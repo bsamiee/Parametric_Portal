@@ -3,7 +3,6 @@
  * Admin-gated CRUD for users, sessions, jobs, DLQ, events, tenants.
  */
 import { HttpApiBuilder } from '@effect/platform';
-import { AppSettingsDefaults, AppSettingsSchema, OAuthProviderConfigSchema, OAuthProviderStoredSchema } from '@parametric-portal/database/models';
 import { DatabaseService } from '@parametric-portal/database/repos';
 import { ParametricApi } from '@parametric-portal/server/api';
 import { Context } from '@parametric-portal/server/context';
@@ -19,22 +18,8 @@ import { StreamingService } from '@parametric-portal/server/platform/streaming';
 import { Crypto } from '@parametric-portal/server/security/crypto';
 import { PolicyService } from '@parametric-portal/server/security/policy';
 import { FeatureService } from '@parametric-portal/server/domain/features';
-import { Cause, Effect, Encoding, Option, Schema as S } from 'effect';
-
-// --- [FUNCTIONS] -------------------------------------------------------------
-
-const _requireOne = <A>(
-	effect: Effect.Effect<Option.Option<A>, unknown>,
-	entity: string,
-	id?: string,
-): Effect.Effect<A, HttpError.NotFound | HttpError.Internal> =>
-	effect.pipe(
-		Effect.mapError((error) => HttpError.Internal.of(`${entity} lookup failed`, error)),
-		Effect.flatMap(Option.match({
-			onNone: () => Effect.fail(HttpError.NotFound.of(entity, id)),
-			onSome: Effect.succeed,
-		})),
-	);
+import { constant, flow } from 'effect/Function';
+import { Array as Arr, Cause, Effect, Encoding, Match, Option, pipe, Struct } from 'effect';
 
 // --- [LAYERS] ----------------------------------------------------------------
 
@@ -47,11 +32,12 @@ const AdminLive = HttpApiBuilder.group(ParametricApi, 'admin', (handlers) =>
 				Telemetry.span('admin.listUsers', { kind: 'server', metrics: false }),
 			)))
 			.handle('listSessions', ({ urlParams }) => Middleware.guarded('admin', 'listSessions', 'api', database.sessions.page(
-					urlParams.userId
-						? [{ field: 'user_id', value: urlParams.userId }]
-						: urlParams.ipAddress
-							? [{ field: 'ip_address', value: urlParams.ipAddress }]
-							: [],
+					pipe(
+						Match.value(urlParams),
+						Match.when({ userId: Match.defined }, ({ userId }) => [{ field: 'user_id' as const, value: userId }]),
+						Match.when({ ipAddress: Match.defined }, ({ ipAddress }) => [{ field: 'ip_address' as const, value: ipAddress }]),
+						Match.orElse(() => []),
+					),
 					{ cursor: urlParams.cursor, limit: urlParams.limit },
 				).pipe(Effect.mapError((error) => HttpError.Internal.of('Session list failed', error)),
 				Telemetry.span('admin.listSessions', { kind: 'server', metrics: false }),
@@ -62,7 +48,8 @@ const AdminLive = HttpApiBuilder.group(ParametricApi, 'admin', (handlers) =>
 				Effect.as({ success: true as const }),
 				Telemetry.span('admin.deleteSession', { kind: 'server', metrics: false }),
 			)))
-			.handle('revokeSessionsByIp', ({ payload }) => Middleware.guarded('admin', 'revokeSessionsByIp', 'mutation', database.sessions.softDeleteByIp(payload.ipAddress).pipe(
+			.handle('revokeSessionsByIp', ({ payload }) => Middleware.guarded('admin', 'revokeSessionsByIp', 'mutation', Context.Request.currentTenantId.pipe(
+				Effect.flatMap((appId) => database.sessions.softDeleteByIp(appId, payload.ipAddress)),
 				Effect.mapError((error) => HttpError.Internal.of('Session revoke failed', error)),
 				Effect.tap((revoked) => audit.log('Session.revokeByIp', { details: { ipAddress: payload.ipAddress, revoked } })),
 				Effect.map((revoked) => ({ revoked })),
@@ -82,26 +69,25 @@ const AdminLive = HttpApiBuilder.group(ParametricApi, 'admin', (handlers) =>
 				Effect.mapError((error) => HttpError.Internal.of('DLQ list failed', error)),
 				Telemetry.span('admin.listDlq', { kind: 'server', metrics: false }),
 			)))
-			.handle('replayDlq', ({ path }) => Middleware.guarded('admin', 'replayDlq', 'mutation', _requireOne(
-				database.jobDlq.one([{ field: 'id', value: path.id }]),
-				'dlq',
-				path.id,
-			).pipe(
-				Effect.flatMap((entry) =>
-					Effect.filterOrFail(
-						Effect.succeed(entry),
-						(dlqEntry) => dlqEntry.source === 'job' || dlqEntry.type.startsWith('webhook:'),
-						(dlqEntry) => HttpError.Validation.of('dlqReplay', `Unsupported event DLQ type: ${dlqEntry.type}`),
-					).pipe(
-						Effect.flatMap((dlqEntry) => (dlqEntry.source === 'job'
-							? Context.Request.withinSync(dlqEntry.appId, jobs.submit(dlqEntry.type, dlqEntry.payload, { priority: 'normal' }).pipe(
-								Effect.flatMap(() => database.jobDlq.markReplayed(path.id)),
-								Effect.asVoid,
-							))
-							: webhooks.retry(path.id).pipe(Effect.asVoid)).pipe(
-							Effect.catchAll((error: unknown) => Effect.fail(HttpError.Internal.of('DLQ replay failed', error))),
+			.handle('replayDlq', ({ path }) => Middleware.guarded('admin', 'replayDlq', 'mutation', database.jobDlq.one([{ field: 'id', value: path.id }]).pipe(
+				Effect.mapError((error) => HttpError.Internal.of('dlq lookup failed', error)),
+				Effect.filterOrFail(Option.isSome, constant(HttpError.NotFound.of('dlq', path.id))),
+				Effect.map(({ value }) => value),
+				Effect.filterOrFail(
+					(entry) => entry.source === 'job' || entry.type.startsWith('webhook:'),
+					(entry) => HttpError.Validation.of('dlqReplay', `Unsupported event DLQ type: ${entry.type}`),
+				),
+				Effect.andThen((entry) => pipe(
+					Match.value(entry.source),
+					Match.when('job', constant(
+						Context.Request.withinSync(entry.appId, jobs.submit(entry.type, entry.payload, { priority: 'normal' }).pipe(
+							Effect.flatMap(constant(database.jobDlq.markReplayed(path.id))),
 						)),
 					)),
+					Match.orElse(constant(webhooks.retry(path.id))),
+				)),
+				Effect.asVoid,
+				Effect.catchAll((error: unknown) => Effect.fail(HttpError.Internal.of('DLQ replay failed', error))),
 				Effect.tap(() => audit.log('Dlq.replay', { details: { dlqId: path.id } })),
 				Effect.as({ success: true as const }),
 				Telemetry.span('admin.replayDlq', { kind: 'server', metrics: false }),
@@ -121,19 +107,19 @@ const AdminLive = HttpApiBuilder.group(ParametricApi, 'admin', (handlers) =>
 				Effect.as({ success: true as const }),
 				Telemetry.span('admin.replayNotification', { kind: 'server', metrics: false }),
 			)))
-			.handleRaw('events', () => Middleware.guarded('admin', 'events', 'realtime', Context.Request.currentTenantId.pipe(
-				Effect.flatMap((tenantId) => StreamingService.sse({
+			.handleRaw('events', constant(Middleware.guarded('admin', 'events', 'realtime', Context.Request.currentTenantId.pipe(
+				Effect.andThen((tenantId) => StreamingService.sse({
 					filter: (envelope) => envelope.event.tenantId === tenantId,
 					name: 'admin.events',
 					serialize: (envelope) => ({
 						data: JSON.stringify(envelope.event),
-						event: 'domain',
+						event: 'domain' as const,
 						id: envelope.event.eventId,
 					}),
 					source: eventBus.stream(),
 				})),
 				Telemetry.span('admin.events', { kind: 'server', metrics: false }),
-			)))
+			))))
 			.handle('dbIoStats', () => Middleware.guarded('admin', 'dbIoStats', 'api', database.monitoring.ioStats().pipe(
 				Effect.mapError((error) => HttpError.Internal.of('Database io stats failed', error)),
 				Telemetry.span('admin.dbIoStats', { kind: 'server', metrics: false }),
@@ -151,7 +137,7 @@ const AdminLive = HttpApiBuilder.group(ParametricApi, 'admin', (handlers) =>
 				Telemetry.span('admin.dbCacheHitRatio', { kind: 'server', metrics: false }),
 			)))
 			.handle('listPermissions', () => Middleware.guarded('admin', 'listPermissions', 'api', policy.list().pipe(
-				Effect.map((permissions) => permissions.map((permission) => ({ action: permission.action, resource: permission.resource, role: permission.role }))),
+				Effect.map(Arr.map(({ action, resource, role }) => ({ action, resource, role }))),
 				Telemetry.span('admin.listPermissions', { kind: 'server', metrics: false }),
 			)))
 			.handle('grantPermission', ({ payload }) => Middleware.guarded('admin', 'grantPermission', 'mutation', policy.grant(payload).pipe(
@@ -170,165 +156,130 @@ const AdminLive = HttpApiBuilder.group(ParametricApi, 'admin', (handlers) =>
 			)))
 			.handle('createTenant', ({ payload }) => Middleware.guarded('admin', 'createTenant', 'mutation', database.apps.byNamespace(payload.namespace).pipe(
 				Effect.mapError((error) => HttpError.Internal.of('Tenant namespace lookup failed', error)),
-				Effect.flatMap(Option.match({
-					onNone: () => Effect.gen(function* () {
-						const inserted = yield* database.apps.insert({
-							name: payload.name,
-							namespace: payload.namespace,
-							settings: Option.fromNullable(payload.settings),
-							status: 'active',
-							updatedAt: undefined
-						}).pipe(
-							Effect.mapError((error) => HttpError.Internal.of('Tenant creation failed', error) as HttpError.Conflict | HttpError.Internal),
-						);
-						yield* policy.seedTenantDefaults(inserted.id).pipe(
-							Effect.mapError((error) => HttpError.Internal.of('Tenant default permissions failed', error) as HttpError.Conflict | HttpError.Internal),
-						);
-						yield* eventBus.publish({ aggregateId: inserted.id, payload: { _tag: 'tenant', action: 'provisioned', name: payload.name, namespace: payload.namespace }, tenantId: inserted.id }).pipe(Effect.ignore);
-						yield* audit.log('tenant.create', { after: { name: payload.name, namespace: payload.namespace }, subjectId: inserted.id });
-						return inserted;
-					}),
-					onSome: () => Effect.fail(HttpError.Conflict.of('tenant', `Namespace '${payload.namespace}' already exists`) as HttpError.Conflict | HttpError.Internal),
+				Effect.filterOrFail(Option.isNone, () => HttpError.Conflict.of('tenant', `Namespace '${payload.namespace}' already exists`) as HttpError.Conflict | HttpError.Internal),
+				Effect.andThen(database.apps.insert({
+					name: payload.name,
+					namespace: payload.namespace,
+					settings: Option.fromNullable(payload.settings),
+					status: 'active',
+					updatedAt: undefined,
 				})),
+				Effect.mapError((error) => HttpError.is(error) ? error : HttpError.Internal.of('Tenant creation failed', error) as HttpError.Conflict | HttpError.Internal),
+				Effect.tap((inserted) => policy.seedTenantDefaults(inserted.id).pipe(
+					Effect.mapError(constant(HttpError.Internal.of('Tenant default permissions failed') as HttpError.Conflict | HttpError.Internal)),
+				)),
+				Effect.tap((inserted) => eventBus.publish({ aggregateId: inserted.id, payload: { _tag: 'tenant', action: 'provisioned', name: payload.name, namespace: payload.namespace }, tenantId: inserted.id }).pipe(Effect.ignore)),
+				Effect.tap((inserted) => audit.log('tenant.create', { after: { name: payload.name, namespace: payload.namespace }, subjectId: inserted.id })),
 				Telemetry.span('admin.createTenant', { kind: 'server', metrics: false }),
 			)))
-			.handle('getTenant', ({ path }) => Middleware.guarded('admin', 'getTenant', 'api', _requireOne(
-				database.apps.one([{ field: 'id', value: path.id }]),
-				'tenant',
-				path.id,
-			).pipe(
-				Telemetry.span('admin.getTenant', { kind: 'server', metrics: false }),
-			)))
-				.handle('updateTenant', ({ path, payload }) => Middleware.guarded('admin', 'updateTenant', 'mutation', database.withTransaction(Effect.gen(function* () {
-					const current = yield* _requireOne(
-						database.apps.one([{ field: 'id', value: path.id }], 'update'),
-						'tenant',
-						path.id,
-					);
-					const currentSettings = yield* S.decodeUnknown(AppSettingsSchema)(
-						Option.getOrElse(current.settings, () => AppSettingsDefaults),
-						{ errors: 'all', onExcessProperty: 'ignore' },
-					).pipe(
-						Effect.mapError((error) => HttpError.Internal.of('Tenant settings decode failed', error)),
-					);
-					const updates = {
-						...(payload.name === undefined ? {} : { name: payload.name }),
-						...(payload.settings === undefined ? {} : {
-							settings: {
-								...currentSettings,
-								...payload.settings,
-							},
-						}),
-					};
-				const updated = yield* Object.keys(updates).length === 0
-					? Effect.succeed(current)
-					: database.apps.set(path.id, updates).pipe(
-						Effect.mapError((error) => Cause.isNoSuchElementException(error)
-							? HttpError.NotFound.of('tenant', path.id)
-							: HttpError.Internal.of('Tenant update failed', error)),
-					);
-					yield* audit.log('App.update', { details: { tenantId: path.id } });
-					yield* eventBus.publish({ aggregateId: path.id, payload: { _tag: 'app', action: 'settings.updated' }, tenantId: path.id }).pipe(Effect.ignore);
-					return updated;
-				})).pipe(
+				.handle('getTenant', ({ path }) => Middleware.guarded('admin', 'getTenant', 'api', database.apps.one([{ field: 'id', value: path.id }]).pipe(
+					Effect.mapError((error) => HttpError.Internal.of('tenant lookup failed', error)),
+					Effect.flatMap(Option.match({
+						onNone: () => Effect.fail(HttpError.NotFound.of('tenant', path.id)),
+						onSome: Effect.succeed,
+					})),
+					Telemetry.span('admin.getTenant', { kind: 'server', metrics: false }),
+				)))
+				.handle('updateTenant', ({ path, payload }) => Middleware.guarded('admin', 'updateTenant', 'mutation', database.withTransaction(
+					database.apps.readSettings(path.id, 'update').pipe(
+						Effect.mapError(constant(HttpError.Internal.of('tenant lookup failed'))),
+						Effect.flatMap(Option.match({
+							onNone: () => Effect.fail(HttpError.NotFound.of('tenant', path.id)),
+							onSome: Effect.succeed,
+						})),
+						Effect.bindTo('loaded'),
+						Effect.let('updates', ({ loaded }) => ({
+							...(payload.name === undefined ? {} : { name: payload.name }),
+							...(payload.settings === undefined ? {} : { settings: { ...loaded.settings, ...payload.settings } }),
+						})),
+						Effect.bind('updated', ({ loaded, updates }) =>
+							database.apps.set(path.id, updates).pipe(
+								Effect.mapError(constant(HttpError.Internal.of('Tenant update failed'))),
+								Effect.when(constant(Object.keys(updates).length > 0)),
+								Effect.map(Option.getOrElse(constant(loaded.app))),
+							),
+						),
+						Effect.tap(() => audit.log('App.update', { details: { tenantId: path.id } })),
+						Effect.tap(() => eventBus.publish({ aggregateId: path.id, payload: { _tag: 'app', action: 'settings.updated' }, tenantId: path.id }).pipe(Effect.ignore)),
+					Effect.map(({ updated }) => updated),
+				)).pipe(
 					Effect.mapError((error) => HttpError.is(error) ? error : HttpError.Internal.of('Tenant update failed', error)),
 					Telemetry.span('admin.updateTenant', { kind: 'server', metrics: false }),
-				)))
-			.handle('deactivateTenant', ({ path }) => Middleware.guarded('admin', 'deactivateTenant', 'mutation', Effect.gen(function* () {
-				const app = yield* _requireOne(database.apps.one([{ field: 'id', value: path.id }]), 'tenant', path.id);
-				yield* Effect.filterOrFail(
-					Effect.succeed(app.status),
-					(status) => status === 'active',
-					() => HttpError.Validation.of('tenantTransition', `Invalid transition from '${app.status}' to 'suspended'`),
-				);
-				yield* database.apps.suspend(path.id).pipe(Effect.mapError((error) => HttpError.Internal.of('Tenant suspension failed', error)));
-				yield* eventBus.publish({ aggregateId: path.id, payload: { _tag: 'tenant', action: 'suspended' }, tenantId: path.id }).pipe(Effect.ignore);
-				yield* audit.log('tenant.update', { after: { status: 'suspended' }, before: { status: app.status }, subjectId: path.id });
-				return { success: true as const };
-			}).pipe(
+			)))
+			.handle('deactivateTenant', ({ path }) => Middleware.guarded('admin', 'deactivateTenant', 'mutation', database.apps.one([{ field: 'id', value: path.id }]).pipe(
+				Effect.mapError(constant(HttpError.Internal.of('tenant lookup failed'))),
+				Effect.filterOrFail(Option.isSome, constant(HttpError.NotFound.of('tenant', path.id))),
+				Effect.map(({ value }) => value),
+				Effect.filterOrFail(
+					(app) => app.status === 'active',
+					(app) => HttpError.Validation.of('tenantTransition', `Invalid transition from '${app.status}' to 'suspended'`),
+				),
+				Effect.tap(() => database.apps.suspend(path.id).pipe(Effect.mapError(constant(HttpError.Internal.of('Tenant suspension failed'))))),
+				Effect.tap(() => eventBus.publish({ aggregateId: path.id, payload: { _tag: 'tenant', action: 'suspended' }, tenantId: path.id }).pipe(Effect.ignore)),
+				Effect.tap((app) => audit.log('tenant.update', { after: { status: 'suspended' }, before: { status: app.status }, subjectId: path.id })),
+				Effect.as({ success: true as const }),
 				Telemetry.span('admin.deactivateTenant', { kind: 'server', metrics: false }),
 			)))
-			.handle('resumeTenant', ({ path }) => Middleware.guarded('admin', 'resumeTenant', 'mutation', Effect.gen(function* () {
-				const app = yield* _requireOne(database.apps.one([{ field: 'id', value: path.id }]), 'tenant', path.id);
-				yield* Effect.filterOrFail(
-					Effect.succeed(app.status),
-					(status) => status === 'suspended',
-					() => HttpError.Validation.of('tenantTransition', `Invalid transition from '${app.status}' to 'active'`),
-				);
-				yield* database.apps.resume(path.id).pipe(Effect.mapError((error) => HttpError.Internal.of('Tenant resume failed', error)));
-				yield* eventBus.publish({ aggregateId: path.id, payload: { _tag: 'tenant', action: 'resumed' }, tenantId: path.id }).pipe(Effect.ignore);
-				yield* audit.log('tenant.update', { after: { status: 'active' }, before: { status: app.status }, subjectId: path.id });
-				return { success: true as const };
-			}).pipe(
+			.handle('resumeTenant', ({ path }) => Middleware.guarded('admin', 'resumeTenant', 'mutation', database.apps.one([{ field: 'id', value: path.id }]).pipe(
+				Effect.mapError(constant(HttpError.Internal.of('tenant lookup failed'))),
+				Effect.filterOrFail(Option.isSome, constant(HttpError.NotFound.of('tenant', path.id))),
+				Effect.map(({ value }) => value),
+				Effect.filterOrFail(
+					(app) => app.status === 'suspended',
+					(app) => HttpError.Validation.of('tenantTransition', `Invalid transition from '${app.status}' to 'active'`),
+				),
+				Effect.tap(() => database.apps.resume(path.id).pipe(Effect.mapError(constant(HttpError.Internal.of('Tenant resume failed'))))),
+				Effect.tap(() => eventBus.publish({ aggregateId: path.id, payload: { _tag: 'tenant', action: 'resumed' }, tenantId: path.id }).pipe(Effect.ignore)),
+				Effect.tap((app) => audit.log('tenant.update', { after: { status: 'active' }, before: { status: app.status }, subjectId: path.id })),
+				Effect.as({ success: true as const }),
 				Telemetry.span('admin.resumeTenant', { kind: 'server', metrics: false }),
 			)))
-			.handle('getTenantOAuth', ({ path }) => Middleware.guarded('admin', 'getTenantOAuth', 'api', _requireOne(
-				database.apps.one([{ field: 'id', value: path.id }]),
-				'tenant',
-				path.id,
-			).pipe(
-				Effect.flatMap((tenant) => S.decodeUnknown(AppSettingsSchema)(
-					Option.getOrElse(tenant.settings, () => AppSettingsDefaults),
-					{ errors: 'all', onExcessProperty: 'ignore' },
-				).pipe(
-					Effect.mapError((error) => HttpError.Internal.of('Tenant OAuth settings decode failed', error)),
-					Effect.flatMap((settings) => Effect.forEach(
-						settings.oauthProviders,
-						(provider) => Encoding.decodeBase64(provider.clientSecretEncrypted).pipe(
-							Effect.flatMap(Crypto.decrypt),
-							Effect.flatMap((clientSecret) => S.decodeUnknown(OAuthProviderConfigSchema)({
-								clientId: provider.clientId,
-								clientSecret,
-								enabled: provider.enabled,
-								keyId: provider.keyId,
-								provider: provider.provider,
-								scopes: provider.scopes,
-								teamId: provider.teamId,
-								tenant: provider.tenant,
-							})),
-						),
-						{ concurrency: 'unbounded' },
-					)),
-				)),
-				Effect.map((providers) => ({ providers })),
-				Effect.mapError((error) => HttpError.Internal.of('Tenant OAuth config read failed', error)),
-				Telemetry.span('admin.getTenantOAuth', { kind: 'server', metrics: false }),
-			)))
-			.handle('updateTenantOAuth', ({ path, payload }) => Middleware.guarded('admin', 'updateTenantOAuth', 'mutation', _requireOne(
-				database.apps.one([{ field: 'id', value: path.id }], 'update'),
-				'tenant',
-				path.id,
-			).pipe(
-				Effect.flatMap((tenant) => S.decodeUnknown(AppSettingsSchema)(
-					Option.getOrElse(tenant.settings, () => AppSettingsDefaults),
-					{ errors: 'all', onExcessProperty: 'ignore' },
-				).pipe(
-					Effect.mapError((error) => HttpError.Internal.of('Tenant OAuth settings decode failed', error)),
-					Effect.flatMap((currentSettings) => Effect.forEach(payload.providers, (provider) => Crypto.encrypt(provider.clientSecret).pipe(
-						Effect.map(Encoding.encodeBase64),
-						Effect.flatMap((clientSecretEncrypted) => S.decodeUnknown(OAuthProviderStoredSchema)({
-							clientId: provider.clientId,
-							clientSecretEncrypted,
-							enabled: provider.enabled,
-							keyId: provider.keyId,
-							provider: provider.provider,
-							scopes: provider.scopes,
-							teamId: provider.teamId,
-							tenant: provider.tenant,
-						})),
-					), { concurrency: 'unbounded' }).pipe(
-						Effect.flatMap((oauthProviders) => database.apps.updateSettings(tenant.id, {
-							...currentSettings,
+				.handle('getTenantOAuth', ({ path }) => Middleware.guarded('admin', 'getTenantOAuth', 'api', database.apps.readSettings(path.id).pipe(
+					Effect.mapError(constant(HttpError.Internal.of('tenant lookup failed'))),
+					Effect.filterOrFail(Option.isSome, constant(HttpError.NotFound.of('tenant', path.id))),
+					Effect.map(({ value: { settings } }) => settings.oauthProviders),
+					Effect.map(Arr.map(({ clientSecretEncrypted, ...rest }) => ({ ...rest, clientSecretSet: clientSecretEncrypted.length > 0 }))),
+					Effect.map((providers) => ({ providers })),
+					Telemetry.span('admin.getTenantOAuth', { kind: 'server', metrics: false }),
+				)))
+				.handle('updateTenantOAuth', flow(
+					Effect.fn(function* ({ path, payload }) {
+						yield* Middleware.guarded('admin', 'updateTenantOAuth', 'mutation', Effect.void);
+						const loaded = yield* database.apps.readSettings(path.id, 'update').pipe(
+							Effect.mapError(constant(HttpError.Internal.of('tenant lookup failed'))),
+							Effect.filterOrFail(Option.isSome, constant(HttpError.NotFound.of('tenant', path.id))),
+							Effect.map(({ value }) => value),
+						);
+						const secretsByProvider = pipe(loaded.settings.oauthProviders, Arr.groupBy(Struct.get('provider')));
+						const oauthProviders = yield* Effect.forEach(payload.providers, Effect.fn(function* (provider) {
+							const { clientSecret, ...fields } = provider;
+							const encrypted = yield* Option.fromNullable(clientSecret).pipe(
+								Option.match({
+									onNone: constant(
+										Effect.fromNullable(secretsByProvider[fields.provider]?.[0]).pipe(
+											Effect.mapError(constant(HttpError.Validation.of('clientSecret', `Missing clientSecret for provider '${fields.provider}'`))),
+											Effect.map(Struct.get('clientSecretEncrypted')),
+										)
+									),
+									onSome: flow(Crypto.encrypt, Effect.mapError(constant(HttpError.Internal.of('Encryption failed'))), Effect.map(Encoding.encodeBase64)),
+								}),
+							);
+							return { ...fields, clientSecretEncrypted: encrypted };
+						}), { concurrency: 'unbounded' });
+						yield* database.apps.updateSettings(loaded.app.id, {
+							...loaded.settings,
 							oauthProviders,
-						})),
-						Effect.mapError((error) => HttpError.Internal.of('Tenant OAuth config update failed', error)),
-					)),
-				)),
-				Effect.tap(() => audit.log('App.update', { details: { tenantId: path.id } })),
-				Effect.tap(() => eventBus.publish({ aggregateId: path.id, payload: { _tag: 'app', action: 'settings.updated' }, tenantId: path.id }).pipe(Effect.ignore)),
-				Effect.map(() => payload),
-				Telemetry.span('admin.updateTenantOAuth', { kind: 'server', metrics: false }),
-			)))
+						}).pipe(Effect.mapError((error) => HttpError.is(error) ? error : HttpError.Internal.of('Tenant OAuth config update failed', error)));
+						yield* audit.log('App.update', { details: { tenantId: path.id } });
+						yield* eventBus.publish({ aggregateId: path.id, payload: { _tag: 'app', action: 'settings.updated' }, tenantId: path.id }).pipe(Effect.ignore);
+						return pipe(
+							oauthProviders,
+							Arr.map(({ clientSecretEncrypted, ...rest }) => ({ ...rest, clientSecretSet: clientSecretEncrypted.length > 0 })),
+							(providers) => ({ providers }),
+						);
+					}),
+					Telemetry.span('admin.updateTenantOAuth', { kind: 'server', metrics: false }),
+				))
 			.handle('getFeatureFlags', () => Middleware.guarded('admin', 'getFeatureFlags', 'api', features.getAll.pipe(
 				Telemetry.span('admin.getFeatureFlags', { kind: 'server', metrics: false }),
 			)))

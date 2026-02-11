@@ -109,7 +109,17 @@ class Request extends Effect.Tag('server/RequestContext')<Request, Context.Reque
 				),
 			),
 		);
-	static readonly update = (partial: Partial<Context.Request.Data>) => FiberRef.update(Request._ref, (ctx) => ({ ...ctx, ...partial })).pipe(
+	static readonly update = (partial: Partial<Context.Request.Data>) => FiberRef.update(Request._ref, (ctx): Context.Request.Data => ({
+		appNamespace: partial.appNamespace ?? ctx.appNamespace,
+		circuit: partial.circuit ?? ctx.circuit,
+		cluster: partial.cluster ?? ctx.cluster,
+		ipAddress: partial.ipAddress ?? ctx.ipAddress,
+		rateLimit: partial.rateLimit ?? ctx.rateLimit,
+		requestId: partial.requestId ?? ctx.requestId,
+		session: partial.session ?? ctx.session,
+		tenantId: partial.tenantId ?? ctx.tenantId,
+		userAgent: partial.userAgent ?? ctx.userAgent,
+	})).pipe(
 		Effect.andThen(Option.fromNullable(partial.tenantId).pipe(Option.match({ onNone: () => Effect.void, onSome: (tenantId) => Client.tenant.set(tenantId) }))),
 		Effect.andThen(Request.annotate(Effect.void)),
 	);

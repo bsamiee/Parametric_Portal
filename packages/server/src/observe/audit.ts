@@ -4,8 +4,8 @@
  * PG18.1: Uses old_data/new_data columns for full before/after snapshots.
  */
 import { DatabaseService } from '@parametric-portal/database/repos';
-import { AuditLog, type JobDlq } from '@parametric-portal/database/models';
-import { Array as A, Clock, DateTime, Effect, Option, pipe, Schema as S, Struct } from 'effect';
+import { AuditLog, AuditOperationSchema, type JobDlq } from '@parametric-portal/database/models';
+import { Array as A, Clock, Effect, Option, pipe, Schema as S, Struct } from 'effect';
 import { constant } from 'effect/Function';
 import { Context } from '../context.ts';
 import { MetricsService } from './metrics.ts';
@@ -30,30 +30,37 @@ class AuditService extends Effect.Service<AuditService>()('server/Audit', {
 			const context = yield* Context.Request.current;
 			const timestampMs = yield* Clock.currentTimeMillis;
 			const index = operationName.indexOf('.');
-			const [subject, operation] = index > 0 ? [operationName.slice(0, index), operationName.slice(index + 1)] : ['security', operationName];
-			const isSecurity = subject === 'security' && _SECURITY_OPS.has(operation);
-			const forceDeadLetter = isSecurity || !(config?.silent ?? false);
-			const subjectId = config?.subjectId ?? (isSecurity ? context.requestId : Context.Request.Id.unspecified);
-			const labels = MetricsService.label({ operation, subject, tenant: context.tenantId });
-			const userId = pipe(context.session, Option.map((s) => s.userId));
-			const dlqContext = { requestId: context.requestId, tenantId: context.tenantId, userId };
-			const entry = {
-				appId: context.tenantId, ipAddress: context.ipAddress,
-				newData: Option.fromNullable(config?.after),
-				oldData: Option.fromNullable(config?.before).pipe(Option.orElse(() => Option.fromNullable(config?.details))),
-				operation, requestId: pipe(context.requestId, Option.some), subject, subjectId,
-				timestamp: DateTime.formatIso(DateTime.unsafeMake(timestampMs)), userAgent: context.userAgent, userId,
-			};
-			yield* Effect.all([Effect.annotateCurrentSpan('audit.operation', operation), Effect.annotateCurrentSpan('audit.subject', subject), Effect.annotateCurrentSpan('audit.subjectId', subjectId)], { discard: true });
-			yield* pipe(
-				database.audit.log(entry),
-				Effect.tap(MetricsService.inc(metrics.audit.writes, labels, 1)),
-				Effect.catchAll((databaseError) => Effect.all([
-					Effect.logWarning('AUDIT_FAILURE', { error: String(databaseError), isSecurity, operation: `${subject}.${operation}`, subjectId }),
-					MetricsService.inc(metrics.audit.failures, labels, 1),
-						Effect.when(writeDeadLetter(entry, String(databaseError), timestampMs, dlqContext), constant(forceDeadLetter)),
-				], { discard: true })),
-			);
+			const [subject, operationRaw] = index > 0 ? [operationName.slice(0, index), operationName.slice(index + 1)] : ['security', operationName];
+			const operationOption = yield* S.decodeUnknown(AuditOperationSchema)(operationRaw).pipe(Effect.option);
+			yield* Option.match(operationOption, {
+				onNone: () => Effect.logWarning('AUDIT_INVALID_OPERATION', { operation: operationRaw, operationName, subject }),
+				onSome: (operation) => {
+					const isSecurity = subject === 'security' && _SECURITY_OPS.has(operation);
+					const forceDeadLetter = isSecurity || !(config?.silent ?? false);
+					const subjectId = config?.subjectId ?? (isSecurity ? context.requestId : Context.Request.Id.unspecified);
+					const labels = MetricsService.label({ operation, subject, tenant: context.tenantId });
+					const userId = pipe(context.session, Option.map((s) => s.userId));
+					const dlqContext = { requestId: context.requestId, tenantId: context.tenantId, userId };
+						const entry = {
+							appId: context.tenantId, ipAddress: context.ipAddress,
+							newData: Option.fromNullable(config?.after),
+							oldData: Option.fromNullable(config?.before).pipe(Option.orElse(() => Option.fromNullable(config?.details))),
+							operation, requestId: pipe(context.requestId, Option.some), subject, subjectId,
+							userAgent: context.userAgent, userId,
+						};
+					return Effect.all([Effect.annotateCurrentSpan('audit.operation', operation), Effect.annotateCurrentSpan('audit.subject', subject), Effect.annotateCurrentSpan('audit.subjectId', subjectId)], { discard: true }).pipe(
+						Effect.andThen(pipe(
+							database.audit.log(entry),
+							Effect.tap(MetricsService.inc(metrics.audit.writes, labels, 1)),
+							Effect.catchAll((databaseError) => Effect.all([
+								Effect.logWarning('AUDIT_FAILURE', { error: String(databaseError), isSecurity, operation: `${subject}.${operation}`, subjectId }),
+								MetricsService.inc(metrics.audit.failures, labels, 1),
+								Effect.when(writeDeadLetter(entry, String(databaseError), timestampMs, dlqContext), constant(forceDeadLetter)),
+							], { discard: true })),
+						)),
+					);
+				},
+			});
 		}).pipe(Telemetry.span('audit.log', { metrics: false }));
 		const replayDlqEntry = (dlq: JobDlq) => Effect.gen(function* () {
 			const entry = yield* S.decodeUnknown(AuditLog.insert)(

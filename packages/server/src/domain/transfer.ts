@@ -4,7 +4,6 @@
  */
 import type { Asset } from '@parametric-portal/database/models';
 import { DatabaseService } from '@parametric-portal/database/repos';
-import { SearchRepo } from '@parametric-portal/database/search';
 import type { TransferQuery } from '@parametric-portal/server/api';
 import { Context } from '../context.ts';
 import { HttpError } from '../errors.ts';
@@ -98,7 +97,7 @@ const _exportAssets = (parameters: typeof TransferQuery.Type) =>
 const _importAssets = (parameters: typeof TransferQuery.Type) =>
 	Effect.gen(function* () {
 		yield* Middleware.permission('transfer', 'import');
-		const [metrics, context, repositories, search, audit, storage] = yield* Effect.all([MetricsService, Context.Request.current, DatabaseService, SearchRepo, AuditService, StorageService]);
+		const [metrics, context, repositories, audit, storage] = yield* Effect.all([MetricsService, Context.Request.current, DatabaseService, AuditService, StorageService]);
 		const session = yield* Context.Request.sessionOrFail;
 		const appId = context.tenantId;
 		const codec = yield* _resolveCodec(parameters.format);
@@ -178,10 +177,10 @@ const _importAssets = (parameters: typeof TransferQuery.Type) =>
 				Effect.mapError((err) => HttpError.Internal.of('Import processing failed', err)),
 				Telemetry.span('transfer.insert'),
 			);
-		yield* Effect.when(
-			search.refresh(appId).pipe(Effect.tapError((error) => Effect.logWarning('Search refresh failed', { error: String(error) })), Effect.catchAll(() => Effect.void)),
-			() => !dryRun && A.isNonEmptyReadonlyArray(assets),
-		);
+			yield* Effect.when(
+				repositories.search.refresh(appId).pipe(Effect.tapError((error) => Effect.logWarning('Search refresh failed', { error: String(error) })), Effect.catchAll(() => Effect.void)),
+				() => !dryRun && A.isNonEmptyReadonlyArray(assets),
+			);
 		const totalFailures = failures.length + A.reduce(dbFailures, 0, (count, err) => count + err.rows.length);
 		yield* Effect.all([
 			MetricsService.inc(metrics.transfer.imports, MetricsService.label({ app: appId, dryRun: String(dryRun), format: codec.ext })),

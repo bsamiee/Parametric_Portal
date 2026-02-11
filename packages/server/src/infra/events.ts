@@ -67,6 +67,29 @@ const _CODEC = {
 	notify: { decode: S.decode(_JSON.notify), encode: S.encode(_JSON.notify) },
 } as const;
 
+// --- [FUNCTIONS] -------------------------------------------------------------
+
+const _extractSqlErrorCode = (cause: unknown): string =>
+	Match.value(cause).pipe(
+		Match.when(
+			(value: unknown): value is { code: string } =>
+				typeof value === 'object' && value !== null && 'code' in value && typeof (value as { readonly code?: unknown }).code === 'string',
+			(value) => value.code,
+		),
+		Match.when(
+			(value: unknown): value is { cause: { code: string } } =>
+				typeof value === 'object'
+				&& value !== null
+				&& 'cause' in value
+				&& typeof (value as { readonly cause?: unknown }).cause === 'object'
+				&& (value as { readonly cause?: unknown }).cause !== null
+				&& 'code' in (value as { readonly cause: { readonly code?: unknown } }).cause
+				&& typeof (value as { readonly cause: { readonly code?: unknown } }).cause.code === 'string',
+			(value) => value.cause.code,
+		),
+		Match.orElse(() => String(cause).includes('23505') ? '23505' : ''),
+	);
+
 // --- [SERVICES] --------------------------------------------------------------
 
 class EventBus extends Effect.Service<EventBus>()('server/EventBus', {
@@ -91,26 +114,24 @@ class EventBus extends Effect.Service<EventBus>()('server/EventBus', {
 				)),
 				Stream.runDrain, Effect.forkScoped,
 			);
-			yield* Client.listen.raw('event_journal_notify').pipe(
-				Stream.mapEffect((payload) => _CODEC.notify.decode(payload).pipe(
-						Effect.flatMap(({ eventId, sourceNodeId }) => sql.unsafe(
-								'SELECT convert_from(payload, \'UTF8\') AS payload FROM effect_event_journal WHERE primary_key = $1 LIMIT 1',
-								[eventId],
-							).pipe(
-								Effect.flatMap(S.decodeUnknown(S.Array(S.Struct({ payload: S.String })))),
-								Effect.flatMap((rows) => Effect.fromNullable(rows[0]?.payload)),
-								Effect.flatMap(_CODEC.envelope.decode),
-								Effect.flatMap((envelope) => PubSub.publish(hub, envelope)),
-								Effect.catchTag('NoSuchElementException', constant(Effect.logWarning('LISTEN/NOTIFY event not found in journal', { eventId }))),
+				yield* Client.listen.raw('event_journal_notify').pipe(
+					Stream.mapEffect((payload) => _CODEC.notify.decode(payload).pipe(
+							Effect.flatMap(({ eventId, sourceNodeId }) => database.eventJournal.byPrimaryKey(eventId).pipe(
+								Effect.flatMap(Option.match({
+									onNone: () => Effect.logWarning('LISTEN/NOTIFY event not found in journal', { eventId }),
+									onSome: (entry) => _CODEC.envelope.decode(entry.payload).pipe(
+										Effect.flatMap((envelope) => PubSub.publish(hub, envelope)),
+									),
+								})),
 								Effect.unless(constant(sourceNodeId === nodeId)),
 							)),
-						Effect.tapError((error) => Effect.logWarning('LISTEN/NOTIFY decode failed', { error: String(error) })),
-						Effect.catchAll(constant(Effect.void)),
-					)),
+							Effect.tapError((error) => Effect.logWarning('LISTEN/NOTIFY decode failed', { error: String(error) })),
+							Effect.catchAll(constant(Effect.void)),
+						)),
 			Stream.runDrain,
-			Effect.tapError((error) => Effect.logWarning('LISTEN/NOTIFY stream interrupted, falling back to cron polling', { error: String(error) })),
+			Effect.tapError((error) => Effect.logWarning('LISTEN/NOTIFY stream interrupted, retrying bridge listener', { error: String(error) })),
 			Effect.retry({ times: 3 }),
-			Effect.catchAll(() => Effect.logWarning('LISTEN/NOTIFY bridge disabled after retries exhausted')),
+			Effect.catchAll(() => Effect.logWarning('LISTEN/NOTIFY bridge disabled after retries exhausted; no automatic polling fallback configured')),
 			Effect.forkScoped,
 		);
 		const publish = (input: EventBus.Types.Input | readonly EventBus.Types.Input[] | Chunk.Chunk<EventBus.Types.Input>) => {
@@ -137,22 +158,25 @@ class EventBus extends Effect.Service<EventBus>()('server/EventBus', {
 									aggregateId: item.aggregateId, causationId: item.causationId,
 									correlationId,
 									eventId,
-										payload: item.payload, tenantId: item.tenantId ?? requestContext.tenantId,
+									payload: item.payload, tenantId: item.tenantId ?? requestContext.tenantId,
 									}),
 								});
 						const json = yield* _CODEC.envelope.encode(envelope);
-						yield* journal.write({
-							effect: constant(Metric.increment(metrics.events.emitted)),
-							event: envelope.event.eventType,
-							payload: new TextEncoder().encode(json),
-							primaryKey: envelope.event.eventId,
-						}).pipe(
-							Effect.catchTag('EventJournalError', (cause) => Effect.fail(EventError.from(
-								envelope.event.eventId,
-								String(cause.cause).includes('23505') ? 'DuplicateEvent' : 'DeliveryFailed',
-									cause,
-								))),
-							);
+							yield* journal.write({
+								effect: constant(Metric.increment(metrics.events.emitted)),
+								event: envelope.event.eventType,
+								payload: new TextEncoder().encode(json),
+								primaryKey: envelope.event.eventId,
+							}).pipe(
+								Effect.catchTag('EventJournalError', (cause) => {
+									const sqlCode = _extractSqlErrorCode(cause.cause);
+									return Effect.fail(EventError.from(
+										envelope.event.eventId,
+										sqlCode === '23505' ? 'DuplicateEvent' : 'DeliveryFailed',
+										cause,
+									));
+								}),
+								);
 						const notifyPayload = yield* _CODEC.notify.encode({ eventId: envelope.event.eventId, sourceNodeId: nodeId });
 						yield* Client.notify('event_journal_notify', notifyPayload).pipe(
 							Effect.tapError(constant(Effect.logWarning('LISTEN/NOTIFY publish failed'))),
@@ -220,42 +244,37 @@ class EventBus extends Effect.Service<EventBus>()('server/EventBus', {
 				);
 			};
 		const stream = (): Stream.Stream<EventEnvelope, never, never> => Stream.unwrapScoped(PubSub.subscribe(hub).pipe(Effect.map((dequeue) => Stream.fromQueue(dequeue))));
-			const replay = (filter: EventBus.Types.ReplayFilter): Stream.Stream<EventEnvelope, EventError> => {
-				const throttle = filter.throttle ?? Duration.millis(10);
-				const batchSize = filter.batchSize ?? 500;
-				const initialCursor = Option.getOrElse(Option.fromNullable(filter.sinceSequenceId), constant('0'));
-				return Stream.paginateChunkEffect(initialCursor, Effect.fn('eventbus.replay')(function*(cursor) {
-					yield* Effect.annotateCurrentSpan('replay.batch_size', batchSize);
-					yield* Effect.annotateCurrentSpan('replay.cursor', cursor);
-					const params: Array<unknown> = [];
-					const timestampCond = pipe(Option.fromNullable(filter.sinceTimestamp), Option.map((v) => `timestamp >= $${params.push(v)}`));
-					const cursorCond = `primary_key::numeric > $${params.push(cursor)}`;
-					const eventCond = pipe(Option.fromNullable(filter.eventType), Option.map((v) => `event = $${params.push(v)}`));
-					const conditions = ['1=1', ...Option.toArray(timestampCond), cursorCond, ...Option.toArray(eventCond)];
-					const whereClause = conditions.join(' AND ');
-						const rows = yield* sql.unsafe(
-							`SELECT convert_from(payload, 'UTF8') AS payload, primary_key FROM effect_event_journal WHERE ${whereClause} ORDER BY primary_key::numeric ASC LIMIT $${params.push(batchSize)}`, params,
-						).pipe(
+				const replay = (filter: EventBus.Types.ReplayFilter): Stream.Stream<EventEnvelope, EventError> => {
+					const throttle = filter.throttle ?? Duration.millis(10);
+					const batchSize = filter.batchSize ?? 500;
+					const initialCursor = Option.getOrElse(Option.fromNullable(filter.sinceSequenceId), constant('0'));
+					return Stream.paginateChunkEffect(initialCursor, Effect.fn('eventbus.replay')(function*(cursor) {
+						yield* Effect.annotateCurrentSpan('replay.batch_size', batchSize);
+						yield* Effect.annotateCurrentSpan('replay.cursor', cursor);
+						const rows = yield* database.eventJournal.replay({
+							batchSize,
+							eventType: filter.eventType,
+							sinceSequenceId: cursor,
+							sinceTimestamp: filter.sinceTimestamp,
+						}).pipe(
 							Effect.catchTag('SqlError', (cause) => Effect.fail(EventError.from('', 'DeliveryFailed', cause))),
-							Effect.flatMap(S.decodeUnknown(S.Array(S.Struct({ payload: S.String, primary_key: S.optional(S.Union(S.String, S.Number, S.BigInt)) })))),
-							Effect.mapError((error) => error instanceof EventError ? error : EventError.from('', 'DeserializationFailed', error)),
+							Effect.mapError((error) => error instanceof EventError ? error : EventError.from('', 'DeliveryFailed', error)),
 						);
-							const envelopes = yield* Effect.forEach(
-								rows,
-								({ payload }) => _CODEC.envelope.decode(payload),
-							).pipe(Effect.orElseFail(constant(EventError.from('', 'DeserializationFailed'))));
-					const filtered = envelopes.filter((envelope) =>
-						(!filter.tenantId || envelope.event.tenantId === filter.tenantId)
-						&& (!filter.aggregateId || envelope.event.aggregateId === filter.aggregateId),
-					);
-							const nextCursor = pipe(
-								Option.fromNullable(rows.at(-1)?.primary_key),
-								Option.map(String),
-								Option.filter(() => rows.length >= batchSize),
-							);
-					return [Chunk.fromIterable(filtered), nextCursor] as const;
-				})).pipe(Stream.schedule(Schedule.spaced(throttle)), Stream.tap(constant(Metric.increment(metrics.events.processed))));
-			};
+						const envelopes = yield* Effect.forEach(
+							rows,
+							({ payload }) => _CODEC.envelope.decode(payload),
+						).pipe(Effect.orElseFail(constant(EventError.from('', 'DeserializationFailed'))));
+						const filtered = envelopes.filter((envelope) =>
+							(!filter.tenantId || envelope.event.tenantId === filter.tenantId)
+							&& (!filter.aggregateId || envelope.event.aggregateId === filter.aggregateId),
+						);
+						const nextCursor = pipe(
+							Option.fromNullable(rows.at(-1)?.primaryKey),
+							Option.filter(() => rows.length >= batchSize),
+						);
+						return [Chunk.fromIterable(filtered), nextCursor] as const;
+					})).pipe(Stream.schedule(Schedule.spaced(throttle)), Stream.tap(constant(Metric.increment(metrics.events.processed))));
+				};
 		yield* Effect.logInfo('EventBus initialized with SqlEventJournal + PubSub fan-out + LISTEN/NOTIFY bridge');
 		return { publish, replay, stream, subscribe };
 	}),
@@ -267,7 +286,9 @@ namespace EventBus {
 	export namespace Types {
 		export type Input = {
 			readonly aggregateId: string; readonly causationId?: string; readonly correlationId?: string;
-			readonly eventId?: S.Schema.Type<typeof DomainEvent>['eventId']; readonly payload: unknown; readonly tenantId?: string;
+			readonly eventId?: S.Schema.Type<typeof DomainEvent>['eventId'];
+			readonly payload: { readonly _tag: string; readonly action: string } & Readonly<Record<string, unknown>>;
+			readonly tenantId?: string;
 		};
 		export type ReplayFilter = {
 			readonly aggregateId?: string; readonly batchSize?: number; readonly eventType?: string;

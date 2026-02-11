@@ -11,14 +11,16 @@ import {
 	App,
 	AppSettingsSchema,
 	Asset,
+	AuditOperationSchema,
 	AuditLog,
 	Job,
 	JobDlq,
 	Notification,
 	NotificationPreferencesSchema,
-	OAuthProviderConfigSchema,
+	Permission,
 	Session,
-	User
+	User,
+	OAuthProviderFields,
 } from '@parametric-portal/database/models';
 import { Url } from '@parametric-portal/types/types';
 import { Schema as S } from 'effect';
@@ -46,7 +48,24 @@ const KeysetResponse = <T extends S.Schema.Any>(itemSchema: T) => S.Struct({
 	items: S.Array(itemSchema).annotations({ description: 'Page of results' }),
 	total: S.Int.annotations({ description: 'Total count of matching items' }),
 }).annotations({ description: 'Cursor-based pagination wrapper', title: 'KeysetResponse' });
-const Query = S.extend(_PaginationBase, S.Struct({ after: S.optional(HttpApiSchema.param('after', S.DateFromString)), before: S.optional(HttpApiSchema.param('before', S.DateFromString)), includeDiff: S.optional(HttpApiSchema.param('includeDiff', S.BooleanFromString)), operation: S.optional(HttpApiSchema.param('operation', S.String)) }));
+const PaginationQuery = _PaginationBase;
+const TemporalQuery = S.extend(_PaginationBase, S.Struct({
+	after: S.optional(HttpApiSchema.param('after', S.DateFromString)),
+	before: S.optional(HttpApiSchema.param('before', S.DateFromString)),
+}));
+const Query = S.extend(TemporalQuery, S.Struct({
+	includeDiff: S.optional(HttpApiSchema.param('includeDiff', S.BooleanFromString)),
+	operation: S.optional(HttpApiSchema.param('operation', AuditOperationSchema)),
+}));
+const SessionListQuery = S.Struct({
+	cursor: S.optional(HttpApiSchema.param('cursor', S.String)),
+	ipAddress: S.optional(HttpApiSchema.param('ipAddress', S.String)),
+	limit: S.optionalWith(HttpApiSchema.param('limit', S.NumberFromString.pipe(S.int(), S.between(1, 100))), { default: () => 50 }),
+	userId: S.optional(HttpApiSchema.param('userId', S.UUID)),
+}).pipe(S.filter(
+	(parameters) => !(parameters.userId !== undefined && parameters.ipAddress !== undefined),
+	{ message: () => 'Provide either userId or ipAddress, not both' },
+));
 const TransferQuery = S.Struct({
 	after: S.optionalWith(HttpApiSchema.param('after', S.DateFromString), { as: 'Option' }),
 	before: S.optionalWith(HttpApiSchema.param('before', S.DateFromString), { as: 'Option' }),
@@ -73,13 +92,18 @@ const AuditLogWithDiff = S.extend(AuditLog.json, S.Struct({
 	})),
 }));
 const SearchEntityType = S.Literal('app', 'asset', 'auditLog', 'user');
-const _TenantOAuthConfig = S.Struct({
-	providers: S.Array(OAuthProviderConfigSchema),
+const _TenantOAuthProviderRead = S.Struct({ ...OAuthProviderFields, clientSecretSet: S.Boolean });
+const _TenantOAuthProviderUpdate = S.Struct({ ...OAuthProviderFields, clientSecret: S.optional(S.NonEmptyTrimmedString) });
+const _TenantOAuthRead = S.Struct({
+	providers: S.Array(_TenantOAuthProviderRead),
+});
+const _TenantOAuthUpdate = S.Struct({
+	providers: S.Array(_TenantOAuthProviderUpdate),
 });
 const _PermissionShape = S.Struct({
-	action: S.NonEmptyTrimmedString,
-	resource: S.NonEmptyTrimmedString,
-	role: Context.UserRole.schema,
+	action: Permission.fields.action,
+	resource: Permission.fields.resource,
+	role: Permission.fields.role,
 });
 
 // --- [GROUPS] ----------------------------------------------------------------
@@ -367,12 +391,12 @@ const _UsersGroup = HttpApiGroup.make('users')
 			.addError(HttpError.Validation)
 			.annotate(OpenApi.Summary, 'Update notification preferences'),
 	)
-	.add(
-		HttpApiEndpoint.get('listNotifications', '/me/notifications')
-			.setUrlParams(Query)
-			.addSuccess(KeysetResponse(Notification.json))
-			.annotate(OpenApi.Summary, 'List own notifications'),
-	)
+		.add(
+			HttpApiEndpoint.get('listNotifications', '/me/notifications')
+				.setUrlParams(TemporalQuery)
+				.addSuccess(KeysetResponse(Notification.json))
+				.annotate(OpenApi.Summary, 'List own notifications'),
+		)
 	.add(
 		HttpApiEndpoint.get('subscribeNotifications', '/me/notifications/subscribe')
 			.addSuccess(S.Void)
@@ -685,22 +709,18 @@ const _AdminGroup = HttpApiGroup.make('admin')
 	.addError(HttpError.Internal)
 	.addError(HttpError.Validation)
 	.addError(HttpError.RateLimit)
-	.add(
-		HttpApiEndpoint.get('listUsers', '/users')
-			.setUrlParams(Query)
-			.addSuccess(KeysetResponse(User.json))
-			.annotate(OpenApi.Summary, 'List users'),
-	)
-	.add(
-		HttpApiEndpoint.get('listSessions', '/sessions')
-			.setUrlParams(S.extend(_PaginationBase, S.Struct({
-				ipAddress: S.optional(HttpApiSchema.param('ipAddress', S.String)),
-				limit: S.optionalWith(HttpApiSchema.param('limit', S.NumberFromString.pipe(S.int(), S.between(1, 100))), { default: () => 50 }),
-				userId: S.optional(HttpApiSchema.param('userId', S.UUID)),
-			})))
-			.addSuccess(KeysetResponse(Session.json))
-			.annotate(OpenApi.Summary, 'List sessions'),
-	)
+		.add(
+			HttpApiEndpoint.get('listUsers', '/users')
+				.setUrlParams(PaginationQuery)
+				.addSuccess(KeysetResponse(User.json))
+				.annotate(OpenApi.Summary, 'List users'),
+		)
+		.add(
+			HttpApiEndpoint.get('listSessions', '/sessions')
+				.setUrlParams(SessionListQuery)
+				.addSuccess(KeysetResponse(Session.json))
+				.annotate(OpenApi.Summary, 'List sessions'),
+		)
 	.add(
 		HttpApiEndpoint.del('deleteSession', '/sessions/:id')
 			.setPath(_IdPath)
@@ -714,12 +734,12 @@ const _AdminGroup = HttpApiGroup.make('admin')
 			.addSuccess(S.Struct({ revoked: S.Int }))
 			.annotate(OpenApi.Summary, 'Revoke all sessions by IP'),
 	)
-	.add(
-		HttpApiEndpoint.get('listJobs', '/jobs')
-			.setUrlParams(Query)
-			.addSuccess(KeysetResponse(Job.json))
-			.annotate(OpenApi.Summary, 'List jobs'),
-	)
+		.add(
+			HttpApiEndpoint.get('listJobs', '/jobs')
+				.setUrlParams(PaginationQuery)
+				.addSuccess(KeysetResponse(Job.json))
+				.annotate(OpenApi.Summary, 'List jobs'),
+		)
 	.add(
 		HttpApiEndpoint.post('cancelJob', '/jobs/:id/cancel')
 			.setPath(S.Struct({ id: S.String }))
@@ -727,12 +747,12 @@ const _AdminGroup = HttpApiGroup.make('admin')
 			.addError(HttpError.NotFound)
 			.annotate(OpenApi.Summary, 'Cancel job'),
 	)
-	.add(
-		HttpApiEndpoint.get('listDlq', '/dlq')
-			.setUrlParams(Query)
-			.addSuccess(KeysetResponse(JobDlq.json))
-			.annotate(OpenApi.Summary, 'List dead letters'),
-	)
+		.add(
+			HttpApiEndpoint.get('listDlq', '/dlq')
+				.setUrlParams(PaginationQuery)
+				.addSuccess(KeysetResponse(JobDlq.json))
+				.annotate(OpenApi.Summary, 'List dead letters'),
+		)
 	.add(
 		HttpApiEndpoint.post('replayDlq', '/dlq/:id/replay')
 			.setPath(_IdPath)
@@ -741,12 +761,12 @@ const _AdminGroup = HttpApiGroup.make('admin')
 			.addError(HttpError.Validation)
 			.annotate(OpenApi.Summary, 'Replay dead letter'),
 	)
-	.add(
-		HttpApiEndpoint.get('listNotifications', '/notifications')
-			.setUrlParams(Query)
-			.addSuccess(KeysetResponse(Notification.json))
-			.annotate(OpenApi.Summary, 'List notifications'),
-	)
+		.add(
+			HttpApiEndpoint.get('listNotifications', '/notifications')
+				.setUrlParams(TemporalQuery)
+				.addSuccess(KeysetResponse(Notification.json))
+				.annotate(OpenApi.Summary, 'List notifications'),
+		)
 	.add(
 		HttpApiEndpoint.post('replayNotification', '/notifications/:id/replay')
 			.setPath(_IdPath)
@@ -848,21 +868,21 @@ const _AdminGroup = HttpApiGroup.make('admin')
 			.addError(HttpError.NotFound)
 			.annotate(OpenApi.Summary, 'Resume suspended tenant'),
 	)
-	.add(
-		HttpApiEndpoint.get('getTenantOAuth', '/tenants/:id/oauth')
-			.setPath(_IdPath)
-			.addSuccess(_TenantOAuthConfig)
-			.addError(HttpError.NotFound)
-			.annotate(OpenApi.Summary, 'Get tenant OAuth config'),
-	)
-	.add(
-		HttpApiEndpoint.put('updateTenantOAuth', '/tenants/:id/oauth')
-			.setPath(_IdPath)
-			.setPayload(_TenantOAuthConfig)
-			.addSuccess(_TenantOAuthConfig)
-			.addError(HttpError.NotFound)
-			.addError(HttpError.Validation)
-			.annotate(OpenApi.Summary, 'Update tenant OAuth config'),
+		.add(
+			HttpApiEndpoint.get('getTenantOAuth', '/tenants/:id/oauth')
+				.setPath(_IdPath)
+				.addSuccess(_TenantOAuthRead)
+				.addError(HttpError.NotFound)
+				.annotate(OpenApi.Summary, 'Get tenant OAuth config'),
+		)
+		.add(
+			HttpApiEndpoint.put('updateTenantOAuth', '/tenants/:id/oauth')
+				.setPath(_IdPath)
+				.setPayload(_TenantOAuthUpdate)
+				.addSuccess(_TenantOAuthRead)
+				.addError(HttpError.NotFound)
+				.addError(HttpError.Validation)
+				.annotate(OpenApi.Summary, 'Update tenant OAuth config'),
 	)
 	.add(
 		HttpApiEndpoint.get('getFeatureFlags', '/features')

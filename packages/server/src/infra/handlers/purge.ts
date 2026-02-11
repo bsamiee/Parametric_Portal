@@ -33,6 +33,18 @@ const _config = Config.all({
 	}).pipe(Config.withDefault({ cron: defaults.cron, days: defaults.days })))),
 	s3: Config.all({ batchSize: Config.integer('PURGE_S3_BATCH_SIZE').pipe(Config.withDefault(100)), concurrency: Config.integer('PURGE_S3_CONCURRENCY').pipe(Config.withDefault(2)) }),
 });
+const _purgeDbOnly = (database: DatabaseService.Type, repo: typeof _JOBS[keyof typeof _JOBS]['repo'], days: number) =>
+	Match.value(repo).pipe(
+		Match.when('apiKeys', () => database.apiKeys.purge(days)),
+		Match.when('assets', () => database.assets.purge(days)),
+		Match.when('eventJournal', () => database.eventJournal.purge(days)),
+		Match.when('jobDlq', () => database.jobDlq.purge(days)),
+		Match.when('kvStore', () => database.kvStore.purge(days)),
+		Match.when('mfaSecrets', () => database.mfaSecrets.purge(days)),
+		Match.when('oauthAccounts', () => database.oauthAccounts.purge(days)),
+		Match.when('sessions', () => database.sessions.purge(days)),
+		Match.exhaustive,
+	);
 
 // --- [SERVICES] --------------------------------------------------------------
 
@@ -57,7 +69,7 @@ class PurgeService extends Effect.Service<PurgeService>()('server/Purge', {
 			return { dbPurged, s3Deleted: s3.deleted, s3Failed: s3.failed };
 		}),
 		'db-only': (database: DatabaseService.Type, _storage: typeof StorageService.Service, days: number, repo: PurgeService.PurgeableRepo, _s3Config: { readonly batchSize: number; readonly concurrency: number }) =>
-			database[repo].purge(days).pipe(Effect.orElseSucceed(() => 0), Effect.map((dbPurged) => ({ dbPurged, s3Deleted: 0, s3Failed: 0 }))),
+			_purgeDbOnly(database, repo, days).pipe(Effect.catchAll(() => Effect.succeed(0)), Effect.map((dbPurged) => ({ dbPurged, s3Deleted: 0, s3Failed: 0 }))),
 	} as const;
 	static readonly _execute = (name: keyof typeof _JOBS, database: DatabaseService.Type, storage: typeof StorageService.Service, audit: typeof AuditService.Service, metrics: MetricsService) =>
 		Effect.orDie(_config).pipe(Effect.flatMap((resolvedConfig) => {

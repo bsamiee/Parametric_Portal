@@ -7,6 +7,7 @@ import { Telemetry } from '@parametric-portal/server/observe/telemetry';
 import { CacheService } from '@parametric-portal/server/platform/cache';
 import { Resilience } from '@parametric-portal/server/utils/resilience';
 import { Data, Duration, Effect, Match, Option, PrimaryKey, Schema as S, Stream } from 'effect';
+import { constant } from 'effect/Function';
 import { AiRegistry } from './registry.ts';
 
 // --- [CONSTANTS] -------------------------------------------------------------
@@ -14,10 +15,9 @@ import { AiRegistry } from './registry.ts';
 const _CONFIG = {
     cache: { settings: { capacity: 256, storeId: 'ai:settings', ttlMinutes: 5 } },
     labels: {
-        operations: {embed: 'ai.embed', generateObject: 'ai.generateObject', generateText: 'ai.generateText', settings: 'ai.settings', streamText: 'ai.streamText',},
-        tokenKinds: {cached: 'cached', input: 'input', output: 'output', reasoning: 'reasoning', total: 'total',},
+        operations: { embed: 'ai.embed', generateObject: 'ai.generateObject', generateText: 'ai.generateText', settings: 'ai.settings', streamText: 'ai.streamText' },
+        tokenKinds: ['input', 'output', 'total', 'reasoning', 'cached'] as const,
     },
-    metrics: { unit: 1 },
     telemetry: { operations: { chat: 'chat', embeddings: 'embeddings' } },
 } as const;
 
@@ -27,284 +27,180 @@ class AiSettingsKey extends S.TaggedRequest<AiSettingsKey>()('AiSettingsKey', {
     failure: S.Unknown,
     payload: { tenantId: S.String },
     success: AiRegistry.schema,
-}) {[PrimaryKey.symbol]() {return `ai:settings:${this.tenantId}`;}}
+}) { [PrimaryKey.symbol]() { return `ai:settings:${this.tenantId}`; } }
 
-// --- [CLASSES] ---------------------------------------------------------------
+// --- [ERRORS] ----------------------------------------------------------------
 
 class AiRuntimeError extends Data.TaggedError('AiRuntimeError')<{
     readonly operation: string;
     readonly cause: unknown;
 }> {}
 
+// --- [FUNCTIONS] -------------------------------------------------------------
+
+const _wrapError = (operation: string) => (cause: unknown) =>
+    Match.value(cause).pipe(
+        Match.when(AiError.isAiError, (error: AiError.AiError) => error),
+        Match.orElse((error) => error instanceof AiRuntimeError ? error : new AiRuntimeError({ cause: error, operation })),
+    );
+
+const _tokenUsageKeys = (usage: Response.Usage) => [
+    usage.inputTokens, usage.outputTokens, usage.totalTokens,
+    usage.reasoningTokens, usage.cachedInputTokens,
+] as const;
+
 // --- [SERVICES] --------------------------------------------------------------
 
 class AiRuntime extends Effect.Service<AiRuntime>()('ai/Runtime', {
     effect: Effect.gen(function* () {
         const [db, metrics] = yield* Effect.all([DatabaseService, MetricsService]);
-        const wrapError = (operation: string) => (cause: unknown) =>
-            Match.value(cause).pipe(
-                Match.when(AiError.isAiError, (error: AiError.AiError) => error),
-                Match.orElse((error) => error instanceof AiRuntimeError ? error : new AiRuntimeError({ cause: error, operation }),
-                ),
-            );
-        const mapSettingsError = wrapError(_CONFIG.labels.operations.settings);
+        const mapSettingsError = _wrapError(_CONFIG.labels.operations.settings);
         const annotate = (attributes: AiTelemetry.GenAITelemetryAttributeOptions) =>
-            Effect.optionFromOptional(Effect.currentSpan).pipe(
-                Effect.flatMap(
-                    Option.match({
-                        onNone: () => Effect.void,
-                        onSome: (span) => Effect.sync(() => AiTelemetry.addGenAIAnnotations(span, attributes)),
-                    }),
-                ),
-            );
+            Effect.flatMap(Effect.optionFromOptional(Effect.currentSpan), Option.match({
+                onNone: constant(Effect.void),
+                onSome: (span) => Effect.sync(() => AiTelemetry.addGenAIAnnotations(span, attributes)),
+            }));
         const settingsCache = yield* CacheService.cache({
             inMemoryCapacity: _CONFIG.cache.settings.capacity,
             lookup: (key: AiSettingsKey) =>
                 db.apps.one([{ field: 'id', value: key.tenantId }]).pipe(
                     Effect.mapError(mapSettingsError),
-                    Effect.flatMap(
-                        Option.match({
-                            onNone: () =>
-                                Effect.fail(
-                                    new AiRuntimeError({
-                                        cause: { tenantId: key.tenantId },
-                                        operation: _CONFIG.labels.operations.settings,
-                                    }),
-                                ),
-                            onSome: (app) =>
-                                AiRegistry.decodeAppSettings(app.settings ?? {}).pipe(
-                                    Effect.mapError(mapSettingsError),
-                                ),
-                        }),
-                    ),
+                    Effect.filterOrFail(Option.isSome, constant(new AiRuntimeError({ cause: { tenantId: key.tenantId }, operation: _CONFIG.labels.operations.settings }))),
+                    Effect.map(({ value }) => value),
+                    Effect.flatMap((app) => AiRegistry.decodeAppSettings(app.settings ?? {}).pipe(Effect.mapError(mapSettingsError))),
                 ),
             storeId: _CONFIG.cache.settings.storeId,
             timeToLive: Duration.minutes(_CONFIG.cache.settings.ttlMinutes),
         });
         const settingsFor = (tenantId: string) =>
-            settingsCache
-                .get(new AiSettingsKey({ tenantId }))
-                .pipe(Effect.mapError(mapSettingsError));
+            settingsCache.get(new AiSettingsKey({ tenantId })).pipe(Effect.mapError(mapSettingsError));
         const settings = () => Context.Request.currentTenantId.pipe(Effect.flatMap(settingsFor));
         const tokenUsage = (labels: Record<string, string | undefined>, usage: Response.Usage) =>
             Effect.forEach(
-                [
-                    [_CONFIG.labels.tokenKinds.input, usage.inputTokens] as const,
-                    [_CONFIG.labels.tokenKinds.output, usage.outputTokens] as const,
-                    [_CONFIG.labels.tokenKinds.total, usage.totalTokens] as const,
-                    [_CONFIG.labels.tokenKinds.reasoning, usage.reasoningTokens] as const,
-                    [_CONFIG.labels.tokenKinds.cached, usage.cachedInputTokens] as const,
-                ],
-                ([kind, value]) =>
-                    Option.fromNullable(value).pipe(
-                        Option.match({
-                            onNone: () => Effect.void,
-                            onSome: (tokens) =>
-                                MetricsService.inc(metrics.ai.tokens, MetricsService.label({ ...labels, kind }), tokens),
-                        }),
-                    ),
+                _CONFIG.labels.tokenKinds.flatMap((kind, i) => {
+                    const value = _tokenUsageKeys(usage)[i];
+                    return value == null ? [] : [[kind, value] as const];
+                }),
+                ([kind, tokens]) => MetricsService.inc(metrics.ai.tokens, MetricsService.label({ ...labels, kind }), tokens),
                 { discard: true },
             );
         const track = <A, E, R>(
             operation: string,
             labels: ReturnType<typeof MetricsService.label>,
-            effect: Effect.Effect<A, E, R>,) =>
-            effect.pipe(
-                (eff) => Resilience.run(operation, eff),
-                (eff) =>
-                    MetricsService.trackEffect(eff, {
-                        duration: metrics.ai.duration,
-                        errors: metrics.ai.errors,
-                        labels,
-                    }),
-                Effect.tapBoth({
-                    onFailure: () => MetricsService.inc(metrics.ai.requests, labels, _CONFIG.metrics.unit),
-                    onSuccess: () => MetricsService.inc(metrics.ai.requests, labels, _CONFIG.metrics.unit),
-                }),
+            effect: Effect.Effect<A, E, R>,
+        ) =>
+            Resilience.run(operation, effect).pipe(
+                (eff) => MetricsService.trackEffect(eff, { duration: metrics.ai.duration, errors: metrics.ai.errors, labels }),
+                Effect.ensuring(MetricsService.inc(metrics.ai.requests, labels, 1)),
             );
         const languageContext = (operation: string) =>
-            Effect.gen(function* () {
-                const ctx = yield* Context.Request.current;
-                const [appSettings, fiberId] = yield* Effect.all([settingsFor(ctx.tenantId), Effect.fiberId]);
-                const labelPairs = {
-                    model: appSettings.language.model,
-                    operation,
-                    provider: appSettings.language.provider,
-                    tenant: ctx.tenantId,
-                };
-                const labels = MetricsService.label(labelPairs);
-                const layers = AiRegistry.layers(appSettings);
-                const requestAnnotations = annotate({
-                    operation: { name: _CONFIG.telemetry.operations.chat },
-                    request: {
-                        maxTokens: appSettings.language.maxTokens,
-                        model: appSettings.language.model,
-                        temperature: appSettings.language.temperature,
-                        topK: appSettings.language.topK,
-                        topP: appSettings.language.topP,
-                    },
-                    system: appSettings.language.provider,
-                });
-                const spanAttrs = Context.Request.toAttrs(ctx, fiberId);
-                return { appSettings, labelPairs, labels, layers, requestAnnotations, spanAttrs } as const;
-            });
-        function embed(input: string,): Effect.Effect<readonly number[], AiError.AiError | AiRuntimeError, Resilience.State>;
-        function embed(input: readonly string[],): Effect.Effect<readonly (readonly number[])[], AiError.AiError | AiRuntimeError, Resilience.State>;
-        function embed(input: string | readonly string[],): Effect.Effect<readonly number[] | readonly (readonly number[])[],AiError.AiError | AiRuntimeError,Resilience.State> {
-            return Effect.gen(function* () {
-                const ctx = yield* Context.Request.current;
-                const appSettings = yield* settingsFor(ctx.tenantId);
-                const labelPairs = {
-                    dimensions: String(appSettings.embedding.dimensions),
-                    model: appSettings.embedding.model,
-                    operation: _CONFIG.labels.operations.embed,
-                    provider: appSettings.embedding.provider,
-                    tenant: ctx.tenantId,
-                };
-                const labels = MetricsService.label(labelPairs);
-                const layers = AiRegistry.layers(appSettings);
-                const requestAnnotations = annotate({
-                    operation: { name: _CONFIG.telemetry.operations.embeddings },
-                    request: { model: appSettings.embedding.model },
-                    system: appSettings.embedding.provider,
-                });
-                const run = <A>(
-                    effect: Effect.Effect<A, unknown, EmbeddingModel.EmbeddingModel>,
-                    count: (value: A) => number,) =>
-                    track(_CONFIG.labels.operations.embed, labels, effect.pipe(Effect.provide(layers.embedding))).pipe(
-                        Effect.tap((value: A) => MetricsService.inc(metrics.ai.embeddings, labels, count(value))),
-                        Effect.tapBoth({
-                            onFailure: () => requestAnnotations,
-                            onSuccess: () => requestAnnotations,
+            Context.Request.current.pipe(
+                Effect.bindTo('requestContext'),
+                Effect.bind('resolved', ({ requestContext }) => Effect.all([settingsFor(requestContext.tenantId), Effect.fiberId])),
+                Effect.map(({ requestContext, resolved: [appSettings, fiberId] }) => {
+                    const labelPairs = { model: appSettings.language.model, operation, provider: appSettings.language.provider, tenant: requestContext.tenantId };
+                    return {
+                        appSettings,
+                        labelPairs,
+                        labels: MetricsService.label(labelPairs),
+                        layers: AiRegistry.layers(appSettings),
+                        requestAnnotations: annotate({
+                            operation: { name: _CONFIG.telemetry.operations.chat },
+                            request: { maxTokens: appSettings.language.maxTokens, model: appSettings.language.model, temperature: appSettings.language.temperature, topK: appSettings.language.topK, topP: appSettings.language.topP },
+                            system: appSettings.language.provider,
                         }),
+                        spanAttrs: Context.Request.toAttrs(requestContext, fiberId),
+                    } as const;
+                }),
+            );
+        function embed(input: string): Effect.Effect<readonly number[], AiError.AiError | AiRuntimeError, Resilience.State>;
+        function embed(input: readonly string[]): Effect.Effect<readonly (readonly number[])[], AiError.AiError | AiRuntimeError, Resilience.State>;
+        // biome-ignore lint/suspicious/noExplicitAny: overloads provide precise types to callers
+        function embed(input: string | readonly string[]): any {
+            return Context.Request.current.pipe(
+                Effect.bindTo('requestContext'),
+                Effect.bind('appSettings', ({ requestContext }) => settingsFor(requestContext.tenantId)),
+                Effect.flatMap(({ requestContext, appSettings }) => {
+                    const labelPairs = { dimensions: String(appSettings.embedding.dimensions), model: appSettings.embedding.model, operation: _CONFIG.labels.operations.embed, provider: appSettings.embedding.provider, tenant: requestContext.tenantId };
+                    const labels = MetricsService.label(labelPairs);
+                    const layers = AiRegistry.layers(appSettings);
+                    const ann = annotate({ operation: { name: _CONFIG.telemetry.operations.embeddings }, request: { model: appSettings.embedding.model }, system: appSettings.embedding.provider });
+                    return track(_CONFIG.labels.operations.embed, labels,
+                        Effect.gen(function* () {
+                            const e = yield* EmbeddingModel.EmbeddingModel;
+                            return yield* (Array.isArray(input) ? e.embedMany(input as readonly string[]) : e.embed(input as string));
+                        }).pipe(Effect.provide(layers.embedding)),
+                    ).pipe(
+                        Effect.tap((result) => MetricsService.inc(metrics.ai.embeddings, labels, Array.isArray(input) ? (result as readonly (readonly number[])[]).length : 1)),
+                        Effect.ensuring(ann),
                         Telemetry.span(_CONFIG.labels.operations.embed, { kind: 'client', metrics: false }),
                     );
-                return yield* Match.value(input).pipe(
-                    Match.when(
-                        (value: string | readonly string[]): value is readonly string[] => Array.isArray(value),
-                        (items) =>
-                            run(
-                                Effect.flatMap(EmbeddingModel.EmbeddingModel, (embedding) => embedding.embedMany(items),),
-                                (values) => values.length,
-                            ),
-                    ),
-                    Match.orElse((item) =>
-                        run(
-                            Effect.flatMap(EmbeddingModel.EmbeddingModel, (embedding) => embedding.embed(item)),
-                            () => _CONFIG.metrics.unit,
-                        ),
-                    ),
-                );
-            }).pipe(Effect.mapError(wrapError(_CONFIG.labels.operations.embed)));
+                }),
+                Effect.mapError(_wrapError(_CONFIG.labels.operations.embed)),
+            );
         }
         const runLanguage = <A extends { readonly usage: Response.Usage }, Options, R>(
             operation: string,
             options: Options,
-            run: (opts: Options) => Effect.Effect<A, AiError.AiError, R>,) =>
-            Effect.gen(function* () {
-                const { appSettings, labelPairs, labels, layers, requestAnnotations } = yield* languageContext(operation,);
-                const response = yield* track(
-                    operation,
-                    labels,
-                    run(options).pipe(Effect.provide(layers.language)),
-                ).pipe(
-                    Effect.tapBoth({
-                        onFailure: () => requestAnnotations,
-                        onSuccess: () => requestAnnotations,
-                    }),
-                    Effect.tap((resp) => tokenUsage(labelPairs, resp.usage)),
-                    Effect.tap((resp) =>
-                        annotate({
-                            operation: { name: _CONFIG.telemetry.operations.chat },
-                            system: appSettings.language.provider,
-                            usage: resp.usage,
-                        }),
+            run: (opts: Options) => Effect.Effect<A, AiError.AiError, R>,
+        ) =>
+            languageContext(operation).pipe(
+                Effect.flatMap(({ appSettings, labelPairs, labels, layers, requestAnnotations }) =>
+                    track(operation, labels, run(options).pipe(Effect.provide(layers.language))).pipe(
+                        Effect.ensuring(requestAnnotations),
+                        Effect.tap((resp) => tokenUsage(labelPairs, resp.usage)),
+                        Effect.tap((resp) => annotate({ operation: { name: _CONFIG.telemetry.operations.chat }, system: appSettings.language.provider, usage: resp.usage })),
+                        Telemetry.span(operation, { kind: 'client', metrics: false }),
                     ),
-                    Telemetry.span(operation, { kind: 'client', metrics: false }),
-                );
-                return response;
-            }).pipe(Effect.mapError(wrapError(operation)));
+                ),
+                Effect.mapError(_wrapError(operation)),
+            );
         const generateText = <Tools extends Record<string, Tool.Any> = {}>(
             options: LanguageModel.GenerateTextOptions<Tools>,
         ) => runLanguage(_CONFIG.labels.operations.generateText, options, LanguageModel.generateText);
         const generateObject = <A, I extends Record<string, unknown>, R, Tools extends Record<string, Tool.Any> = {}>(
             options: LanguageModel.GenerateObjectOptions<Tools, A, I, R>,
         ) => runLanguage(_CONFIG.labels.operations.generateObject, options, LanguageModel.generateObject);
-        const recordStreamTextPreStartError = (error: unknown) =>
-            Context.Request.currentTenantId.pipe(
-                Effect.flatMap((tenantId) => {
-                    const labels = MetricsService.label({
-                        operation: _CONFIG.labels.operations.streamText,
-                        tenant: tenantId,
-                    });
-                    return Effect.all(
-                        [
-                            MetricsService.inc(metrics.ai.requests, labels, _CONFIG.metrics.unit),
-                            MetricsService.trackError(metrics.ai.errors, labels, error),
-                        ],
-                        { discard: true },
-                    );
-                }),
-            );
         const streamText = <Tools extends Record<string, Tool.Any> = {}>(
             options: LanguageModel.GenerateTextOptions<Tools>,
         ) =>
             Stream.unwrap(
-                Effect.gen(function* () {
-                    const { appSettings, labelPairs, labels, layers, requestAnnotations, spanAttrs } =
-                        yield* languageContext(_CONFIG.labels.operations.streamText);
-                    const base = LanguageModel.streamText(options).pipe(Stream.provideLayer(layers.language));
-                    const onStart = Effect.all(
-                        [
-                            requestAnnotations,
-                            MetricsService.inc(metrics.ai.requests, labels, _CONFIG.metrics.unit),
-                        ],
-                        { discard: true },
-                    );
-                    const onFinish = (part: Response.StreamPart<Tools>) =>
-                        Option.match(
-                            Option.liftPredicate(
-                                (value: Response.StreamPart<Tools>): value is Response.FinishPart =>
-                                    value.type === 'finish',
-                            )(part),
-                            {
-                                onNone: () => Effect.void,
-                                onSome: (finish) =>
-                                    Effect.all(
-                                        [
-                                            tokenUsage(labelPairs, finish.usage),
-                                            annotate({
-                                                operation: { name: _CONFIG.telemetry.operations.chat },
-                                                system: appSettings.language.provider,
-                                                usage: finish.usage,
-                                            }),
-                                        ],
-                                        { discard: true },
-                                    ),
-                            },
+                languageContext(_CONFIG.labels.operations.streamText).pipe(
+                    Effect.map(({ appSettings, labelPairs, labels, layers, requestAnnotations, spanAttrs }) => {
+                        const base = LanguageModel.streamText(options).pipe(Stream.provideLayer(layers.language));
+                        const onStart = Effect.all([requestAnnotations, MetricsService.inc(metrics.ai.requests, labels, 1)], { discard: true });
+                        const onFinish = (part: Response.StreamPart<Tools>) =>
+                            part.type === 'finish'
+                                ? Effect.all([tokenUsage(labelPairs, part.usage), annotate({ operation: { name: _CONFIG.telemetry.operations.chat }, system: appSettings.language.provider, usage: part.usage })], { discard: true })
+                                : Effect.void;
+                        return Stream.withSpan(
+                            MetricsService.trackStream(
+                                Stream.tapError(Stream.mapEffect(Stream.onStart(base, onStart), (part) => onFinish(part).pipe(Effect.as(part))),
+                                    (error) => MetricsService.trackError(metrics.ai.errors, labels, error)),
+                                metrics.stream.elements,
+                                labelPairs,
+                            ),
+                            _CONFIG.labels.operations.streamText,
+                            { attributes: spanAttrs, kind: 'client' },
                         );
-                    const onError = (error: unknown) => MetricsService.trackError(metrics.ai.errors, labels, error);
-                    const withStart = Stream.onStart(base, onStart);
-                    const withFinish = Stream.mapEffect(withStart, (part) => onFinish(part).pipe(Effect.as(part)),);
-                    const withError = Stream.tapError(withFinish, onError);
-                    const withMetrics = MetricsService.trackStream(withError, metrics.stream.elements, labelPairs);
-                    return Stream.withSpan(withMetrics, _CONFIG.labels.operations.streamText, { attributes: spanAttrs, kind: 'client' });
-                }).pipe(
-                    Effect.tapError(recordStreamTextPreStartError),
+                    }),
+                    Effect.tapError((error) => Context.Request.currentTenantId.pipe(
+                        Effect.flatMap((tenantId) => {
+                            const labels = MetricsService.label({ operation: _CONFIG.labels.operations.streamText, tenant: tenantId });
+                            return Effect.all([MetricsService.inc(metrics.ai.requests, labels, 1), MetricsService.trackError(metrics.ai.errors, labels, error)], { discard: true });
+                        }),
+                    )),
                     (eff) => Resilience.run(_CONFIG.labels.operations.streamText, eff),
                 ),
-            ).pipe(Stream.mapError(wrapError(_CONFIG.labels.operations.streamText)));
+            ).pipe(Stream.mapError(_wrapError(_CONFIG.labels.operations.streamText)));
         const chat = (options?: { readonly prompt?: Parameters<typeof Chat.fromPrompt>[0] }) =>
-            Effect.gen(function* () {
-                const appSettings = yield* settings();
-                const base = Option.fromNullable(options?.prompt).pipe(
-                    Option.match({
-                        onNone: () => Chat.empty,
-                        onSome: (prompt) => Chat.fromPrompt(prompt),
-                    }),
-                );
-                return yield* base.pipe(Effect.provide(AiRegistry.layers(appSettings).language));
-            });
+            settings().pipe(
+                Effect.flatMap((appSettings) =>
+                    (options?.prompt === undefined ? Chat.empty : Chat.fromPrompt(options.prompt)).pipe(
+                        Effect.provide(AiRegistry.layers(appSettings).language),
+                    ),
+                ),
+            );
         return { chat, embed, generateObject, generateText, settings, streamText };
     }),
 }) {}

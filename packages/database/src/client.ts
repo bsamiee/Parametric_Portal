@@ -6,7 +6,7 @@ import { PgClient } from '@effect/sql-pg';
 import { SqlClient } from '@effect/sql';
 import { readFileSync } from 'node:fs';
 import type { SecureVersion } from 'node:tls';
-import { Config, Duration, Effect, FiberRef, Layer, Option, Schema as Sch, Stream, String as S } from 'effect';
+import { Config, Duration, Effect, FiberRef, Layer, Option, Redacted, Schema as Sch, Stream, String as S } from 'effect';
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
@@ -57,35 +57,40 @@ const _layer = Layer.unwrapEffect(Effect.gen(function* () {
 		statementMs: 			Config.integer('POSTGRES_STATEMENT_TIMEOUT_MS').pipe(Config.withDefault(30_000)),
 		transactionMs: 			Config.integer('POSTGRES_TRANSACTION_TIMEOUT_MS').pipe(Config.withDefault(120_000)),
 	});
-	const currentPgOptions = (process.env['PGOPTIONS'] ?? '').match(_CONFIG.pgOptions.extractPattern) ?? [];
-	const normalizedPgOptions = currentPgOptions
-		.map((token) => token.replace(_CONFIG.pgOptions.replacePattern, '').split('=', 2))
-		.filter((parts): parts is [string, string] => (parts[0] ?? '') !== '' && (parts[1] ?? '') !== '')
-		.map(([key, value]) => [key, value] as const);
-	const timeoutPgOptions = _CONFIG.pgOptions.timeouts
-		.map(([key, timeoutKey]) => [key, String(timeouts[timeoutKey])] as const);
-	process.env['PGOPTIONS'] = Array.from(
-		new Map<string, string>([...normalizedPgOptions, ...timeoutPgOptions]),
-		([key, value]) => `-c ${key}=${value}`,
-	).join(' ');
+	const timeoutPgOptions = _CONFIG.pgOptions.timeouts.map(([key, timeoutKey]) => [key, String(timeouts[timeoutKey])] as const);
+	const connectionUrl = yield* Config.redacted('DATABASE_URL').pipe(
+		Config.mapAttempt((databaseUrl) => {
+			const parsedUrl = new URL(Redacted.value(databaseUrl));
+			const normalizedPgOptions = [
+				...((parsedUrl.searchParams.get('options') ?? '').match(_CONFIG.pgOptions.extractPattern) ?? []), // NOSONAR S3358
+				...((process.env['PGOPTIONS'] ?? '').match(_CONFIG.pgOptions.extractPattern) ?? []), // NOSONAR S3358
+			]
+				.map((token) => token.replace(_CONFIG.pgOptions.replacePattern, '').split('=', 2))
+				.filter((parts): parts is [string, string] => (parts[0] ?? '') !== '' && (parts[1] ?? '') !== '')
+				.map(([key, value]) => [key, value] as const);
+			parsedUrl.searchParams.set(
+				'options',
+				Array.from(
+					new Map<string, string>([...normalizedPgOptions, ...timeoutPgOptions]),
+					([key, value]) => `-c ${key}=${value}`,
+				).join(' '),
+			);
+			return Redacted.make(parsedUrl.toString());
+		}),
+	);
 	return PgClient.layerConfig({
 		applicationName: 		Config.string('POSTGRES_APP_NAME').pipe(Config.withDefault('parametric-portal')),
 		connectionTTL: 			Config.integer('POSTGRES_CONNECTION_TTL_MS').pipe(Config.withDefault(900_000), Config.map(Duration.millis)),
 		connectTimeout: 		Config.integer('POSTGRES_CONNECT_TIMEOUT_MS').pipe(Config.withDefault(5_000), Config.map(Duration.millis)),
-		database: 				Config.string('POSTGRES_DB').pipe(Config.withDefault('parametric')),
-		host: 					Config.string('POSTGRES_HOST').pipe(Config.withDefault('localhost')),
 		idleTimeout: 			Config.integer('POSTGRES_IDLE_TIMEOUT_MS').pipe(Config.withDefault(30_000), Config.map(Duration.millis)),
 		maxConnections: 		Config.integer('POSTGRES_POOL_MAX').pipe(Config.withDefault(10)),
 		minConnections: 		Config.integer('POSTGRES_POOL_MIN').pipe(Config.withDefault(2)),
-		password: 				Config.redacted('POSTGRES_PASSWORD').pipe(Config.option, Config.map(Option.getOrUndefined)),
-		port: 					Config.integer('POSTGRES_PORT').pipe(Config.withDefault(5432)),
 		spanAttributes: 		Config.succeed({ 'service.name': 'database' }),
 		ssl: 					_sslConfig,
 		transformJson: 			Config.succeed(true),
 		transformQueryNames: 	Config.succeed(S.camelToSnake),
 		transformResultNames: 	Config.succeed(S.snakeToCamel),
-		url: 					Config.redacted('DATABASE_URL').pipe(Config.option, Config.map(Option.getOrUndefined)),
-		username: 				Config.string('POSTGRES_USER').pipe(Config.withDefault('postgres')),
+		url: 					Config.succeed(connectionUrl),
 	});
 }));
 
@@ -139,28 +144,50 @@ const Client = (() => {
 		tenant: (() => {
 			const Id = _CONFIG.tenant.id;
 			const ref = FiberRef.unsafeMake<string>(Id.unspecified);
+			const sqlContextRef = FiberRef.unsafeMake(false);
 			const tenant = {
 				current: FiberRef.get(ref),
 				Id,
+				inSqlContext: FiberRef.get(sqlContextRef),
 				locally: <A, E, R>(tenantId: string, effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, R> => Effect.locallyWith(effect, ref, () => tenantId),
 				set: (tenantId: string) => FiberRef.set(ref, tenantId),
 				with: <A, E, R>(appId: string, effect: Effect.Effect<A, E, R>) => tenant.locally(appId, Effect.gen(function* () {
-					const db = yield* sql;
-					return yield* db.withTransaction(db`SELECT set_config('app.current_tenant', ${appId}, true)`.pipe(Effect.andThen(effect), Effect.provideService(SqlClient.SqlClient, db)));
+					const inSqlContext = yield* FiberRef.get(sqlContextRef);
+					return yield* inSqlContext
+						? effect
+						: Effect.flatMap(sql, (db) =>
+							Effect.locallyWith(
+								db.withTransaction(
+									db`SELECT set_config('app.current_tenant', ${appId}, true)`.pipe(
+										Effect.andThen(effect),
+										Effect.provideService(SqlClient.SqlClient, db),
+									),
+								),
+								sqlContextRef,
+								() => true,
+							),
+						);
 				})),
 			} as const;
 			return tenant;
-		})(),
-		vector: {
-			configureIterativeScan: (mode: 'relaxed_order' | 'strict_order' | 'off' = 'relaxed_order') => sql.pipe(Effect.flatMap((db) => db`SET hnsw.iterative_scan = ${mode}`)),
-			getConfig: Effect.fn('db.vectorConfig')(function* () {
-				const db = yield* sql;
-				return yield* db<{ name: string; setting: string }>`SELECT name, setting FROM pg_settings WHERE name LIKE 'hnsw.%'`;
-			}),
-			indexStats: (tableName: string, indexName: string) => sql.pipe(Effect.flatMap((db) => db<{ idxScan: bigint; idxTupFetch: bigint; idxTupRead: bigint }>`SELECT idx_scan, idx_tup_read, idx_tup_fetch FROM pg_stat_user_indexes WHERE relname = ${tableName} AND indexrelname = ${indexName}`)),
-		},
-	} as const;
-})();
+			})(),
+			vector: {
+				getConfig: Effect.fn('db.vectorConfig')(function* () {
+					const db = yield* sql;
+					return yield* db<{ name: string; setting: string }>`SELECT name, setting FROM pg_settings WHERE name LIKE 'hnsw.%'`;
+				}),
+				indexStats: (tableName: string, indexName: string) => sql.pipe(Effect.flatMap((db) => db<{ idxScan: bigint; idxTupFetch: bigint; idxTupRead: bigint }>`SELECT idx_scan, idx_tup_read, idx_tup_fetch FROM pg_stat_user_indexes WHERE relname = ${tableName} AND indexrelname = ${indexName}`)),
+				withIterativeScan: <A, E, R>(mode: 'relaxed_order' | 'strict_order' | 'off', effect: Effect.Effect<A, E, R>) => sql.pipe(
+					Effect.flatMap((db) => db.withTransaction(
+						db`SET LOCAL hnsw.iterative_scan = ${mode}`.pipe(
+							Effect.andThen(effect),
+							Effect.provideService(SqlClient.SqlClient, db),
+						),
+					)),
+				),
+			},
+		} as const;
+	})();
 
 // --- [EXPORT] ----------------------------------------------------------------
 

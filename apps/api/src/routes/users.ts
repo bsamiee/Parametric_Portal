@@ -12,22 +12,8 @@ import { Middleware } from '@parametric-portal/server/middleware';
 import { AuditService } from '@parametric-portal/server/observe/audit';
 import { Telemetry } from '@parametric-portal/server/observe/telemetry';
 import { StreamingService } from '@parametric-portal/server/platform/streaming';
+import { constant } from 'effect/Function';
 import { Effect, Option } from 'effect';
-
-// --- [FUNCTIONS] -------------------------------------------------------------
-
-const _requireOne = <A>(
-	effect: Effect.Effect<Option.Option<A>, unknown>,
-	entity: string,
-	id?: string,
-): Effect.Effect<A, HttpError.NotFound | HttpError.Internal> =>
-	effect.pipe(
-		Effect.mapError((error) => HttpError.Internal.of(`${entity} lookup failed`, error)),
-		Effect.flatMap(Option.match({
-			onNone: () => Effect.fail(HttpError.NotFound.of(entity, id)),
-			onSome: Effect.succeed,
-		})),
-	);
 
 // --- [LAYERS] ----------------------------------------------------------------
 
@@ -37,14 +23,18 @@ const UsersLive = HttpApiBuilder.group(ParametricApi, 'users', (handlers) =>
 			return handlers
 				.handle('getMe', () =>
 					Middleware.guarded('users', 'getMe', 'api', Context.Request.sessionOrFail.pipe(
-						Effect.flatMap((session) => _requireOne(database.users.one([{ field: 'id', value: session.userId }]), 'user')),
+						Effect.flatMap((session) => database.users.one([{ field: 'id', value: session.userId }])),
+						Effect.mapError((error) => HttpError.Internal.of('user lookup failed', error)),
+						Effect.flatMap(Option.match({
+							onNone: () => Effect.fail(HttpError.NotFound.of('user')),
+							onSome: Effect.succeed,
+						})),
 						Telemetry.span('users.getMe', { metrics: false }),
 					)))
 				.handle('updateProfile', ({ payload }) =>
 					Middleware.guarded('users', 'updateProfile', 'mutation', Context.Request.sessionOrFail.pipe(
-						Effect.flatMap((session) => database.users.set(session.userId, { email: payload.email }).pipe(
-							Effect.mapError((error) => HttpError.Internal.of('Profile update failed', error)),
-						)),
+						Effect.flatMap((session) => database.users.set(session.userId, { email: payload.email })),
+						Effect.mapError(constant(HttpError.Internal.of('Profile update failed'))),
 						Effect.tap((updatedUser) => audit.log('User.update', {
 							after: { email: updatedUser.email },
 							subjectId: updatedUser.id,
@@ -53,27 +43,31 @@ const UsersLive = HttpApiBuilder.group(ParametricApi, 'users', (handlers) =>
 					)))
 				.handle('deactivate', () =>
 					Middleware.guarded('users', 'deactivate', 'mutation', Context.Request.sessionOrFail.pipe(
-						Effect.flatMap((session) => database.users.set(session.userId, { status: 'inactive' }).pipe(
-							Effect.mapError((error) => HttpError.Internal.of('Account deactivation failed', error)),
-						)),
+						Effect.flatMap((session) => database.users.set(session.userId, { status: 'inactive' })),
+						Effect.mapError(constant(HttpError.Internal.of('Account deactivation failed'))),
 						Effect.tap((user) => audit.log('User.update', {
 							after: { status: 'inactive' },
 							before: { status: user.status },
 							subjectId: user.id,
 						})),
-						Effect.map(() => ({ success: true as const })),
+						Effect.as({ success: true as const }),
 						Telemetry.span('users.deactivate', { metrics: false }),
 					)))
 				.handle('updateRole', ({ path: { id }, payload: { role } }) =>
-					Middleware.guarded('users', 'updateRole', 'mutation', _requireOne(database.users.one([{ field: 'id', value: id }]), 'user', id).pipe(
-						Effect.flatMap((user) => database.users.set(id, { role }).pipe(
-							Effect.mapError((error) => HttpError.Internal.of('Role update failed', error)),
-							Effect.tap((updatedUser) => audit.log('User.update', {
-								after: { email: updatedUser.email, role: updatedUser.role },
-								before: { email: user.email, role: user.role },
-								subjectId: id,
-							})),
+					Middleware.guarded('users', 'updateRole', 'mutation', database.users.one([{ field: 'id', value: id }]).pipe(
+						Effect.mapError(constant(HttpError.Internal.of('user lookup failed'))),
+						Effect.filterOrFail(Option.isSome, constant(HttpError.NotFound.of('user', id))),
+						Effect.map(({ value }) => value),
+						Effect.bindTo('user'),
+						Effect.bind('updatedUser', () => database.users.set(id, { role }).pipe(
+							Effect.mapError(constant(HttpError.Internal.of('Role update failed'))),
 						)),
+						Effect.tap(({ user, updatedUser }) => audit.log('User.update', {
+							after: { email: updatedUser.email, role: updatedUser.role },
+							before: { email: user.email, role: user.role },
+							subjectId: id,
+						})),
+						Effect.map(({ updatedUser }) => updatedUser),
 						Telemetry.span('users.updateRole', { metrics: false }),
 					)))
 				.handle('getNotificationPreferences', () =>

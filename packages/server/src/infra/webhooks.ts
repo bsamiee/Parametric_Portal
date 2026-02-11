@@ -7,7 +7,7 @@ import { Activity, Workflow } from '@effect/workflow';
 import { FetchHttpClient, HttpClient, HttpClientError, HttpClientRequest } from '@effect/platform';
 import { SqlClient } from '@effect/sql';
 import { Cause, Clock, Config, Duration, Effect, Function as F, Layer, Match, Metric, Option, PrimaryKey, Array as Arr, Schema as S, STM, Stream, TMap } from 'effect';
-import { AppSettingsDefaults, AppSettingsSchema, type JobDlq } from '@parametric-portal/database/models';
+import type { JobDlq } from '@parametric-portal/database/models';
 import { DatabaseService } from '@parametric-portal/database/repos';
 import { Context } from '../context.ts';
 import { MetricsService } from '../observe/metrics.ts';
@@ -162,18 +162,15 @@ class WebhookService extends Effect.Service<WebhookService>()('server/Webhooks',
 	],
 	scoped: Effect.gen(function* () {
 		const [cache, database, eventBus, metrics, sql] = yield* Effect.all([CacheService, DatabaseService, EventBus, MetricsService, SqlClient.SqlClient]);
-			const throttles = yield* STM.commit(TMap.empty<string, Effect.Semaphore>());
-				const settingsCache = yield* CacheService.cache<WebhookSettingsKey, never, never>({
-						lookup: (key) => Context.Request.withinSync(key.tenantId, database.apps.one([{ field: 'id', value: key.tenantId }])).pipe(
-							Effect.flatMap(Option.match({
-								onNone: () => Effect.succeed({ webhooks: [] }),
-								onSome: (app) => S.decodeUnknown(AppSettingsSchema)(
-									Option.getOrElse(app.settings, () => AppSettingsDefaults),
-									{ errors: 'all', onExcessProperty: 'ignore' },
-								).pipe(
-									Effect.flatMap((settings) => S.decodeUnknown(_SCHEMA.WebhookSettings)(
-										{ webhooks: settings.webhooks },
-										{ errors: 'all', onExcessProperty: 'ignore' },
+				const throttles = yield* STM.commit(TMap.empty<string, Effect.Semaphore>());
+					const settingsCache = yield* CacheService.cache<WebhookSettingsKey, never, never>({
+							lookup: (key) => Context.Request.withinSync(key.tenantId, database.apps.readSettings(key.tenantId)).pipe(
+								Effect.flatMap(Option.match({
+									onNone: () => Effect.succeed({ webhooks: [] }),
+									onSome: ({ settings }) => Effect.succeed(settings).pipe(
+										Effect.flatMap((settings) => S.decodeUnknown(_SCHEMA.WebhookSettings)(
+											{ webhooks: settings.webhooks },
+											{ errors: 'all', onExcessProperty: 'ignore' },
 									)),
 									Effect.mapError((cause) => WebhookError.from('VerificationFailed', undefined, { cause })),
 								),
@@ -186,26 +183,22 @@ class WebhookService extends Effect.Service<WebhookService>()('server/Webhooks',
 			const delivery = _makeDeliveryEngine({ cache, eventBus, metrics, throttles });
 			const get = (tenantId: string) => settingsCache.get(new WebhookSettingsKey({ tenantId }));
 				const invalidate = (tenantId: string) => settingsCache.invalidate(new WebhookSettingsKey({ tenantId }));
-					const update = (tenantId: string, transform: (webhooks: typeof _SCHEMA.WebhookSettings.Type['webhooks']) => typeof _SCHEMA.WebhookSettings.Type['webhooks']) => Effect.gen(function* () {
-					const appOption = yield* Context.Request.withinSync(tenantId, database.apps.one([{ field: 'id', value: tenantId }])).pipe(
-						Effect.provideService(SqlClient.SqlClient, sql),
-					);
-					const app = yield* Option.match(appOption, {
-						onNone: F.constant(Effect.fail(WebhookError.from('NotFound', undefined, { cause: `App not found: ${tenantId}` }))),
-						onSome: Effect.succeed,
-					});
-						const baseSettings = yield* S.decodeUnknown(AppSettingsSchema)(
-							Option.getOrElse(app.settings, () => AppSettingsDefaults),
-							{ errors: 'all', onExcessProperty: 'ignore' },
-						).pipe(Effect.mapError((cause) => WebhookError.from('VerificationFailed', undefined, { cause })));
-						const current = yield* S.decodeUnknown(_SCHEMA.WebhookSettings)(
-							{ webhooks: baseSettings.webhooks },
-							{ errors: 'all', onExcessProperty: 'ignore' },
-						).pipe(Effect.mapError((cause) => WebhookError.from('VerificationFailed', undefined, { cause })));
-						yield* Context.Request.withinSync(tenantId, database.apps.updateSettings(tenantId, {
-							...baseSettings,
-							webhooks: transform(current.webhooks),
-						})).pipe(Effect.provideService(SqlClient.SqlClient, sql));
+						const update = (tenantId: string, transform: (webhooks: typeof _SCHEMA.WebhookSettings.Type['webhooks']) => typeof _SCHEMA.WebhookSettings.Type['webhooks']) => Effect.gen(function* () {
+						const appOption = yield* Context.Request.withinSync(tenantId, database.apps.readSettings(tenantId, 'update')).pipe(
+							Effect.provideService(SqlClient.SqlClient, sql),
+						);
+						const app = yield* Option.match(appOption, {
+							onNone: F.constant(Effect.fail(WebhookError.from('NotFound', undefined, { cause: `App not found: ${tenantId}` }))),
+							onSome: Effect.succeed,
+						});
+							const current = yield* S.decodeUnknown(_SCHEMA.WebhookSettings)(
+								{ webhooks: app.settings.webhooks },
+								{ errors: 'all', onExcessProperty: 'ignore' },
+							).pipe(Effect.mapError((cause) => WebhookError.from('VerificationFailed', undefined, { cause })));
+							yield* Context.Request.withinSync(tenantId, database.apps.updateSettings(tenantId, {
+								...app.settings,
+								webhooks: transform(current.webhooks),
+							})).pipe(Effect.provideService(SqlClient.SqlClient, sql));
 						yield* invalidate(tenantId);
 						yield* eventBus.publish({
 							aggregateId: tenantId,
