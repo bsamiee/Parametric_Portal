@@ -53,7 +53,7 @@
  * APP-LAYER RESPONSIBILITIES:
  * - sessions.updated_at: Updated by app on each authenticated request
  * - Email format validation: RFC 5322 is complex; verification email is authoritative
- * - access_expires_at validation: App must ensure access_expires_at > now() at insert time
+ * - expiry validation: App must ensure expiry.access/refresh > now() at insert time
  * - MFA rate limiting: Track failed attempts in app-layer cache (Redis), not DB
  * CAVEATS:
  * - UUIDv7 clock skew: If DB server clock moves backward, IDs may sort before existing.
@@ -235,7 +235,7 @@ export default Effect.gen(function* () {
             id UUID PRIMARY KEY DEFAULT uuidv7(),
             app_id UUID NOT NULL REFERENCES apps(id) ON DELETE RESTRICT,
             email TEXT COLLATE case_insensitive NOT NULL,
-            notification_preferences JSONB NOT NULL DEFAULT jsonb_build_object(
+            preferences JSONB NOT NULL DEFAULT jsonb_build_object(
                 'channels', jsonb_build_object('email', true, 'webhook', true, 'inApp', true),
                 'templates', '{}'::jsonb,
                 'mutedUntil', NULL
@@ -254,7 +254,7 @@ export default Effect.gen(function* () {
     yield* sql`COMMENT ON TABLE users IS 'User accounts — NEVER hard-delete; use uuid_extract_timestamp(id) for creation time'`;
     yield* sql`COMMENT ON COLUMN users.deleted_at IS 'Soft-delete timestamp — NULL means active; set enables email re-registration'`;
     yield* sql`COMMENT ON COLUMN users.email IS 'Format validated at app layer; ICU nondeterministic collation enforces case-insensitive uniqueness among active users'`;
-    yield* sql`COMMENT ON COLUMN users.notification_preferences IS 'Per-user notification preferences: channel toggles, template overrides, mute window'`;
+    yield* sql`COMMENT ON COLUMN users.preferences IS 'Per-user notification preferences: channel toggles, template overrides, mute window'`;
     yield* sql`COMMENT ON COLUMN users.role_order IS 'VIRTUAL generated — permission hierarchy (owner=4, admin=3, member=2, viewer=1, guest=0)'`;
     yield* sql`CREATE UNIQUE INDEX idx_users_app_email_active ON users(app_id, email) WHERE deleted_at IS NULL`;
     yield* sql`CREATE INDEX idx_users_app_email ON users(app_id, email) INCLUDE (id, role) WHERE deleted_at IS NULL`;
@@ -292,32 +292,28 @@ export default Effect.gen(function* () {
             id UUID PRIMARY KEY DEFAULT uuidv7(),
             app_id UUID NOT NULL REFERENCES apps(id) ON DELETE RESTRICT,
             user_id UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
-            hash TEXT NOT NULL,
-            refresh_hash TEXT NOT NULL,
-            access_expires_at TIMESTAMPTZ NOT NULL,
-            refresh_expires_at TIMESTAMPTZ NOT NULL,
+            tokens JSONB NOT NULL,
+            expiry JSONB NOT NULL,
             deleted_at TIMESTAMPTZ,
             verified_at TIMESTAMPTZ,
             ip_address INET,
-            user_agent TEXT,
+            agent TEXT,
             updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-            prefix TEXT GENERATED ALWAYS AS (left(hash, 16)) VIRTUAL,
-            CONSTRAINT sessions_hash_unique UNIQUE NULLS NOT DISTINCT (hash),
-            CONSTRAINT sessions_hash_format CHECK (hash ~* '^[0-9a-f]{64}$'),
-            CONSTRAINT sessions_refresh_hash_unique UNIQUE NULLS NOT DISTINCT (refresh_hash),
-            CONSTRAINT sessions_refresh_hash_format CHECK (refresh_hash ~* '^[0-9a-f]{64}$'),
-            CONSTRAINT sessions_user_agent_length CHECK (user_agent IS NULL OR length(user_agent) <= 1024)
+            CONSTRAINT sessions_token_access_format CHECK ((tokens->>'access') ~* '^[0-9a-f]{64}$'),
+            CONSTRAINT sessions_token_refresh_format CHECK ((tokens->>'refresh') ~* '^[0-9a-f]{64}$'),
+            CONSTRAINT sessions_agent_length CHECK (agent IS NULL OR length(agent) <= 1024)
         )
     `;
     yield* sql`COMMENT ON TABLE sessions IS 'Auth sessions — use uuid_extract_timestamp(id) for creation time'`;
     yield* sql`COMMENT ON COLUMN sessions.verified_at IS 'NULL until second factor verified — gate sensitive operations'`;
-    yield* sql`COMMENT ON COLUMN sessions.prefix IS 'VIRTUAL for debugging/logs only — NOT unique (birthday collision at ~4B tokens)'`;
-    yield* sql`COMMENT ON COLUMN sessions.refresh_hash IS 'Refresh token hash (rotated on refresh; invalidates prior refresh token)'`;
-    yield* sql`COMMENT ON COLUMN sessions.refresh_expires_at IS 'Refresh token expiration (session remains refreshable until this time)'`;
+    yield* sql`COMMENT ON COLUMN sessions.tokens IS 'JSONB with access/refresh SHA-256 token hashes'`;
+    yield* sql`COMMENT ON COLUMN sessions.expiry IS 'JSONB with access/refresh expiration timestamps'`;
     yield* sql`COMMENT ON COLUMN sessions.updated_at IS 'App layer must update on each authenticated request'`;
     yield* sql`COMMENT ON COLUMN sessions.deleted_at IS 'Soft-delete timestamp — NULL means active'`;
-    yield* sql`CREATE INDEX idx_sessions_app_user_active ON sessions(app_id, user_id) INCLUDE (access_expires_at, verified_at, updated_at, ip_address) WHERE deleted_at IS NULL`;
-    yield* sql`CREATE INDEX idx_sessions_cleanup ON sessions(access_expires_at, deleted_at)`;
+    yield* sql`CREATE UNIQUE INDEX idx_sessions_token_access ON sessions((tokens->>'access'))`;
+    yield* sql`CREATE UNIQUE INDEX idx_sessions_token_refresh ON sessions((tokens->>'refresh'))`;
+    yield* sql`CREATE INDEX idx_sessions_app_user_active ON sessions(app_id, user_id) INCLUDE (expiry, verified_at, updated_at, ip_address) WHERE deleted_at IS NULL`;
+    yield* sql`CREATE INDEX idx_sessions_cleanup ON sessions((expiry->>'access'), deleted_at)`;
     yield* sql`CREATE INDEX idx_sessions_ip ON sessions(ip_address) WHERE ip_address IS NOT NULL AND deleted_at IS NULL`;
     yield* sql`CREATE INDEX idx_sessions_user_id_fk ON sessions(user_id)`;
     yield* sql`CREATE INDEX idx_sessions_app_id_fk ON sessions(app_id)`;
@@ -357,9 +353,7 @@ export default Effect.gen(function* () {
             user_id UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
             provider TEXT NOT NULL,
             external_id TEXT NOT NULL,
-            access_encrypted BYTEA NOT NULL,
-            refresh_encrypted BYTEA,
-            expires_at TIMESTAMPTZ,
+            token_payload BYTEA NOT NULL,
             deleted_at TIMESTAMPTZ,
             updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
             CONSTRAINT oauth_provider_external_unique UNIQUE NULLS NOT DISTINCT (provider, external_id),
@@ -367,10 +361,9 @@ export default Effect.gen(function* () {
         )
     `;
     yield* sql`COMMENT ON TABLE oauth_accounts IS 'Federated identity linking — use uuid_extract_timestamp(id) for creation time'`;
-    yield* sql`COMMENT ON COLUMN oauth_accounts.access_encrypted IS 'AES-256-GCM encrypted — consistent with api_keys'`;
-    yield* sql`COMMENT ON COLUMN oauth_accounts.refresh_encrypted IS 'AES-256-GCM encrypted — NULL if provider does not issue refresh tokens'`;
+    yield* sql`COMMENT ON COLUMN oauth_accounts.token_payload IS 'AES-256-GCM encrypted token blob (access + refresh + expiry merged)'`;
     yield* sql`COMMENT ON COLUMN oauth_accounts.deleted_at IS 'Soft-delete timestamp — NULL means active'`;
-    yield* sql`CREATE INDEX idx_oauth_user ON oauth_accounts(user_id) INCLUDE (provider, external_id, expires_at) WHERE deleted_at IS NULL`;
+    yield* sql`CREATE INDEX idx_oauth_user ON oauth_accounts(user_id) INCLUDE (provider, external_id) WHERE deleted_at IS NULL`;
     yield* sql`CREATE INDEX idx_oauth_user_id_fk ON oauth_accounts(user_id)`;
     yield* sql`CREATE TRIGGER oauth_accounts_updated_at BEFORE UPDATE ON oauth_accounts FOR EACH ROW EXECUTE FUNCTION set_updated_at()`;
     // ═══════════════════════════════════════════════════════════════════════════
@@ -419,13 +412,9 @@ export default Effect.gen(function* () {
             user_id UUID REFERENCES users(id) ON DELETE RESTRICT,
             request_id UUID,
             operation TEXT NOT NULL,
-            subject TEXT NOT NULL,
-            subject_id UUID NOT NULL,
-            old_data JSONB,
-            new_data JSONB,
-            ip_address INET,
-            user_agent TEXT,
-            CONSTRAINT audit_logs_user_agent_length CHECK (user_agent IS NULL OR length(user_agent) <= 1024),
+            target JSONB NOT NULL,
+            delta JSONB,
+            context JSONB,
             CONSTRAINT audit_logs_operation_valid CHECK (operation IN (
                 'create', 'update', 'delete', 'read', 'list', 'status',
                 'login', 'refresh', 'revoke', 'revokeByIp',
@@ -440,19 +429,19 @@ export default Effect.gen(function* () {
             ))
         )
     `;
-    yield* sql`COMMENT ON TABLE audit_logs IS 'Append-only audit trail — use uuid_extract_timestamp(id) for creation time; old_data/new_data populated via RETURNING OLD/NEW'`;
+    yield* sql`COMMENT ON TABLE audit_logs IS 'Append-only audit trail — use uuid_extract_timestamp(id) for creation time'`;
     yield* sql`COMMENT ON COLUMN audit_logs.user_id IS 'FK to users — RESTRICT (users never hard-deleted); JOIN to users.email when needed'`;
     yield* sql`COMMENT ON COLUMN audit_logs.request_id IS 'Correlation ID from request context — correlate multiple audit entries from same HTTP request'`;
-    yield* sql`COMMENT ON COLUMN audit_logs.old_data IS 'PG18.1: Pre-modification state captured via RETURNING OLD.* — NULL for create operations'`;
-    yield* sql`COMMENT ON COLUMN audit_logs.new_data IS 'PG18.1: Post-modification state captured via RETURNING NEW.* — NULL for delete operations'`;
+    yield* sql`COMMENT ON COLUMN audit_logs.target IS 'JSONB with type (entity type) and id (entity UUID) — replaces subject/subject_id'`;
+    yield* sql`COMMENT ON COLUMN audit_logs.delta IS 'JSONB with old/new state — NULL for read/list operations; replaces old_data/new_data'`;
+    yield* sql`COMMENT ON COLUMN audit_logs.context IS 'JSONB with ip/agent request context — replaces ip_address/user_agent'`;
     yield* sql`CREATE INDEX idx_audit_id_brin ON audit_logs USING BRIN (id)`;
-    yield* sql`CREATE INDEX idx_audit_app_subject ON audit_logs(app_id, subject, subject_id, id DESC) INCLUDE (user_id, operation)`;
-    yield* sql`CREATE INDEX idx_audit_app_user ON audit_logs(app_id, user_id, id DESC) INCLUDE (subject, subject_id, operation) WHERE user_id IS NOT NULL`;
-    yield* sql`CREATE INDEX idx_audit_subject_id ON audit_logs(subject_id, id DESC)`;
+    yield* sql`CREATE INDEX idx_audit_app_target ON audit_logs(app_id, (target->>'type'), ((target->>'id')::uuid), id DESC) INCLUDE (user_id, operation)`;
+    yield* sql`CREATE INDEX idx_audit_app_user ON audit_logs(app_id, user_id, id DESC) INCLUDE (target, operation) WHERE user_id IS NOT NULL`;
+    yield* sql`CREATE INDEX idx_audit_target_id ON audit_logs(((target->>'id')::uuid), id DESC)`;
     yield* sql`CREATE INDEX idx_audit_request ON audit_logs(request_id) WHERE request_id IS NOT NULL`;
-    yield* sql`CREATE INDEX idx_audit_old_data ON audit_logs USING GIN (old_data) WHERE old_data IS NOT NULL`;
-    yield* sql`CREATE INDEX idx_audit_new_data ON audit_logs USING GIN (new_data) WHERE new_data IS NOT NULL`;
-    yield* sql`CREATE INDEX idx_audit_ip ON audit_logs(ip_address) WHERE ip_address IS NOT NULL`;
+    yield* sql`CREATE INDEX idx_audit_delta ON audit_logs USING GIN (delta) WHERE delta IS NOT NULL`;
+    yield* sql`CREATE INDEX idx_audit_context_ip ON audit_logs((context->>'ip')) WHERE context IS NOT NULL`;
     yield* sql`CREATE INDEX idx_audit_app_id_fk ON audit_logs(app_id)`;
     yield* sql`CREATE INDEX idx_audit_user_id_fk ON audit_logs(user_id)`;
     yield* sql`CREATE TRIGGER audit_logs_immutable BEFORE UPDATE OR DELETE ON audit_logs FOR EACH ROW EXECUTE FUNCTION reject_modification()`;
@@ -464,18 +453,18 @@ export default Effect.gen(function* () {
             id UUID PRIMARY KEY DEFAULT uuidv7(),
             user_id UUID NOT NULL UNIQUE REFERENCES users(id) ON DELETE RESTRICT,
             encrypted BYTEA NOT NULL,
-            backup_hashes TEXT[] NOT NULL DEFAULT '{}',
+            backups TEXT[] NOT NULL DEFAULT '{}',
             enabled_at TIMESTAMPTZ,
             deleted_at TIMESTAMPTZ,
             updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-            remaining INTEGER GENERATED ALWAYS AS (COALESCE(array_length(backup_hashes, 1), 0)) VIRTUAL,
-            CONSTRAINT mfa_backup_hashes_no_nulls CHECK (array_position(backup_hashes, NULL) IS NULL)
+            remaining INTEGER GENERATED ALWAYS AS (COALESCE(array_length(backups, 1), 0)) VIRTUAL,
+            CONSTRAINT mfa_backups_no_nulls CHECK (array_position(backups, NULL) IS NULL)
         )
     `;
     yield* sql`COMMENT ON TABLE mfa_secrets IS 'TOTP secrets — use uuid_extract_timestamp(id) for creation time'`;
     yield* sql`COMMENT ON COLUMN mfa_secrets.enabled_at IS 'NULL = enrolled but not activated; set after first successful TOTP'`;
     yield* sql`COMMENT ON COLUMN mfa_secrets.remaining IS 'VIRTUAL — COALESCE ensures 0 (not NULL) when codes exhausted'`;
-    yield* sql`COMMENT ON COLUMN mfa_secrets.backup_hashes IS 'Rate limiting for MFA attempts tracked in app-layer cache (Redis), not DB'`;
+    yield* sql`COMMENT ON COLUMN mfa_secrets.backups IS 'Hashed backup codes — rate limiting for MFA attempts tracked in app-layer cache (Redis), not DB'`;
     yield* sql`COMMENT ON COLUMN mfa_secrets.deleted_at IS 'Soft-delete timestamp — NULL means active'`;
     yield* sql`CREATE INDEX idx_mfa_user ON mfa_secrets(user_id) INCLUDE (enabled_at) WHERE deleted_at IS NULL`;
     yield* sql`CREATE TRIGGER mfa_secrets_updated_at BEFORE UPDATE ON mfa_secrets FOR EACH ROW EXECUTE FUNCTION set_updated_at()`;
@@ -489,25 +478,22 @@ export default Effect.gen(function* () {
             credential_id TEXT NOT NULL,
             public_key BYTEA NOT NULL,
             counter INTEGER NOT NULL DEFAULT 0,
-            device_type TEXT NOT NULL,
-            backed_up BOOLEAN NOT NULL DEFAULT false,
-            transports TEXT[] NOT NULL DEFAULT '{}',
+            authenticator JSONB NOT NULL,
             name TEXT NOT NULL,
             last_used_at TIMESTAMPTZ,
             deleted_at TIMESTAMPTZ,
             updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
             CONSTRAINT webauthn_credentials_credential_id_unique UNIQUE NULLS NOT DISTINCT (credential_id),
             CONSTRAINT webauthn_credentials_counter_non_negative CHECK (counter >= 0),
-            CONSTRAINT webauthn_credentials_device_type_valid CHECK (device_type IN ('singleDevice', 'multiDevice')),
-            CONSTRAINT webauthn_credentials_name_not_empty CHECK (length(trim(name)) > 0),
-            CONSTRAINT webauthn_credentials_transports_no_nulls CHECK (array_position(transports, NULL) IS NULL)
+            CONSTRAINT webauthn_authenticator_valid CHECK (authenticator->>'device' IN ('singleDevice', 'multiDevice')),
+            CONSTRAINT webauthn_credentials_name_not_empty CHECK (length(trim(name)) > 0)
         )
     `;
     yield* sql`COMMENT ON TABLE webauthn_credentials IS 'WebAuthn passkeys — use uuid_extract_timestamp(id) for creation time'`;
     yield* sql`COMMENT ON COLUMN webauthn_credentials.credential_id IS 'Base64url credential ID from authenticator; globally unique'`;
     yield* sql`COMMENT ON COLUMN webauthn_credentials.deleted_at IS 'Soft-delete timestamp — NULL means active'`;
-    yield* sql`CREATE INDEX idx_webauthn_credentials_user_active ON webauthn_credentials(user_id) INCLUDE (credential_id, name, last_used_at, counter, device_type, backed_up) WHERE deleted_at IS NULL`;
-    yield* sql`CREATE INDEX idx_webauthn_credentials_credential_id_active ON webauthn_credentials(credential_id) INCLUDE (user_id, counter, public_key, transports, backed_up, device_type) WHERE deleted_at IS NULL`;
+    yield* sql`CREATE INDEX idx_webauthn_credentials_user_active ON webauthn_credentials(user_id) INCLUDE (credential_id, name, last_used_at, counter, authenticator) WHERE deleted_at IS NULL`;
+    yield* sql`CREATE INDEX idx_webauthn_credentials_credential_id_active ON webauthn_credentials(credential_id) INCLUDE (user_id, counter, public_key, authenticator) WHERE deleted_at IS NULL`;
     yield* sql`CREATE INDEX idx_webauthn_credentials_user_id_fk ON webauthn_credentials(user_id)`;
     yield* sql`CREATE TRIGGER webauthn_credentials_updated_at BEFORE UPDATE ON webauthn_credentials FOR EACH ROW EXECUTE FUNCTION set_updated_at()`;
     // ═══════════════════════════════════════════════════════════════════════════
@@ -521,39 +507,34 @@ export default Effect.gen(function* () {
             status TEXT NOT NULL,
             priority TEXT NOT NULL,
             payload JSONB NOT NULL,
-            result JSONB,
-            progress JSONB,
+            output JSONB,
             history JSONB NOT NULL,
-            attempts INTEGER NOT NULL,
-            max_attempts INTEGER NOT NULL,
+            retry JSONB NOT NULL,
             scheduled_at TIMESTAMPTZ,
-            batch_id TEXT,
-            dedupe_key TEXT,
-            last_error TEXT,
+            correlation JSONB,
             completed_at TIMESTAMPTZ,
             updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
             CONSTRAINT jobs_type_not_empty CHECK (length(trim(type)) > 0),
             CONSTRAINT jobs_status_valid CHECK (status IN ('queued', 'processing', 'complete', 'failed', 'cancelled')),
             CONSTRAINT jobs_priority_valid CHECK (priority IN ('critical', 'high', 'normal', 'low')),
-            CONSTRAINT jobs_attempts_non_negative CHECK (attempts >= 0),
-            CONSTRAINT jobs_max_attempts_positive CHECK (max_attempts > 0),
+            CONSTRAINT jobs_retry_valid CHECK ((retry->>'current')::int >= 0 AND (retry->>'max')::int > 0),
             CONSTRAINT jobs_history_array CHECK (jsonb_typeof(history) = 'array')
         )
     `;
     yield* sql`COMMENT ON TABLE jobs IS 'Durable job registry — snowflake job_id, status/progress/history, tenant-scoped'`;
     yield* sql`COMMENT ON COLUMN jobs.job_id IS 'Snowflake job identifier (18-19 digit string)'`;
     yield* sql`COMMENT ON COLUMN jobs.history IS 'Array of {status, timestamp, error?} state transitions'`;
-    yield* sql`CREATE INDEX idx_jobs_app_status ON jobs(app_id, status) INCLUDE (type, priority, attempts)`;
+    yield* sql`CREATE INDEX idx_jobs_app_status ON jobs(app_id, status) INCLUDE (type, priority, retry)`;
     yield* sql`CREATE INDEX idx_jobs_app_type ON jobs(app_id, type) INCLUDE (status, priority)`;
     yield* sql`CREATE INDEX idx_jobs_app_updated ON jobs(app_id, updated_at DESC) INCLUDE (status, type)`;
-    yield* sql`CREATE UNIQUE INDEX idx_jobs_dedupe_active_unique ON jobs(app_id, dedupe_key) WHERE dedupe_key IS NOT NULL AND status IN ('queued', 'processing')`;
-    yield* sql`CREATE INDEX idx_jobs_batch ON jobs(batch_id) WHERE batch_id IS NOT NULL`;
+    yield* sql`CREATE UNIQUE INDEX idx_jobs_dedupe_active ON jobs(app_id, (correlation->>'dedupe')) WHERE correlation->>'dedupe' IS NOT NULL AND status IN ('queued', 'processing')`;
+    yield* sql`CREATE INDEX idx_jobs_batch ON jobs((correlation->>'batch')) WHERE correlation->>'batch' IS NOT NULL`;
     yield* sql`CREATE INDEX idx_jobs_app_id_fk ON jobs(app_id)`;
     yield* sql`CREATE TRIGGER jobs_updated_at BEFORE UPDATE ON jobs FOR EACH ROW EXECUTE FUNCTION set_updated_at()`;
     // ═══════════════════════════════════════════════════════════════════════════
     // NOTIFICATIONS: Durable channel delivery ledger (email/webhook/in-app)
     // ═══════════════════════════════════════════════════════════════════════════
-    yield* sql`
+    yield* sql.unsafe(String.raw`
         CREATE TABLE notifications (
             id UUID PRIMARY KEY DEFAULT uuidv7(),
             app_id UUID NOT NULL REFERENCES apps(id) ON DELETE RESTRICT,
@@ -562,28 +543,24 @@ export default Effect.gen(function* () {
             template TEXT NOT NULL,
             status TEXT NOT NULL CHECK (status IN ('queued', 'sending', 'delivered', 'failed', 'dlq')),
             recipient TEXT,
-            provider TEXT,
             payload JSONB NOT NULL,
-            error TEXT,
-            attempts INTEGER NOT NULL DEFAULT 0 CHECK (attempts >= 0),
-            max_attempts INTEGER NOT NULL DEFAULT 5 CHECK (max_attempts > 0),
-            job_id TEXT,
-            dedupe_key TEXT,
-            delivered_at TIMESTAMPTZ,
+            delivery JSONB,
+            retry JSONB NOT NULL DEFAULT '{"current":0,"max":5}',
+            correlation JSONB,
             updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-            CONSTRAINT notifications_template_not_empty CHECK (length(trim(template)) > 0)
+            CONSTRAINT notifications_template_not_empty CHECK (length(trim(template)) > 0),
+            CONSTRAINT notifications_retry_valid CHECK ((retry->>'current')::int >= 0 AND (retry->>'max')::int > 0)
         )
-    `;
+    `);
     yield* sql`COMMENT ON TABLE notifications IS 'Tenant-scoped notification ledger for email/webhook/in-app delivery lifecycle — use uuid_extract_timestamp(id) for creation time'`;
     yield* sql`COMMENT ON COLUMN notifications.user_id IS 'FK to users — RESTRICT (users never hard-deleted); NULL for system/broadcast notifications'`;
-    yield* sql`COMMENT ON COLUMN notifications.job_id IS 'Snowflake job_id linking to jobs table — NO FK constraint (job may complete/purge before notification)'`;
-    yield* sql`CREATE INDEX idx_notifications_app_status ON notifications(app_id, status, id DESC) INCLUDE (channel, template, attempts, max_attempts)`;
+    yield* sql`CREATE INDEX idx_notifications_app_status ON notifications(app_id, status, id DESC) INCLUDE (channel, template, retry)`;
     yield* sql`CREATE INDEX idx_notifications_app_user ON notifications(app_id, user_id, id DESC) INCLUDE (channel, status, template) WHERE user_id IS NOT NULL`;
     yield* sql`CREATE INDEX idx_notifications_app_updated ON notifications(app_id, updated_at DESC) INCLUDE (channel, status, user_id)`;
-    yield* sql`CREATE INDEX idx_notifications_job_id ON notifications(job_id) WHERE job_id IS NOT NULL`;
+    yield* sql`CREATE INDEX idx_notifications_correlation_job ON notifications((correlation->>'job')) WHERE correlation->>'job' IS NOT NULL`;
     yield* sql`CREATE INDEX idx_notifications_app_id_fk ON notifications(app_id)`;
     yield* sql`CREATE INDEX idx_notifications_user_id_fk ON notifications(user_id) WHERE user_id IS NOT NULL`;
-    yield* sql`CREATE UNIQUE INDEX idx_notifications_dedupe_active ON notifications(app_id, dedupe_key) WHERE dedupe_key IS NOT NULL AND status IN ('queued', 'sending')`;
+    yield* sql`CREATE UNIQUE INDEX idx_notifications_dedupe_active ON notifications(app_id, (correlation->>'dedupe')) WHERE correlation->>'dedupe' IS NOT NULL AND status IN ('queued', 'sending')`;
     yield* sql`CREATE TRIGGER notifications_updated_at BEFORE UPDATE ON notifications FOR EACH ROW EXECUTE FUNCTION set_updated_at()`;
     // ═══════════════════════════════════════════════════════════════════════════
     // JOB_DLQ: Dead-letter queue for failed jobs and events
@@ -592,15 +569,14 @@ export default Effect.gen(function* () {
         CREATE TABLE job_dlq (
             id UUID PRIMARY KEY DEFAULT uuidv7(),
             source TEXT NOT NULL DEFAULT 'job',
-            original_job_id TEXT NOT NULL,
+            source_id TEXT NOT NULL,
             app_id UUID NOT NULL REFERENCES apps(id) ON DELETE RESTRICT,
-            user_id UUID REFERENCES users(id) ON DELETE RESTRICT,
-            request_id UUID,
+            context JSONB,
             type TEXT NOT NULL,
             payload JSONB NOT NULL,
             error_reason TEXT NOT NULL,
             attempts INTEGER NOT NULL,
-            error_history JSONB NOT NULL,
+            errors JSONB NOT NULL,
             replayed_at TIMESTAMPTZ,
             CONSTRAINT job_dlq_source_valid CHECK (source IN ('job', 'event')),
             CONSTRAINT job_dlq_error_reason_valid CHECK (error_reason IN (
@@ -609,7 +585,7 @@ export default Effect.gen(function* () {
                 'DeliveryFailed', 'DeserializationFailed', 'DuplicateEvent', 'ValidationFailed',
                 'AuditPersistFailed', 'HandlerTimeout'
             )),
-            CONSTRAINT job_dlq_error_history_array CHECK (jsonb_typeof(error_history) = 'array'),
+            CONSTRAINT job_dlq_errors_array CHECK (jsonb_typeof(errors) = 'array'),
             CONSTRAINT job_dlq_attempts_positive CHECK (attempts > 0)
         )
     `;
@@ -620,7 +596,7 @@ export default Effect.gen(function* () {
 	        COMMENT ON COLUMN job_dlq.source IS 'Discriminant: job = background job, event = domain event from EventBus'
 	    `;
     yield* sql`
-	        COMMENT ON COLUMN job_dlq.original_job_id IS 'Reference to original job/event — snowflake string, NO FK constraint (source may be purged before replay)'
+	        COMMENT ON COLUMN job_dlq.source_id IS 'Reference to original job/event — snowflake string, NO FK constraint (source may be purged before replay)'
 	    `;
     yield* sql`
 	        COMMENT ON COLUMN job_dlq.payload IS 'Serialized failed payload; webhook DLQ entries persist endpoint snapshot + event data for deterministic replay even after settings drift'
@@ -628,17 +604,16 @@ export default Effect.gen(function* () {
     yield* sql`
 	        COMMENT ON COLUMN job_dlq.error_reason IS 'Failure classification discriminant for typed error handling — valid values depend on source'
 	    `;
-    yield* sql`COMMENT ON COLUMN job_dlq.error_history IS 'Array of {error: string, timestamp: number} entries from all attempts'`;
+    yield* sql`COMMENT ON COLUMN job_dlq.errors IS 'Array of {error: string, timestamp: number} entries from all attempts'`;
     yield* sql`COMMENT ON COLUMN job_dlq.replayed_at IS 'NULL = pending replay; set when job/event resubmitted to queue'`;
     yield* sql`CREATE INDEX idx_job_dlq_id_brin ON job_dlq USING BRIN (id)`;
     yield* sql`CREATE INDEX idx_job_dlq_source ON job_dlq(source, error_reason) INCLUDE (type, attempts) WHERE replayed_at IS NULL`;
     yield* sql`CREATE INDEX idx_job_dlq_pending_type ON job_dlq(type, error_reason) INCLUDE (app_id, source, attempts) WHERE replayed_at IS NULL`;
     yield* sql`CREATE INDEX idx_job_dlq_pending_app ON job_dlq(app_id, id DESC) INCLUDE (type, source, error_reason, attempts) WHERE replayed_at IS NULL`;
-    yield* sql`CREATE INDEX idx_job_dlq_original ON job_dlq(original_job_id) INCLUDE (error_reason, attempts, replayed_at)`;
-    yield* sql`CREATE INDEX idx_job_dlq_request ON job_dlq(request_id) INCLUDE (type, error_reason) WHERE request_id IS NOT NULL`;
-    yield* sql`CREATE INDEX idx_job_dlq_errors ON job_dlq USING GIN (error_history)`;
+    yield* sql`CREATE INDEX idx_job_dlq_source_id ON job_dlq(source_id) INCLUDE (error_reason, attempts, replayed_at)`;
+    yield* sql`CREATE INDEX idx_job_dlq_context_request ON job_dlq(((context->>'request')::uuid)) WHERE context->>'request' IS NOT NULL`;
+    yield* sql`CREATE INDEX idx_job_dlq_errors ON job_dlq USING GIN (errors)`;
     yield* sql`CREATE INDEX idx_job_dlq_app_id_fk ON job_dlq(app_id)`;
-    yield* sql`CREATE INDEX idx_job_dlq_user_id_fk ON job_dlq(user_id) WHERE user_id IS NOT NULL`;
     // ═══════════════════════════════════════════════════════════════════════════
     // EFFECT_EVENT_JOURNAL: SqlEventJournal from @effect/sql (append-only, dedup via primary_key)
     // ═══════════════════════════════════════════════════════════════════════════
@@ -693,16 +668,14 @@ export default Effect.gen(function* () {
     // ═══════════════════════════════════════════════════════════════════════════
     yield* sql`
         CREATE OR REPLACE FUNCTION purge_sessions(p_older_than_days INT DEFAULT 30)
-        RETURNS INT
-        LANGUAGE sql
-        AS $$
+        RETURNS INT LANGUAGE sql AS $$
             WITH purged AS (
                 DELETE FROM sessions
                 WHERE (deleted_at IS NOT NULL AND deleted_at < NOW() - (p_older_than_days || ' days')::interval)
-                   OR (GREATEST(access_expires_at, refresh_expires_at) < NOW() - (p_older_than_days || ' days')::interval)
+                   OR (GREATEST((expiry->>'access')::timestamptz, (expiry->>'refresh')::timestamptz)
+                       < NOW() - (p_older_than_days || ' days')::interval)
                 RETURNING id
-            )
-            SELECT COUNT(*)::int FROM purged
+            ) SELECT COUNT(*)::int FROM purged
         $$
     `;
     yield* sql`COMMENT ON FUNCTION purge_sessions IS 'Hard-delete soft-deleted + expired sessions older than N days'`;
@@ -1039,7 +1012,7 @@ export default Effect.gen(function* () {
     `;
     yield* sql`COMMENT ON FUNCTION revoke_sessions_by_ip IS 'Tenant-safe session revocation by IP: soft-deletes only current app rows and updates updated_at.'`;
     yield* sql`
-        CREATE OR REPLACE FUNCTION count_audit_by_ip(p_app_id UUID, p_ip INET, p_window_minutes INT DEFAULT 60)
+        CREATE OR REPLACE FUNCTION count_audit_by_ip(p_app_id UUID, p_ip TEXT, p_window_minutes INT DEFAULT 60)
         RETURNS INT
         LANGUAGE sql
         STABLE
@@ -1047,7 +1020,7 @@ export default Effect.gen(function* () {
             SELECT COUNT(*)::int
             FROM audit_logs
             WHERE app_id = p_app_id
-              AND ip_address = p_ip
+              AND context->>'ip' = p_ip
               AND uuid_extract_timestamp(id) > NOW() - (p_window_minutes || ' minutes')::interval
         $$
     `;
@@ -1237,24 +1210,22 @@ export default Effect.gen(function* () {
                 'auditLog',
                 NEW.id,
                 NEW.app_id,
-                NEW.subject::text || ':' || NEW.operation::text,
-                NEW.subject::text || ' ' || NEW.operation::text,
+                (NEW.target->>'type') || ':' || NEW.operation::text,
+                (NEW.target->>'type') || ' ' || NEW.operation::text,
                 jsonb_strip_nulls(jsonb_build_object(
-                    'subject', NEW.subject,
+                    'targetType', NEW.target->>'type',
                     'operation', NEW.operation,
                     'userId', NEW.user_id,
-                    'hasOldData', NEW.old_data IS NOT NULL,
-                    'hasNewData', NEW.new_data IS NOT NULL
+                    'hasDelta', NEW.delta IS NOT NULL
                 ), true),
                 normalize_search_text(
-                    NEW.subject::text || ':' || NEW.operation::text,
-                    NEW.subject::text || ' ' || NEW.operation::text,
+                    (NEW.target->>'type') || ':' || NEW.operation::text,
+                    (NEW.target->>'type') || ' ' || NEW.operation::text,
                     jsonb_strip_nulls(jsonb_build_object(
-                        'subject', NEW.subject,
+                        'targetType', NEW.target->>'type',
                         'operation', NEW.operation,
                         'userId', NEW.user_id,
-                        'hasOldData', NEW.old_data IS NOT NULL,
-                        'hasNewData', NEW.new_data IS NOT NULL
+                        'hasDelta', NEW.delta IS NOT NULL
                     ), true)
                 )
             )
@@ -1297,23 +1268,21 @@ export default Effect.gen(function* () {
                 FROM assets
                 WHERE deleted_at IS NULL;
                 INSERT INTO search_documents (entity_type, entity_id, scope_id, display_text, content_text, metadata, normalized_text)
-                SELECT 'auditLog', id, app_id, subject::text || ':' || operation::text, subject::text || ' ' || operation::text,
+                SELECT 'auditLog', id, app_id, (target->>'type') || ':' || operation::text, (target->>'type') || ' ' || operation::text,
                     jsonb_strip_nulls(jsonb_build_object(
-                        'subject', subject,
+                        'targetType', target->>'type',
                         'operation', operation,
                         'userId', user_id,
-                        'hasOldData', old_data IS NOT NULL,
-                        'hasNewData', new_data IS NOT NULL
+                        'hasDelta', delta IS NOT NULL
                     ), true),
                     normalize_search_text(
-                        subject::text || ':' || operation::text,
-                        subject::text || ' ' || operation::text,
+                        (target->>'type') || ':' || operation::text,
+                        (target->>'type') || ' ' || operation::text,
                         jsonb_strip_nulls(jsonb_build_object(
-                            'subject', subject,
+                            'targetType', target->>'type',
                             'operation', operation,
                             'userId', user_id,
-                            'hasOldData', old_data IS NOT NULL,
-                            'hasNewData', new_data IS NOT NULL
+                            'hasDelta', delta IS NOT NULL
                         ), true)
                     )
                 FROM audit_logs;
@@ -1342,23 +1311,21 @@ export default Effect.gen(function* () {
             WHERE deleted_at IS NULL AND app_id = p_scope_id;
 
             INSERT INTO search_documents (entity_type, entity_id, scope_id, display_text, content_text, metadata, normalized_text)
-            SELECT 'auditLog', id, app_id, subject::text || ':' || operation::text, subject::text || ' ' || operation::text,
+            SELECT 'auditLog', id, app_id, (target->>'type') || ':' || operation::text, (target->>'type') || ' ' || operation::text,
                 jsonb_strip_nulls(jsonb_build_object(
-                    'subject', subject,
+                    'targetType', target->>'type',
                     'operation', operation,
                     'userId', user_id,
-                    'hasOldData', old_data IS NOT NULL,
-                    'hasNewData', new_data IS NOT NULL
+                    'hasDelta', delta IS NOT NULL
                 ), true),
                 normalize_search_text(
-                    subject::text || ':' || operation::text,
-                    subject::text || ' ' || operation::text,
+                    (target->>'type') || ':' || operation::text,
+                    (target->>'type') || ' ' || operation::text,
                     jsonb_strip_nulls(jsonb_build_object(
-                        'subject', subject,
+                        'targetType', target->>'type',
                         'operation', operation,
                         'userId', user_id,
-                        'hasOldData', old_data IS NOT NULL,
-                        'hasNewData', new_data IS NOT NULL
+                        'hasDelta', delta IS NOT NULL
                     ), true)
                 )
             FROM audit_logs

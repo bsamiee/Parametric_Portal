@@ -14,13 +14,13 @@ import { Array as A, Effect, Option, pipe } from 'effect';
 
 // --- [FUNCTIONS] -------------------------------------------------------------
 
-const withDiffs = <T extends { oldData: Option.Option<unknown>; newData: Option.Option<unknown> }>(
+const withDiffs = <T extends { delta: Option.Option<{ readonly old?: unknown; readonly new?: unknown }> }>(
 	items: readonly T[],
 	includeDiff: boolean,): readonly (T & { readonly diff: Diff.Patch | null })[] =>
 	A.map(items, (entry) => ({
 		...entry,
 		diff: includeDiff
-			? pipe(Diff.fromSnapshots(entry.oldData, entry.newData), Option.getOrNull)
+			? pipe(Option.flatMap(entry.delta, (delta) => Diff.fromSnapshots(Option.fromNullable(delta.old), Option.fromNullable(delta.new))), Option.getOrNull)
 			: null,
 	}));
 

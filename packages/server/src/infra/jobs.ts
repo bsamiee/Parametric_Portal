@@ -34,7 +34,6 @@ const _DLQ_WATCHER_CFG = Config.all({
 	maxRetries: 		Config.integer('JOB_DLQ_MAX_RETRIES').pipe(Config.withDefault(_CONFIG.dlqWatcher.maxRetries)),
 });
 const _ErrorReason = S.Literal('NotFound', 'AlreadyCancelled', 'HandlerMissing', 'Validation', 'Processing', 'MaxRetries', 'RunnerUnavailable', 'Timeout');
-const _Priority = Job.fields.priority;
 const _HistoryEntry = S.Struct({ error: S.optional(S.String), status: JobStatusSchema, timestamp: S.Number });
 const _Progress = S.Struct({ message: S.String, pct: S.Number });
 const _STATUS_MODEL = {
@@ -54,7 +53,7 @@ const _ERROR_PROPS = {
 
 const _retryBase = (config: { readonly base: Duration.Duration; readonly maxAttempts: number }): Schedule.Schedule<[Duration.Duration, number], unknown, never> =>
 	Resilience.schedule({ base: config.base, cap: _CONFIG.retry.cap, maxAttempts: config.maxAttempts }) as Schedule.Schedule<[Duration.Duration, number], unknown, never>;
-const _makeDlqWatcher = (submitFn: (type: string, payload: unknown, opts?: { priority?: typeof _Priority.Type }) => Effect.Effect<unknown, unknown, unknown>) =>
+const _makeDlqWatcher = (submitFn: (type: string, payload: unknown, opts?: { priority?: typeof Job.fields.priority.Type }) => Effect.Effect<unknown, unknown, unknown>) =>
 	Effect.gen(function* () {
 		const database = yield* DatabaseService;
 		const sql = yield* SqlClient.SqlClient;
@@ -65,8 +64,8 @@ const _makeDlqWatcher = (submitFn: (type: string, payload: unknown, opts?: { pri
 			Match.value(entry.attempts).pipe(
 				Match.when((attempts) => attempts > dlqConfig.maxRetries, () => Effect.void),
 				Match.when((attempts) => attempts === dlqConfig.maxRetries, (attempts) => eventBus.publish({
-					aggregateId: entry.originalJobId,
-					payload: { _tag: 'DlqAlertEvent', action: 'alert', attempts, errorReason: entry.errorReason, originalJobId: entry.originalJobId, type: entry.type },
+					aggregateId: entry.sourceId,
+					payload: { _tag: 'DlqAlertEvent', action: 'alert', attempts, errorReason: entry.errorReason, sourceId: entry.sourceId, type: entry.type },
 					tenantId: entry.appId,
 				}).pipe(
 					Effect.zipRight(_dbRun(entry.appId, database.jobDlq.set(entry.id, { attempts: attempts + 1 }))),
@@ -121,7 +120,7 @@ class JobPayload extends S.Class<JobPayload>('JobPayload')({
 	duration: S.optionalWith(S.Literal('short', 'long'), { default: () => 'short' }),ipAddress: S.optional(S.String), 
 	maxAttempts: S.optionalWith(S.Number, { default: () => 3 }),
 	payload: S.Unknown,
-	priority: S.optionalWith(_Priority, { default: () => 'normal' }),requestId: S.optional(S.String), scheduledAt: S.optional(S.Number), tenantId: S.String, type: S.String,userAgent: S.optional(S.String),
+	priority: S.optionalWith(Job.fields.priority, { default: () => 'normal' }),requestId: S.optional(S.String), scheduledAt: S.optional(S.Number), tenantId: S.String, type: S.String,userAgent: S.optional(S.String),
 }) {}
 class JobStatusResponse extends S.Class<JobStatusResponse>('JobStatusResponse')({
 	attempts: S.Number, history: S.Array(_HistoryEntry), result: S.optional(S.Unknown), status: JobStatusSchema,
@@ -157,12 +156,12 @@ class JobState extends S.Class<JobState>('JobState')({
 	get errorHistory(): readonly { error: string; timestamp: number }[] {return this.history.flatMap((entry) => entry.error ? [{ error: entry.error, timestamp: entry.timestamp }] : []);}
 	static readonly fromRecord = (job: S.Schema.Type<typeof Job>) =>
 			new JobState({
-				attempts: job.attempts,
+				attempts: job.retry.current,
 				completedAt: Option.getOrUndefined(Option.map(job.completedAt, (d: Date) => d.getTime())),
 				createdAt: Snowflake.timestamp(Snowflake.Snowflake(job.jobId)),
 				history: S.is(S.Array(_HistoryEntry))(job.history) ? job.history : [],
-				lastError: Option.getOrUndefined(job.lastError),
-				result: Option.getOrUndefined(job.result),
+				lastError: job.history.at(-1)?.error,
+				result: Option.getOrUndefined(Option.map(job.output, (o) => o.result)),
 				status: job.status,
 			});
 	static readonly defaultResponse = new JobStatusResponse({ attempts: 0, history: [], status: 'queued' });
@@ -170,7 +169,7 @@ class JobState extends S.Class<JobState>('JobState')({
 }
 class JobContext extends Effect.Tag('JobContext')<JobContext, {
 	readonly jobId: string;
-	readonly priority: typeof _Priority.Type;
+	readonly priority: typeof Job.fields.priority.Type;
 	readonly reportProgress: (pct: number, message: string) => Effect.Effect<void>;
 	readonly tenantId: string;
 }>() {}
@@ -223,17 +222,17 @@ const JobEntityLive = JobEntity.toLayer(Effect.gen(function* () {
 		})),
 	);
 	const _writeState = (jobId: string, tenantId: string, state: JobState) =>
-		_dbRun(tenantId, database.jobs.set(jobId, { attempts: state.attempts, completedAt: Option.fromNullable(state.completedAt).pipe(Option.map((timestamp) => new Date(timestamp))), history: state.history, lastError: Option.fromNullable(state.lastError), result: Option.fromNullable(state.result), status: state.status })).pipe(
+		_dbRun(tenantId, database.jobs.set(jobId, { completedAt: Option.fromNullable(state.completedAt).pipe(Option.map((timestamp) => new Date(timestamp))), history: state.history, output: Option.fromNullable(state.result).pipe(Option.map((result) => ({ result }))), retry: { current: state.attempts, max: 0 }, status: state.status })).pipe(
 			Effect.tapError((error) => Effect.logError('Job state DB write failed', { error: String(error), jobId })),
 			Effect.tap(() => cache.kv.set(_stateCacheKey(jobId), state, _CONFIG.cache.ttl).pipe(Effect.ignore)));
 	const _readProgress = (jobId: string, tenantId: string) => cache.kv.get(_progressCacheKey(jobId), _Progress).pipe(
 		Effect.flatMap(Option.match({
-			onNone: () => _dbRun(tenantId, database.jobs.one([{ field: 'job_id', value: jobId }])).pipe(Effect.map(Option.flatMap((job) => job.progress)), Effect.tap(Option.match({ onNone: () => Effect.void, onSome: (value) => cache.kv.set(_progressCacheKey(jobId), value, _CONFIG.cache.ttl) }))),
+			onNone: () => _dbRun(tenantId, database.jobs.one([{ field: 'job_id', value: jobId }])).pipe(Effect.map(Option.flatMap((job) => Option.flatMap(job.output, (o) => Option.fromNullable((o as { progress?: typeof _Progress.Type }).progress)))), Effect.tap(Option.match({ onNone: () => Effect.void, onSome: (value) => cache.kv.set(_progressCacheKey(jobId), value, _CONFIG.cache.ttl) }))),
 			onSome: (value) => Effect.succeed(Option.some(value)),
 		})),
 	);
 		const _writeProgress = (jobId: string, tenantId: string, progress: typeof _Progress.Type) =>
-			_dbRun(tenantId, database.jobs.set(jobId, { progress: Option.some(progress) })).pipe(
+			_dbRun(tenantId, database.jobs.set(jobId, { output: Option.some({ progress }) })).pipe(
 				Effect.tapError((error) => Effect.logError('Job progress DB write failed', { error: String(error), jobId })),
 				Effect.tap(() => cache.kv.set(_progressCacheKey(jobId), progress, _CONFIG.cache.ttl).pipe(Effect.ignore)));
 		const _progressStreamLabels = MetricsService.label({ stream: 'job_progress' });
@@ -282,7 +281,7 @@ const JobEntityLive = JobEntity.toLayer(Effect.gen(function* () {
 		const _findDuplicate = (jobId: string, tenantId: string, dedupeKey: string) => _runtime.db.run(
 			tenantId,
 			database.jobs.one([
-				{ field: 'dedupe_key', value: dedupeKey },
+				{ raw: sql`correlation->>'dedupe' = ${dedupeKey}` },
 				{ field: 'status', op: 'in', values: ['queued', 'processing'] },
 			]),
 		).pipe(Effect.mapError((error) => JobError.from(jobId, 'Processing', error)));
@@ -339,15 +338,14 @@ const JobEntityLive = JobEntity.toLayer(Effect.gen(function* () {
 									extra: (state) => _runtime.db.run(envelope.tenantId, database.jobDlq.insert({
 										appId: envelope.tenantId,
 										attempts: state.attempts,
-										errorHistory: state.errorHistory,
+										context: Option.fromNullable(envelope.requestId).pipe(Option.map((request) => ({ request }))),
 										errorReason,
-										originalJobId: jobId,
+										errors: state.errorHistory,
 										payload: envelope.payload,
 										replayedAt: Option.none(),
-										requestId: Option.fromNullable(envelope.requestId),
 										source: 'job',
+										sourceId: jobId,
 										type: envelope.type,
-										userId: Option.none(),
 									})).pipe(Effect.zipRight(Metric.increment(metrics.jobs.deadLettered)), Effect.asVoid),
 									jobId,
 									reason: errorReason,
@@ -421,10 +419,10 @@ const JobEntityLive = JobEntity.toLayer(Effect.gen(function* () {
 							const queuedTimestamp = yield* Clock.currentTimeMillis;
 							const state = JobState.transition(null, 'queued', queuedTimestamp);
 						const inserted = yield* _runtime.db.run(envelope.payload.tenantId, database.jobs.insert({
-							appId: envelope.payload.tenantId, attempts: state.attempts,
-							batchId: Option.fromNullable(envelope.payload.batchId), completedAt: Option.none(), dedupeKey: Option.fromNullable(envelope.payload.dedupeKey), history: state.history, jobId,
-							lastError: Option.none(), maxAttempts: envelope.payload.maxAttempts, payload: envelope.payload.payload, priority: envelope.payload.priority,
-							progress: Option.none(), result: Option.none(), scheduledAt: Option.fromNullable(envelope.payload.scheduledAt).pipe(Option.map((timestamp) => new Date(timestamp))), status: state.status, type: envelope.payload.type, updatedAt: undefined,
+							appId: envelope.payload.tenantId, completedAt: Option.none(),
+							correlation: Option.some({ batch: envelope.payload.batchId, dedupe: envelope.payload.dedupeKey }), history: state.history, jobId,
+							output: Option.none(), payload: envelope.payload.payload, priority: envelope.payload.priority,
+							retry: { current: state.attempts, max: envelope.payload.maxAttempts }, scheduledAt: Option.fromNullable(envelope.payload.scheduledAt).pipe(Option.map((timestamp) => new Date(timestamp))), status: state.status, type: envelope.payload.type, updatedAt: undefined,
 						})).pipe(
 							Effect.as({ duplicate: false as const, jobId }),
 								Effect.catchAll((error) => dedupeKey.pipe(
@@ -498,9 +496,9 @@ class JobService extends Effect.Service<JobService>()('server/Jobs', {
 							: JobError.from(jobId, 'Processing', error)),
 				)),
 			);
-		function submit<T>(type: string, payloads: readonly T[], opts?: { dedupeKey?: string; maxAttempts?: number; priority?: typeof _Priority.Type; scheduledAt?: number }): Effect.Effect<readonly string[], unknown, never>;
-		function submit<T>(type: string, payloads: T, opts?: { dedupeKey?: string; maxAttempts?: number; priority?: typeof _Priority.Type; scheduledAt?: number }): Effect.Effect<string, unknown, never>;
-		function submit<T>(type: string, payloads: T | readonly T[], opts?: { dedupeKey?: string; maxAttempts?: number; priority?: typeof _Priority.Type; scheduledAt?: number }): Effect.Effect<string | readonly string[], unknown, never> {
+		function submit<T>(type: string, payloads: readonly T[], opts?: { dedupeKey?: string; maxAttempts?: number; priority?: typeof Job.fields.priority.Type; scheduledAt?: number }): Effect.Effect<readonly string[], unknown, never>;
+		function submit<T>(type: string, payloads: T, opts?: { dedupeKey?: string; maxAttempts?: number; priority?: typeof Job.fields.priority.Type; scheduledAt?: number }): Effect.Effect<string, unknown, never>;
+		function submit<T>(type: string, payloads: T | readonly T[], opts?: { dedupeKey?: string; maxAttempts?: number; priority?: typeof Job.fields.priority.Type; scheduledAt?: number }): Effect.Effect<string | readonly string[], unknown, never> {
 			return Context.Request.currentTenantId.pipe(
 				Effect.flatMap((tenantId) => Effect.gen(function* () {
 					const requestContext = yield* Context.Request.current;

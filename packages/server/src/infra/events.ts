@@ -220,11 +220,10 @@ class EventBus extends Effect.Service<EventBus>()('server/EventBus', {
 											Match.orElse(constant(
 												Context.Request.withinSync(envelope.event.tenantId, database.jobDlq.insert({
 													appId: envelope.event.tenantId, attempts: 1,
-													errorHistory: [{ error: String(error.cause ?? error.message), timestamp: Date.now() }],
-												errorReason: error.reason, originalJobId: envelope.event.eventId,
+													context: Option.fromNullable(envelope.event.correlationId).pipe(Option.map((request) => ({ request }))),
+													errorReason: error.reason, errors: [{ error: String(error.cause ?? error.message), timestamp: Date.now() }],
 												payload: envelope.event.payload, replayedAt: Option.none(),
-												requestId: Option.fromNullable(envelope.event.correlationId),
-												source: 'event', type: eventType, userId: Option.none(),
+												source: 'event', sourceId: envelope.event.eventId, type: eventType,
 												}).pipe(Effect.provideService(SqlClient.SqlClient, sql))).pipe(
 													Effect.tap(constant(Effect.logWarning('Event written to DLQ', { 'dlq.error_reason': error.reason, 'dlq.event_id': envelope.event.eventId, 'dlq.event_type': eventType }))),
 													Effect.catchAll(constant(Effect.logError('DLQ write failed', { 'dlq.event_id': envelope.event.eventId }))),

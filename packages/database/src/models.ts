@@ -25,7 +25,7 @@ const AuditOperationSchema = S.Literal(
 	'purge-job-dlq', 'purge-kv-store', 'purge-mfa-secrets', 'purge-oauth-accounts',
 	'archive', 'purge-tenant',
 );
-const NotificationPreferencesSchema = S.Struct({
+const PreferencesSchema = S.Struct({
 	channels: 	S.Struct({email: S.Boolean, inApp: S.Boolean, webhook: S.Boolean,}),
 	mutedUntil: S.NullOr(S.String),
 	templates: 	S.Record({key: S.String, value: S.Struct({email: S.optional(S.Boolean), inApp: S.optional(S.Boolean), webhook: S.optional(S.Boolean),}),}),
@@ -72,10 +72,9 @@ class User extends Model.Class<User>('User')({
 	id: Model.Generated(S.UUID),
 	appId: S.UUID,
 	email: S.String,
-	notificationPreferences: Model.Generated(NotificationPreferencesSchema),
+	preferences: Model.Generated(PreferencesSchema),
 	role: RoleSchema,
 	status: S.Literal('active', 'inactive', 'suspended'),
-	roleOrder: Model.Generated(S.Number),
 	deletedAt: Model.FieldOption(S.DateFromSelf),
 	updatedAt: Model.DateTimeUpdateFromDate,
 }) {}
@@ -96,14 +95,11 @@ class Session extends Model.Class<Session>('Session')({
 	id: Model.Generated(S.UUID),
 	appId: S.UUID,
 	userId: S.UUID,
-	accessExpiresAt: S.DateFromSelf,
-	refreshExpiresAt: S.DateFromSelf,
+	expiry: S.Struct({ access: S.DateFromSelf, refresh: S.DateFromSelf }),
 	verifiedAt: Model.FieldOption(S.DateFromSelf),
 	ipAddress: Model.FieldOption(S.String),
-	userAgent: Model.FieldOption(S.String),
-	prefix: Model.Generated(S.String),
-	hash: Model.Sensitive(S.String),
-	refreshHash: Model.Sensitive(S.String),
+	agent: Model.FieldOption(S.String),
+	tokens: Model.Sensitive(S.Struct({ access: S.String, refresh: S.String })),
 	deletedAt: Model.FieldOption(S.DateFromSelf),
 	updatedAt: Model.DateTimeUpdateFromDate,
 }) {}
@@ -114,9 +110,7 @@ class OauthAccount extends Model.Class<OauthAccount>('OauthAccount')({
 	userId: S.UUID,
 	provider: OAuthProviderSchema,
 	externalId: S.String,
-	expiresAt: Model.FieldOption(S.DateFromSelf),
-	accessEncrypted: Model.Sensitive(S.Uint8ArrayFromSelf),
-	refreshEncrypted: Model.FieldOption(Model.Sensitive(S.Uint8ArrayFromSelf)),
+	tokenPayload: Model.Sensitive(S.Uint8ArrayFromSelf),
 	deletedAt: Model.FieldOption(S.DateFromSelf),
 	updatedAt: Model.DateTimeUpdateFromDate,
 }) {}
@@ -126,9 +120,8 @@ class MfaSecret extends Model.Class<MfaSecret>('MfaSecret')({
 	id: Model.Generated(S.UUID),
 	userId: S.UUID,
 	enabledAt: Model.FieldOption(S.DateFromSelf),
-	remaining: Model.Generated(S.Number),
 	encrypted: Model.Sensitive(S.Uint8ArrayFromSelf),
-	backupHashes: Model.Sensitive(S.Array(S.String)),
+	backups: Model.Sensitive(S.Array(S.String)),
 	deletedAt: Model.FieldOption(S.DateFromSelf),
 	updatedAt: Model.DateTimeUpdateFromDate,
 }) {}
@@ -140,9 +133,7 @@ class WebauthnCredential extends Model.Class<WebauthnCredential>('WebauthnCreden
 	credentialId: S.String,
 	publicKey: S.Uint8ArrayFromSelf,
 	counter: S.Number,
-	deviceType: S.Literal('singleDevice', 'multiDevice'),
-	backedUp: S.Boolean,
-	transports: S.Array(S.String),
+	authenticator: S.Struct({ device: S.Literal('singleDevice', 'multiDevice'), backedUp: S.Boolean, transports: S.Array(S.String) }),
 	name: S.String,
 	lastUsedAt: Model.FieldOption(S.DateFromSelf),
 	deletedAt: Model.FieldOption(S.DateFromSelf),
@@ -154,7 +145,6 @@ class ApiKey extends Model.Class<ApiKey>('ApiKey')({
 	id: Model.Generated(S.UUID),
 	userId: S.UUID,
 	name: S.String,
-	prefix: Model.Generated(S.String),
 	expiresAt: Model.FieldOption(S.DateFromSelf),
 	lastUsedAt: Model.FieldOption(S.DateFromSelf),
 	encrypted: Model.Sensitive(S.Uint8ArrayFromSelf),
@@ -180,7 +170,6 @@ class Asset extends Model.Class<Asset>('Asset')({
 	userId: Model.FieldOption(S.UUID),
 	type: S.String,
 	content: S.String,
-	size: Model.Generated(S.Number),
 	status: S.Literal('active', 'processing', 'failed', 'deleted'),
 	hash: Model.FieldOption(S.String),
 	name: Model.FieldOption(S.String),
@@ -196,12 +185,9 @@ class AuditLog extends Model.Class<AuditLog>('AuditLog')({
 	userId: Model.FieldOption(S.UUID),
 	requestId: Model.FieldOption(S.UUID),
 	operation: AuditOperationSchema,
-	subject: S.String,
-	subjectId: S.UUID,
-	oldData: Model.FieldOption(S.Unknown),
-	newData: Model.FieldOption(S.Unknown),
-	ipAddress: Model.FieldOption(S.String),
-	userAgent: Model.FieldOption(S.String),
+	target: S.Struct({ type: S.String, id: S.UUID }),
+	delta: Model.FieldOption(S.Struct({ old: S.optional(S.Unknown), new: S.optional(S.Unknown) })),
+	context: Model.FieldOption(S.Struct({ ip: S.optional(S.String), agent: S.optional(S.String) })),
 }) {}
 
 // --- [JOBS: JOB] -------------------------------------------------------------
@@ -212,19 +198,15 @@ class Job extends Model.Class<Job>('Job')({
 	status: JobStatusSchema,
 	priority: S.Literal('critical', 'high', 'normal', 'low'),
 	payload: S.Unknown,
-	result: Model.FieldOption(S.Unknown),
-	progress: Model.FieldOption(S.Struct({ message: S.String, pct: S.Number })),
+	output: Model.FieldOption(S.Struct({ result: S.optional(S.Unknown), progress: S.optional(S.Struct({ message: S.String, pct: S.Number })) })),
 	history: S.Array(S.Struct({
 		error: S.optional(S.String),
 		status: JobStatusSchema,
 		timestamp: S.Number
 	})),
-	attempts: S.Number,
-	maxAttempts: S.Number,
+	retry: S.Struct({ current: S.Number, max: S.Number }),
 	scheduledAt: Model.FieldOption(S.DateFromSelf),
-	batchId: Model.FieldOption(S.String),
-	dedupeKey: Model.FieldOption(S.String),
-	lastError: Model.FieldOption(S.String),
+	correlation: Model.FieldOption(S.Struct({ batch: S.optional(S.String), dedupe: S.optional(S.String) })),
 	completedAt: Model.FieldOption(S.DateFromSelf),
 	updatedAt: Model.DateTimeUpdateFromDate,
 }) {}
@@ -233,10 +215,9 @@ class Job extends Model.Class<Job>('Job')({
 class JobDlq extends Model.Class<JobDlq>('JobDlq')({
 	id: Model.Generated(S.UUID),
 	source: S.Literal('job', 'event'),
-	originalJobId: S.String,
+	sourceId: S.String,
 	appId: S.UUID,
-	userId: Model.FieldOption(S.UUID),
-	requestId: Model.FieldOption(S.UUID),
+	context: Model.FieldOption(S.Struct({ user: S.optional(S.UUID), request: S.optional(S.UUID) })),
 	type: S.String,
 	payload: S.Unknown,
 	errorReason: S.Literal(
@@ -244,7 +225,7 @@ class JobDlq extends Model.Class<JobDlq>('JobDlq')({
 		'DeliveryFailed', 'DeserializationFailed', 'DuplicateEvent', 'ValidationFailed', 'AuditPersistFailed', 'HandlerTimeout',
 	),
 	attempts: S.Number,
-	errorHistory: S.Array(S.Struct({
+	errors: S.Array(S.Struct({
 		error: S.String,
 		timestamp: S.Number
 	})),
@@ -260,14 +241,10 @@ class Notification extends Model.Class<Notification>('Notification')({
 	template: S.NonEmptyTrimmedString,
 	status: S.Literal('queued', 'sending', 'delivered', 'failed', 'dlq'),
 	recipient: Model.FieldOption(S.String),
-	provider: Model.FieldOption(S.String),
 	payload: S.Unknown,
-	error: Model.FieldOption(S.String),
-	attempts: S.Number,
-	maxAttempts: S.Number,
-	jobId: Model.FieldOption(S.String),
-	dedupeKey: Model.FieldOption(S.String),
-	deliveredAt: Model.FieldOption(S.DateFromSelf),
+	delivery: Model.FieldOption(S.Struct({ error: S.optional(S.String), provider: S.optional(S.String), at: S.optional(S.DateFromSelf) })),
+	retry: S.Struct({ current: S.Number, max: S.Number }),
+	correlation: Model.FieldOption(S.Struct({ job: S.optional(S.String), dedupe: S.optional(S.String) })),
 	updatedAt: Model.DateTimeUpdateFromDate,
 }) {}
 
@@ -285,6 +262,6 @@ class KvStore extends Model.Class<KvStore>('KvStore')({
 export {
 	ApiKey, App, Asset, AuditLog, Job, JobDlq, JobStatusSchema, KvStore, MfaSecret, Notification,
 	AppSettingsDefaults, AppSettingsSchema, FeatureFlagsSchema,
-	AuditOperationSchema, NotificationPreferencesSchema, OAuthProviderSchema,
+	AuditOperationSchema, PreferencesSchema, OAuthProviderSchema,
 	OauthAccount, Permission, RoleSchema, Session, User, WebauthnCredential,
 };

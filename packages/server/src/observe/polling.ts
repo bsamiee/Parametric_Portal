@@ -27,14 +27,7 @@ const _CONFIG = {
 
 // --- [SCHEMA] ----------------------------------------------------------------
 
-const _SCHEMA = {
-	alert: S.Struct({
-		current: S.Number,
-		metric: S.String,
-		severity: S.Literal('critical', 'warning'),
-		threshold: S.Number }
-	),
-} as const;
+const _AlertSchema = S.Struct({ current: S.Number, metric: S.String, severity: S.Literal('critical', 'warning'), threshold: S.Number });
 
 // --- [SERVICES] --------------------------------------------------------------
 
@@ -51,19 +44,19 @@ class PollingService extends Effect.Service<PollingService>()('server/Polling', 
 			{ concurrency: _CONFIG.refresh.tenantMetric.concurrency })),
 			Effect.map((values) => values.reduce((sum, value) => sum + value, _CONFIG.fallback.metric)),
 		);
-		const _loadAlerts = database.kvStore.getJson(_CONFIG.kvKey, S.Array(_SCHEMA.alert)).pipe(
+		const _loadAlerts = database.kvStore.getJson(_CONFIG.kvKey, S.Array(_AlertSchema)).pipe(
 			Effect.map(Option.getOrElse(() => [] as const)),
 			Effect.tapError((error) => Effect.logError('Failed to load polling alerts', { error: String(error) })),
 			Effect.orElseSucceed(() => [] as const),
 		);
-		const _isCritical = (items: ReadonlyArray<typeof _SCHEMA.alert.Type>, metric: string) => items.some((alert) => alert.metric === metric && alert.severity === 'critical');
+		const _isCritical = (items: ReadonlyArray<typeof _AlertSchema.Type>, metric: string) => items.some((alert) => alert.metric === metric && alert.severity === 'critical');
 		const initial = yield* _loadAlerts;
 			const alerts = yield* STM.commit(TRef.make(initial));
 			const ioStatsState = yield* STM.commit(TRef.make<{ avgHitRatio: number; totalReads: number; totalWrites: number }>({ ..._CONFIG.fallback.ioStats }));
 			const metricState = yield* STM.commit(TRef.make({} as Record<string, number>));
 			const lastFailureAtMs = yield* STM.commit(TRef.make(Option.none<number>()));
 			const lastSuccessAtMs = yield* STM.commit(TRef.make(Option.none<number>()));
-		const persistAlerts = (updated: typeof initial) => database.kvStore.setJson(_CONFIG.kvKey, [...updated], S.Array(_SCHEMA.alert)).pipe(Effect.ignoreLogged);
+		const persistAlerts = (updated: typeof initial) => database.kvStore.setJson(_CONFIG.kvKey, [...updated], S.Array(_AlertSchema)).pipe(Effect.ignoreLogged);
 		const publishFailure = (metric: string, error: unknown) => eventBus.publish({ aggregateId: metric, payload: { _tag: 'polling', action: 'error', error: String(error), metric }, tenantId: Context.Request.Id.system }).pipe(Effect.ignore);
 		const recoverWith = <A>(metric: string, message: string, fallback: Effect.Effect<A>) => (error: unknown) => Clock.currentTimeMillis.pipe(
 			Effect.flatMap((now) => Effect.all([

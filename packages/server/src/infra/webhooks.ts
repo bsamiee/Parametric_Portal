@@ -153,8 +153,8 @@ class WebhookService extends Effect.Service<WebhookService>()('server/Webhooks',
 						const tenantId = yield* Context.Request.currentTenantId;
 						const timestamp = yield* Clock.currentTimeMillis;
 							yield* Context.Request.withinSync(tenantId, database.jobDlq.insert({
-								appId: tenantId, attempts: _CONFIG.retry.maxAttempts, errorHistory: [{ error: Cause.pretty(cause), timestamp }], errorReason: 'MaxRetries',
-								originalJobId: payload.id, payload: { data: payload.data, endpoint }, replayedAt: Option.none(), requestId: Option.none(), source: 'event', type: `webhook:${payload.type}`, userId: Option.none(),
+								appId: tenantId, attempts: _CONFIG.retry.maxAttempts, context: Option.none(), errorReason: 'MaxRetries', errors: [{ error: Cause.pretty(cause), timestamp }],
+								payload: { data: payload.data, endpoint }, replayedAt: Option.none(), source: 'event', sourceId: payload.id, type: `webhook:${payload.type}`,
 							}));
 					}).pipe(Effect.ignore)),
 				);

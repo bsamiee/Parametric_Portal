@@ -263,12 +263,10 @@ const AuthLive = HttpApiBuilder.group(ParametricApi, 'auth', (handlers) =>
 					}),
 					Effect.tap(({ linkAction }) => Match.value(linkAction).pipe(
 						Match.when({ isNone: true }, constant(repositories.oauthAccounts.insert({
-							accessEncrypted: new Uint8Array(0),
 							deletedAt: Option.none(),
-							expiresAt: Option.none(),
 							externalId,
 							provider,
-							refreshEncrypted: Option.none(),
+							tokenPayload: new Uint8Array(0),
 							updatedAt: undefined,
 							userId: linkAction.session.userId,
 						}).pipe(Effect.mapError(constant(HttpError.Internal.of('OAuth account link failed'))), Effect.asVoid))),

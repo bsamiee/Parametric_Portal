@@ -32,7 +32,7 @@ const _AuthState = S.Union(
 	S.Struct({ _tag: S.Literal('oauth'), provider: OAuthProviderSchema, requestId: S.String, tenantId: S.String }),
 	S.Struct({ _tag: S.Literal('session'), provider: OAuthProviderSchema, requestId: S.String, sessionId: S.String, tenantId: S.String, tokens: _Tokens, userId: S.String, verifiedAt: S.OptionFromSelf(S.DateTimeUtc) }),
 );
-const _SessionCache = Session.pipe(S.pick('accessExpiresAt', 'appId', 'id', 'userId', 'verifiedAt'));
+const _SessionCache = Session.pipe(S.pick('appId', 'expiry', 'id', 'userId', 'verifiedAt'));
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
@@ -162,9 +162,9 @@ class AuthService extends Effect.Service<AuthService>()('server/Auth', {
 				Match.when('mfa', () => Context.Request.withinSync(key.tenantId, db.mfaSecrets.byUser(key.id).pipe(
 					Effect.map(flow(Option.flatMap((s) => s.enabledAt), Option.isSome)),
 				)).pipe(Effect.mapError((error) => AuthError.from('internal', { op: 'mfa_status', tenantId: key.tenantId, userId: key.id }, error)))),
-				Match.when('session', () => Context.Request.withinSync(key.tenantId, db.sessions.byHash(key.id as Hex64).pipe(
+				Match.when('session', () => Context.Request.withinSync(key.tenantId, db.sessions.byAccessToken(key.id as Hex64).pipe(
 					Effect.tap(Option.match({ onNone: constant(Effect.void), onSome: (s) => db.sessions.touch(s.id).pipe(Effect.annotateLogs('sessionId', s.id), Effect.ignoreLogged) })),
-					Effect.map(Option.map((s) => ({ accessExpiresAt: s.accessExpiresAt, appId: s.appId, id: s.id, userId: s.userId, verifiedAt: s.verifiedAt }))),
+					Effect.map(Option.map((s) => ({ appId: s.appId, expiry: s.expiry, id: s.id, userId: s.userId, verifiedAt: s.verifiedAt }))),
 				)).pipe(Effect.mapError((error) => AuthError.from('internal', { op: 'session_cache' }, error)))),
 				Match.orElse(() => Effect.fail(AuthError.from('internal', { key: key.id, op: 'cache_lookup', scope: key.scope }))),
 			).pipe(Effect.provideService(SqlClient.SqlClient, sqlClient)),
@@ -224,27 +224,23 @@ class AuthService extends Effect.Service<AuthService>()('server/Auth', {
 				const allSessions = yield* db.sessions.byUser(userId).pipe(Effect.catchAll((error) => Effect.logWarning('Session limit enforcement failed', { error: String(error), userId }).pipe(Effect.as([]))));
 				const activeSessions = pipe(allSessions.filter((s) => Option.isNone(s.deletedAt)), A.sortBy(Order.mapInput(Order.string, (s) => s.id)));
 				yield* Effect.when(
-					Effect.forEach(activeSessions.slice(0, activeSessions.length - maxSessions + 1), (s) => db.sessions.softDelete(s.id).pipe(Effect.tap(constant(invalidateSession(s.appId, s.hash)))), { discard: true }),
+					Effect.forEach(activeSessions.slice(0, activeSessions.length - maxSessions + 1), (s) => db.sessions.softDelete(s.id).pipe(Effect.tap(constant(invalidateSession(s.appId, s.tokens.access)))), { discard: true }),
 					constant(activeSessions.length >= maxSessions),
 				).pipe(Effect.catchAll((error) => Effect.logWarning('Session limit enforcement failed', { error: String(error), userId })));
-				const accessEncrypted = yield* Crypto.encrypt(oauthTokens.accessToken());
-				const refreshToken = oauthTokens.refreshToken();
-				const refreshEncrypted = refreshToken == null ? Option.none<Uint8Array>() : yield* Crypto.encrypt(refreshToken).pipe(Effect.map(Option.some));
-				yield* db.oauthAccounts.upsert({ accessEncrypted, deletedAt: Option.none(), expiresAt: Option.fromNullable(oauthTokens.accessTokenExpiresAt()), externalId: userInfo.externalId, provider, refreshEncrypted, updatedAt: undefined, userId });
+				const tokenPayload = yield* Crypto.encrypt(JSON.stringify({ access: oauthTokens.accessToken(), expires: oauthTokens.accessTokenExpiresAt()?.toISOString() ?? null, refresh: oauthTokens.refreshToken() ?? null }));
+				yield* db.oauthAccounts.upsert({ deletedAt: Option.none(), externalId: userInfo.externalId, provider, tokenPayload, updatedAt: undefined, userId });
 				const mfaEnabled = yield* db.mfaSecrets.byUser(userId).pipe(Effect.map((opt) => opt.pipe(Option.flatMap((s) => s.enabledAt), Option.isSome)));
 				const [sessionPair, refreshPair, tokenRequestContext] = yield* Effect.all([Crypto.pair, Crypto.pair, Context.Request.current]);
 				const [sessionHash, refreshHash] = yield* Effect.all([Crypto.hmac(oauthLoaded.tenantId, Redacted.value(sessionPair.token)), Crypto.hmac(oauthLoaded.tenantId, Redacted.value(refreshPair.token))]);
 				const tokenNow = DateTime.unsafeNow();
 				const sessionRow = yield* db.sessions.insert({
-					accessExpiresAt: DateTime.toDateUtc(DateTime.addDuration(tokenNow, Context.Request.config.durations.session)),
+					agent: tokenRequestContext.userAgent,
 					appId: oauthLoaded.tenantId,
 					deletedAt: Option.none(),
-					hash: sessionHash,
+					expiry: { access: DateTime.toDateUtc(DateTime.addDuration(tokenNow, Context.Request.config.durations.session)), refresh: DateTime.toDateUtc(DateTime.addDuration(tokenNow, Context.Request.config.durations.refresh)) },
 					ipAddress: tokenRequestContext.ipAddress,
-					refreshExpiresAt: DateTime.toDateUtc(DateTime.addDuration(tokenNow, Context.Request.config.durations.refresh)),
-					refreshHash,
+					tokens: { access: sessionHash, refresh: refreshHash },
 					updatedAt: undefined,
-					userAgent: tokenRequestContext.userAgent,
 					userId,
 					verifiedAt: mfaEnabled ? Option.none() : Option.some(new Date()),
 				});
@@ -277,17 +273,17 @@ class AuthService extends Effect.Service<AuthService>()('server/Auth', {
 			lookup: (hash: Hex64) => Context.Request.current.pipe(Effect.flatMap((context) => (cache.get(new CacheKey({ id: hash, scope: 'session', tenantId: context.tenantId })) as Effect.Effect<Option.Option<typeof _SessionCache.Type>>).pipe(Effect.flatMap(Option.match({
 				onNone: () => Effect.succeed(Option.none()),
 				onSome: (sessionRow) => sessionRow.appId === context.tenantId
-					? Clock.currentTimeMillis.pipe(Effect.flatMap((now) => now > sessionRow.accessExpiresAt.getTime()
-						? Effect.logWarning('Session expired', { accessExpiresAt: sessionRow.accessExpiresAt, sessionId: sessionRow.id }).pipe(Effect.as(Option.none()))
+					? Clock.currentTimeMillis.pipe(Effect.flatMap((now) => now > sessionRow.expiry.access.getTime()
+						? Effect.logWarning('Session expired', { accessExpiresAt: sessionRow.expiry.access, sessionId: sessionRow.id }).pipe(Effect.as(Option.none()))
 						: (cache.get(new CacheKey({ id: sessionRow.userId, scope: 'mfa', tenantId: context.tenantId })) as Effect.Effect<boolean>).pipe(Effect.map((mfaEnabled) => Option.some({ appId: sessionRow.appId, id: sessionRow.id, kind: 'session' as const, mfaEnabled, userId: sessionRow.userId, verifiedAt: sessionRow.verifiedAt })))))
 					: Effect.logWarning('Session tenant mismatch', { expected: context.tenantId, got: sessionRow.appId }).pipe(Effect.as(Option.none())),
 			})))), Effect.mapError((error) => AuthError.from('internal', { op: 'session.lookup' }, error)), Telemetry.span('auth.session.lookup', { metrics: false })),
 			refresh: (hash: Hex64) => Effect.gen(function* () {
 				const [tenantId, found] = yield* Effect.all([
 					Context.Request.currentTenantId,
-					db.sessions.byRefreshHash(hash).pipe(Effect.flatMap(Option.match({ onNone: () => Effect.fail(AuthError.from('token_invalid')), onSome: Effect.succeed }))),
+					db.sessions.byRefreshToken(hash).pipe(Effect.flatMap(Option.match({ onNone: () => Effect.fail(AuthError.from('token_invalid')), onSome: Effect.succeed }))),
 				]);
-				yield* Clock.currentTimeMillis.pipe(Effect.filterOrFail((now) => now <= found.refreshExpiresAt.getTime(), () => AuthError.from('token_expired')));
+				yield* Clock.currentTimeMillis.pipe(Effect.filterOrFail((now) => now <= found.expiry.refresh.getTime(), () => AuthError.from('token_expired')));
 				const loaded = yield* CacheService.kv.get(_STATE_KEY('session', tenantId, found.id), _AuthState).pipe(
 					Effect.flatMap(Option.match({ onNone: () => Effect.fail(AuthError.from('phase_invalid', { id: found.id, scope: 'session' })), onSome: Effect.succeed })),
 				);
@@ -299,8 +295,8 @@ class AuthService extends Effect.Service<AuthService>()('server/Auth', {
 				);
 				const stateTag = sessionLoaded.verifiedAt.pipe(Option.match({ onNone: () => 'mfa' as const, onSome: () => 'active' as const }));
 				const { nextSessionId, nextSessionVerifiedAt, nextTokens, mfaPending } = yield* db.withTransaction(Effect.gen(function* () {
-					const sessionRow = yield* db.sessions.byRefreshHashForUpdate(hash).pipe(Effect.flatMap(Option.match({ onNone: () => Effect.fail(AuthError.from('token_invalid')), onSome: Effect.succeed })));
-					yield* Clock.currentTimeMillis.pipe(Effect.filterOrFail((now) => now <= sessionRow.refreshExpiresAt.getTime(), () => AuthError.from('token_expired')));
+					const sessionRow = yield* db.sessions.byRefreshTokenForUpdate(hash).pipe(Effect.flatMap(Option.match({ onNone: () => Effect.fail(AuthError.from('token_invalid')), onSome: Effect.succeed })));
+					yield* Clock.currentTimeMillis.pipe(Effect.filterOrFail((now) => now <= sessionRow.expiry.refresh.getTime(), () => AuthError.from('token_expired')));
 					yield* db.sessions.softDelete(sessionRow.id);
 					const mfaPending = stateTag === 'mfa' && (yield* db.mfaSecrets.byUser(sessionRow.userId).pipe(Effect.map((opt) => opt.pipe(Option.flatMap((s) => s.enabledAt), Option.isSome))));
 					const [sessionPair, refreshPair, tokenRequestContext] = yield* Effect.all([Crypto.pair, Crypto.pair, Context.Request.current]);
@@ -308,15 +304,13 @@ class AuthService extends Effect.Service<AuthService>()('server/Auth', {
 					const tokenNow = DateTime.unsafeNow();
 					const nextSessionVerifiedAt = mfaPending ? Option.none<DateTime.Utc>() : Option.some(DateTime.unsafeNow());
 					const newSessionRow = yield* db.sessions.insert({
-						accessExpiresAt: DateTime.toDateUtc(DateTime.addDuration(tokenNow, Context.Request.config.durations.session)),
+						agent: tokenRequestContext.userAgent,
 						appId: sessionLoaded.tenantId,
 						deletedAt: Option.none(),
-						hash: txSessionHash,
+						expiry: { access: DateTime.toDateUtc(DateTime.addDuration(tokenNow, Context.Request.config.durations.session)), refresh: DateTime.toDateUtc(DateTime.addDuration(tokenNow, Context.Request.config.durations.refresh)) },
 						ipAddress: tokenRequestContext.ipAddress,
-						refreshExpiresAt: DateTime.toDateUtc(DateTime.addDuration(tokenNow, Context.Request.config.durations.refresh)),
-						refreshHash: txRefreshHash,
+						tokens: { access: txSessionHash, refresh: txRefreshHash },
 						updatedAt: undefined,
-						userAgent: tokenRequestContext.userAgent,
 						userId: sessionRow.userId,
 						verifiedAt: Option.map(nextSessionVerifiedAt, DateTime.toDateUtc),
 					});
@@ -352,7 +346,7 @@ class AuthService extends Effect.Service<AuthService>()('server/Auth', {
 					const tenantId = yield* Context.Request.currentTenantId;
 					const sessionOption = yield* db.sessions.one([{ field: 'id', value: sessionId }]).pipe(Effect.orElseSucceed(() => Option.none()));
 					yield* db.sessions.softDelete(sessionId).pipe(Effect.ignore);
-					yield* Option.match(sessionOption, { onNone: () => Effect.void, onSome: (existing) => invalidateSession(existing.appId, existing.hash) });
+					yield* Option.match(sessionOption, { onNone: () => Effect.void, onSome: (existing) => invalidateSession(existing.appId, existing.tokens.access) });
 					yield* CacheService.kv.del(_STATE_KEY('session', tenantId, sessionId)).pipe(Effect.ignore);
 					return { _tag: 'Revoke', revokedAt: DateTime.unsafeNow() } as const;
 				})
@@ -378,13 +372,13 @@ class AuthService extends Effect.Service<AuthService>()('server/Auth', {
 				const _makeBackup = customAlphabet(_CONFIG.backup.alphabet, _CONFIG.backup.length);
 				const backupCodes = Array.from({ length: _CONFIG.backup.count }, () => _makeBackup());
 				const salt = Encoding.encodeHex(randomBytes(16));
-				const backupHashes = yield* Effect.all(backupCodes.map((backupCode) => Crypto.hash(`${salt}${backupCode.toUpperCase()}`).pipe(Effect.map((hash) => `${salt}$${hash}`))), { concurrency: 'unbounded' });
-				yield* Effect.suspend(() => db.mfaSecrets.upsert({ backupHashes, encrypted, userId })).pipe(Effect.asVoid, Effect.catchAll((error) => Effect.fail(HttpError.Internal.of('MFA upsert failed', error))));
+				const backups = yield* Effect.all(backupCodes.map((backupCode) => Crypto.hash(`${salt}${backupCode.toUpperCase()}`).pipe(Effect.map((hash) => `${salt}$${hash}`))), { concurrency: 'unbounded' });
+				yield* Effect.suspend(() => db.mfaSecrets.upsert({ backups, encrypted, userId })).pipe(Effect.asVoid, Effect.catchAll((error) => Effect.fail(HttpError.Internal.of('MFA upsert failed', error))));
 				yield* cache.invalidate(new CacheKey({ id: userId, scope: 'mfa', tenantId: requestContext.tenantId })).pipe(Effect.ignore);
 				yield* Effect.all([MetricsService.inc(metrics.mfa.enrollments, MetricsService.label({ tenant: requestContext.tenantId }), 1), audit.log('MfaSecret.enroll', { details: { backupCodesGenerated: _CONFIG.backup.count }, subjectId: userId })], { discard: true });
 				return { backupCodes, qrDataUrl: generateURI({ algorithm: _CONFIG.totp.algorithm, digits: _CONFIG.totp.digits, issuer, label: email, period: _CONFIG.totp.periodSec, secret }), secret };
 			}), 'mfa.enroll', { metrics: false }),
-			status: (userId: string) => db.mfaSecrets.byUser(userId).pipe(Effect.mapError((error) => HttpError.Internal.of('MFA status check failed', error)), Effect.map(Option.match({ onNone: () => ({ enabled: false, enrolled: false }) as const, onSome: (mfaSecret) => ({ enabled: Option.isSome(mfaSecret.enabledAt), enrolled: true, remainingBackupCodes: mfaSecret.backupHashes.length }) as const }))),
+			status: (userId: string) => db.mfaSecrets.byUser(userId).pipe(Effect.mapError((error) => HttpError.Internal.of('MFA status check failed', error)), Effect.map(Option.match({ onNone: () => ({ enabled: false, enrolled: false }) as const, onSome: (mfaSecret) => ({ enabled: Option.isSome(mfaSecret.enabledAt), enrolled: true, remainingBackupCodes: mfaSecret.backups.length }) as const }))),
 			verify: (sessionId: string, code: string, mode: 'backup' | 'totp') => Effect.gen(function* () {
 				const tenantId = yield* Context.Request.currentTenantId;
 				const loaded = yield* CacheService.kv.get(_STATE_KEY('session', tenantId, sessionId), _AuthState).pipe(
@@ -402,14 +396,14 @@ class AuthService extends Effect.Service<AuthService>()('server/Auth', {
 				const mfaSecret = yield* db.mfaSecrets.byUser(sessionLoaded.userId).pipe(Effect.mapError((error) => AuthError.from('internal', { op: 'mfa_lookup', userId: sessionLoaded.userId }, error)), Effect.flatMap(Option.match({ onNone: () => Effect.fail(AuthError.from('mfa_not_enrolled', { userId: sessionLoaded.userId })), onSome: Effect.succeed })));
 				const now = yield* Clock.currentTimeMillis;
 				const remainingCodes = yield* isBackup
-					? Effect.all(mfaSecret.backupHashes.map((entry, index) => {
+					? Effect.all(mfaSecret.backups.map((entry, index) => {
 						const sep = entry.indexOf('$');
 						return sep <= 0 || sep >= entry.length - 1 ? Effect.succeed(Option.none<number>()) : Crypto.hash(`${entry.slice(0, sep)}${code.toUpperCase()}`).pipe(Effect.flatMap((computed) => Crypto.compare(computed, entry.slice(sep + 1))), Effect.map((isMatch) => isMatch ? Option.some(index) : Option.none()));
 					}), { concurrency: 1 }).pipe(Effect.map(Option.firstSomeOf), Effect.flatMap(Option.match({
-						onNone: () => replayGuard.recordFailure(sessionLoaded.userId).pipe(Effect.andThen(Effect.fail(AuthError.from('mfa_invalid_backup', { remaining: mfaSecret.backupHashes.length })))),
-						onSome: (index) => db.mfaSecrets.upsert({ backupHashes: mfaSecret.backupHashes.filter((_, idx) => idx !== index), enabledAt: mfaSecret.enabledAt, encrypted: mfaSecret.encrypted, userId: sessionLoaded.userId }).pipe(Effect.tap(() => replayGuard.recordSuccess(sessionLoaded.userId)), Effect.as(mfaSecret.backupHashes.length - 1), Effect.mapError((error) => AuthError.from('mfa_invalid_backup', { userId: sessionLoaded.userId }, error))),
+						onNone: () => replayGuard.recordFailure(sessionLoaded.userId).pipe(Effect.andThen(Effect.fail(AuthError.from('mfa_invalid_backup', { remaining: mfaSecret.backups.length })))),
+						onSome: (index) => db.mfaSecrets.upsert({ backups: mfaSecret.backups.filter((_, idx) => idx !== index), enabledAt: mfaSecret.enabledAt, encrypted: mfaSecret.encrypted, userId: sessionLoaded.userId }).pipe(Effect.tap(() => replayGuard.recordSuccess(sessionLoaded.userId)), Effect.as(mfaSecret.backups.length - 1), Effect.mapError((error) => AuthError.from('mfa_invalid_backup', { userId: sessionLoaded.userId }, error))),
 					})))
-					: Crypto.decrypt(mfaSecret.encrypted).pipe(Effect.mapError((error) => AuthError.from('mfa_invalid_code', { userId: sessionLoaded.userId }, error)), Effect.flatMap((secret) => Effect.try({ catch: () => AuthError.from('mfa_invalid_code', { userId: sessionLoaded.userId }), try: () => verifySync({ algorithm: _CONFIG.totp.algorithm, digits: _CONFIG.totp.digits, epochTolerance: _CONFIG.totp.epochTolerance, period: _CONFIG.totp.periodSec, secret, token: code }) })), Effect.filterOrElse((result) => result.valid, () => replayGuard.recordFailure(sessionLoaded.userId).pipe(Effect.andThen(Effect.fail(AuthError.from('mfa_invalid_code', { userId: sessionLoaded.userId }))))), Effect.flatMap((result) => replayGuard.checkAndMark(sessionLoaded.userId, Math.floor(now / _CONFIG.totp.periodMs) + ((result as { delta?: number }).delta ?? 0), code)), Effect.filterOrElse(({ alreadyUsed }) => !alreadyUsed, () => replayGuard.recordFailure(sessionLoaded.userId).pipe(Effect.andThen(Effect.fail(AuthError.from('mfa_invalid_code', { userId: sessionLoaded.userId }))))), Effect.tap(() => replayGuard.recordSuccess(sessionLoaded.userId)), Effect.tap(() => Option.isNone(mfaSecret.enabledAt) ? db.mfaSecrets.upsert({ backupHashes: mfaSecret.backupHashes, enabledAt: Option.some(new Date()), encrypted: mfaSecret.encrypted, userId: sessionLoaded.userId }) : Effect.void), Effect.as(mfaSecret.backupHashes.length));
+					: Crypto.decrypt(mfaSecret.encrypted).pipe(Effect.mapError((error) => AuthError.from('mfa_invalid_code', { userId: sessionLoaded.userId }, error)), Effect.flatMap((secret) => Effect.try({ catch: () => AuthError.from('mfa_invalid_code', { userId: sessionLoaded.userId }), try: () => verifySync({ algorithm: _CONFIG.totp.algorithm, digits: _CONFIG.totp.digits, epochTolerance: _CONFIG.totp.epochTolerance, period: _CONFIG.totp.periodSec, secret, token: code }) })), Effect.filterOrElse((result) => result.valid, () => replayGuard.recordFailure(sessionLoaded.userId).pipe(Effect.andThen(Effect.fail(AuthError.from('mfa_invalid_code', { userId: sessionLoaded.userId }))))), Effect.flatMap((result) => replayGuard.checkAndMark(sessionLoaded.userId, Math.floor(now / _CONFIG.totp.periodMs) + ((result as { delta?: number }).delta ?? 0), code)), Effect.filterOrElse(({ alreadyUsed }) => !alreadyUsed, () => replayGuard.recordFailure(sessionLoaded.userId).pipe(Effect.andThen(Effect.fail(AuthError.from('mfa_invalid_code', { userId: sessionLoaded.userId }))))), Effect.tap(() => replayGuard.recordSuccess(sessionLoaded.userId)), Effect.tap(() => Option.isNone(mfaSecret.enabledAt) ? db.mfaSecrets.upsert({ backups: mfaSecret.backups, enabledAt: Option.some(new Date()), encrypted: mfaSecret.encrypted, userId: sessionLoaded.userId }) : Effect.void), Effect.as(mfaSecret.backups.length));
 				const verifiedAt = DateTime.unsafeNow();
 				yield* db.sessions.verify(sessionLoaded.sessionId).pipe(Effect.ignore);
 				yield* invalidateSession(sessionLoaded.tenantId, sessionLoaded.tokens.session);
@@ -424,7 +418,7 @@ class AuthService extends Effect.Service<AuthService>()('server/Auth', {
 				start: (userId: string) => Telemetry.span(Effect.gen(function* () {
 					const credentials = yield* _activeCredentials(userId);
 					yield* Effect.filterOrFail(Effect.succeed(credentials), (c) => c.length > 0, () => HttpError.NotFound.of('webauthn_credentials', undefined, 'No passkeys registered'));
-					const options = yield* Effect.tryPromise({ catch: (error) => HttpError.Internal.of('WebAuthn authentication options generation failed', error), try: () => generateAuthenticationOptions({ allowCredentials: credentials.map((credential) => ({ id: credential.credentialId, transports: credential.transports as AuthenticatorTransportFuture[] })), rpID: rpId }) });
+					const options = yield* Effect.tryPromise({ catch: (error) => HttpError.Internal.of('WebAuthn authentication options generation failed', error), try: () => generateAuthenticationOptions({ allowCredentials: credentials.map((credential) => ({ id: credential.credentialId, transports: credential.authenticator.transports as AuthenticatorTransportFuture[] })), rpID: rpId }) });
 					yield* Clock.currentTimeMillis.pipe(Effect.flatMap((now) => CacheService.kv.set(`${_CONFIG.webauthn.challengeKeyPrefix}${userId}`, { challenge: options.challenge, exp: now + Duration.toMillis(_CONFIG.webauthn.challengeTtl), userId }, _CONFIG.webauthn.challengeTtl)), Effect.mapError((error) => HttpError.Internal.of('WebAuthn challenge store failed', error)));
 					return options;
 				}), 'webauthn.authentication.start', { metrics: false }),
@@ -433,7 +427,7 @@ class AuthService extends Effect.Service<AuthService>()('server/Auth', {
 					const stored = yield* CacheService.kv.get(`${_CONFIG.webauthn.challengeKeyPrefix}${userId}`, S.Struct({ challenge: S.String, exp: S.Number, userId: S.String })).pipe(Effect.mapError((error) => HttpError.Internal.of('WebAuthn challenge lookup failed', error)), Effect.flatMap(Option.match({ onNone: () => Effect.fail(HttpError.Auth.of('WebAuthn challenge expired or not found')), onSome: Effect.succeed })), Effect.flatMap((stored) => Clock.currentTimeMillis.pipe(Effect.filterOrFail((now) => stored.exp >= now, () => HttpError.Auth.of('WebAuthn challenge expired')), Effect.as(stored))));
 					const credentialId = (response as { id?: string })?.id ?? '';
 					const credential = yield* db.webauthnCredentials.byCredentialId(credentialId).pipe(Effect.mapError((error) => HttpError.Internal.of('WebAuthn credential lookup failed', error)), Effect.flatMap(Option.match({ onNone: () => Effect.fail(HttpError.Auth.of('WebAuthn credential not found')), onSome: Effect.succeed })));
-					const verification = yield* Effect.tryPromise({ catch: (error) => HttpError.Auth.of('WebAuthn authentication verification failed', error), try: () => verifyAuthenticationResponse({ credential: { counter: credential.counter, id: credential.credentialId, publicKey: credential.publicKey as Uint8Array<ArrayBuffer>, transports: credential.transports as AuthenticatorTransportFuture[] }, expectedChallenge: stored.challenge, expectedOrigin, expectedRPID: rpId, response: response as Parameters<typeof verifyAuthenticationResponse>[0]['response'] }) });
+					const verification = yield* Effect.tryPromise({ catch: (error) => HttpError.Auth.of('WebAuthn authentication verification failed', error), try: () => verifyAuthenticationResponse({ credential: { counter: credential.counter, id: credential.credentialId, publicKey: credential.publicKey as Uint8Array<ArrayBuffer>, transports: credential.authenticator.transports as AuthenticatorTransportFuture[] }, expectedChallenge: stored.challenge, expectedOrigin, expectedRPID: rpId, response: response as Parameters<typeof verifyAuthenticationResponse>[0]['response'] }) });
 					yield* Effect.filterOrFail(Effect.succeed(verification), (v) => v.verified, () => HttpError.Auth.of('WebAuthn authentication verification rejected'));
 					yield* db.webauthnCredentials.updateCounter(credential.id, verification.authenticationInfo.newCounter).pipe(Effect.ignore);
 					yield* CacheService.kv.del(`${_CONFIG.webauthn.challengeKeyPrefix}${userId}`).pipe(Effect.ignore);
@@ -449,13 +443,13 @@ class AuthService extends Effect.Service<AuthService>()('server/Auth', {
 					yield* audit.log('WebauthnCredential.delete', { details: { credentialId: target.credentialId, name: target.name }, subjectId: userId });
 					return { deleted: true as const };
 				}), 'webauthn.credential.delete', { metrics: false }),
-				list: (userId: string) => _activeCredentials(userId).pipe(Effect.map((credentials) => credentials.map((credential) => ({ backedUp: credential.backedUp, counter: credential.counter, credentialId: credential.credentialId, deviceType: credential.deviceType, id: credential.id, lastUsedAt: Option.getOrNull(credential.lastUsedAt), name: credential.name, transports: credential.transports }))), Telemetry.span('webauthn.credentials.list', { metrics: false })),
+				list: (userId: string) => _activeCredentials(userId).pipe(Effect.map((credentials) => credentials.map((credential) => ({ authenticator: credential.authenticator, counter: credential.counter, credentialId: credential.credentialId, id: credential.id, lastUsedAt: Option.getOrNull(credential.lastUsedAt), name: credential.name }))), Telemetry.span('webauthn.credentials.list', { metrics: false })),
 			},
 			registration: {
 				start: (userId: string, email: string) => Telemetry.span(Effect.gen(function* () {
 					const existingCredentials = yield* _activeCredentials(userId);
 					yield* Effect.filterOrFail(Effect.succeed(existingCredentials), (c) => c.length < _CONFIG.webauthn.maxCredentialsPerUser, () => HttpError.Conflict.of('webauthn', `Maximum ${_CONFIG.webauthn.maxCredentialsPerUser} passkeys allowed`));
-					const options = yield* Effect.tryPromise({ catch: (error) => HttpError.Internal.of('WebAuthn registration options generation failed', error), try: () => generateRegistrationOptions({ attestationType: 'none', authenticatorSelection: { residentKey: 'preferred', userVerification: 'preferred' }, excludeCredentials: existingCredentials.map((credential) => ({ id: credential.credentialId, transports: credential.transports as AuthenticatorTransportFuture[] })), rpID: rpId, rpName, userName: email }) });
+					const options = yield* Effect.tryPromise({ catch: (error) => HttpError.Internal.of('WebAuthn registration options generation failed', error), try: () => generateRegistrationOptions({ attestationType: 'none', authenticatorSelection: { residentKey: 'preferred', userVerification: 'preferred' }, excludeCredentials: existingCredentials.map((credential) => ({ id: credential.credentialId, transports: credential.authenticator.transports as AuthenticatorTransportFuture[] })), rpID: rpId, rpName, userName: email }) });
 					yield* Clock.currentTimeMillis.pipe(Effect.flatMap((now) => CacheService.kv.set(`${_CONFIG.webauthn.challengeKeyPrefix}${userId}`, { challenge: options.challenge, exp: now + Duration.toMillis(_CONFIG.webauthn.challengeTtl), userId }, _CONFIG.webauthn.challengeTtl)), Effect.mapError((error) => HttpError.Internal.of('WebAuthn challenge store failed', error)));
 					yield* audit.log('WebauthnCredential.register', { details: { existingCount: existingCredentials.length }, subjectId: userId });
 					return options;
@@ -465,7 +459,7 @@ class AuthService extends Effect.Service<AuthService>()('server/Auth', {
 					const stored = yield* CacheService.kv.get(`${_CONFIG.webauthn.challengeKeyPrefix}${userId}`, S.Struct({ challenge: S.String, exp: S.Number, userId: S.String })).pipe(Effect.mapError((error) => HttpError.Internal.of('WebAuthn challenge lookup failed', error)), Effect.flatMap(Option.match({ onNone: () => Effect.fail(HttpError.Auth.of('WebAuthn challenge expired or not found')), onSome: Effect.succeed })), Effect.flatMap((stored) => Clock.currentTimeMillis.pipe(Effect.filterOrFail((now) => stored.exp >= now, () => HttpError.Auth.of('WebAuthn challenge expired')), Effect.as(stored))));
 					const verification = yield* Effect.tryPromise({ catch: (error) => HttpError.Auth.of('WebAuthn registration verification failed', error), try: () => verifyRegistrationResponse({ expectedChallenge: stored.challenge, expectedOrigin, expectedRPID: rpId, response: response as Parameters<typeof verifyRegistrationResponse>[0]['response'] }) });
 					const registrationInfo = yield* verification.verified && verification.registrationInfo ? Effect.succeed(verification.registrationInfo) : Effect.fail(HttpError.Auth.of('WebAuthn registration verification rejected'));
-					yield* db.webauthnCredentials.insert({ backedUp: registrationInfo.credentialBackedUp, counter: registrationInfo.credential.counter, credentialId: registrationInfo.credential.id, deletedAt: Option.none(), deviceType: registrationInfo.credentialDeviceType, lastUsedAt: Option.none(), name: credentialName, publicKey: registrationInfo.credential.publicKey, transports: registrationInfo.credential.transports ?? [], updatedAt: undefined, userId }).pipe(Effect.mapError((error) => HttpError.Internal.of('WebAuthn credential store failed', error)));
+					yield* db.webauthnCredentials.insert({ authenticator: { backedUp: registrationInfo.credentialBackedUp, device: registrationInfo.credentialDeviceType, transports: registrationInfo.credential.transports ?? [] }, counter: registrationInfo.credential.counter, credentialId: registrationInfo.credential.id, deletedAt: Option.none(), lastUsedAt: Option.none(), name: credentialName, publicKey: registrationInfo.credential.publicKey, updatedAt: undefined, userId }).pipe(Effect.mapError((error) => HttpError.Internal.of('WebAuthn credential store failed', error)));
 					yield* CacheService.kv.del(`${_CONFIG.webauthn.challengeKeyPrefix}${userId}`).pipe(Effect.ignore);
 					yield* Effect.all([MetricsService.inc(metrics.mfa.enrollments, MetricsService.label({ method: 'webauthn', tenant: requestContext.tenantId }), 1), audit.log('WebauthnCredential.register', { details: { credentialId: registrationInfo.credential.id, deviceType: registrationInfo.credentialDeviceType, name: credentialName }, subjectId: userId })], { discard: true });
 					return { credentialId: registrationInfo.credential.id, verified: true as const };

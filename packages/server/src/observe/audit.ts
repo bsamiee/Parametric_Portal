@@ -23,7 +23,7 @@ class AuditService extends Effect.Service<AuditService>()('server/Audit', {
 		const metrics = yield* MetricsService;
 		yield* Effect.annotateLogsScoped({ 'service.name': 'audit' });
 		const writeDeadLetter = (entry: Record<string, unknown>, error: string, timestampMs: number, context: { readonly tenantId: string; readonly requestId: string; readonly userId: Option.Option<string> }) =>
-			database.jobDlq.insert({ appId: context.tenantId, attempts: 1, errorHistory: [{ error, timestamp: timestampMs }], errorReason: 'AuditPersistFailed', originalJobId: context.requestId, payload: entry, replayedAt: Option.none(), requestId: Option.some(context.requestId), source: 'event', type: `audit.${entry['subject']}.${entry['operation']}`, userId: context.userId }).pipe(Effect.ignore);
+			database.jobDlq.insert({ appId: context.tenantId, attempts: 1, context: Option.some({ request: context.requestId, user: Option.getOrUndefined(context.userId) }), errorReason: 'AuditPersistFailed', errors: [{ error, timestamp: timestampMs }], payload: entry, replayedAt: Option.none(), source: 'event', sourceId: context.requestId, type: `audit.${entry['subject']}.${entry['operation']}` }).pipe(Effect.ignore);
 		const log = (
 			operationName: string,
 			config?: { readonly subjectId?: string; readonly before?: unknown; readonly after?: unknown; readonly details?: unknown; readonly silent?: boolean },
@@ -42,11 +42,12 @@ class AuditService extends Effect.Service<AuditService>()('server/Audit', {
 				const userId = pipe(context.session, Option.map(Struct.get('userId')));
 				const dlqContext = { requestId: context.requestId, tenantId: context.tenantId, userId };
 				const entry = {
-					appId: context.tenantId, ipAddress: context.ipAddress,
-					newData: Option.fromNullable(config?.after),
-					oldData: pipe(Option.fromNullable(config?.before), Option.orElse(constant(Option.fromNullable(config?.details)))),
-					operation, requestId: Option.some(context.requestId), subject, subjectId,
-					userAgent: context.userAgent, userId,
+					appId: context.tenantId,
+					context: Option.some({ agent: Option.getOrUndefined(context.userAgent), ip: Option.getOrUndefined(context.ipAddress) }),
+					delta: pipe(Option.fromNullable(config?.before ?? config?.details), Option.map((old) => ({ new: config?.after, old }))),
+					operation, requestId: Option.some(context.requestId),
+					target: { id: subjectId, type: subject },
+					userId,
 				};
 				yield* Effect.all([Effect.annotateCurrentSpan('audit.operation', operation), Effect.annotateCurrentSpan('audit.subject', subject), Effect.annotateCurrentSpan('audit.subjectId', subjectId)], { discard: true });
 				yield* database.audit.log(entry).pipe(

@@ -119,8 +119,8 @@ const Client = (() => {
 			raw: (channel: string) => Stream.unwrap(Effect.map(PgClient.PgClient, (pgClient) => pgClient.listen(channel))),
 			typed: <A, I>(channel: string, schema: Sch.Schema<A, I, never>) =>
 				Stream.unwrap(Effect.map(PgClient.PgClient, (pgClient) => pgClient.listen(channel).pipe(
-					Stream.mapEffect((payload) => Sch.decode(Sch.parseJson(schema))(payload).pipe(Effect.tapError((error) => Effect.logWarning('LISTEN/NOTIFY decode failed', { channel, error: String(error) })), Effect.option)),
-					Stream.filterMap((decoded) => decoded),
+					Stream.mapEffect(F.flow(Sch.decode(Sch.parseJson(schema)), Effect.tapError((error) => Effect.logWarning('LISTEN/NOTIFY decode failed', { channel, error: String(error) })), Effect.option)),
+					Stream.filterMap(F.identity),
 				))),
 		},
 		lock: {
@@ -133,9 +133,6 @@ const Client = (() => {
 			try: (key: bigint) => sql.pipe(Effect.flatMap((db) => db<{ acquired: boolean }>`SELECT pg_try_advisory_xact_lock(${key}) AS acquired`.pipe(Effect.map(([r]) => r?.acquired ?? false)))),
 		},
 		notify: (channel: string, payload: string) => sql.pipe(Effect.flatMap((db) => db`SELECT pg_notify(${channel}, ${payload})`)),
-		statements: Effect.fn('db.listStatStatements')((limit = 100) => sql.pipe(Effect.flatMap((db) =>
-			db<{ result: unknown }>`SELECT list_stat_statements_json(${limit}) AS result`.pipe(Effect.map(([row]) => Array.isArray(row?.result) ? row.result : [])),
-		))),
 		tenant: (() => {
 			const Id = _CONFIG.tenant.id;
 			const ref = FiberRef.unsafeMake<string>(Id.unspecified);

@@ -72,7 +72,7 @@ const repo = <M extends Model.AnyNoContext, const C extends Config<M>>(model: M,
 		const pkCast = _pkCast ? sql`::${sql.literal(_pkCast)}` : sql``;
 		const softEntry = Field.pick('mark:soft', cols);
 		const expEntry = Field.pick('mark:exp', cols);
-		const _insertCols = Object.keys(cols).filter(column => column !== pkCol && !(['uuidv7', 'virtual', 'stored'] as const).some(gen => Field.isGen(column, gen)));
+		const _insertCols = Object.keys(cols).filter(column => column !== pkCol && !(['uuidv7', 'stored'] as const).some(gen => Field.isGen(column, gen)));
 		// --- SQL fragments ---------------------------------------------------
 		const $active = softEntry ? sql` AND ${sql(softEntry.col)} IS NULL` : sql``;
 		const $fresh = Option.fromNullable(expEntry).pipe(Option.match({ onNone: () => sql``, onSome: (e) => e.null ? sql` AND (${sql(e.col)} IS NULL OR ${sql(e.col)} > NOW())` : sql` AND ${sql(e.col)} > NOW()` }));
@@ -86,20 +86,22 @@ const repo = <M extends Model.AnyNoContext, const C extends Config<M>>(model: M,
 			const _withTenantContext = <A, E, R>(operation: string, effect: Effect.Effect<A, E, R>): Effect.Effect<A, E | RepoScopeError | SqlError, R> =>
 				Option.match(_scopeOpt, {
 					onNone: () => effect,
-					onSome: (scopeCol) => Effect.flatMap(Client.tenant.current, (tenantId) => Effect.flatMap(Client.tenant.inSqlContext, (inSqlContext) =>
-						_tenantScope(operation, scopeCol)(tenantId).pipe(
-							Effect.andThen(
-								tenantId === Client.tenant.Id.system || inSqlContext
-									? effect
-									: sql.withTransaction(
-										sql`SELECT set_config('app.current_tenant', ${tenantId}, true)`.pipe(
-											Effect.andThen(effect),
-											Effect.provideService(SqlClient.SqlClient, sql),
+					onSome: (scopeCol) => Effect.all([Client.tenant.current, Client.tenant.inSqlContext]).pipe(
+						Effect.flatMap(([tenantId, inSqlContext]) =>
+							_tenantScope(operation, scopeCol)(tenantId).pipe(
+								Effect.andThen(
+									tenantId === Client.tenant.Id.system || inSqlContext
+										? effect
+										: sql.withTransaction(
+											sql`SELECT set_config('app.current_tenant', ${tenantId}, true)`.pipe(
+												Effect.andThen(effect),
+												Effect.provideService(SqlClient.SqlClient, sql),
+											),
 										),
-									),
+								),
 							),
 						),
-					)),
+					),
 				});
 			const _autoScope = (operation: string): Effect.Effect<Statement.Fragment, RepoScopeError> => Option.match(_scopeOpt, { onNone: () => Effect.succeed(sql``), onSome: (scopeCol) => Effect.andThen(Client.tenant.current, _tenantScope(operation, scopeCol)) });
 		type OpCtx = { col: Statement.Fragment; value: unknown; values: unknown[]; $cast: SqlCast | undefined };
@@ -161,14 +163,14 @@ const repo = <M extends Model.AnyNoContext, const C extends Config<M>>(model: M,
 				R.reduce(filter, [] as Pred[], (acc, value, key) => {
 					const empty = value === undefined || (Array.isArray(value) && !(value as unknown[]).length);
 					const isTemporal = key === 'after' || key === 'before';
-					const tsOp = _uuidv7Col && isTemporal ? _tsOps[key as keyof typeof _tsOps] : undefined;
+					const tsOp = _uuidv7Col && isTemporal ? _tsOps[key] : undefined;
 					const pred = (tsOp && { field: _uuidv7Col, op: tsOp, value })
 						|| (Array.isArray(value) && { field: key, op: 'in' as const, values: value as unknown[] })
 						|| { field: key, value };
 					return ({
 						false: !isTemporal || tsOp ? [...acc, pred as Pred] : acc,
 						true: acc,
-					})[`${empty}`] as Pred[];
+				})[`${empty}`];
 				});
 			const $entry = (column: string, value: unknown): Statement.Fragment => {
 				const col = sql(column);
