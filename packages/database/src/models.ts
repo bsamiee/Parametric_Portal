@@ -13,53 +13,42 @@ import { Schema as S } from 'effect';
 const RoleSchema = 		S.Literal('owner', 'admin', 'member', 'viewer', 'guest');
 const OAuthProviderSchema = S.Literal('apple', 'github', 'google', 'microsoft');
 const JobStatusSchema = S.Literal('queued', 'processing', 'complete', 'failed', 'cancelled');
+const AuditOperationSchema = S.Literal(
+	'create', 'update', 'delete', 'read', 'list', 'status',
+	'login', 'refresh', 'revoke', 'revokeByIp',
+	'verify', 'verifyMfa', 'register', 'enroll', 'disable',
+	'sign', 'upload', 'stream_upload', 'copy', 'remove', 'abort_multipart',
+	'export', 'import', 'validate',
+	'cancel', 'replay',
+	'auth_failure', 'permission_denied',
+	'purge-sessions', 'purge-api-keys', 'purge-assets', 'purge-event-journal',
+	'purge-job-dlq', 'purge-kv-store', 'purge-mfa-secrets', 'purge-oauth-accounts',
+);
 const NotificationPreferencesSchema = S.Struct({
 	channels: 	S.Struct({email: S.Boolean, inApp: S.Boolean, webhook: S.Boolean,}),
 	mutedUntil: S.NullOr(S.String),
 	templates: 	S.Record({key: S.String, value: S.Struct({email: S.optional(S.Boolean), inApp: S.optional(S.Boolean), webhook: S.optional(S.Boolean),}),}),
 });
-const FeatureFlagsDefaults = {
-	enableAiSearch: false,
-	enableApiKeys: true,
-	enableAuditLog: true,
-	enableExport: false,
-	enableMfa: false,
-	enableNotifications: true,
-	enableOAuth: false,
-	enableRealtime: true,
-	enableWebhooks: false,
-} as const;
 const FeatureFlagsSchema = S.Struct({
-	enableAiSearch: 		S.optionalWith(S.Boolean, { default: () => FeatureFlagsDefaults.enableAiSearch }),
-	enableApiKeys: 			S.optionalWith(S.Boolean, { default: () => FeatureFlagsDefaults.enableApiKeys }),
-	enableAuditLog: 		S.optionalWith(S.Boolean, { default: () => FeatureFlagsDefaults.enableAuditLog }),
-	enableExport: 			S.optionalWith(S.Boolean, { default: () => FeatureFlagsDefaults.enableExport }),
-	enableMfa: 				S.optionalWith(S.Boolean, { default: () => FeatureFlagsDefaults.enableMfa }),
-	enableNotifications: 	S.optionalWith(S.Boolean, { default: () => FeatureFlagsDefaults.enableNotifications }),
-	enableOAuth: 			S.optionalWith(S.Boolean, { default: () => FeatureFlagsDefaults.enableOAuth }),
-	enableRealtime: 		S.optionalWith(S.Boolean, { default: () => FeatureFlagsDefaults.enableRealtime }),
-	enableWebhooks: 		S.optionalWith(S.Boolean, { default: () => FeatureFlagsDefaults.enableWebhooks }),
+	enableAiSearch: 		S.optionalWith(S.Boolean, { default: () => false }),
+	enableApiKeys: 			S.optionalWith(S.Boolean, { default: () => true }),
+	enableAuditLog: 		S.optionalWith(S.Boolean, { default: () => true }),
+	enableExport: 			S.optionalWith(S.Boolean, { default: () => false }),
+	enableMfa: 				S.optionalWith(S.Boolean, { default: () => false }),
+	enableNotifications: 	S.optionalWith(S.Boolean, { default: () => true }),
+	enableOAuth: 			S.optionalWith(S.Boolean, { default: () => false }),
+	enableRealtime: 		S.optionalWith(S.Boolean, { default: () => true }),
+	enableWebhooks: 		S.optionalWith(S.Boolean, { default: () => false }),
 });
-const OAuthProviderConfigSchema = S.Struct({
+const OAuthProviderFields = {
 	clientId: S.NonEmptyTrimmedString,
-	clientSecret: S.NonEmptyTrimmedString,
 	enabled: S.Boolean,
 	keyId: S.optional(S.NonEmptyTrimmedString),
 	provider: OAuthProviderSchema,
 	scopes: S.optional(S.Array(S.String)),
 	teamId: S.optional(S.NonEmptyTrimmedString),
 	tenant: S.optional(S.NonEmptyTrimmedString),
-});
-const OAuthProviderStoredSchema = S.Struct({
-	clientId: S.NonEmptyTrimmedString,
-	clientSecretEncrypted: S.NonEmptyTrimmedString,
-	enabled: S.Boolean,
-	keyId: S.optional(S.NonEmptyTrimmedString),
-	provider: OAuthProviderSchema,
-	scopes: S.optional(S.Array(S.String)),
-	teamId: S.optional(S.NonEmptyTrimmedString),
-	tenant: S.optional(S.NonEmptyTrimmedString),
-});
+};
 const AppWebhookSchema = S.Struct({
 	active: S.Boolean,
 	endpoint: S.Struct({
@@ -70,15 +59,11 @@ const AppWebhookSchema = S.Struct({
 	eventTypes: S.Array(S.String),
 });
 const AppSettingsSchema = S.Struct({
-	featureFlags: S.optionalWith(FeatureFlagsSchema, { default: () => ({ ...FeatureFlagsDefaults }) }),
-	oauthProviders: S.optionalWith(S.Array(OAuthProviderStoredSchema), { default: () => [] }),
+	featureFlags: S.optionalWith(FeatureFlagsSchema, { default: () => S.decodeSync(FeatureFlagsSchema)({}) }),
+	oauthProviders: S.optionalWith(S.Array(S.Struct({ ...OAuthProviderFields, clientSecretEncrypted: S.String })), { default: () => [] }),
 	webhooks: S.optionalWith(S.Array(AppWebhookSchema), { default: () => [] }),
 });
-const AppSettingsDefaults = {
-	featureFlags: { ...FeatureFlagsDefaults },
-	oauthProviders: [],
-	webhooks: [],
-} as const satisfies S.Schema.Type<typeof AppSettingsSchema>;
+const AppSettingsDefaults = S.decodeSync(AppSettingsSchema)({});
 
 // --- [AUTH: USER] ------------------------------------------------------------
 class User extends Model.Class<User>('User')({
@@ -125,7 +110,7 @@ class Session extends Model.Class<Session>('Session')({
 class OauthAccount extends Model.Class<OauthAccount>('OauthAccount')({
 	id: Model.Generated(S.UUID),
 	userId: S.UUID,
-	provider: S.String,
+	provider: OAuthProviderSchema,
 	externalId: S.String,
 	expiresAt: Model.FieldOption(S.DateFromSelf),
 	scope: Model.FieldOption(S.String),
@@ -209,7 +194,7 @@ class AuditLog extends Model.Class<AuditLog>('AuditLog')({
 	appId: S.UUID,
 	userId: Model.FieldOption(S.UUID),
 	requestId: Model.FieldOption(S.UUID),
-	operation: S.String,
+	operation: AuditOperationSchema,
 	subject: S.String,
 	subjectId: S.UUID,
 	oldData: Model.FieldOption(S.Unknown),
@@ -298,7 +283,7 @@ class KvStore extends Model.Class<KvStore>('KvStore')({
 
 export {
 	ApiKey, App, Asset, AuditLog, Job, JobDlq, JobStatusSchema, KvStore, MfaSecret, Notification,
-	AppSettingsDefaults, AppSettingsSchema, AppWebhookSchema, FeatureFlagsDefaults, FeatureFlagsSchema,
-	NotificationPreferencesSchema, OAuthProviderConfigSchema, OAuthProviderSchema, OAuthProviderStoredSchema,
+	AppSettingsDefaults, AppSettingsSchema, AppWebhookSchema, FeatureFlagsSchema,
+	AuditOperationSchema, NotificationPreferencesSchema, OAuthProviderFields, OAuthProviderSchema,
 	OauthAccount, Permission, RoleSchema, Session, User, WebauthnCredential,
 };

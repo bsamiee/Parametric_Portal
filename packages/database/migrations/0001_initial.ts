@@ -1,26 +1,26 @@
 /**
- * PG18.1 + EXTENSIONS LEVERAGED (Release date: 2025-11-13):
+ * PostgreSQL 18.1 aligned features and extensions (18.1 released 2025-11-13):
  * ┌───────────────────────────────────────────────────────────────────────────────┐
  * │ uuidv7()              │ NATIVE time-ordered IDs (no extension, k-sortable)    │
  * │ uuid_extract_timestamp│ Extract creation time from UUIDv7 (NO created_at)     │
  * │ RETURNING OLD/NEW     │ Capture before/after values in single DML statement   │
- * │ btree_gist            │ GiST for scalars — required for WITHOUT OVERLAPS      │
  * │ NULLS NOT DISTINCT    │ Proper NULL handling in unique constraints            │
  * │ Covering (INCLUDE)    │ Index-only scans eliminate heap fetches               │
  * │ BRIN indexes          │ Ultra-compact for time-range scans on audit logs      │
  * │ Parallel GIN          │ Concurrent JSONB index builds                         │
  * │ B-tree skip scan      │ Multi-column indexes usable when leading cols omitted │
  * │ Partial indexes       │ Only index active/non-deleted records                 │
- * │ STORED generated      │ Precomputed columns (assets.size only — others VIRTUAL│
- * │ VIRTUAL generated     │ Computed on read (prefix columns)                     │
+ * │ STORED generated      │ Precomputed columns for search hash/vector + asset size│
+ * │ VIRTUAL generated     │ Computed on read for lightweight derived counters      │
  * │ Immutability          │ DB-enforced append-only audit_logs via trigger        │
  * └───────────────────────────────────────────────────────────────────────────────┘
  * EXTENSIONS + COLLATION REQUIRED (CREATE EXTENSION IF NOT EXISTS):
  * - ICU case-insensitive collation (TEXT + nondeterministic ICU collation for apps.namespace, users.email)
- * - btree_gist (GiST index support for scalar types — temporal constraints)
  * - pg_trgm (trigram similarity for fuzzy search)
+ * - btree_gin (multi-column GIN with scalar + trigram operator classes)
  * - fuzzystrmatch (levenshtein/soundex fuzzy matchers)
  * - unaccent (diacritic normalization for FTS/similarity)
+ * - pgcrypto (cryptographic digest for deterministic SHA-256 document hashes)
  * - vector (pgvector 0.8+ embeddings + HNSW with iterative scan)
  * - pg_stat_statements (SQL stats; requires shared_preload_libraries)
  * - pgaudit (compliance audit logging for SOC2/HIPAA/PCI-DSS)
@@ -73,10 +73,11 @@ import { Effect } from 'effect';
 export default Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
     // ═══════════════════════════════════════════════════════════════════════════
-    // EXTENSIONS: btree_gist + pg_trgm + fuzzystrmatch + unaccent + vector + pg_stat_statements + pgaudit
+    // EXTENSIONS: pgcrypto + pg_trgm + btree_gin + fuzzystrmatch + unaccent + vector + pg_stat_statements + pgaudit
     // ═══════════════════════════════════════════════════════════════════════════
-    yield* sql`CREATE EXTENSION IF NOT EXISTS btree_gist`;
+    yield* sql`CREATE EXTENSION IF NOT EXISTS pgcrypto`;
     yield* sql`CREATE EXTENSION IF NOT EXISTS pg_trgm`;
+    yield* sql`CREATE EXTENSION IF NOT EXISTS btree_gin`;
     yield* sql`CREATE EXTENSION IF NOT EXISTS fuzzystrmatch`;
     yield* sql`CREATE EXTENSION IF NOT EXISTS unaccent`;
     yield* sql`CREATE EXTENSION IF NOT EXISTS vector`;
@@ -86,7 +87,7 @@ export default Effect.gen(function* () {
 	            CREATE EXTENSION IF NOT EXISTS pg_stat_statements;
 	        EXCEPTION
 	            WHEN OTHERS THEN
-	                RAISE WARNING 'pg_stat_statements unavailable: %', SQLERRM;
+                        RAISE WARNING 'pg_stat_statements unavailable (extension install only; shared_preload_libraries and compute_query_id must also be configured): %', SQLERRM;
 	        END;
 	        $$;
 	    `);
@@ -96,12 +97,13 @@ export default Effect.gen(function* () {
 	            CREATE EXTENSION IF NOT EXISTS pgaudit;
 	        EXCEPTION
 	            WHEN OTHERS THEN
-	                RAISE WARNING 'pgaudit unavailable: %', SQLERRM;
+                        RAISE WARNING 'pgaudit unavailable (extension install only; shared_preload_libraries must include pgaudit): %', SQLERRM;
 	        END;
 	        $$;
 	    `);
-    yield* sql`COMMENT ON EXTENSION btree_gist IS 'btree_gist: GiST support for scalar types — required for temporal constraints (WITHOUT OVERLAPS)'`;
+    yield* sql`COMMENT ON EXTENSION pgcrypto IS 'pgcrypto: SHA-256 digest support for generated document hashes and integrity checks'`;
     yield* sql`COMMENT ON EXTENSION pg_trgm IS 'pg_trgm: trigram similarity for fuzzy search'`;
+    yield* sql`COMMENT ON EXTENSION btree_gin IS 'btree_gin: scalar operator classes for multi-column GIN indexes with pg_trgm'`;
     yield* sql`COMMENT ON EXTENSION fuzzystrmatch IS 'fuzzystrmatch: levenshtein/soundex matchers for fuzzy search'`;
     yield* sql`COMMENT ON EXTENSION unaccent IS 'unaccent: Unicode diacritic normalization for search'`;
     yield* sql`COMMENT ON EXTENSION vector IS 'pgvector 0.8+: vector similarity search with HNSW iterative scan support'`;
@@ -109,7 +111,7 @@ export default Effect.gen(function* () {
 	        DO $$
 	        BEGIN
 	            IF EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'pg_stat_statements') THEN
-	                COMMENT ON EXTENSION pg_stat_statements IS 'pg_stat_statements: SQL statement performance statistics';
+                COMMENT ON EXTENSION pg_stat_statements IS 'pg_stat_statements: SQL statement performance statistics (requires shared_preload_libraries + compute_query_id)';
 	            END IF;
 	        END;
 	        $$;
@@ -118,7 +120,7 @@ export default Effect.gen(function* () {
 	        DO $$
 	        BEGIN
 	            IF EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'pgaudit') THEN
-	                COMMENT ON EXTENSION pgaudit IS 'pgaudit: compliance audit logging for SOC2/HIPAA/PCI-DSS';
+                COMMENT ON EXTENSION pgaudit IS 'pgaudit: compliance audit logging for SOC2/HIPAA/PCI-DSS (requires shared_preload_libraries)';
 	            END IF;
 	        END;
 	        $$;
@@ -177,10 +179,10 @@ export default Effect.gen(function* () {
         SECURITY DEFINER
         SET search_path TO public
         AS $$
-            SELECT current_setting('app.current_tenant', true)::uuid
+            SELECT NULLIF(current_setting('app.current_tenant', true), '')::uuid
         $$
     `;
-    yield* sql`COMMENT ON FUNCTION get_current_tenant_id() IS 'Returns current tenant ID from app.current_tenant GUC. Used by RLS policies with caching via STABLE.'`;
+    yield* sql`COMMENT ON FUNCTION get_current_tenant_id() IS 'Returns current tenant ID from app.current_tenant GUC with null-safe default-deny semantics. Used by RLS policies with STABLE caching.'`;
     yield* sql`
         CREATE OR REPLACE FUNCTION get_tenant_user_ids()
         RETURNS SETOF uuid
@@ -244,7 +246,9 @@ export default Effect.gen(function* () {
             updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
             role_order INTEGER GENERATED ALWAYS AS (
                 CASE role WHEN 'owner' THEN 4 WHEN 'admin' THEN 3 WHEN 'member' THEN 2 WHEN 'viewer' THEN 1 WHEN 'guest' THEN 0 ELSE -1 END
-            ) VIRTUAL
+            ) VIRTUAL,
+            CONSTRAINT users_role_valid CHECK (role IN ('owner', 'admin', 'member', 'viewer', 'guest')),
+            CONSTRAINT users_status_valid CHECK (status IN ('active', 'inactive', 'suspended'))
         )
     `;
     yield* sql`COMMENT ON TABLE users IS 'User accounts — NEVER hard-delete; use uuid_extract_timestamp(id) for creation time'`;
@@ -359,7 +363,8 @@ export default Effect.gen(function* () {
             deleted_at TIMESTAMPTZ,
             scope TEXT,
             updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-            CONSTRAINT oauth_provider_external_unique UNIQUE NULLS NOT DISTINCT (provider, external_id)
+            CONSTRAINT oauth_provider_external_unique UNIQUE NULLS NOT DISTINCT (provider, external_id),
+            CONSTRAINT oauth_provider_valid CHECK (provider IN ('apple', 'github', 'google', 'microsoft'))
         )
     `;
     yield* sql`COMMENT ON TABLE oauth_accounts IS 'Federated identity linking — use uuid_extract_timestamp(id) for creation time'`;
@@ -387,6 +392,7 @@ export default Effect.gen(function* () {
             updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
             size INTEGER GENERATED ALWAYS AS (octet_length(content)) STORED,
             CONSTRAINT assets_content_max_size CHECK (octet_length(content) <= 1048576),
+            CONSTRAINT assets_status_valid CHECK (status IN ('active', 'processing', 'failed', 'deleted')),
             CONSTRAINT assets_hash_format CHECK (hash IS NULL OR hash ~* '^[0-9a-f]{64}$')
         )
     `;
@@ -450,34 +456,6 @@ export default Effect.gen(function* () {
     yield* sql`CREATE INDEX idx_audit_app_id_fk ON audit_logs(app_id)`;
     yield* sql`CREATE INDEX idx_audit_user_id_fk ON audit_logs(user_id)`;
     yield* sql`CREATE TRIGGER audit_logs_immutable BEFORE UPDATE OR DELETE ON audit_logs FOR EACH ROW EXECUTE FUNCTION reject_modification()`;
-    // ═══════════════════════════════════════════════════════════════════════════
-    // AUDIT HELPER: PG18.1 function to log with RETURNING OLD/NEW data
-    // ═══════════════════════════════════════════════════════════════════════════
-    yield* sql.unsafe(String.raw`
-        CREATE OR REPLACE FUNCTION audit_log_entry(
-            p_app_id UUID,
-            p_user_id UUID,
-            p_request_id UUID,
-            p_operation TEXT,
-            p_subject TEXT,
-            p_subject_id UUID,
-            p_old_data JSONB DEFAULT NULL,
-            p_new_data JSONB DEFAULT NULL,
-            p_ip_address INET DEFAULT NULL,
-            p_user_agent TEXT DEFAULT NULL
-        )
-        RETURNS UUID
-        LANGUAGE sql
-        AS $$
-            INSERT INTO audit_logs (app_id, user_id, request_id, operation, subject, subject_id, old_data, new_data, ip_address, user_agent)
-            VALUES (p_app_id, p_user_id, p_request_id, p_operation, p_subject, p_subject_id,
-                    jsonb_strip_nulls(p_old_data, true),
-                    jsonb_strip_nulls(p_new_data, true),
-                    p_ip_address, p_user_agent)
-            RETURNING id
-        $$
-    `);
-    yield* sql`COMMENT ON FUNCTION audit_log_entry IS 'Insert audit entry with PG18.1 jsonb_strip_nulls(,true) to remove null values AND null array elements'`;
     // ═══════════════════════════════════════════════════════════════════════════
     // MFA_SECRETS: TOTP secrets with backup codes
     // ═══════════════════════════════════════════════════════════════════════════
@@ -555,8 +533,8 @@ export default Effect.gen(function* () {
             completed_at TIMESTAMPTZ,
             updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
             CONSTRAINT jobs_type_not_empty CHECK (length(trim(type)) > 0),
-            CONSTRAINT jobs_status_not_empty CHECK (length(trim(status)) > 0),
-            CONSTRAINT jobs_priority_not_empty CHECK (length(trim(priority)) > 0),
+            CONSTRAINT jobs_status_valid CHECK (status IN ('queued', 'processing', 'complete', 'failed', 'cancelled')),
+            CONSTRAINT jobs_priority_valid CHECK (priority IN ('critical', 'high', 'normal', 'low')),
             CONSTRAINT jobs_attempts_non_negative CHECK (attempts >= 0),
             CONSTRAINT jobs_max_attempts_positive CHECK (max_attempts > 0),
             CONSTRAINT jobs_history_array CHECK (jsonb_typeof(history) = 'array')
@@ -572,17 +550,6 @@ export default Effect.gen(function* () {
     yield* sql`CREATE INDEX idx_jobs_batch ON jobs(batch_id) WHERE batch_id IS NOT NULL`;
     yield* sql`CREATE INDEX idx_jobs_app_id_fk ON jobs(app_id)`;
     yield* sql`CREATE TRIGGER jobs_updated_at BEFORE UPDATE ON jobs FOR EACH ROW EXECUTE FUNCTION set_updated_at()`;
-    yield* sql`
-        CREATE OR REPLACE FUNCTION count_jobs_by_status()
-        RETURNS JSONB
-        LANGUAGE sql
-        STABLE
-        AS $$
-            SELECT COALESCE(jsonb_object_agg(status, cnt), '{}'::jsonb)
-            FROM (SELECT status, COUNT(*)::int AS cnt FROM jobs GROUP BY status) sub
-        $$
-    `;
-    yield* sql`COMMENT ON FUNCTION count_jobs_by_status() IS 'Aggregate job counts per status as JSONB object — e.g. {"queued":5,"processing":2}'`;
     // ═══════════════════════════════════════════════════════════════════════════
     // NOTIFICATIONS: Durable channel delivery ledger (email/webhook/in-app)
     // ═══════════════════════════════════════════════════════════════════════════
@@ -853,6 +820,39 @@ export default Effect.gen(function* () {
         $$;
         COMMENT ON FUNCTION count_event_outbox IS 'Count pending event remotes for outbox-depth monitoring';
 
+        CREATE OR REPLACE FUNCTION get_event_journal_entry_by_primary_key(p_primary_key TEXT)
+        RETURNS TABLE(payload TEXT)
+        LANGUAGE sql
+        STABLE
+        AS $$
+            SELECT convert_from(effect_event_journal.payload, 'UTF8') AS payload
+            FROM effect_event_journal
+            WHERE effect_event_journal.primary_key = p_primary_key
+            LIMIT 1
+        $$;
+        COMMENT ON FUNCTION get_event_journal_entry_by_primary_key IS 'Fetch one event journal payload by primary_key for LISTEN/NOTIFY bridge hydration';
+
+        CREATE OR REPLACE FUNCTION list_event_journal_entries(
+            p_since_sequence_id TEXT DEFAULT '0',
+            p_since_timestamp BIGINT DEFAULT NULL,
+            p_event_type TEXT DEFAULT NULL,
+            p_limit INT DEFAULT 500
+        )
+        RETURNS TABLE(payload TEXT, primary_key TEXT)
+        LANGUAGE sql
+        STABLE
+        AS $$
+            SELECT convert_from(effect_event_journal.payload, 'UTF8') AS payload, effect_event_journal.primary_key
+            FROM effect_event_journal
+            WHERE effect_event_journal.primary_key ~ '^[0-9]+$'
+              AND effect_event_journal.primary_key::numeric > p_since_sequence_id::numeric
+              AND (p_since_timestamp IS NULL OR effect_event_journal.timestamp >= p_since_timestamp)
+              AND (p_event_type IS NULL OR effect_event_journal.event = p_event_type)
+            ORDER BY effect_event_journal.primary_key::numeric ASC
+            LIMIT LEAST(GREATEST(COALESCE(p_limit, 500), 1), 5000)
+        $$;
+        COMMENT ON FUNCTION list_event_journal_entries IS 'Replay event journal in sequence order with optional timestamp/event filters and bounded limit';
+
         CREATE OR REPLACE FUNCTION get_db_io_config()
         RETURNS TABLE(name TEXT, setting TEXT)
         LANGUAGE sql
@@ -869,9 +869,9 @@ export default Effect.gen(function* () {
             backend_type TEXT,
             io_object TEXT,
             io_context TEXT,
-            hits BIGINT,
-            reads BIGINT,
-            writes BIGINT,
+            hits DOUBLE PRECISION,
+            reads DOUBLE PRECISION,
+            writes DOUBLE PRECISION,
             cache_hit_ratio DOUBLE PRECISION
         )
         LANGUAGE sql
@@ -960,71 +960,25 @@ export default Effect.gen(function* () {
     `;
     yield* sql`COMMENT ON FUNCTION delete_kv_by_prefix IS 'Hard-delete kv_store entries by key prefix pattern'`;
     // ═══════════════════════════════════════════════════════════════════════════
-    // JSON UTILITIES: JSONB diff extraction for audit display
-    // ═══════════════════════════════════════════════════════════════════════════
-    yield* sql.unsafe(String.raw`
-        CREATE OR REPLACE FUNCTION extract_audit_changes(
-            p_old_data JSONB,
-            p_new_data JSONB
-        )
-        RETURNS TABLE(
-            field_name TEXT,
-            old_value TEXT,
-            new_value TEXT,
-            change_type TEXT
-        )
-        LANGUAGE sql
-        STABLE
-        AS $$
-            SELECT
-                COALESCE(o.key, n.key) AS field_name,
-                o.value::text AS old_value,
-                n.value::text AS new_value,
-                CASE
-                    WHEN o.key IS NULL THEN 'added'
-                    WHEN n.key IS NULL THEN 'removed'
-                    WHEN o.value IS DISTINCT FROM n.value THEN 'modified'
-                    ELSE 'unchanged'
-                END AS change_type
-            FROM jsonb_each(COALESCE(p_old_data, '{}'::jsonb)) o
-            FULL OUTER JOIN jsonb_each(COALESCE(p_new_data, '{}'::jsonb)) n
-                ON o.key = n.key
-            WHERE o.value IS DISTINCT FROM n.value
-        $$
-    `);
-    yield* sql`COMMENT ON FUNCTION extract_audit_changes IS 'PG18.1: Extract field-level changes between old/new JSONB for audit diff display. Uses jsonb_each (40x faster than JSON_TABLE for flat structures).'`;
-    // ═══════════════════════════════════════════════════════════════════════════
     // IP-BASED FUNCTIONS: Abuse detection and session management
     // ═══════════════════════════════════════════════════════════════════════════
     yield* sql`
-        CREATE OR REPLACE FUNCTION count_sessions_by_ip(p_ip INET, p_window_minutes INT DEFAULT 60)
-        RETURNS INT
-        LANGUAGE sql
-        STABLE
-        AS $$
-            SELECT COUNT(*)::int
-            FROM sessions
-            WHERE ip_address = p_ip
-              AND deleted_at IS NULL
-              AND uuid_extract_timestamp(id) > NOW() - (p_window_minutes || ' minutes')::interval
-        $$
-    `;
-    yield* sql`COMMENT ON FUNCTION count_sessions_by_ip IS 'Count active sessions from IP in time window (rate limiting)'`;
-    yield* sql`
-        CREATE OR REPLACE FUNCTION revoke_sessions_by_ip(p_ip INET)
+        CREATE OR REPLACE FUNCTION revoke_sessions_by_ip(p_app_id UUID, p_ip INET)
         RETURNS INT
         LANGUAGE sql
         AS $$
             WITH revoked AS (
                 UPDATE sessions
-                SET deleted_at = NOW()
-                WHERE ip_address = p_ip AND deleted_at IS NULL
+                SET deleted_at = NOW(), updated_at = NOW()
+                WHERE app_id = p_app_id
+                  AND ip_address = p_ip
+                  AND deleted_at IS NULL
                 RETURNING id
             )
             SELECT COUNT(*)::int FROM revoked
         $$
     `;
-    yield* sql`COMMENT ON FUNCTION revoke_sessions_by_ip IS 'Soft-delete all sessions from IP (abuse response)'`;
+    yield* sql`COMMENT ON FUNCTION revoke_sessions_by_ip IS 'Tenant-safe session revocation by IP: soft-deletes only current app rows and updates updated_at.'`;
     yield* sql`
         CREATE OR REPLACE FUNCTION count_audit_by_ip(p_app_id UUID, p_ip INET, p_window_minutes INT DEFAULT 60)
         RETURNS INT
@@ -1043,6 +997,30 @@ export default Effect.gen(function* () {
     // SEARCH: Hybrid FTS + trigram + embeddings + fuzzystrmatch
     // pgvector 0.8+: Enable hnsw.iterative_scan = 'relaxed_order' for filtered queries
     // ═══════════════════════════════════════════════════════════════════════════
+    yield* sql.unsafe(String.raw`
+        CREATE OR REPLACE FUNCTION normalize_search_text(
+            p_display_text text,
+            p_content_text text DEFAULT NULL,
+            p_metadata jsonb DEFAULT NULL
+        )
+        RETURNS text
+        LANGUAGE sql
+        STABLE
+        PARALLEL SAFE
+        AS $$
+            SELECT trim(regexp_replace(
+                casefold(unaccent(concat_ws(' ',
+                    coalesce(p_display_text, ''),
+                    coalesce(p_content_text, ''),
+                    coalesce(p_metadata::text, '')
+                ))),
+                '\s+',
+                ' ',
+                'g'
+            ))
+        $$
+    `);
+    yield* sql`COMMENT ON FUNCTION normalize_search_text(text, text, jsonb) IS 'Canonical search text normalizer used by index write paths and query-side matching'`;
     yield* sql`CREATE TEXT SEARCH CONFIGURATION parametric_search (COPY = english)`;
     yield* sql`
         ALTER TEXT SEARCH CONFIGURATION parametric_search
@@ -1059,9 +1037,10 @@ export default Effect.gen(function* () {
             display_text TEXT NOT NULL,
             content_text TEXT,
             metadata JSONB,
+            normalized_text TEXT NOT NULL,
             updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
             document_hash TEXT GENERATED ALWAYS AS (
-                md5(coalesce(display_text, '') || ' ' || coalesce(content_text, '') || ' ' || coalesce(metadata::text, ''))
+                encode(digest(coalesce(display_text, '') || ' ' || coalesce(content_text, '') || ' ' || coalesce(metadata::text, ''), 'sha256'), 'hex')
             ) STORED,
             search_vector TSVECTOR GENERATED ALWAYS AS (
                 setweight(to_tsvector('parametric_search', coalesce(display_text, '')), 'A') ||
@@ -1072,6 +1051,7 @@ export default Effect.gen(function* () {
         )
     `;
     yield* sql`COMMENT ON TABLE search_documents IS 'Unified search index — use entity_id (UUIDv7) for creation time via uuid_extract_timestamp()'`;
+    yield* sql`COMMENT ON COLUMN search_documents.normalized_text IS 'Canonical term-matching text built via normalize_search_text() for trigram/fuzzy ranking'`;
     yield* sql`
         CREATE TABLE search_embeddings (
             entity_type TEXT NOT NULL,
@@ -1091,7 +1071,7 @@ export default Effect.gen(function* () {
     yield* sql`COMMENT ON COLUMN search_embeddings.embedding IS 'Max-dimension vectors (3072); actual dimensions stored in dimensions, model in model'`;
     yield* sql`CREATE INDEX idx_search_documents_vector ON search_documents USING GIN (search_vector)`;
     yield* sql`CREATE INDEX idx_search_documents_scope ON search_documents (scope_id, entity_type)`;
-    yield* sql`CREATE INDEX idx_search_documents_trgm ON search_documents USING GIN (display_text gin_trgm_ops)`;
+    yield* sql`CREATE INDEX idx_search_documents_scope_entity_trgm ON search_documents USING GIN (scope_id uuid_ops, entity_type text_ops, normalized_text gin_trgm_ops)`;
     yield* sql`CREATE INDEX idx_search_embeddings_scope ON search_embeddings (scope_id, entity_type, model, dimensions)`;
     yield* sql`CREATE INDEX idx_search_embeddings_embedding ON search_embeddings USING hnsw (embedding vector_cosine_ops) WITH (m = 16, ef_construction = 64)`;
     yield* sql`CREATE TRIGGER search_documents_updated_at BEFORE UPDATE ON search_documents FOR EACH ROW EXECUTE FUNCTION set_updated_at()`;
@@ -1100,19 +1080,21 @@ export default Effect.gen(function* () {
         CREATE OR REPLACE FUNCTION upsert_search_document_app()
         RETURNS TRIGGER AS $$
         BEGIN
-            INSERT INTO search_documents (entity_type, entity_id, scope_id, display_text, content_text, metadata)
+            INSERT INTO search_documents (entity_type, entity_id, scope_id, display_text, content_text, metadata, normalized_text)
             VALUES (
                 'app',
                 NEW.id,
                 NULL,
                 NEW.name,
                 NEW.namespace,
-                jsonb_build_object('name', NEW.name, 'namespace', NEW.namespace)
+                jsonb_build_object('name', NEW.name, 'namespace', NEW.namespace),
+                normalize_search_text(NEW.name, NEW.namespace, jsonb_build_object('name', NEW.name, 'namespace', NEW.namespace))
             )
             ON CONFLICT (entity_type, entity_id) DO UPDATE SET
                 display_text = EXCLUDED.display_text,
                 content_text = EXCLUDED.content_text,
-                metadata = EXCLUDED.metadata;
+                metadata = EXCLUDED.metadata,
+                normalized_text = EXCLUDED.normalized_text;
             RETURN NEW;
         END;
         $$ LANGUAGE plpgsql
@@ -1121,20 +1103,22 @@ export default Effect.gen(function* () {
         CREATE OR REPLACE FUNCTION upsert_search_document_user()
         RETURNS TRIGGER AS $$
         BEGIN
-            INSERT INTO search_documents (entity_type, entity_id, scope_id, display_text, content_text, metadata)
+            INSERT INTO search_documents (entity_type, entity_id, scope_id, display_text, content_text, metadata, normalized_text)
             VALUES (
                 'user',
                 NEW.id,
                 NEW.app_id,
                 NEW.email,
                 NEW.role::text,
-                jsonb_build_object('email', NEW.email, 'role', NEW.role)
+                jsonb_build_object('email', NEW.email, 'role', NEW.role),
+                normalize_search_text(NEW.email, NEW.role::text, jsonb_build_object('email', NEW.email, 'role', NEW.role))
             )
             ON CONFLICT (entity_type, entity_id) DO UPDATE SET
                 scope_id = EXCLUDED.scope_id,
                 display_text = EXCLUDED.display_text,
                 content_text = EXCLUDED.content_text,
-                metadata = EXCLUDED.metadata;
+                metadata = EXCLUDED.metadata,
+                normalized_text = EXCLUDED.normalized_text;
             RETURN NEW;
         END;
         $$ LANGUAGE plpgsql
@@ -1152,20 +1136,26 @@ export default Effect.gen(function* () {
         CREATE OR REPLACE FUNCTION upsert_search_document_asset()
         RETURNS TRIGGER AS $$
         BEGIN
-            INSERT INTO search_documents (entity_type, entity_id, scope_id, display_text, content_text, metadata)
+            INSERT INTO search_documents (entity_type, entity_id, scope_id, display_text, content_text, metadata, normalized_text)
             VALUES (
                 'asset',
                 NEW.id,
                 NEW.app_id,
                 COALESCE(NEW.name, NEW.type),
                 NEW.content,
-                jsonb_strip_nulls(jsonb_build_object('type', NEW.type, 'size', NEW.size, 'name', NEW.name, 'hash', NEW.hash), true)
+                jsonb_strip_nulls(jsonb_build_object('type', NEW.type, 'size', NEW.size, 'name', NEW.name, 'hash', NEW.hash), true),
+                normalize_search_text(
+                    COALESCE(NEW.name, NEW.type),
+                    NEW.content,
+                    jsonb_strip_nulls(jsonb_build_object('type', NEW.type, 'size', NEW.size, 'name', NEW.name, 'hash', NEW.hash), true)
+                )
             )
             ON CONFLICT (entity_type, entity_id) DO UPDATE SET
                 scope_id = EXCLUDED.scope_id,
                 display_text = EXCLUDED.display_text,
                 content_text = EXCLUDED.content_text,
-                metadata = EXCLUDED.metadata;
+                metadata = EXCLUDED.metadata,
+                normalized_text = EXCLUDED.normalized_text;
             RETURN NEW;
         END;
         $$ LANGUAGE plpgsql
@@ -1183,7 +1173,7 @@ export default Effect.gen(function* () {
         CREATE OR REPLACE FUNCTION insert_search_document_audit()
         RETURNS TRIGGER AS $$
         BEGIN
-            INSERT INTO search_documents (entity_type, entity_id, scope_id, display_text, content_text, metadata)
+            INSERT INTO search_documents (entity_type, entity_id, scope_id, display_text, content_text, metadata, normalized_text)
             VALUES (
                 'auditLog',
                 NEW.id,
@@ -1196,13 +1186,25 @@ export default Effect.gen(function* () {
                     'userId', NEW.user_id,
                     'hasOldData', NEW.old_data IS NOT NULL,
                     'hasNewData', NEW.new_data IS NOT NULL
-                ), true)
+                ), true),
+                normalize_search_text(
+                    NEW.subject::text || ':' || NEW.operation::text,
+                    NEW.subject::text || ' ' || NEW.operation::text,
+                    jsonb_strip_nulls(jsonb_build_object(
+                        'subject', NEW.subject,
+                        'operation', NEW.operation,
+                        'userId', NEW.user_id,
+                        'hasOldData', NEW.old_data IS NOT NULL,
+                        'hasNewData', NEW.new_data IS NOT NULL
+                    ), true)
+                )
             )
             ON CONFLICT (entity_type, entity_id) DO UPDATE SET
                 scope_id = EXCLUDED.scope_id,
                 display_text = EXCLUDED.display_text,
                 content_text = EXCLUDED.content_text,
-                metadata = EXCLUDED.metadata;
+                metadata = EXCLUDED.metadata,
+                normalized_text = EXCLUDED.normalized_text;
             RETURN NEW;
         END;
         $$ LANGUAGE plpgsql
@@ -1222,19 +1224,20 @@ export default Effect.gen(function* () {
         BEGIN
             IF p_scope_id IS NULL THEN
                 DELETE FROM search_documents;
-                INSERT INTO search_documents (entity_type, entity_id, scope_id, display_text, content_text, metadata)
-                SELECT 'app', id, NULL, name, namespace, jsonb_build_object('name', name, 'namespace', namespace)
+                INSERT INTO search_documents (entity_type, entity_id, scope_id, display_text, content_text, metadata, normalized_text)
+                SELECT 'app', id, NULL, name, namespace, jsonb_build_object('name', name, 'namespace', namespace), normalize_search_text(name, namespace, jsonb_build_object('name', name, 'namespace', namespace))
                 FROM apps;
-                INSERT INTO search_documents (entity_type, entity_id, scope_id, display_text, content_text, metadata)
-                SELECT 'user', id, app_id, email, role::text, jsonb_build_object('email', email, 'role', role)
+                INSERT INTO search_documents (entity_type, entity_id, scope_id, display_text, content_text, metadata, normalized_text)
+                SELECT 'user', id, app_id, email, role::text, jsonb_build_object('email', email, 'role', role), normalize_search_text(email, role::text, jsonb_build_object('email', email, 'role', role))
                 FROM users
                 WHERE deleted_at IS NULL;
-                INSERT INTO search_documents (entity_type, entity_id, scope_id, display_text, content_text, metadata)
+                INSERT INTO search_documents (entity_type, entity_id, scope_id, display_text, content_text, metadata, normalized_text)
                 SELECT 'asset', id, app_id, COALESCE(name, type), content,
-                    jsonb_strip_nulls(jsonb_build_object('type', type, 'size', size, 'name', name, 'hash', hash), true)
+                    jsonb_strip_nulls(jsonb_build_object('type', type, 'size', size, 'name', name, 'hash', hash), true),
+                    normalize_search_text(COALESCE(name, type), content, jsonb_strip_nulls(jsonb_build_object('type', type, 'size', size, 'name', name, 'hash', hash), true))
                 FROM assets
                 WHERE deleted_at IS NULL;
-                INSERT INTO search_documents (entity_type, entity_id, scope_id, display_text, content_text, metadata)
+                INSERT INTO search_documents (entity_type, entity_id, scope_id, display_text, content_text, metadata, normalized_text)
                 SELECT 'auditLog', id, app_id, subject::text || ':' || operation::text, subject::text || ' ' || operation::text,
                     jsonb_strip_nulls(jsonb_build_object(
                         'subject', subject,
@@ -1242,7 +1245,18 @@ export default Effect.gen(function* () {
                         'userId', user_id,
                         'hasOldData', old_data IS NOT NULL,
                         'hasNewData', new_data IS NOT NULL
-                    ), true)
+                    ), true),
+                    normalize_search_text(
+                        subject::text || ':' || operation::text,
+                        subject::text || ' ' || operation::text,
+                        jsonb_strip_nulls(jsonb_build_object(
+                            'subject', subject,
+                            'operation', operation,
+                            'userId', user_id,
+                            'hasOldData', old_data IS NOT NULL,
+                            'hasNewData', new_data IS NOT NULL
+                        ), true)
+                    )
                 FROM audit_logs;
                 RETURN;
             END IF;
@@ -1251,23 +1265,24 @@ export default Effect.gen(function* () {
 
             IF p_include_global THEN
                 DELETE FROM search_documents WHERE scope_id IS NULL;
-                INSERT INTO search_documents (entity_type, entity_id, scope_id, display_text, content_text, metadata)
-                SELECT 'app', id, NULL, name, namespace, jsonb_build_object('name', name, 'namespace', namespace)
+                INSERT INTO search_documents (entity_type, entity_id, scope_id, display_text, content_text, metadata, normalized_text)
+                SELECT 'app', id, NULL, name, namespace, jsonb_build_object('name', name, 'namespace', namespace), normalize_search_text(name, namespace, jsonb_build_object('name', name, 'namespace', namespace))
                 FROM apps;
             END IF;
 
-            INSERT INTO search_documents (entity_type, entity_id, scope_id, display_text, content_text, metadata)
-            SELECT 'user', id, app_id, email, role::text, jsonb_build_object('email', email, 'role', role)
+            INSERT INTO search_documents (entity_type, entity_id, scope_id, display_text, content_text, metadata, normalized_text)
+            SELECT 'user', id, app_id, email, role::text, jsonb_build_object('email', email, 'role', role), normalize_search_text(email, role::text, jsonb_build_object('email', email, 'role', role))
             FROM users
             WHERE deleted_at IS NULL AND app_id = p_scope_id;
 
-            INSERT INTO search_documents (entity_type, entity_id, scope_id, display_text, content_text, metadata)
+            INSERT INTO search_documents (entity_type, entity_id, scope_id, display_text, content_text, metadata, normalized_text)
             SELECT 'asset', id, app_id, COALESCE(name, type), content,
-                jsonb_strip_nulls(jsonb_build_object('type', type, 'size', size, 'name', name, 'hash', hash), true)
+                jsonb_strip_nulls(jsonb_build_object('type', type, 'size', size, 'name', name, 'hash', hash), true),
+                normalize_search_text(COALESCE(name, type), content, jsonb_strip_nulls(jsonb_build_object('type', type, 'size', size, 'name', name, 'hash', hash), true))
             FROM assets
             WHERE deleted_at IS NULL AND app_id = p_scope_id;
 
-            INSERT INTO search_documents (entity_type, entity_id, scope_id, display_text, content_text, metadata)
+            INSERT INTO search_documents (entity_type, entity_id, scope_id, display_text, content_text, metadata, normalized_text)
             SELECT 'auditLog', id, app_id, subject::text || ':' || operation::text, subject::text || ' ' || operation::text,
                 jsonb_strip_nulls(jsonb_build_object(
                     'subject', subject,
@@ -1275,7 +1290,18 @@ export default Effect.gen(function* () {
                     'userId', user_id,
                     'hasOldData', old_data IS NOT NULL,
                     'hasNewData', new_data IS NOT NULL
-                ), true)
+                ), true),
+                normalize_search_text(
+                    subject::text || ':' || operation::text,
+                    subject::text || ' ' || operation::text,
+                    jsonb_strip_nulls(jsonb_build_object(
+                        'subject', subject,
+                        'operation', operation,
+                        'userId', user_id,
+                        'hasOldData', old_data IS NOT NULL,
+                        'hasNewData', new_data IS NOT NULL
+                    ), true)
+                )
             FROM audit_logs
             WHERE app_id = p_scope_id;
         END
@@ -1457,33 +1483,33 @@ export default Effect.gen(function* () {
     yield* sql`ALTER TABLE search_documents ENABLE ROW LEVEL SECURITY`;
     yield* sql`ALTER TABLE search_embeddings ENABLE ROW LEVEL SECURITY`;
     // RLS Policies: users (scoped by app_id)
-    yield* sql`CREATE POLICY users_tenant_isolation ON users USING (app_id = current_setting('app.current_tenant')::uuid) WITH CHECK (app_id = current_setting('app.current_tenant')::uuid)`;
+    yield* sql`CREATE POLICY users_tenant_isolation ON users USING (app_id = get_current_tenant_id()) WITH CHECK (app_id = get_current_tenant_id())`;
     // RLS Policies: permissions (scoped by app_id)
-    yield* sql`CREATE POLICY permissions_tenant_isolation ON permissions USING (app_id = current_setting('app.current_tenant')::uuid) WITH CHECK (app_id = current_setting('app.current_tenant')::uuid)`;
+    yield* sql`CREATE POLICY permissions_tenant_isolation ON permissions USING (app_id = get_current_tenant_id()) WITH CHECK (app_id = get_current_tenant_id())`;
     // RLS Policies: sessions (scoped by app_id)
-    yield* sql`CREATE POLICY sessions_tenant_isolation ON sessions USING (app_id = current_setting('app.current_tenant')::uuid) WITH CHECK (app_id = current_setting('app.current_tenant')::uuid)`;
+    yield* sql`CREATE POLICY sessions_tenant_isolation ON sessions USING (app_id = get_current_tenant_id()) WITH CHECK (app_id = get_current_tenant_id())`;
     // RLS Policies: api_keys (scoped via SECURITY DEFINER helper — avoids chained RLS)
-    yield* sql`CREATE POLICY api_keys_tenant_isolation ON api_keys USING (user_id IN (SELECT get_tenant_user_ids()))`;
+    yield* sql`CREATE POLICY api_keys_tenant_isolation ON api_keys USING (user_id IN (SELECT get_tenant_user_ids())) WITH CHECK (user_id IN (SELECT get_tenant_user_ids()))`;
     // RLS Policies: oauth_accounts (scoped via SECURITY DEFINER helper — avoids chained RLS)
-    yield* sql`CREATE POLICY oauth_accounts_tenant_isolation ON oauth_accounts USING (user_id IN (SELECT get_tenant_user_ids()))`;
+    yield* sql`CREATE POLICY oauth_accounts_tenant_isolation ON oauth_accounts USING (user_id IN (SELECT get_tenant_user_ids())) WITH CHECK (user_id IN (SELECT get_tenant_user_ids()))`;
     // RLS Policies: mfa_secrets (scoped via SECURITY DEFINER helper — avoids chained RLS)
-    yield* sql`CREATE POLICY mfa_secrets_tenant_isolation ON mfa_secrets USING (user_id IN (SELECT get_tenant_user_ids()))`;
+    yield* sql`CREATE POLICY mfa_secrets_tenant_isolation ON mfa_secrets USING (user_id IN (SELECT get_tenant_user_ids())) WITH CHECK (user_id IN (SELECT get_tenant_user_ids()))`;
     // RLS Policies: webauthn_credentials (scoped via SECURITY DEFINER helper — avoids chained RLS)
-    yield* sql`CREATE POLICY webauthn_credentials_tenant_isolation ON webauthn_credentials USING (user_id IN (SELECT get_tenant_user_ids()))`;
+    yield* sql`CREATE POLICY webauthn_credentials_tenant_isolation ON webauthn_credentials USING (user_id IN (SELECT get_tenant_user_ids())) WITH CHECK (user_id IN (SELECT get_tenant_user_ids()))`;
     // RLS Policies: assets (scoped by app_id)
-    yield* sql`CREATE POLICY assets_tenant_isolation ON assets USING (app_id = current_setting('app.current_tenant')::uuid) WITH CHECK (app_id = current_setting('app.current_tenant')::uuid)`;
+    yield* sql`CREATE POLICY assets_tenant_isolation ON assets USING (app_id = get_current_tenant_id()) WITH CHECK (app_id = get_current_tenant_id())`;
     // RLS Policies: audit_logs (scoped by app_id)
-    yield* sql`CREATE POLICY audit_logs_tenant_isolation ON audit_logs USING (app_id = current_setting('app.current_tenant')::uuid) WITH CHECK (app_id = current_setting('app.current_tenant')::uuid)`;
+    yield* sql`CREATE POLICY audit_logs_tenant_isolation ON audit_logs USING (app_id = get_current_tenant_id()) WITH CHECK (app_id = get_current_tenant_id())`;
     // RLS Policies: jobs (scoped by app_id)
-    yield* sql`CREATE POLICY jobs_tenant_isolation ON jobs USING (app_id = current_setting('app.current_tenant')::uuid) WITH CHECK (app_id = current_setting('app.current_tenant')::uuid)`;
+    yield* sql`CREATE POLICY jobs_tenant_isolation ON jobs USING (app_id = get_current_tenant_id()) WITH CHECK (app_id = get_current_tenant_id())`;
     // RLS Policies: notifications (scoped by app_id)
-    yield* sql`CREATE POLICY notifications_tenant_isolation ON notifications USING (app_id = current_setting('app.current_tenant')::uuid) WITH CHECK (app_id = current_setting('app.current_tenant')::uuid)`;
+    yield* sql`CREATE POLICY notifications_tenant_isolation ON notifications USING (app_id = get_current_tenant_id()) WITH CHECK (app_id = get_current_tenant_id())`;
     // RLS Policies: job_dlq (scoped by app_id)
-    yield* sql`CREATE POLICY job_dlq_tenant_isolation ON job_dlq USING (app_id = current_setting('app.current_tenant')::uuid) WITH CHECK (app_id = current_setting('app.current_tenant')::uuid)`;
+    yield* sql`CREATE POLICY job_dlq_tenant_isolation ON job_dlq USING (app_id = get_current_tenant_id()) WITH CHECK (app_id = get_current_tenant_id())`;
     // RLS Policies: search_documents (scoped by scope_id = app_id, or global if NULL)
-    yield* sql`CREATE POLICY search_documents_tenant_isolation ON search_documents USING (scope_id IS NULL OR scope_id = current_setting('app.current_tenant')::uuid)`;
+    yield* sql`CREATE POLICY search_documents_tenant_isolation ON search_documents USING (scope_id IS NULL OR scope_id = get_current_tenant_id()) WITH CHECK (scope_id IS NULL OR scope_id = get_current_tenant_id())`;
     // RLS Policies: search_embeddings (scoped by scope_id = app_id, or global if NULL)
-    yield* sql`CREATE POLICY search_embeddings_tenant_isolation ON search_embeddings USING (scope_id IS NULL OR scope_id = current_setting('app.current_tenant')::uuid)`;
+    yield* sql`CREATE POLICY search_embeddings_tenant_isolation ON search_embeddings USING (scope_id IS NULL OR scope_id = get_current_tenant_id()) WITH CHECK (scope_id IS NULL OR scope_id = get_current_tenant_id())`;
     // FORCE RLS for table owners (superuser bypass is acceptable for migrations/admin)
     yield* sql`ALTER TABLE users FORCE ROW LEVEL SECURITY`;
     yield* sql`ALTER TABLE permissions FORCE ROW LEVEL SECURITY`;
@@ -1499,11 +1525,11 @@ export default Effect.gen(function* () {
     yield* sql`ALTER TABLE job_dlq FORCE ROW LEVEL SECURITY`;
     yield* sql`ALTER TABLE search_documents FORCE ROW LEVEL SECURITY`;
     yield* sql`ALTER TABLE search_embeddings FORCE ROW LEVEL SECURITY`;
-    yield* sql`COMMENT ON POLICY users_tenant_isolation ON users IS 'RLS: Isolate users by app_id matching current_setting(app.current_tenant)'`;
-    yield* sql`COMMENT ON POLICY permissions_tenant_isolation ON permissions IS 'RLS: Isolate permissions by app_id matching current_setting(app.current_tenant)'`;
-    yield* sql`COMMENT ON POLICY assets_tenant_isolation ON assets IS 'RLS: Isolate assets by app_id matching current_setting(app.current_tenant)'`;
-    yield* sql`COMMENT ON POLICY audit_logs_tenant_isolation ON audit_logs IS 'RLS: Isolate audit_logs by app_id matching current_setting(app.current_tenant)'`;
-    yield* sql`COMMENT ON POLICY jobs_tenant_isolation ON jobs IS 'RLS: Isolate jobs by app_id matching current_setting(app.current_tenant)'`;
-    yield* sql`COMMENT ON POLICY notifications_tenant_isolation ON notifications IS 'RLS: Isolate notifications by app_id matching current_setting(app.current_tenant)'`;
-    yield* sql`COMMENT ON POLICY job_dlq_tenant_isolation ON job_dlq IS 'RLS: Isolate job_dlq by app_id matching current_setting(app.current_tenant)'`;
+    yield* sql`COMMENT ON POLICY users_tenant_isolation ON users IS 'RLS: Isolate users by app_id matching get_current_tenant_id()'`;
+    yield* sql`COMMENT ON POLICY permissions_tenant_isolation ON permissions IS 'RLS: Isolate permissions by app_id matching get_current_tenant_id()'`;
+    yield* sql`COMMENT ON POLICY assets_tenant_isolation ON assets IS 'RLS: Isolate assets by app_id matching get_current_tenant_id()'`;
+    yield* sql`COMMENT ON POLICY audit_logs_tenant_isolation ON audit_logs IS 'RLS: Isolate audit_logs by app_id matching get_current_tenant_id()'`;
+    yield* sql`COMMENT ON POLICY jobs_tenant_isolation ON jobs IS 'RLS: Isolate jobs by app_id matching get_current_tenant_id()'`;
+    yield* sql`COMMENT ON POLICY notifications_tenant_isolation ON notifications IS 'RLS: Isolate notifications by app_id matching get_current_tenant_id()'`;
+    yield* sql`COMMENT ON POLICY job_dlq_tenant_isolation ON job_dlq IS 'RLS: Isolate job_dlq by app_id matching get_current_tenant_id()'`;
 });

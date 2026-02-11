@@ -14,7 +14,7 @@ import { Array as A, Effect, Option, pipe } from 'effect';
 
 // --- [FUNCTIONS] -------------------------------------------------------------
 
-const withDiffs = <T extends { oldData: Option.Option<unknown>; newData: Option.Option<unknown> }>(	// Transform audit entries: compute diffs when requested, add null diff otherwise
+const withDiffs = <T extends { oldData: Option.Option<unknown>; newData: Option.Option<unknown> }>(
 	items: readonly T[],
 	includeDiff: boolean,): readonly (T & { readonly diff: Diff.Patch | null })[] =>
 	A.map(items, (entry) => ({

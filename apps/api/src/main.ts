@@ -9,7 +9,6 @@ import { AiRuntime } from '@parametric-portal/ai/runtime';
 import { SearchService } from '@parametric-portal/ai/search';
 import { Client } from '@parametric-portal/database/client';
 import { DatabaseService } from '@parametric-portal/database/repos';
-import { SearchRepo } from '@parametric-portal/database/search';
 import { ParametricApi } from '@parametric-portal/server/api';
 import { Middleware } from '@parametric-portal/server/middleware';
 import { Auth } from '@parametric-portal/server/domain/auth';
@@ -72,7 +71,7 @@ const ServicesLayer = Layer.mergeAll(Auth.Service.Default, EmailAdapter.Default,
 	Layer.provideMerge(ReplayGuardService.Default),
 	Layer.provideMerge(CacheService.Layer),
 	Layer.provideMerge(Resilience.Layer),
-	Layer.provideMerge(Layer.mergeAll(DatabaseService.Default, SearchRepo.Default, MetricsService.Default, Crypto.Service.Default, StreamingService.Default, ClusterService.Default)),
+	Layer.provideMerge(Layer.mergeAll(DatabaseService.Default, MetricsService.Default, Crypto.Service.Default, StreamingService.Default, ClusterService.Default)),
 	Layer.provideMerge(PlatformLayer),
 );
 

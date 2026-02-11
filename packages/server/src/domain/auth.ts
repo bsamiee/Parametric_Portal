@@ -4,7 +4,7 @@
  */
 import { HttpTraceContext } from '@effect/platform';
 import { SqlClient } from '@effect/sql';
-import { AppSettingsDefaults, AppSettingsSchema, Session } from '@parametric-portal/database/models';
+import { Session } from '@parametric-portal/database/models';
 import { DatabaseService } from '@parametric-portal/database/repos';
 import type { Hex64 } from '@parametric-portal/types/types';
 import { generateAuthenticationOptions, generateRegistrationOptions, verifyAuthenticationResponse, verifyRegistrationResponse, type AuthenticatorTransportFuture } from '@simplewebauthn/server';
@@ -84,25 +84,19 @@ class AuthService extends Effect.Service<AuthService>()('server/Auth', {
 					baseUrl: Config.string('API_BASE_URL').pipe(Config.withDefault('http://localhost:4000')),
 				});
 				const _redirect = (provider: Context.OAuthProvider) => `${configuration.baseUrl}/api/auth/oauth/${provider}/callback`;
-				const _providerConfig = (provider: Context.OAuthProvider) => Effect.gen(function* () {
-					const tenantId = yield* Context.Request.currentTenantId;
-					const app = yield* db.apps.one([{ field: 'id', value: tenantId }]).pipe(
-						Effect.mapError((error) => AuthError.from('config_failed', { op: 'oauth_tenant_lookup', provider, tenantId }, error)),
-						Effect.flatMap(Option.match({
-							onNone: () => Effect.fail(AuthError.from('config_failed', { op: 'oauth_tenant_missing', provider, tenantId })),
+					const _providerConfig = (provider: Context.OAuthProvider) => Effect.gen(function* () {
+						const tenantId = yield* Context.Request.currentTenantId;
+						const loaded = yield* db.apps.readSettings(tenantId).pipe(
+							Effect.mapError((error) => AuthError.from('config_failed', { op: 'oauth_tenant_lookup', provider, tenantId }, error)),
+							Effect.flatMap(Option.match({
+								onNone: () => Effect.fail(AuthError.from('config_failed', { op: 'oauth_tenant_missing', provider, tenantId })),
+								onSome: Effect.succeed,
+							})),
+						);
+						const providerSettings = yield* Option.fromNullable(loaded.settings.oauthProviders.find((candidate) => candidate.provider === provider && candidate.enabled)).pipe(Option.match({
+							onNone: () => Effect.fail(AuthError.from('config_failed', { op: 'oauth_provider_missing', provider, tenantId })),
 							onSome: Effect.succeed,
-						})),
-					);
-					const settings = yield* S.decodeUnknown(AppSettingsSchema)(
-						Option.getOrElse(app.settings, () => AppSettingsDefaults),
-						{ errors: 'all', onExcessProperty: 'ignore' },
-					).pipe(
-						Effect.mapError((error) => AuthError.from('config_failed', { op: 'oauth_settings_decode', provider, tenantId }, error)),
-					);
-					const providerSettings = yield* Option.fromNullable(settings.oauthProviders.find((candidate) => candidate.provider === provider && candidate.enabled)).pipe(Option.match({
-						onNone: () => Effect.fail(AuthError.from('config_failed', { op: 'oauth_provider_missing', provider, tenantId })),
-						onSome: Effect.succeed,
-					}));
+						}));
 					const clientSecret = yield* Encoding.decodeBase64(providerSettings.clientSecretEncrypted).pipe(
 						Effect.mapError((error) => AuthError.from('config_failed', { op: 'oauth_secret_decode', provider, tenantId }, error)),
 						Effect.flatMap(Crypto.decrypt),
@@ -304,7 +298,7 @@ class AuthService extends Effect.Service<AuthService>()('server/Auth', {
 					)
 				);
 				const stateTag = sessionLoaded.verifiedAt.pipe(Option.match({ onNone: () => 'mfa' as const, onSome: () => 'active' as const }));
-				const { nextSessionId, nextTokens, mfaPending } = yield* db.withTransaction(Effect.gen(function* () {
+				const { nextSessionId, nextSessionVerifiedAt, nextTokens, mfaPending } = yield* db.withTransaction(Effect.gen(function* () {
 					const sessionRow = yield* db.sessions.byRefreshHashForUpdate(hash).pipe(Effect.flatMap(Option.match({ onNone: () => Effect.fail(AuthError.from('token_invalid')), onSome: Effect.succeed })));
 					yield* Clock.currentTimeMillis.pipe(Effect.filterOrFail((now) => now <= sessionRow.refreshExpiresAt.getTime(), () => AuthError.from('token_expired')));
 					yield* db.sessions.softDelete(sessionRow.id);
@@ -312,6 +306,7 @@ class AuthService extends Effect.Service<AuthService>()('server/Auth', {
 					const [sessionPair, refreshPair, tokenRequestContext] = yield* Effect.all([Crypto.pair, Crypto.pair, Context.Request.current]);
 					const [txSessionHash, txRefreshHash] = yield* Effect.all([Crypto.hmac(sessionLoaded.tenantId, Redacted.value(sessionPair.token)), Crypto.hmac(sessionLoaded.tenantId, Redacted.value(refreshPair.token))]);
 					const tokenNow = DateTime.unsafeNow();
+					const nextSessionVerifiedAt = mfaPending ? Option.none<DateTime.Utc>() : Option.some(DateTime.unsafeNow());
 					const newSessionRow = yield* db.sessions.insert({
 						accessExpiresAt: DateTime.toDateUtc(DateTime.addDuration(tokenNow, Context.Request.config.durations.session)),
 						appId: sessionLoaded.tenantId,
@@ -323,15 +318,15 @@ class AuthService extends Effect.Service<AuthService>()('server/Auth', {
 						updatedAt: undefined,
 						userAgent: tokenRequestContext.userAgent,
 						userId: sessionRow.userId,
-						verifiedAt: mfaPending ? Option.none() : Option.some(new Date()),
+						verifiedAt: Option.map(nextSessionVerifiedAt, DateTime.toDateUtc),
 					});
 					const nextSessionId = newSessionRow.id;
 					const nextTokens = { expiresAt: DateTime.addDuration(tokenNow, Context.Request.config.durations.session), refresh: refreshPair.token, session: sessionPair.token };
-					return { mfaPending, nextSessionId, nextTokens };
+					return { mfaPending, nextSessionId, nextSessionVerifiedAt, nextTokens };
 				}));
 				yield* invalidateSession(sessionLoaded.tenantId, sessionLoaded.tokens.session);
 				yield* MetricsService.inc(metrics.auth.refreshes, MetricsService.label({ tenant: sessionLoaded.tenantId }));
-				const nextSessionState: typeof _AuthState.Type = { _tag: 'session', provider: sessionLoaded.provider, requestId: sessionLoaded.requestId, sessionId: nextSessionId, tenantId, tokens: nextTokens, userId: found.userId, verifiedAt: sessionLoaded.verifiedAt };
+				const nextSessionState: typeof _AuthState.Type = { _tag: 'session', provider: sessionLoaded.provider, requestId: sessionLoaded.requestId, sessionId: nextSessionId, tenantId, tokens: nextTokens, userId: found.userId, verifiedAt: nextSessionVerifiedAt };
 				yield* Effect.all([CacheService.kv.del(_STATE_KEY('session', tenantId, found.id)).pipe(Effect.ignore), CacheService.kv.set(_STATE_KEY('session', tenantId, nextSessionId), nextSessionState, Context.Request.config.durations.session)], { discard: true });
 				return { accessToken: Redacted.value(nextTokens.session), expiresAt: nextTokens.expiresAt, mfaPending, refreshToken: Redacted.value(nextTokens.refresh), userId: found.userId };
 			}).pipe(Effect.mapError((error) => error instanceof AuthError ? HttpError.Auth.of(error.reason, error) : HttpError.Auth.of('Token refresh failed', error)), Telemetry.span('auth.refresh')),

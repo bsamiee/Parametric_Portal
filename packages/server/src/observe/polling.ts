@@ -59,7 +59,7 @@ class PollingService extends Effect.Service<PollingService>()('server/Polling', 
 			const lastFailureAtMs = yield* STM.commit(TRef.make(Option.none<number>()));
 			const lastSuccessAtMs = yield* STM.commit(TRef.make(Option.none<number>()));
 		const persistAlerts = (updated: typeof initial) => database.kvStore.setJson(_CONFIG.kvKey, [...updated], S.Array(_SCHEMA.alert)).pipe(Effect.ignoreLogged);
-		const publishFailure = (metric: string, error: unknown) => eventBus.publish({ aggregateId: metric, payload: { _tag: 'polling.error', error: String(error), metric }, tenantId: Context.Request.Id.system }).pipe(Effect.ignore);
+		const publishFailure = (metric: string, error: unknown) => eventBus.publish({ aggregateId: metric, payload: { _tag: 'polling', action: 'error', error: String(error), metric }, tenantId: Context.Request.Id.system }).pipe(Effect.ignore);
 		const recoverWith = <A>(metric: string, message: string, fallback: Effect.Effect<A>) => (error: unknown) => Clock.currentTimeMillis.pipe(
 			Effect.flatMap((now) => Effect.all([
 				STM.commit(TRef.set(lastFailureAtMs, Option.some(now))),

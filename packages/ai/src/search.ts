@@ -1,5 +1,4 @@
 import { DatabaseService } from '@parametric-portal/database/repos';
-import { SearchRepo } from '@parametric-portal/database/search';
 import { Context } from '@parametric-portal/server/context';
 import { ClusterService } from '@parametric-portal/server/infra/cluster';
 import { AuditService } from '@parametric-portal/server/observe/audit';
@@ -44,8 +43,8 @@ class AiSearchError extends Data.TaggedError('AiSearchError')<{
 
 class SearchService extends Effect.Service<SearchService>()('ai/Search', {
     effect: Effect.gen(function* () {
-        const [searchRepo, audit, metrics, ai] = yield* Effect.all([
-            SearchRepo,
+        const [database, audit, metrics, ai] = yield* Effect.all([
+            DatabaseService,
             AuditService,
             MetricsService,
             AiRuntime,
@@ -86,7 +85,7 @@ class SearchService extends Effect.Service<SearchService>()('ai/Search', {
                     ),
                     Effect.option,
                 );
-                const result = yield* searchRepo.search(
+                const result = yield* database.search.search(
                     {
                         ...options,
                         scopeId,
@@ -105,7 +104,7 @@ class SearchService extends Effect.Service<SearchService>()('ai/Search', {
                 );
                 yield* Effect.all(
                     [
-                        audit.log('Search.query', {
+                        audit.log('Search.read', {
                             details: {
                                 entityTypes: options.entityTypes,
                                 resultCount: result.total,
@@ -125,10 +124,10 @@ class SearchService extends Effect.Service<SearchService>()('ai/Search', {
             readonly prefix: string;}) =>
             Effect.gen(function* () {
                 const { ctx, scopeId, subjectId } = yield* requestContext(_CONFIG.users.anonymous);
-                const result = yield* searchRepo.suggest({ ...options, scopeId });
+                const result = yield* database.search.suggest({ ...options, scopeId });
                 yield* Effect.all(
                     [
-                        audit.log('Search.suggest', {
+                        audit.log('Search.list', {
                             details: { prefix: options.prefix, resultCount: result.length },
                             subjectId,
                         }),
@@ -141,10 +140,10 @@ class SearchService extends Effect.Service<SearchService>()('ai/Search', {
         const refresh = (includeGlobal = false) =>
             Effect.gen(function* () {
                 const { ctx, scopeId, subjectId } = yield* requestContext(_CONFIG.users.system);
-                yield* searchRepo.refresh(scopeId, includeGlobal);
+                yield* database.search.refresh(scopeId, includeGlobal);
                 yield* Effect.all(
                     [
-                        audit.log('Search.refresh', { details: { includeGlobal, scopeId }, subjectId }),
+                        audit.log('Search.refresh', { details: { includeGlobal, kind: 'index', scopeId }, subjectId }),
                         MetricsService.inc(metrics.search.refreshes, MetricsService.label({ tenant: ctx.tenantId })),
                     ],
                     { discard: true },
@@ -158,7 +157,7 @@ class SearchService extends Effect.Service<SearchService>()('ai/Search', {
                 const { ctx, scopeId, subjectId } = yield* requestContext(_CONFIG.users.system);
                 const appSettings = yield* ai.settings();
                 const { dimensions, model } = appSettings.embedding;
-                const sources = yield* searchRepo.embeddingSources({
+                const sources = yield* database.search.embeddingSources({
                     dimensions,
                     entityTypes: options?.entityTypes ?? [],
                     includeGlobal: options?.includeGlobal ?? false,
@@ -182,7 +181,7 @@ class SearchService extends Effect.Service<SearchService>()('ai/Search', {
                 yield* Effect.forEach(
                     A.zip(sources, embeddings),
                     ([source, embedding]) =>
-                        searchRepo.upsertEmbedding({
+                        database.search.upsertEmbedding({
                             dimensions,
                             documentHash: source.documentHash,
                             embedding,
@@ -195,8 +194,8 @@ class SearchService extends Effect.Service<SearchService>()('ai/Search', {
                 );
                 yield* Effect.all(
                     [
-                        audit.log('Search.refreshEmbeddings', {
-                            details: { count: sources.length, includeGlobal: options?.includeGlobal ?? false, scopeId },
+                        audit.log('Search.refresh', {
+                            details: { count: sources.length, includeGlobal: options?.includeGlobal ?? false, kind: _CONFIG.labels.embeddings, scopeId },
                             subjectId,
                         }),
                         MetricsService.inc(

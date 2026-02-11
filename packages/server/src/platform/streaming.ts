@@ -70,8 +70,8 @@ class StreamingService extends Effect.Service<StreamingService>()('server/Stream
 				const labels = _labels('ingest', format, config.name, tenantId);
 				const source = config.source;
 				const raw: Stream.Stream<Uint8Array, E | Error, never> = ('getReader' in source
-					? Stream.fromReadableStream({ evaluate: () => source, onError: (error) => error as E | Error })
-					: Stream.fromAsyncIterable(source, (error) => error as E | Error)
+					? Stream.fromReadableStream({ evaluate: () => source, onError: (error): E | Error => error instanceof Error ? error : new Error(String(error)) })
+					: Stream.fromAsyncIterable(source, (error): E | Error => error instanceof Error ? error : new Error(String(error)))
 				).pipe(
 					(stream) => config.throttle ? Stream.throttle(stream, { cost: Chunk.size, units: config.throttle.units, duration: config.throttle.duration, burst: config.throttle.burst }) : stream,
 					(stream) => config.debounce ? Stream.debounce(stream, config.debounce) : stream,

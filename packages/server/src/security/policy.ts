@@ -55,19 +55,25 @@ class PolicyService extends Effect.Service<PolicyService>()('server/Policy', {
 		yield* Effect.forkScoped(eventBus.subscribe('policy.changed', S.Struct({ _tag: S.Literal('policy'), action: S.Literal('changed'), role: Context.UserRole.schema }),
 			(event, payload) => cache.invalidate(new CacheKey({ role: payload.role, tenantId: event.tenantId })).pipe(Effect.ignore),
 		).pipe(Stream.runDrain, Effect.ignore));
-		const require = Effect.fn('PolicyService.require')(function* (resource: string, action: string) {
-			const ctx = yield* Context.Request.current;
-			const session = yield* Option.match(ctx.session, { onNone: () => Effect.fail(HttpError.Auth.of('Missing session')), onSome: Effect.succeed });
-			const rules = _CONFIG.rules;
-			const matches = (table: Record<string, readonly string[]>) => table[resource]?.includes('*') || table[resource]?.includes(action);
-			yield* Effect.filterOrFail(Effect.succeed(session), () => !(matches(rules.interactive) && session.kind !== 'session'), () => HttpError.Forbidden.of('Interactive session required'));
-			yield* Effect.filterOrFail(Effect.succeed(session), () => !(matches(rules.mfa) && session.mfaEnabled && Option.isNone(session.verifiedAt)), () => HttpError.Forbidden.of('MFA verification required'));
-			const user = yield* Context.Request.withinSync(ctx.tenantId, database.users.one([{ field: 'id', value: session.userId }])).pipe(
-				Effect.flatMap(Option.match({ onNone: () => Effect.fail(HttpError.Forbidden.of('User not found')), onSome: Effect.succeed })),
-			);
-			const permissions = yield* cache.get(new CacheKey({ role: user.role, tenantId: ctx.tenantId }));
-			yield* Effect.filterOrFail(Effect.succeed(permissions), (ps) => ps.some((p) => p.resource === resource && p.action === action), () => HttpError.Forbidden.of('Insufficient permissions')).pipe(
-				Effect.tapError(() => Effect.all([
+			const require = Effect.fn('PolicyService.require')(function* (resource: string, action: string) {
+				const ctx = yield* Context.Request.current;
+				const session = yield* Option.match(ctx.session, { onNone: () => Effect.fail(HttpError.Auth.of('Missing session')), onSome: Effect.succeed });
+				const rules = _CONFIG.rules;
+			const matches = (table: Record<string, readonly string[]>) => table[resource]?.includes('*') === true || table[resource]?.includes(action) === true;
+				yield* Effect.filterOrFail(Effect.succeed(session), () => !(matches(rules.interactive) && session.kind !== 'session'), () => HttpError.Forbidden.of('Interactive session required'));
+				yield* Effect.when(Effect.fail(HttpError.Forbidden.of('MFA enrollment required')), () => matches(rules.mfa) && !session.mfaEnabled);
+				yield* Effect.when(Effect.fail(HttpError.Forbidden.of('MFA verification required')), () => matches(rules.mfa) && Option.isNone(session.verifiedAt));
+				const user = yield* Context.Request.withinSync(ctx.tenantId, database.users.one([{ field: 'id', value: session.userId }])).pipe(
+					Effect.flatMap(Option.match({ onNone: () => Effect.fail(HttpError.Forbidden.of('User not found')), onSome: Effect.succeed })),
+				);
+				yield* Effect.filterOrFail(
+					Effect.succeed(user),
+					(candidate) => Option.isNone(candidate.deletedAt) && candidate.status === 'active',
+					() => HttpError.Forbidden.of('User is not active'),
+				);
+				const permissions = yield* cache.get(new CacheKey({ role: user.role, tenantId: ctx.tenantId }));
+				yield* Effect.filterOrFail(Effect.succeed(permissions), (ps) => ps.some((p) => p.resource === resource && p.action === action), () => HttpError.Forbidden.of('Insufficient permissions')).pipe(
+					Effect.tapError(() => Effect.all([
 					audit.log('security.permission_denied', { details: { action, resource, role: user.role }, subjectId: session.userId }),
 					MetricsService.trackError(metrics.errors, MetricsService.label({ action, resource, role: user.role, tenant: ctx.tenantId }), HttpError.Forbidden.of('Insufficient permissions')),
 				], { discard: true })),
@@ -78,15 +84,13 @@ class PolicyService extends Effect.Service<PolicyService>()('server/Policy', {
 			Effect.map((ps) => ps.filter((p) => Option.isNone(p.deletedAt))),
 			Effect.mapError((error) => HttpError.Internal.of('Permission list failed', error)),
 		);
-		const grant = (input: { role: S.Schema.Type<typeof Context.UserRole.schema>; resource: string; action: string }) => Effect.gen(function* () {
-			const tid = yield* Context.Request.currentTenantId;
-			const res = yield* Context.Request.withinSync(tid, database.permissions.grant({ action: input.action, appId: tid, resource: input.resource, role: input.role }));
-			const first = Array.isArray(res) ? res[0] : res;
-			const granted = yield* Effect.fromNullable(first).pipe(Effect.mapError(() => HttpError.Internal.of('Permission grant returned empty')));
-			yield* cache.invalidate(new CacheKey({ role: input.role, tenantId: tid })).pipe(Effect.ignore);
-			yield* eventBus.publish({ aggregateId: tid, payload: { _tag: 'policy', action: 'changed', role: input.role }, tenantId: tid }).pipe(Effect.ignore);
-			return granted;
-		}).pipe(Effect.mapError((error) => error instanceof HttpError.Internal ? error : HttpError.Internal.of('Permission grant failed', error)));
+			const grant = (input: { role: S.Schema.Type<typeof Context.UserRole.schema>; resource: string; action: string }) => Effect.gen(function* () {
+				const tid = yield* Context.Request.currentTenantId;
+				const granted = yield* Context.Request.withinSync(tid, database.permissions.grant({ action: input.action, appId: tid, resource: input.resource, role: input.role }));
+				yield* cache.invalidate(new CacheKey({ role: input.role, tenantId: tid })).pipe(Effect.ignore);
+				yield* eventBus.publish({ aggregateId: tid, payload: { _tag: 'policy', action: 'changed', role: input.role }, tenantId: tid }).pipe(Effect.ignore);
+				return granted;
+			}).pipe(Effect.mapError((error) => error instanceof HttpError.Internal ? error : HttpError.Internal.of('Permission grant failed', error)));
 		const revoke = (input: { role: S.Schema.Type<typeof Context.UserRole.schema>; resource: string; action: string }) => Effect.gen(function* () {
 			const tid = yield* Context.Request.currentTenantId;
 			yield* Context.Request.withinSync(tid, database.permissions.revoke(input.role, input.resource, input.action));

@@ -126,7 +126,7 @@ const _makeRequestContext = (database: { readonly apps: { readonly byNamespace: 
 			const isAsyncTenantContextPath = A.some(_CONFIG.tenantAsyncContextPrefixes, (prefix) => path === prefix || path.startsWith(`${prefix}/`));
 			const withTenantContext = isAsyncTenantContextPath
 				? Context.Request.within
-				: Context.Request.within;
+				: Context.Request.withinSync;
 		const appWithRequest = Effect.provideService(app, HttpServerRequest.HttpServerRequest, req);
 		const ctx: Context.Request.Data = { appNamespace: namespaceOpt, circuit: Option.none(), cluster: Option.none(), ipAddress, rateLimit: Option.none(), requestId, session: Option.none(), tenantId, userAgent: Headers.get(req.headers, 'user-agent') };
 		const resultEffect = Effect.all([appWithRequest, Context.Request.current]).pipe(Effect.map(([response, requestContext]) => ({ circuit: requestContext.circuit, response })));

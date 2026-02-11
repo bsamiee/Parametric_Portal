@@ -3,7 +3,7 @@
  * Backed by App.settings featureFlags object.
  */
 import { SqlClient } from '@effect/sql';
-import { AppSettingsDefaults, AppSettingsSchema, FeatureFlagsSchema } from '@parametric-portal/database/models';
+import { AppSettingsDefaults, FeatureFlagsSchema } from '@parametric-portal/database/models';
 import { DatabaseService } from '@parametric-portal/database/repos';
 import { Duration, Effect, Option, PrimaryKey, Schema as S, Stream } from 'effect';
 import { Context } from '../context.ts';
@@ -26,18 +26,15 @@ class FeatureService extends Effect.Service<FeatureService>()('server/Features',
 			failure: HttpError.Internal,
 			payload: { tenantId: S.String },
 			success: FlagRegistry,
-		}) {[PrimaryKey.symbol]() { return `features:${this.tenantId}`; }}
-		const cache = yield* CacheService.cache<FlagCacheKey, never, never>({
-				lookup: (key) => Context.Request.withinSync(key.tenantId, database.apps.one([{ field: 'id', value: key.tenantId }])).pipe(
-					Effect.flatMap(Option.match({
-						onNone: () => Effect.succeed({ ...AppSettingsDefaults.featureFlags }),
-						onSome: (app) => S.decodeUnknown(AppSettingsSchema)(
-							Option.getOrElse(app.settings, () => AppSettingsDefaults),
-							{ errors: 'all', onExcessProperty: 'ignore' },
-						).pipe(Effect.map((settings) => settings.featureFlags)),
-					})),
-					Effect.mapError((error) => HttpError.Internal.of('Feature flag lookup failed', error)),
-					Effect.provideService(SqlClient.SqlClient, sql),
+			}) {[PrimaryKey.symbol]() { return `features:${this.tenantId}`; }}
+			const cache = yield* CacheService.cache<FlagCacheKey, never, never>({
+					lookup: (key) => Context.Request.withinSync(key.tenantId, database.apps.readSettings(key.tenantId)).pipe(
+						Effect.flatMap(Option.match({
+							onNone: () => Effect.succeed({ ...AppSettingsDefaults.featureFlags }),
+							onSome: ({ settings }) => Effect.succeed(settings.featureFlags),
+						})),
+						Effect.mapError((error) => HttpError.Internal.of('Feature flag lookup failed', error)),
+						Effect.provideService(SqlClient.SqlClient, sql),
 			),
 			storeId: 'features',
 			timeToLive: Duration.minutes(5),
@@ -53,30 +50,24 @@ class FeatureService extends Effect.Service<FeatureService>()('server/Features',
 				Effect.catchAll((error) => Effect.fail(HttpError.Internal.of('Feature flag cache error', error))),
 			);
 		const getAll = Context.Request.currentTenantId.pipe(Effect.flatMap(_loadFlags));
-		const set = <K extends keyof typeof FlagRegistry.Type>(flagName: K, value: typeof FlagRegistry.Type[K]) =>
-			Telemetry.span(Effect.gen(function* () {
-				const tenantId = yield* Context.Request.currentTenantId;
-				const app = yield* Context.Request.withinSync(tenantId, database.apps.one([{ field: 'id', value: tenantId }])).pipe(
-					Effect.provideService(SqlClient.SqlClient, sql),
-					Effect.mapError((error) => HttpError.Internal.of('Tenant lookup failed', error)),
-					Effect.flatMap(Option.match({
-						onNone: () => Effect.fail(HttpError.NotFound.of('tenant', tenantId)),
-						onSome: Effect.succeed,
-					})),
-				);
-				const currentSettings = yield* S.decodeUnknown(AppSettingsSchema)(
-					Option.getOrElse(app.settings, () => AppSettingsDefaults),
-					{ errors: 'all', onExcessProperty: 'ignore' },
-				).pipe(
-					Effect.mapError((error) => HttpError.Internal.of('Feature settings decode failed', error)),
-				);
-				yield* Context.Request.withinSync(tenantId, database.apps.updateSettings(tenantId, {
-					...currentSettings,
-					featureFlags: {
-						...currentSettings.featureFlags,
-						[flagName]: value,
-					},
-				})).pipe(
+			const set = <K extends keyof typeof FlagRegistry.Type>(flagName: K, value: typeof FlagRegistry.Type[K]) =>
+				Telemetry.span(Effect.gen(function* () {
+					const tenantId = yield* Context.Request.currentTenantId;
+					const loaded = yield* Context.Request.withinSync(tenantId, database.apps.readSettings(tenantId, 'update')).pipe(
+						Effect.provideService(SqlClient.SqlClient, sql),
+						Effect.mapError((error) => HttpError.Internal.of('Tenant lookup failed', error)),
+						Effect.flatMap(Option.match({
+							onNone: () => Effect.fail(HttpError.NotFound.of('tenant', tenantId)),
+							onSome: Effect.succeed,
+						})),
+					);
+					yield* Context.Request.withinSync(tenantId, database.apps.updateSettings(tenantId, {
+						...loaded.settings,
+						featureFlags: {
+							...loaded.settings.featureFlags,
+							[flagName]: value,
+						},
+					})).pipe(
 					Effect.provideService(SqlClient.SqlClient, sql),
 					Effect.mapError((error) => HttpError.Internal.of('Feature flag update failed', error)),
 				);

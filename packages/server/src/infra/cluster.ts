@@ -348,10 +348,10 @@ class ClusterService extends Effect.Service<ClusterService>()('server/Cluster', 
 				return next.done || n >= limit ? Option.none() : Option.some([next.value, n + 1] as const);
 			}) };
 		}),
-		singleton: <E, R, StateSchema extends S.Schema.Any = never>(
-			name: string,
-			run: (stateRef: Ref.Ref<S.Schema.Type<StateSchema>>) => Effect.Effect<void, E, R>,
-			options?: {
+			singleton: <E, R, StateSchema extends S.Schema.Any = never>(
+				name: string,
+				run: (stateRef: Ref.Ref<S.Schema.Type<StateSchema> | undefined>) => Effect.Effect<void, E, R>,
+				options?: {
 				readonly shardGroup?: string;
 				readonly state?: {
 					readonly schema: StateSchema;
@@ -375,16 +375,15 @@ class ClusterService extends Effect.Service<ClusterService>()('server/Cluster', 
 					const stateLabels = MetricsService.label({ singleton: name });
 					const taggedOperations = Metric.taggedWithLabels(metrics.singleton.stateOperations, stateLabels);
 					const taggedErrors = Metric.taggedWithLabels(metrics.singleton.stateErrors, stateLabels);
-					yield* Effect.annotateLogsScoped({ 'service.name': `singleton.${name}` });
-					yield* options?.onBecomeLeader ?? Effect.void;
-					yield* Effect.addFinalizer(() => options?.onLoseLeadership ?? Effect.void);
-					const stateRef = yield* Option.match(Option.fromNullable(options?.state), {
-						onNone: () => Ref.make(undefined as unknown as S.Schema.Type<StateSchema>),
-						onSome: (stateConfig) => Effect.gen(function* () {
-							const database = yield* DatabaseService;
-							const schema = stateConfig.schema as unknown as S.Schema<S.Schema.Type<StateSchema>, S.Schema.Encoded<StateSchema>, never>;
-							const loaded = yield* database.kvStore.getJson(stateKey, schema).pipe(
-								Effect.tap(() => Metric.increment(taggedOperations)),
+						yield* Effect.annotateLogsScoped({ 'service.name': `singleton.${name}` });
+						yield* options?.onBecomeLeader ?? Effect.void;
+						yield* Effect.addFinalizer(() => options?.onLoseLeadership ?? Effect.void);
+						const stateRef = yield* Option.match(Option.fromNullable(options?.state), {
+							onNone: () => Ref.make(undefined),
+							onSome: (stateConfig) => Effect.gen(function* () {
+								const database = yield* DatabaseService;
+								const loaded = yield* database.kvStore.getJson(stateKey, stateConfig.schema).pipe(
+									Effect.tap(() => Metric.increment(taggedOperations)),
 								Effect.flatMap(Option.match({
 									onNone: () => stateVersion > _CONFIG.singleton.schemaVersion
 										? Effect.iterate(
@@ -412,11 +411,11 @@ class ClusterService extends Effect.Service<ClusterService>()('server/Cluster', 
 									Effect.zipRight(Effect.logWarning('State load failed, using initial', { cause })),
 									Effect.as(stateConfig.initial),
 								)),
-							);
-							const reference = yield* Ref.make(loaded);
-							yield* Effect.addFinalizer(() => Ref.get(reference).pipe(
-								Effect.flatMap((value) => database.kvStore.setJson(stateKey, value, schema)),
-								Effect.retry(_retrySchedule(_CONFIG.retry.maxAttempts.state)),
+								);
+								const reference = yield* Ref.make(loaded);
+								yield* Effect.addFinalizer(() => Ref.get(reference).pipe(
+									Effect.flatMap((value) => database.kvStore.setJson(stateKey, value, stateConfig.schema)),
+									Effect.retry(_retrySchedule(_CONFIG.retry.maxAttempts.state)),
 								Effect.tap(() => Metric.increment(taggedOperations)),
 								Effect.catchAllCause((cause) => Metric.increment(taggedErrors).pipe(
 									Effect.zipRight(Effect.logError('State persist failed - potential data loss', { cause, singleton: name })),
