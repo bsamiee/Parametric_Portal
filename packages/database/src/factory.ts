@@ -3,7 +3,7 @@
  * Single `resolve` config for lookups, predicate-based find/one/page/count.
  * Polymorphic single/bulk operations for drop/lift/set.
  */
-import { Model, SqlClient, SqlResolver, SqlSchema, type Statement } from '@effect/sql';
+import { Model, SqlClient, SqlSchema, type Statement } from '@effect/sql';
 import { PgClient } from '@effect/sql-pg';
 import type { SqlError } from '@effect/sql/SqlError';
 import type { ParseError } from 'effect/ParseResult';
@@ -26,10 +26,24 @@ type AggSpec = { sum?: string; avg?: string; min?: string; max?: string; count?:
 type MergeResult<T> = T & { readonly _action: 'insert' | 'update' };
 type SqlCast = typeof Field.sqlCast[keyof typeof Field.sqlCast];
 type FnConfig = { args?: readonly (string | { field: string; cast: SqlCast })[]; params?: S.Schema.AnyNoContext };
+type ResolveDirectSpec<M extends Model.AnyNoContext> =
+	| keyof M['fields'] & string
+	| readonly (keyof M['fields'] & string)[]
+	| `many:${keyof M['fields'] & string}`;
+type ResolveJoinSpec = {
+	through: {
+		base?: string;
+		source: string | readonly string[];
+		table: string;
+		target: string;
+	};
+};
+type ResolveSpec<M extends Model.AnyNoContext> = ResolveDirectSpec<M> | ResolveJoinSpec;
+type ResolveMany<T> = T extends `many:${string}` ? true : T extends { through: { source: `many:${string}` } } ? true : false;
 type Config<M extends Model.AnyNoContext> = {
 	pk?: { column: string; cast?: SqlCast };
 	scoped?: keyof M['fields'] & string;
-	resolve?: Record<string, keyof M['fields'] & string | (keyof M['fields'] & string)[] | `many:${keyof M['fields'] & string}`>;
+	resolve?: Record<string, ResolveSpec<M>>;
 	conflict?: { keys: (keyof M['fields'] & string)[]; only?: (keyof M['fields'] & string)[] };
 	purge?: string;
 	fn?: Record<string, FnConfig>;
@@ -60,6 +74,13 @@ const Update = {
 const _EMPTY_FN_PARAMS = S.Struct({});
 const _fnArgs = (sql: SqlClient.SqlClient, spec: { args?: FnConfig['args'] }, params: Record<string, unknown>) =>
 	sql.csv((spec.args ?? []).map(arg => typeof arg === 'string' ? sql`${params[arg]}` : sql`${params[arg.field]}::${sql.literal(arg.cast)}`));
+const _isJoinResolve = (spec: ResolveSpec<Model.AnyNoContext>): spec is ResolveJoinSpec =>
+	typeof spec === 'object' && !Array.isArray(spec) && 'through' in spec;
+const _extractResolveFields = (source: string | readonly string[]) => {
+	const isMany = typeof source === 'string' && source.startsWith('many:');
+	const fields = (isMany && [source.slice(5)]) || (Array.isArray(source) && [...source]) || [source];
+	return { fields, isMany } as const;
+};
 
 // --- [FACTORY] ---------------------------------------------------------------
 
@@ -72,37 +93,33 @@ const repo = <M extends Model.AnyNoContext, const C extends Config<M>>(model: M,
 		const pkCast = _pkCast ? sql`::${sql.literal(_pkCast)}` : sql``;
 		const softEntry = Field.pick('mark:soft', cols);
 		const expEntry = Field.pick('mark:exp', cols);
-		const _insertCols = Object.keys(cols).filter(column => column !== pkCol && !(['uuidv7', 'stored'] as const).some(gen => Field.isGen(column, gen)));
+		const _insertCols = Object.keys(cols).filter(column => column !== pkCol && !(['uuidv7', 'stored', 'virtual'] as const).some(gen => Field.isGen(column, gen)));
 		// --- SQL fragments ---------------------------------------------------
 		const $active = softEntry ? sql` AND ${sql(softEntry.col)} IS NULL` : sql``;
 		const $fresh = Option.fromNullable(expEntry).pipe(Option.match({ onNone: () => sql``, onSome: (e) => e.null ? sql` AND (${sql(e.col)} IS NULL OR ${sql(e.col)} > NOW())` : sql` AND ${sql(e.col)} > NOW()` }));
 		const $touch = ((e) => e ? sql`, ${sql(e.col)} = NOW()` : sql``)(Field.pick('autoUpdate', cols));
 		const $scope = (scope?: Record<string, unknown>) => scope && !R.isEmptyRecord(scope) ? sql` AND ${sql.and(R.collect(scope, (column, value) => sql`${sql(column)} = ${value}`))}` : sql``; // NOSONAR S3358
 		const $target = (target: string | [string, unknown]) => typeof target === 'string' ? sql`${sql(pkCol)} = ${target}${pkCast}` : sql`${sql(target[0])} = ${target[1]}`;
-		const $lock = (lock: false | 'update' | 'share' | 'nowait' | 'skip') => ({ false: sql``, nowait: sql` FOR UPDATE NOWAIT`, share: sql` FOR SHARE`, skip: sql` FOR UPDATE SKIP LOCKED`, update: sql` FOR UPDATE` })[`${lock}`];
+		const $lock = (lock: false | 'update' | 'share' | 'nowait' | 'skip') => ({ false: sql``, nowait: sql` FOR UPDATE NOWAIT`, share: sql` FOR SHARE`, skip: sql` FOR UPDATE SKIP LOCKED`, update: sql` FOR UPDATE` })[`${lock}`]; // NOSONAR S3358
 			const $order = (asc: boolean) => asc ? sql`ORDER BY ${sql(pkCol)} ASC` : sql`ORDER BY ${sql(pkCol)} DESC`;
 			const _scopeOpt = Option.fromNullable(config.scoped).pipe(Option.flatMap((field) => Option.fromNullable(Field.resolve(field))), Option.map((entry) => entry.col));
 			const _tenantScope = (operation: string, scopeCol: string) => (tenantId: string) => ({ [Client.tenant.Id.system]: Effect.succeed(sql``), [Client.tenant.Id.unspecified]: Effect.fail(new RepoScopeError({ operation, reason: 'tenant_missing', scopedField: scopeCol, table, tenantId })) } as Record<string, Effect.Effect<Statement.Fragment, RepoScopeError>>)[tenantId] ?? Effect.succeed(sql` AND ${sql(scopeCol)} = ${tenantId}`); // NOSONAR S3358
 			const _withTenantContext = <A, E, R>(operation: string, effect: Effect.Effect<A, E, R>): Effect.Effect<A, E | RepoScopeError | SqlError, R> =>
-				Option.match(_scopeOpt, {
-					onNone: () => effect,
-					onSome: (scopeCol) => Effect.all([Client.tenant.current, Client.tenant.inSqlContext]).pipe(
-						Effect.flatMap(([tenantId, inSqlContext]) =>
-							_tenantScope(operation, scopeCol)(tenantId).pipe(
-								Effect.andThen(
-									tenantId === Client.tenant.Id.system || inSqlContext
-										? effect
-										: sql.withTransaction(
-											sql`SELECT set_config('app.current_tenant', ${tenantId}, true)`.pipe(
-												Effect.andThen(effect),
-												Effect.provideService(SqlClient.SqlClient, sql),
-											),
-										),
-								),
+				({
+					false: Effect.gen(function* () {
+						const scopeCol = Option.getOrUndefined(_scopeOpt) as string;
+						const [tenantId, inSqlContext] = yield* Effect.all([Client.tenant.current, Client.tenant.inSqlContext]);
+						yield* _tenantScope(operation, scopeCol)(tenantId);
+						const skipTransaction = tenantId === Client.tenant.Id.system || inSqlContext;
+						return yield* ({ false: sql.withTransaction(
+							sql`SELECT set_config('app.current_tenant', ${tenantId}, true)`.pipe(
+								Effect.andThen(effect),
+								Effect.provideService(SqlClient.SqlClient, sql),
 							),
-						),
-					),
-				});
+						), true: effect })[`${skipTransaction}`];
+					}),
+					true: effect,
+				})[`${Option.isNone(_scopeOpt)}`];
 			const _autoScope = (operation: string): Effect.Effect<Statement.Fragment, RepoScopeError> => Option.match(_scopeOpt, { onNone: () => Effect.succeed(sql``), onSome: (scopeCol) => Effect.andThen(Client.tenant.current, _tenantScope(operation, scopeCol)) });
 		type OpCtx = { col: Statement.Fragment; value: unknown; values: unknown[]; $cast: SqlCast | undefined };
 		const _cmp = (op: string) => ({ col, value, $cast }: OpCtx) => {
@@ -129,7 +146,7 @@ const repo = <M extends Model.AnyNoContext, const C extends Config<M>>(model: M,
 			tsGte: ({ col, value }: OpCtx) => sql`uuid_extract_timestamp(${col}) >= ${value}`,
 			tsLte: ({ col, value }: OpCtx) => sql`uuid_extract_timestamp(${col}) <= ${value}`,
 		} as const satisfies Record<string, (ctx: OpCtx) => Statement.Fragment>;
-			const $pred = (p: Pred): Statement.Fragment => {
+			const $pred = (predicate: Pred): Statement.Fragment => {
 				const _handleObj = (pred: { field: string; value?: unknown; values?: unknown[]; op?: keyof typeof _ops; cast?: SqlCast; wrap?: string }) => {
 					const { field, op = 'eq', value, values = [], cast, wrap } = pred;
 					const { cast: metaCast, wrap: metaWrap } = Field.predMeta(field);
@@ -138,11 +155,11 @@ const repo = <M extends Model.AnyNoContext, const C extends Config<M>>(model: M,
 					const col = $wrap ? sql`${sql.literal($wrap)}(${sql(field)})` : sql`${sql(field)}`;
 					return (_ops[op] ?? _ops.eq)({ $cast, col, value, values });
 				};
-				const kind: 'obj' | 'raw' | 'tuple' = ('raw' in p && 'raw') || (Array.isArray(p) && 'tuple') || 'obj';
+				const kind: 'obj' | 'raw' | 'tuple' = ('raw' in predicate && 'raw') || (Array.isArray(predicate) && 'tuple') || 'obj';
 				const dispatch = {
-					obj: () => _handleObj(p as Parameters<typeof _handleObj>[0]),
-					raw: () => (p as { raw: Statement.Fragment }).raw,
-					tuple: () => sql`${sql((p as [string, unknown])[0])} = ${(p as [string, unknown])[1]}`,
+					obj: () => _handleObj(predicate as Parameters<typeof _handleObj>[0]),
+					raw: () => (predicate as { raw: Statement.Fragment }).raw,
+					tuple: () => sql`${sql((predicate as [string, unknown])[0])} = ${(predicate as [string, unknown])[1]}`,
 				} satisfies Record<typeof kind, () => Statement.Fragment>;
 				return dispatch[kind]();
 			};
@@ -164,13 +181,11 @@ const repo = <M extends Model.AnyNoContext, const C extends Config<M>>(model: M,
 					const empty = value === undefined || (Array.isArray(value) && !(value as unknown[]).length);
 					const isTemporal = key === 'after' || key === 'before';
 					const tsOp = _uuidv7Col && isTemporal ? _tsOps[key] : undefined;
-					const pred = (tsOp && { field: _uuidv7Col, op: tsOp, value })
+					const predicate = (tsOp && { field: _uuidv7Col, op: tsOp, value })
 						|| (Array.isArray(value) && { field: key, op: 'in' as const, values: value as unknown[] })
 						|| { field: key, value };
-					return ({
-						false: !isTemporal || tsOp ? [...acc, pred as Pred] : acc,
-						true: acc,
-				})[`${empty}`];
+					const include = !empty && (!isTemporal || !!tsOp);
+					return ({ false: acc, true: [...acc, predicate as Pred] })[`${include}`];
 				});
 			const $entry = (column: string, value: unknown): Statement.Fragment => {
 				const col = sql(column);
@@ -190,38 +205,92 @@ const repo = <M extends Model.AnyNoContext, const C extends Config<M>>(model: M,
 				} satisfies Record<typeof kind, () => Statement.Fragment>;
 				return dispatch[kind]();
 			};
-		const $entries = (updates: Record<string, unknown>): Statement.Fragment[] => R.collect(updates, (column, value) => $entry(column, value));
-		const $excluded = (keys: string[], only?: string[]) => (only ?? Object.keys(cols).filter(column => column !== pkCol && !keys.includes(column))).map(column => sql`${sql(column)} = EXCLUDED.${sql(column)}`);
-		const upsertConfiguration = config.conflict && { keys: config.conflict.keys, updates: $excluded(config.conflict.keys, config.conflict.only) };
-		// --- Base repository + resolvers -------------------------------------
-		const base = yield* Model.makeRepository(model, { idColumn: pkCol, spanPrefix: table, tableName: table });
-		const resolvers = yield* Effect.all(R.map(config.resolve ?? {}, (spec, name) => {
-			const isMany = typeof spec === 'string' && spec.startsWith('many:');
-			const fields = (isMany && [(spec).slice(5)])
-				|| (Array.isArray(spec) && (spec as string[]))
-				|| [spec as string];
-			const $cf = fields.map(field => { const wrap = Field.predMeta(field).wrap; return wrap ? sql`${sql.literal(wrap)}(${sql(field)})` : sql`${sql(field)}`; });
-			const $compoundClause = (rec: Record<string, unknown>) => sql`(${sql.and(fields.map((column, index) => sql`${$cf[index]} = ${rec[column]}`))})`;  // NOSONAR S2004
-			const $wh = (keys: unknown[]) => ({ false: sql.or((keys as Record<string, unknown>[]).map($compoundClause)), true: sql`${$cf[0]} IN ${sql.in(keys)}` })[`${fields.length === 1}`];
-			const $select = (wh: Statement.Fragment, $autoScope: Statement.Fragment) => sql`SELECT * FROM ${sql(table)} WHERE ${wh}${$active}${$fresh}${$autoScope}`;
-			const ex = (keys: unknown[]) => Effect.andThen(_autoScope('by'), ($autoScope) => $select($wh(keys), $autoScope)); // NOSONAR S2004
-			const schema = Field.from(fields, cols), extract = Field.from(fields);
-			return isMany
-				? SqlResolver.grouped(`${table}.${name}Grp`, { execute: ex, Request: schema, RequestGroupKey: (id: unknown) => id, Result: model, ResultGroupKey: extract, withContext: false })
-				: SqlResolver.findById(`${table}.${name}`, { execute: ex, Id: schema, Result: model, ResultId: extract, withContext: false });
-		}));
-		// --- Query methods ---------------------------------------------------
-			const by = <K extends string & keyof NonNullable<C['resolve']>>(key: K, value: unknown): (
-				NonNullable<C['resolve']>[K] extends `many:${string}`
-					? Effect.Effect<readonly S.Schema.Type<M>[], SqlError | ParseError | RepoScopeError | RepoConfigError> // NOSONAR S3358
-					: Effect.Effect<Option.Option<S.Schema.Type<M>>, SqlError | ParseError | RepoScopeError | RepoConfigError>
-			) => (resolvers[key]
-				? _withTenantContext('by', resolvers[key].execute(value) as Effect.Effect<unknown, SqlError | ParseError | RepoScopeError, never>)
-				: Effect.fail(new RepoConfigError({ message: `resolver '${String(key)}' not configured`, operation: 'by', table }))) as (
-				NonNullable<C['resolve']>[K] extends `many:${string}`
-					? Effect.Effect<readonly S.Schema.Type<M>[], SqlError | ParseError | RepoScopeError | RepoConfigError>
-					: Effect.Effect<Option.Option<S.Schema.Type<M>>, SqlError | ParseError | RepoScopeError | RepoConfigError>
+			const $entries = (updates: Record<string, unknown>): Statement.Fragment[] => R.collect(updates, (column, value) => $entry(column, value));
+			const $excluded = (keys: string[], only?: string[]) => (only ?? Object.keys(cols).filter(column => column !== pkCol && !keys.includes(column))).map(column => sql`${sql(column)} = EXCLUDED.${sql(column)}`);
+			const upsertConfiguration = config.conflict && { keys: config.conflict.keys, updates: $excluded(config.conflict.keys, config.conflict.only) };
+			// --- Base repository + resolvers -------------------------------------
+			const base = yield* Model.makeRepository(model, { idColumn: pkCol, spanPrefix: table, tableName: table });
+		// Unlike Field.from(fields, cols) which uses actual column schemas, this builds an opaque S.Unknown
+		// schema for resolver request types where the concrete column type is irrelevant.
+		const _resolveSchema = (fields: readonly string[]): S.Schema.AnyNoContext =>
+				fields.length === 1
+					? S.Unknown
+					: S.Struct(Object.fromEntries(fields.map((field) => [field, S.Unknown]))) as S.Schema.AnyNoContext;
+			const _resolveWhere = (refs: readonly Statement.Fragment[], fields: readonly string[], value: unknown) => {
+				const values = Array.isArray(value) ? value : [value];
+				return fields.length === 1
+					? sql`${refs[0]} IN ${sql.in(values)}`
+					: sql.or((values as Record<string, unknown>[]).map((record) => sql`(${sql.and(fields.map((field, index) => sql`${refs[index]} = ${record[field]}`))})`)); 
+			};
+			const resolvers = R.map(config.resolve ?? {}, (spec) =>
+				_isJoinResolve(spec)
+					? ((through) => {
+						const { fields, isMany } = _extractResolveFields(through.source);
+						const request = _resolveSchema(fields);
+						const refs = fields.map((field) => sql`${sql(through.table)}.${sql(field)}`);
+						return {
+							execute: (value: unknown, lock: false | 'update' | 'share' | 'nowait' | 'skip' = false) => _autoScope('by').pipe(
+								Effect.flatMap(($autoScope) => {
+									const where = _resolveWhere(refs, fields, value);
+									const query: Effect.Effect<unknown, SqlError | ParseError, never> = isMany
+										? SqlSchema.findAll({
+											execute: () => sql`SELECT ${sql(table)}.* FROM ${sql(table)} JOIN ${sql(through.table)} ON ${sql(table)}.${sql(through.base ?? pkCol)} = ${sql(through.table)}.${sql(through.target)} WHERE ${where}${$active}${$fresh}${$autoScope}`,
+											Request: request,
+											Result: model,
+										})(value)
+										: SqlSchema.findOne({
+											execute: () => sql`SELECT ${sql(table)}.* FROM ${sql(table)} JOIN ${sql(through.table)} ON ${sql(table)}.${sql(through.base ?? pkCol)} = ${sql(through.table)}.${sql(through.target)} WHERE ${where}${$active}${$fresh}${$autoScope}${$lock(lock)}`,
+											Request: request,
+											Result: model,
+										})(value);
+									return query;
+								}),
+							),
+							isMany,
+						} as const;
+					})(spec.through)
+					: (() => {
+						const isMany = typeof spec === 'string' && spec.startsWith('many:');
+						const fields = (isMany && [spec.slice(5)]) || (Array.isArray(spec) && [...spec]) || [spec];
+						const request = _resolveSchema(fields);
+						const refs = fields.map((field) => {
+							const wrap = Field.predMeta(field).wrap;
+							return wrap ? sql`${sql.literal(wrap)}(${sql(field)})` : sql`${sql(field)}`;
+						});
+						return {
+							execute: (value: unknown, lock: false | 'update' | 'share' | 'nowait' | 'skip' = false) => _autoScope('by').pipe(
+								Effect.flatMap(($autoScope) => {
+									const where = _resolveWhere(refs, fields, value);
+									const query: Effect.Effect<unknown, SqlError | ParseError, never> = isMany
+										? SqlSchema.findAll({
+											execute: () => sql`SELECT * FROM ${sql(table)} WHERE ${where}${$active}${$fresh}${$autoScope}`,
+											Request: request,
+											Result: model,
+										})(value)
+										: SqlSchema.findOne({
+											execute: () => sql`SELECT * FROM ${sql(table)} WHERE ${where}${$active}${$fresh}${$autoScope}${$lock(lock)}`,
+											Request: request,
+											Result: model,
+										})(value);
+									return query;
+								}),
+							),
+							isMany,
+						} as const;
+					})(),
 			);
+			// --- Query methods ---------------------------------------------------
+				const by = <K extends string & keyof NonNullable<C['resolve']>>(key: K, value: unknown, lock: false | 'update' | 'share' | 'nowait' | 'skip' = false): (
+					ResolveMany<NonNullable<C['resolve']>[K]> extends true
+						? Effect.Effect<readonly S.Schema.Type<M>[], SqlError | ParseError | RepoScopeError | RepoConfigError> // NOSONAR S3358
+						: Effect.Effect<Option.Option<S.Schema.Type<M>>, SqlError | ParseError | RepoScopeError | RepoConfigError>
+				) => (resolvers[key]
+					? _withTenantContext('by', resolvers[key].execute(value, lock) as Effect.Effect<unknown, SqlError | ParseError | RepoScopeError, never>) // NOSONAR S3358
+					: Effect.fail(new RepoConfigError({ message: `resolver '${String(key)}' not configured`, operation: 'by', table }))) as (
+					ResolveMany<NonNullable<C['resolve']>[K]> extends true
+						? Effect.Effect<readonly S.Schema.Type<M>[], SqlError | ParseError | RepoScopeError | RepoConfigError>
+						: Effect.Effect<Option.Option<S.Schema.Type<M>>, SqlError | ParseError | RepoScopeError | RepoConfigError>
+				);
 			const _findExec = (predicate: Pred | readonly Pred[], $autoScope: Statement.Fragment, asc: boolean) => () => sql`SELECT * FROM ${sql(table)} WHERE ${$where(predicate)}${$active}${$fresh}${$autoScope} ${$order(asc)}`;
 			const find = (predicate: Pred | readonly Pred[], options: { asc?: boolean } = {}) => _withTenantContext('find', Effect.andThen(_autoScope('find'), ($autoScope) => SqlSchema.findAll({ execute: _findExec(predicate, $autoScope, options.asc ?? false), Request: S.Void, Result: model })(undefined)));
 			const one = (predicate: Pred | readonly Pred[], lock: false | 'update' | 'share' | 'nowait' | 'skip' = false) => _withTenantContext('one', _autoScope('one').pipe(Effect.flatMap(($autoScope) => SqlSchema.findOne({ execute: () => sql`SELECT * FROM ${sql(table)} WHERE ${$where(predicate)}${$active}${$fresh}${$autoScope}${$lock(lock)}`, Request: S.Void, Result: model })(undefined))));

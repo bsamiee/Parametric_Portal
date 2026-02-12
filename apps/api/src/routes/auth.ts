@@ -249,7 +249,7 @@ const AuthLive = HttpApiBuilder.group(ParametricApi, 'auth', (handlers) =>
 						),
 						constant(HttpError.Conflict.of('oauth_account', `Provider ${provider} is already linked`)),
 					),
-					Effect.bind('externalAccount', constant(repositories.oauthAccounts.byExternalAny(provider, externalId).pipe(
+					Effect.bind('externalAccount', constant(repositories.oauthAccounts.byExternal(provider, externalId).pipe(
 						Effect.mapError(constant(HttpError.Internal.of('OAuth account conflict check failed'))),
 					))),
 					Effect.let('linkAction', ({ externalAccount, session }) => {

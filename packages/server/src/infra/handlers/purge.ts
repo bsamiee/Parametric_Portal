@@ -101,7 +101,7 @@ class PurgeService extends Effect.Service<PurgeService>()('server/Purge', {
 				Effect.asVoid, Telemetry.span(`jobs.${name}`, { metrics: false }),
 			);
 		}));
-		static readonly _scheduledJobs = R.keys(_JOBS).filter((name) => _JOBS[name].cron !== null);
+		static readonly _scheduledJobs = R.keys(_JOBS).filter((name) => _JOBS[name].cron !== null && _JOBS[name].strategy !== 'db-only');
 		static readonly Crons = Layer.unwrapEffect(
 			Effect.orDie(_config).pipe(Effect.map((resolvedConfig) => Layer.mergeAll(
 				...(PurgeService._scheduledJobs.map((name) => ClusterService.Schedule.cron({

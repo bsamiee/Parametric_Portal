@@ -137,6 +137,26 @@ const AdminLive = HttpApiBuilder.group(ParametricApi, 'admin', (handlers) =>
 				Effect.mapError((error) => HttpError.Internal.of('Database cache hit ratio failed', error)),
 				Telemetry.span('admin.dbCacheHitRatio'),
 			)))
+			.handle('dbWalInspect', ({ urlParams }) => Middleware.guarded('admin', 'dbWalInspect', 'api', database.listWalInspect(urlParams.limit).pipe(
+				Effect.mapError((error) => HttpError.Internal.of('Database WAL inspect failed', error)),
+				Telemetry.span('admin.dbWalInspect'),
+			)))
+			.handle('dbStatKcache', ({ urlParams }) => Middleware.guarded('admin', 'dbStatKcache', 'api', database.listStatKcache(urlParams.limit).pipe(
+				Effect.mapError((error) => HttpError.Internal.of('Database stat kcache failed', error)),
+				Telemetry.span('admin.dbStatKcache'),
+			)))
+			.handle('dbCronJobs', () => Middleware.guarded('admin', 'dbCronJobs', 'api', database.listCronJobs().pipe(
+				Effect.mapError((error) => HttpError.Internal.of('Database cron jobs failed', error)),
+				Telemetry.span('admin.dbCronJobs'),
+			)))
+			.handle('dbPartitionHealth', ({ urlParams }) => Middleware.guarded('admin', 'dbPartitionHealth', 'api', database.listPartitionHealth(urlParams.parentTable).pipe(
+				Effect.mapError((error) => HttpError.Internal.of('Database partition health failed', error)),
+				Telemetry.span('admin.dbPartitionHealth'),
+			)))
+			.handle('dbReconcileMaintenance', () => Middleware.guarded('admin', 'dbReconcileMaintenance', 'mutation', database.reconcileMaintenanceCronJobs().pipe(
+				Effect.mapError((error) => HttpError.Internal.of('Database maintenance reconciliation failed', error)),
+				Telemetry.span('admin.dbReconcileMaintenance'),
+			)))
 			.handle('listPermissions', () => Middleware.guarded('admin', 'listPermissions', 'api', policy.list().pipe(
 				Effect.map(Arr.map(({ action, resource, role }) => ({ action, resource, role }))),
 				Telemetry.span('admin.listPermissions'),
@@ -256,43 +276,44 @@ const AdminLive = HttpApiBuilder.group(ParametricApi, 'admin', (handlers) =>
 					Effect.map((providers) => ({ providers })),
 					Telemetry.span('admin.getTenantOAuth'),
 				)))
-				.handle('updateTenantOAuth', flow(
-					Effect.fn(function* ({ path, payload }) {
-						yield* Middleware.guarded('admin', 'updateTenantOAuth', 'mutation', Effect.void);
-						const loaded = yield* database.apps.readSettings(path.id, 'update').pipe(
-							Effect.mapError(constant(HttpError.Internal.of('tenant lookup failed'))),
-							Effect.filterOrFail(Option.isSome, constant(HttpError.NotFound.of('tenant', path.id))),
-							Effect.map(({ value }) => value),
-						);
-						const secretsByProvider = pipe(loaded.settings.oauthProviders, Arr.groupBy(Struct.get('provider')));
-						const oauthProviders = yield* Effect.forEach(payload.providers, Effect.fn(function* (provider) {
-							const { clientSecret, ...fields } = provider;
-							const encrypted = yield* Option.fromNullable(clientSecret).pipe(
+				.handle('updateTenantOAuth', ({ path, payload }) => Middleware.guarded('admin', 'updateTenantOAuth', 'mutation',
+					database.apps.readSettings(path.id, 'update').pipe(
+						Effect.mapError(constant(HttpError.Internal.of('tenant lookup failed'))),
+						Effect.filterOrFail(Option.isSome, constant(HttpError.NotFound.of('tenant', path.id))),
+						Effect.map(Struct.get('value')),
+						Effect.bindTo('loaded'),
+						Effect.let('secretsByProvider', ({ loaded }) => Arr.groupBy(loaded.settings.oauthProviders, Struct.get('provider'))),
+						Effect.bind('encrypted', ({ secretsByProvider }) =>
+							Effect.forEach(payload.providers, (provider) => pipe(
+								Option.fromNullable(provider.clientSecret),
 								Option.match({
 									onNone: constant(
-										Effect.fromNullable(secretsByProvider[fields.provider]?.[0]).pipe(
-											Effect.mapError(constant(HttpError.Validation.of('clientSecret', `Missing clientSecret for provider '${fields.provider}'`))),
+										Effect.fromNullable(secretsByProvider[provider.provider]?.[0]).pipe(
+											Effect.mapError(constant(HttpError.Internal.of(`Missing clientSecret for provider '${provider.provider}'`))),
 											Effect.map(Struct.get('clientSecretEncrypted')),
 										)
 									),
 									onSome: flow(Crypto.encrypt, Effect.mapError(constant(HttpError.Internal.of('Encryption failed'))), Effect.map(Encoding.encodeBase64)),
 								}),
-							);
-							return { ...fields, clientSecretEncrypted: encrypted };
-						}), { concurrency: 'unbounded' });
-						yield* database.apps.updateSettings(loaded.app.id, {
-							...loaded.settings,
-							oauthProviders,
-						}).pipe(Effect.mapError((error) => HttpError.is(error) ? error : HttpError.Internal.of('Tenant OAuth config update failed', error)));
-						yield* audit.log('App.update', { details: { tenantId: path.id } });
-						yield* eventBus.publish({ aggregateId: path.id, payload: { _tag: 'app', action: 'settings.updated' }, tenantId: path.id }).pipe(Effect.ignore);
-						return pipe(
-							oauthProviders,
+							), { concurrency: 'unbounded' }),
+						),
+						Effect.let('oauthProviders', flow(
+							Struct.get('encrypted'),
+							Arr.zipWith(payload.providers, (enc, provider) => ({ ...Struct.omit(provider, 'clientSecret'), clientSecretEncrypted: enc })),
+						)),
+						Effect.tap(({ loaded, oauthProviders }) =>
+							database.apps.updateSettings(loaded.app.id, { ...loaded.settings, oauthProviders }),
+						),
+						Effect.mapError((error) => HttpError.is(error) ? error : HttpError.Internal.of('Tenant OAuth config update failed', error)),
+						Effect.tap(constant(audit.log('App.update', { details: { tenantId: path.id } }))),
+						Effect.tap(constant(eventBus.publish({ aggregateId: path.id, payload: { _tag: 'app', action: 'settings.updated' }, tenantId: path.id }).pipe(Effect.ignore))),
+						Effect.map(flow(
+							Struct.get('oauthProviders'),
 							Arr.map(({ clientSecretEncrypted, ...rest }) => ({ ...rest, clientSecretSet: clientSecretEncrypted.length > 0 })),
 							(providers) => ({ providers }),
-						);
-					}),
-					Telemetry.span('admin.updateTenantOAuth'),
+						)),
+						Telemetry.span('admin.updateTenantOAuth'),
+					),
 				))
 			.handle('getFeatureFlags', () => Middleware.guarded('admin', 'getFeatureFlags', 'api', features.getAll.pipe(
 				Telemetry.span('admin.getFeatureFlags'),

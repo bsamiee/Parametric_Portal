@@ -773,6 +773,40 @@ const _AdminGroup = HttpApiGroup.make('admin')
 			.annotate(OpenApi.Summary, 'Database cache hit ratio'),
 	)
 	.add(
+		HttpApiEndpoint.get('dbWalInspect', '/db/walinspect')
+			.setUrlParams(S.Struct({
+				limit: S.optionalWith(HttpApiSchema.param('limit', S.NumberFromString.pipe(S.int(), S.between(1, 500))), { default: () => 100 }),
+			}))
+			.addSuccess(S.Array(S.Unknown))
+			.annotate(OpenApi.Summary, 'WAL inspection snapshot'),
+	)
+	.add(
+		HttpApiEndpoint.get('dbStatKcache', '/db/stat-kcache')
+			.setUrlParams(S.Struct({
+				limit: S.optionalWith(HttpApiSchema.param('limit', S.NumberFromString.pipe(S.int(), S.between(1, 500))), { default: () => 100 }),
+			}))
+			.addSuccess(S.Array(S.Unknown))
+			.annotate(OpenApi.Summary, 'Per-query filesystem IO attribution'),
+	)
+	.add(
+		HttpApiEndpoint.get('dbCronJobs', '/db/cron-jobs')
+			.addSuccess(S.Array(S.Unknown))
+			.annotate(OpenApi.Summary, 'Database cron jobs'),
+	)
+	.add(
+		HttpApiEndpoint.get('dbPartitionHealth', '/db/partition-health')
+			.setUrlParams(S.Struct({
+				parentTable: S.optionalWith(HttpApiSchema.param('parentTable', S.String), { default: () => 'public.sessions' }),
+			}))
+			.addSuccess(S.Array(S.Unknown))
+			.annotate(OpenApi.Summary, 'Partition metadata and bounds'),
+	)
+	.add(
+		HttpApiEndpoint.post('dbReconcileMaintenance', '/db/reconcile-maintenance')
+			.addSuccess(S.Array(S.Unknown))
+			.annotate(OpenApi.Summary, 'Reconcile database maintenance cron jobs'),
+	)
+	.add(
 		HttpApiEndpoint.get('listPermissions', '/permissions')
 			.addSuccess(S.Array(S.Struct({ action: Permission.fields.action, resource: Permission.fields.resource, role: Permission.fields.role })))
 			.annotate(OpenApi.Summary, 'List tenant permissions'),

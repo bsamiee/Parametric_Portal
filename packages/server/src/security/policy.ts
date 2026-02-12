@@ -16,8 +16,8 @@ import { CacheService } from '../platform/cache.ts';
 // --- [CONSTANTS] -------------------------------------------------------------
 
 const _CONFIG = {
-	catalog: {
-		admin: 			['listUsers', 'listSessions', 'deleteSession', 'revokeSessionsByIp', 'listJobs', 'cancelJob', 'listDlq', 'replayDlq', 'listNotifications', 'replayNotification', 'events', 'dbIoStats', 'dbIoConfig', 'dbStatements', 'dbCacheHitRatio', 'listTenants', 'createTenant', 'getTenant', 'updateTenant', 'deactivateTenant', 'resumeTenant', 'archiveTenant', 'purgeTenant', 'getTenantOAuth', 'updateTenantOAuth', 'listPermissions', 'grantPermission', 'revokePermission', 'getFeatureFlags', 'setFeatureFlag'],
+		catalog: {
+			admin: 			['listUsers', 'listSessions', 'deleteSession', 'revokeSessionsByIp', 'listJobs', 'cancelJob', 'listDlq', 'replayDlq', 'listNotifications', 'replayNotification', 'events', 'dbIoStats', 'dbIoConfig', 'dbStatements', 'dbCacheHitRatio', 'dbWalInspect', 'dbStatKcache', 'dbCronJobs', 'dbPartitionHealth', 'dbReconcileMaintenance', 'listTenants', 'createTenant', 'getTenant', 'updateTenant', 'deactivateTenant', 'resumeTenant', 'archiveTenant', 'purgeTenant', 'getTenantOAuth', 'updateTenantOAuth', 'listPermissions', 'grantPermission', 'revokePermission', 'getFeatureFlags', 'setFeatureFlag'],
 		audit: 			['getByEntity', 'getByUser', 'getMine'],
 		auth: 			['logout', 'me', 'mfaStatus', 'mfaEnroll', 'mfaVerify', 'mfaDisable', 'mfaRecover', 'listApiKeys', 'createApiKey', 'deleteApiKey', 'rotateApiKey', 'linkProvider', 'unlinkProvider'],
 		jobs: 			['subscribe'],

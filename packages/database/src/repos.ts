@@ -2,7 +2,7 @@
  * Expose batched repositories via factory pattern.
  * UUIDv7 ordering, casefold comparisons, purge/revoke DB functions.
  */
-import { SqlClient, SqlSchema } from '@effect/sql';
+import { SqlClient } from '@effect/sql';
 import { Clock, Effect, Option, Record as R, Schema as S } from 'effect';
 import { repo, routine, Update } from './factory.ts';
 import { ApiKey, App, AppSettingsDefaults, Asset, AuditLog, type AuditOperationSchema, Job, JobDlq, KvStore, MfaSecret, Notification, OauthAccount, Permission, Session, User, WebauthnCredential, AppSettingsSchema } from './models.ts';
@@ -46,14 +46,14 @@ const makePermissionRepo = Effect.gen(function* () {
 });
 const makeAppRepo = Effect.gen(function* () {
 	const repository = yield* repo(App, 'apps', { resolve: { byNamespace: 'namespace' } });
-	const _decodeSettings = (raw: unknown) => S.decodeUnknown(AppSettingsSchema)(raw, { errors: 'all', onExcessProperty: 'ignore' });
+	const _decodeSettings = (rawValue: unknown) => S.decodeUnknown(AppSettingsSchema)(rawValue, { errors: 'all', onExcessProperty: 'ignore' });
 	return { ...repository,
 		archive: (id: string) => repository.set(id, { status: 'archived' }),
 		byNamespace: (namespace: string) => repository.by('byNamespace', namespace),
 		readSettings: (id: string, lock: false | 'update' = false) => repository.one([{ field: 'id', value: id }], lock).pipe(
 			Effect.flatMap(Option.match({
 				onNone: () => Effect.succeed(Option.none()),
-				onSome: (app) => _decodeSettings(Option.getOrElse(app.settings, () => AppSettingsDefaults)).pipe(Effect.map((settings) => Option.some({ app, settings })),),
+				onSome: (app) => _decodeSettings(Option.getOrElse(app.settings, () => AppSettingsDefaults)).pipe(Effect.map((settings) => Option.some({ app, settings }))),
 			})),
 		),
 		resume: (id: string) => repository.set(id, { status: 'active' }),
@@ -65,12 +65,16 @@ const makeSessionRepo = Effect.gen(function* () {
 	const repository = yield* repo(Session, 'sessions', {
 		fn: { revoke_sessions_by_ip: { args: [{ cast: 'uuid', field: 'appId' }, { cast: 'inet', field: 'ip' }], params: S.Struct({ appId: S.UUID, ip: S.String }) } },
 		purge: 'purge_sessions',
+		resolve: {
+			byAccessToken: { through: { source: 'token_access', table: 'session_tokens', target: 'session_id' } },
+			byRefreshToken: { through: { source: 'token_refresh', table: 'session_tokens', target: 'session_id' } },
+		},
 		scoped: 'appId',
 	});
 	return { ...repository,
-		byAccessToken: (hash: string) => repository.one([{ field: 'token_access', value: hash }]),
-		byRefreshToken: (hash: string) => repository.one([{ field: 'token_refresh', value: hash }]),
-		byRefreshTokenForUpdate: (hash: string) => repository.one([{ field: 'token_refresh', value: hash }], 'update'),
+		byAccessToken: (hash: string) => repository.by('byAccessToken', hash),
+		byRefreshToken: (hash: string) => repository.by('byRefreshToken', hash),
+		byRefreshTokenForUpdate: (hash: string) => repository.by('byRefreshToken', hash, 'update'),
 		byUser: (userId: string) => repository.find([{ field: 'user_id', value: userId }]),
 		softDelete: (id: string) => repository.drop(id),
 		softDeleteByIp: (appId: string, ip: string) => repository.fn('revoke_sessions_by_ip', { appId, ip }),
@@ -89,19 +93,12 @@ const makeApiKeyRepo = Effect.gen(function* () {
 	};
 });
 const makeOauthAccountRepo = Effect.gen(function* () {
-	const sqlClient = yield* SqlClient.SqlClient;
 	const repository = yield* repo(OauthAccount, 'oauth_accounts', {
 		conflict: { keys: ['provider', 'externalId'], only: ['tokenPayload'] },
 		purge: 'purge_oauth_accounts', resolve: { byExternal: ['provider', 'externalId'], byUser: 'many:userId' },
 	});
-	const byExternalAny = SqlSchema.findOne({
-		execute: (input: { externalId: string; provider: S.Schema.Type<typeof OauthAccount.fields.provider> }) => sqlClient`SELECT * FROM oauth_accounts WHERE provider = ${input.provider} AND external_id = ${input.externalId} AND deleted_at IS NULL LIMIT 1`,
-		Request: S.Struct({ externalId: S.String, provider: OauthAccount.fields.provider }),
-		Result: OauthAccount,
-	});
 	return { ...repository,
 		byExternal: (provider: S.Schema.Type<typeof OauthAccount.fields.provider>, externalId: string) => repository.by('byExternal', { externalId, provider }),
-		byExternalAny: (provider: S.Schema.Type<typeof OauthAccount.fields.provider>, externalId: string) => byExternalAny({ externalId, provider }),
 		byUser: (userId: string) => repository.by('byUser', userId),
 		restore: (id: string) => repository.lift(id),
 		softDelete: (id: string) => repository.drop(id),
@@ -163,28 +160,21 @@ const makeWebauthnCredentialRepo = Effect.gen(function* () {
 const makeJobRepo = Effect.gen(function* () {
 	const sql = yield* SqlClient.SqlClient;
 	const repository = yield* repo(Job, 'jobs', { pk: { column: 'job_id' }, scoped: 'appId' });
-	const _updatedBetween = (after?: Date, before?: Date) => [
-		...(after === undefined ? [] : [{ field: 'updated_at', op: 'gte' as const, value: after }]),
-		...(before === undefined ? [] : [{ field: 'updated_at', op: 'lte' as const, value: before }]),
-	];
 	return { ...repository,
-		byDateRange: (after: Date, before: Date, options?: { limit?: number; cursor?: string }) => repository.page(_updatedBetween(after, before), { cursor: options?.cursor, limit: options?.limit ?? 100 }),
-		byStatus: (status: string, options?: { after?: Date; before?: Date; limit?: number; cursor?: string }) => repository.page([{ field: 'status', value: status }, ..._updatedBetween(options?.after, options?.before)], { cursor: options?.cursor, limit: options?.limit ?? 100 }),
+		byDateRange: (after: Date, before: Date, options?: { limit?: number; cursor?: string }) => repository.page(repository.preds({ after, before }), { cursor: options?.cursor, limit: options?.limit ?? 100 }),
+		byStatus: (status: string, options?: { after?: Date; before?: Date; limit?: number; cursor?: string }) => repository.page([{ field: 'status', value: status }, ...repository.preds({ after: options?.after, before: options?.before })], { cursor: options?.cursor, limit: options?.limit ?? 100 }),
 		countByStatuses: (...statuses: readonly string[]) => repository.count([{ field: 'status', op: 'in', values: [...statuses] }]),
 		isDuplicate: (dedupeKey: string) => repository.exists([{ raw: sql`correlation->>'dedupe' = ${dedupeKey}` }, { field: 'status', op: 'in', values: ['queued', 'processing'] }]),
 	};
 });
 const makeJobDlqRepo = Effect.gen(function* () {
 	const repository = yield* repo(JobDlq, 'job_dlq', { purge: 'purge_job_dlq', resolve: { bySource: 'sourceId' }, scoped: 'appId' });
-	const _typePred = (type?: string) => type === undefined
-		? []
-		: [{ field: 'type', op: type.includes('*') ? 'like' : 'eq', value: type.replaceAll('*', '%') } as const];
 	return { ...repository,
 		byErrorReason: (errorReason: string, options?: { limit?: number; cursor?: string }) => repository.page([{ field: 'error_reason', value: errorReason }], { cursor: options?.cursor, limit: options?.limit ?? 100 }),
 		byRequest: (requestId: string) => repository.find([{ field: 'context_request_id', value: requestId }]),
 		bySource: (sourceId: string) => repository.by('bySource', sourceId),
-		countPending: (type?: string) => repository.count(_typePred(type)),
-		listPending: (options?: { type?: string; limit?: number; cursor?: string }) => repository.page(_typePred(options?.type), { cursor: options?.cursor, limit: options?.limit ?? 100 }),
+		countPending: (type?: string) => repository.count(type === undefined ? [] : [{ field: 'type', op: type.includes('*') ? 'like' as const : 'eq' as const, value: type.replaceAll('*', '%') }]),
+		listPending: (options?: { type?: string; limit?: number; cursor?: string }) => repository.page(options?.type === undefined ? [] : [{ field: 'type', op: options.type.includes('*') ? 'like' as const : 'eq' as const, value: options.type.replaceAll('*', '%') }], { cursor: options?.cursor, limit: options?.limit ?? 100 }),
 		markReplayed: (id: string) => repository.drop(id),
 		unmarkReplayed: (id: string) => repository.lift(id),
 	};
@@ -238,7 +228,14 @@ const makeSystemRepo = Effect.gen(function* () {
 					schema: S.Struct({ payload: S.String, primaryKey: S.String }),
 				},
 		},
-		fnTyped: { list_stat_statements_json: { args: ['limit'], params: S.Struct({ limit: S.Number }), schema: S.Array(S.Unknown) } },
+		fnTyped: {
+			list_cron_jobs_json: { schema: S.Array(S.Unknown) },
+			list_partition_health_json: { args: ['parentTable'], params: S.Struct({ parentTable: S.String }), schema: S.Array(S.Unknown) },
+			list_stat_kcache_json: { args: ['limit'], params: S.Struct({ limit: S.Number }), schema: S.Array(S.Unknown) },
+			list_stat_statements_json: { args: ['limit'], params: S.Struct({ limit: S.Number }), schema: S.Array(S.Unknown) },
+			list_walinspect_json: { args: ['limit'], params: S.Struct({ limit: S.Number }), schema: S.Array(S.Unknown) },
+			reconcile_maintenance_cron_jobs: { schema: S.Array(S.Unknown) },
+		},
 	});
 	return {
 		dbCacheHitRatio: () => repository.fnSet('get_db_cache_hit_ratio', {}),
@@ -253,8 +250,13 @@ const makeSystemRepo = Effect.gen(function* () {
 			sinceTimestamp: Option.getOrNull(Option.fromNullable(input.sinceTimestamp)),
 		}),
 		eventOutboxCount: () => repository.fn('count_event_outbox', {}),
+		listCronJobs: () => repository.fnTyped('list_cron_jobs_json', {}),
+		listPartitionHealth: (parentTable = 'public.sessions') => repository.fnTyped('list_partition_health_json', { parentTable }),
+		listStatKcache: (limit = 100) => repository.fnTyped('list_stat_kcache_json', { limit }),
 		listStatStatements: (limit = 100) => repository.fnTyped('list_stat_statements_json', { limit }),
+		listWalInspect: (limit = 100) => repository.fnTyped('list_walinspect_json', { limit }),
 		purgeTenantCascade: (appId: string) => repository.fn('purge_tenant_cascade', { appId }),
+		reconcileMaintenanceCronJobs: () => repository.fnTyped('reconcile_maintenance_cron_jobs', {}),
 	};
 });
 
@@ -279,8 +281,16 @@ class DatabaseService extends Effect.Service<DatabaseService>()('database/Databa
 					purge: (olderThanDays: number) => system.eventJournalPurge(olderThanDays),
 					replay: (input: { batchSize: number; eventType?: string; sinceSequenceId: string; sinceTimestamp?: number }) => system.eventJournalReplay(input),
 				}, eventOutbox: { count: system.eventOutboxCount() },
-				jobDlq, jobs, kvStore, listStatStatements: Effect.fn('db.listStatStatements')((limit = 100) => system.listStatStatements(limit)), mfaSecrets,
-				monitoring, notifications, oauthAccounts, permissions, search: searchRepo, sessions,
+				jobDlq, jobs, kvStore,
+				listCronJobs: Effect.fn('db.listCronJobs')(() => system.listCronJobs()),
+				listPartitionHealth: Effect.fn('db.listPartitionHealth')((parentTable = 'public.sessions') => system.listPartitionHealth(parentTable)),
+				listStatKcache: Effect.fn('db.listStatKcache')((limit = 100) => system.listStatKcache(limit)),
+				listStatStatements: Effect.fn('db.listStatStatements')((limit = 100) => system.listStatStatements(limit)),
+				listWalInspect: Effect.fn('db.listWalInspect')((limit = 100) => system.listWalInspect(limit)),
+				mfaSecrets,
+				monitoring, notifications, oauthAccounts, permissions,
+				reconcileMaintenanceCronJobs: Effect.fn('db.reconcileMaintenanceCronJobs')(() => system.reconcileMaintenanceCronJobs()),
+				search: searchRepo, sessions,
 				system: { purgeTenantCascade: (appId: string) => system.purgeTenantCascade(appId) },
 				users, webauthnCredentials, withTransaction: sqlClient.withTransaction,
 			};
