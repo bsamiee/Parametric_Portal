@@ -1,0 +1,49 @@
+name: 'Setup Node.js with Smart Caching'
+description: 'Setup Node.js with intelligent dependency caching and installation'
+author: 'Example Author'
+
+inputs:
+  node-version: { description: 'Node.js version', required: true }
+  package-manager: { description: 'npm | yarn | pnpm', required: false, default: 'npm' }
+  cache-dependency-path: { description: 'Path to lock file(s)', required: false, default: '**/package-lock.json' }
+
+outputs:
+  cache-hit: { description: 'Whether cache was hit', value: '${{ steps.cache.outputs.cache-hit }}' }
+  node-version: { description: 'Installed version', value: '${{ steps.setup.outputs.node-version }}' }
+
+branding: { icon: package, color: green }
+
+runs:
+  using: 'composite'
+  steps:
+    - shell: bash
+      run: |
+        [[ "${{ inputs.package-manager }}" =~ ^(npm|yarn|pnpm)$ ]] || { echo "::error::Invalid package manager: ${{ inputs.package-manager }}"; exit 1; }
+    - id: setup
+      uses: actions/setup-node@6044e13b5dc448c55e2357c09f80417699197238 # v6.2.0
+      with: { node-version: '${{ inputs.node-version }}' }
+    - if: inputs.package-manager != 'npm'
+      shell: bash
+      run: corepack enable
+    - id: cache-dir
+      shell: bash
+      run: |
+        case "${{ inputs.package-manager }}" in
+          npm)  echo "dir=$(npm config get cache)" >> $GITHUB_OUTPUT ;;
+          yarn) echo "dir=$(yarn cache dir)" >> $GITHUB_OUTPUT ;;
+          pnpm) echo "dir=$(pnpm store path)" >> $GITHUB_OUTPUT ;;
+        esac
+    - id: cache
+      uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
+      with:
+        path: ${{ steps.cache-dir.outputs.dir }}
+        key: ${{ runner.os }}-${{ inputs.package-manager }}-${{ hashFiles(inputs.cache-dependency-path) }}
+        restore-keys: ${{ runner.os }}-${{ inputs.package-manager }}-
+    - if: steps.cache.outputs.cache-hit != 'true'
+      shell: bash
+      run: |
+        case "${{ inputs.package-manager }}" in
+          npm)  npm ci ;;
+          yarn) yarn install --frozen-lockfile ;;
+          pnpm) pnpm install --frozen-lockfile ;;
+        esac

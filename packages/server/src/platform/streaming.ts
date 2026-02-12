@@ -81,8 +81,8 @@ class StreamingService extends Effect.Service<StreamingService>()('server/Stream
                 Match.when('msgpack', () => pipe(raw, Stream.pipeThroughChannel(MsgPack.unpack()))),
                 Match.when('sse', () => pipe(raw, Stream.decodeText('utf-8'), Stream.pipeThroughChannel(Sse.makeChannel<E | Error, unknown>()))),
                 Match.when('ndjson', () => pipe(raw, Stream.pipeThroughChannel(Ndjson.unpack()))),
-                    Match.when('binary', () => raw),
-                    Match.exhaustive,
+                Match.when('binary', () => raw),
+                Match.exhaustive,
                 );
                 const metricTap = (item: unknown) => Match.value(format).pipe(
                     Match.when('binary', () => item instanceof Uint8Array ? _inc(labels, (metrics) => metrics.stream.bytes, item.length) : _inc(labels, (metrics) => metrics.stream.elements)),
@@ -91,9 +91,9 @@ class StreamingService extends Effect.Service<StreamingService>()('server/Stream
                 return decoded.pipe(
                     (stream) => config.retry ? Stream.retry(stream, Resilience.schedule({ base: config.retry.base, maxAttempts: config.retry.times })) : stream,
                     Stream.buffer({ capacity: formatConfig.capacity, strategy: formatConfig.strategy }),
-                _withMetrics(labels, config.name, format),
-                Stream.tap(metricTap),
-            );
+                    _withMetrics(labels, config.name, format),
+                    Stream.tap(metricTap),
+                );
         }), { circuit: config.name, retry: false, timeout: false }).pipe(
             Telemetry.span('streaming.ingest', { 'stream.format': format, 'stream.name': config.name, metrics: false }),
         );

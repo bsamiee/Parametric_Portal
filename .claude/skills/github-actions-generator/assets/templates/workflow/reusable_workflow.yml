@@ -1,0 +1,27 @@
+# [NAME] -- [DESCRIPTION]
+# Usage: uses: [OWNER]/[REPO]/.github/workflows/[FILE]@[REF]
+name: [NAME]
+on:
+  workflow_call:
+    inputs:
+      [INPUT]: { description: '[DESC]', required: true, type: string, default: '[DEFAULT]' }
+    secrets:
+      [SECRET]: { description: '[DESC]', required: false }  # required: false when using secrets: inherit
+    outputs:
+      [OUTPUT]: { description: '[DESC]', value: '${{ jobs.[JOB].outputs.[KEY] }}' }
+
+permissions: { contents: read }
+
+jobs:
+  [JOB]:
+    runs-on: ubuntu-latest
+    timeout-minutes: [TIMEOUT]
+    permissions: { contents: read, [SCOPE]: read }
+    outputs: { [KEY]: '${{ steps.[STEP].outputs.[NAME] }}' }
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with: { fetch-depth: 1 }
+      - id: [STEP]
+        run: |
+          # inputs.${{ inputs.[INPUT] }}, secrets.${{ secrets.[SECRET] }}
+          echo "[NAME]=[VALUE]" >> $GITHUB_OUTPUT

@@ -20,7 +20,7 @@ const handleSubscribe = (jobs: typeof JobService.Service) =>
         yield* Middleware.permission('jobs', 'subscribe');
         const ctx = yield* Context.Request.current;
         const appId = ctx.tenantId;
-    return yield* StreamingService.sse({
+        return yield* StreamingService.sse({
             filter: (event) => event.tenantId === appId,
             name: 'jobs.status',
             serialize: (event) => ({ data: JSON.stringify(event), event: 'status', id: event.jobId }),

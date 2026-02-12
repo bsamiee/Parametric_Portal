@@ -112,7 +112,7 @@ Return structured summary:
 | :-----: | ------------- | ----------------------------- | :-----: | ---------------- |
 |   [1]   | Read-only     | `Read, Glob, Grep`            | sonnet  | Analysis, review |
 |   [2]   | Write-capable | `Read, Edit, Write, Bash`     | sonnet  | Implementation   |
-|   [3]   | Orchestrator  | `Task, Read, Glob, TodoWrite` |  opus   | Agent dispatch   |
+|   [3]   | Orchestrator  | `Task, Read, Glob, TaskCreate` |  opus   | Agent dispatch   |
 |   [4]   | Full access   | *(omit tools field)*          | session | General-purpose  |
 
 [REFERENCE] Template scaffold: [→agent.template.md](../templates/agent.template.md)

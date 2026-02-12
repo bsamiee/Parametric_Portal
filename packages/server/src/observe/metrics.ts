@@ -192,13 +192,13 @@ class MetricsService extends Effect.Service<MetricsService>()('server/Metrics', 
             const baseLabels = MetricsService.label({ method: req.method, path, tenant: tenantId });
             const tenantLabels = MetricsService.label({ tenant: tenantId });
             const activeGauge = Metric.taggedWithLabels(metrics.http.active, tenantLabels);
-                yield* Metric.increment(activeGauge);
+            yield* Metric.increment(activeGauge);
             return yield* app.pipe(
                 Metric.trackDuration(Metric.taggedWithLabels(metrics.http.duration, baseLabels)),
                 Metric.trackErrorWith(Metric.taggedWithLabels(metrics.errors, tenantLabels), MetricsService.errorTag),
                 Effect.tap((res) => Metric.increment(Metric.taggedWithLabels(metrics.http.requests, HashSet.add(baseLabels, MetricLabel.make('status', String(res.status)))))),
-                    Effect.ensuring(Metric.incrementBy(activeGauge, -1)),
-                );
+                Effect.ensuring(Metric.incrementBy(activeGauge, -1)),
+            );
             }),
         );
 }

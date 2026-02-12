@@ -61,6 +61,7 @@ playwright/.cache/
 .cache/
 .artifacts/
 .nx/*
+.stryker-tmp/
 .vite-inspect/
 .vite/
 .scannerwork/

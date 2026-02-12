@@ -88,26 +88,26 @@ const ApiLayer = HttpApiBuilder.api(ParametricApi).pipe(Layer.provide(RouteLayer
 
 const ServerLayer = Layer.unwrapEffect(Effect.gen(function* () {
     const [database, auth, serverConfig] = yield* Effect.all([Effect.orDie(DatabaseService), Effect.orDie(Auth.Service), Effect.orDie(ServerConfig)]);
-        const MiddlewareLayer = Middleware.layer({
-                apiKeyLookup: (hash) => {
-                    const now = new Date();
-                    return database.apiKeys.byHash(hash).pipe(
-                        Effect.map(Option.filter((key) => Option.isNone(key.deletedAt) && Option.match(key.expiresAt, { onNone: () => true, onSome: (expiresAt) => expiresAt >= now }))),
-                        Effect.tap(Option.match({
-                            onNone: () => Effect.void,
-                            onSome: (key) => database.apiKeys.touch(key.id).pipe(Effect.ignore),
-                        })),
-                        Effect.map(Option.map((key) => ({ id: key.id, userId: key.userId }))),
-                        Effect.catchAll((error) =>
-                            Effect.logError('API key lookup failed', { error: String(error) }).pipe(
-                                Effect.andThen(Effect.succeed(Option.none())),
-                            ),
-                        ),
-                    );
-                },
-            cors: serverConfig.corsOrigins,
-            sessionLookup: (hash) => auth.session.lookup(hash),
-            });
+    const MiddlewareLayer = Middleware.layer({
+        apiKeyLookup: (hash) => {
+            const now = new Date();
+            return database.apiKeys.byHash(hash).pipe(
+                Effect.map(Option.filter((key) => Option.isNone(key.deletedAt) && Option.match(key.expiresAt, { onNone: () => true, onSome: (expiresAt) => expiresAt >= now }))),
+                Effect.tap(Option.match({
+                    onNone: () => Effect.void,
+                    onSome: (key) => database.apiKeys.touch(key.id).pipe(Effect.ignore),
+                })),
+                Effect.map(Option.map((key) => ({ id: key.id, userId: key.userId }))),
+                Effect.catchAll((error) =>
+                    Effect.logError('API key lookup failed', { error: String(error) }).pipe(
+                        Effect.andThen(Effect.succeed(Option.none())),
+                    ),
+                ),
+            );
+        },
+        cors: serverConfig.corsOrigins,
+        sessionLookup: (hash) => auth.session.lookup(hash),
+    });
     return HttpApiBuilder.serve((application) => Middleware.pipeline(database)(application).pipe(
         CacheService.headers,
         HttpMiddleware.logger,

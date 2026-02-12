@@ -7,7 +7,10 @@
       "Glob",
       "Grep",
       "Task",
-      "TodoWrite",
+      "TaskCreate",
+      "TaskUpdate",
+      "TaskList",
+      "TaskGet",
       "NotebookEdit",
       "WebSearch",
       "WebFetch",
@@ -50,6 +53,16 @@
             "type": "command",
             "command": "uv run \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/webhook-emit.py",
             "timeout": 5
+          }
+        ]
+      },
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/validate-spec.sh",
+            "timeout": 10
           }
         ]
       }

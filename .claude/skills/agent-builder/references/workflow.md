@@ -96,14 +96,15 @@ Synthesis: Combine strongest elements, and resolve conflicts via Type hierarchy.
 
 Create `.claude/agents/${name}.md`:
 
-| [STEP] | [COMPONENT]  | [ACTION]                                          |
-| :----: | ------------ | ------------------------------------------------- |
-|   1    | Frontmatter  | name, description, tools, model, skills           |
-|   2    | Role Line    | Imperative, single sentence, concrete deliverable |
-|   3    | §INPUT       | Invocation context specification                  |
-|   4    | §PROCESS     | Numbered steps with **verb** bold                 |
-|   5    | §OUTPUT      | Explicit format specification                     |
-|   6    | §CONSTRAINTS | [CRITICAL]/[IMPORTANT] markers                    |
+| [STEP] | [COMPONENT]  | [ACTION]                                                            |
+| :----: | ------------ | ------------------------------------------------------------------- |
+|   1    | Frontmatter  | name, description, tools, disallowedTools, model, permissionMode    |
+|   2    | Frontmatter  | maxTurns, skills, mcpServers, hooks, memory, color (all optional)   |
+|   3    | Role Line    | Imperative, single sentence, concrete deliverable                   |
+|   4    | §INPUT       | Invocation context specification                                    |
+|   5    | §PROCESS     | Numbered steps with **verb** bold                                   |
+|   6    | §OUTPUT      | Explicit format specification                                       |
+|   7    | §CONSTRAINTS | [CRITICAL]/[IMPORTANT] markers                                      |
 
 Type gates:
 
@@ -111,7 +112,7 @@ Type gates:
 | ------------ | ----------------------------- | :-----: |
 | readonly     | Read, Glob, Grep              | sonnet  |
 | write        | Read, Edit, Write, Glob, Bash | sonnet  |
-| orchestrator | Task, Read, Glob, TodoWrite   |  opus   |
+| orchestrator | Task, Read, Glob, TaskCreate   |  opus   |
 | full         | *(omit field)*                | session |
 
 [CRITICAL]:

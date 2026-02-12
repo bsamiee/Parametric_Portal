@@ -6,7 +6,8 @@ user-invocable: false
 description: >-
   Executes SonarCloud API queries via unified Python CLI. Use when checking
   quality gate status, searching issues (bugs, vulnerabilities, code smells),
-  retrieving metrics (coverage, complexity), or viewing analysis history.
+  retrieving metrics (coverage, complexity), viewing analysis history, or
+  inspecting security hotspots.
 ---
 
 # [H1][SONARCLOUD-TOOLS]
@@ -16,7 +17,7 @@ description: >-
 
 Execute SonarCloud queries through unified Python CLI.
 
-[IMPORTANT] Commands default to `project=bsamiee_Parametric_Portal`, `organization=bsamiee`. 1Password auto-injects API token.
+[IMPORTANT] Commands default to `project=bsamiee_Parametric_Portal`, `organization=bsamiee`. 1Password auto-injects API token. SonarCloud API base: `https://sonarcloud.io/api`.
 
 ---
 ## [0][SCANNER]
@@ -74,37 +75,52 @@ uv run .claude/skills/sonarcloud-tools/scripts/sonarcloud.py hotspots TO_REVIEW
 ## [3][ARGUMENTS]
 
 **quality-gate**: `[branch]` or `pr <num>`
-- No args — current default branch
-- `main` — specific branch
-- `pr 42` — specific pull request
+- No args -- current default branch
+- `main` -- specific branch
+- `pr 42` -- specific pull request
 
 **issues**: `[severities] [types]`
-- `severities` — Comma-separated: BLOCKER,CRITICAL,MAJOR,MINOR,INFO
-- `types` — Comma-separated: BUG,VULNERABILITY,CODE_SMELL
+- `severities` -- Comma-separated: `BLOCKER`, `CRITICAL`, `MAJOR`, `MINOR`, `INFO`
+- `types` -- Comma-separated: `BUG`, `VULNERABILITY`, `CODE_SMELL`
 
 **measures**: `[metrics]`
-- `metrics` — Comma-separated (default: all standard metrics)
-- Common: coverage,bugs,vulnerabilities,code_smells,ncloc
+- `metrics` -- Comma-separated (default: all standard metrics)
+- Standard: `ncloc`, `coverage`, `bugs`, `vulnerabilities`, `code_smells`, `duplicated_lines_density`, `security_hotspots`, `reliability_rating`, `security_rating`, `sqale_rating`
 
 **analyses**: `[page_size]`
-- `page_size` — Number of results (default: 10, max: 100)
+- `page_size` -- Number of results (default: `10`, max: `100`)
 
 **projects**: `[page_size]`
-- `page_size` — Number of results (default: 100, max: 500)
+- `page_size` -- Number of results (default: `100`, max: `500`)
 
 **hotspots**: `[status]`
-- `status` — Filter: TO_REVIEW, ACKNOWLEDGED, FIXED, SAFE
+- `status` -- Filter: `TO_REVIEW`, `ACKNOWLEDGED`, `FIXED`, `SAFE`
 
 ---
 ## [4][OUTPUT]
 
 Commands return: `{"status": "success|error", ...}`.
 
-| [INDEX] | [CMD]          | [RESPONSE]                                      |
-| :-----: | -------------- | ----------------------------------------------- |
+| [INDEX] | [CMD]          | [RESPONSE]                                           |
+| :-----: | -------------- | ---------------------------------------------------- |
 |   [1]   | `quality-gate` | `{project, gate_status, passed: bool, conditions[]}` |
-|   [2]   | `issues`       | `{project, total, issues[], summary}`           |
-|   [3]   | `measures`     | `{project, name, metrics}`                      |
-|   [4]   | `analyses`     | `{project, total, analyses[]}`                  |
-|   [5]   | `projects`     | `{organization, total, projects[]}`             |
-|   [6]   | `hotspots`     | `{project, total, hotspots[]}`                  |
+|   [2]   | `issues`       | `{project, total, issues[], summary}`                |
+|   [3]   | `measures`     | `{project, name, metrics}`                           |
+|   [4]   | `analyses`     | `{project, total, analyses[]}`                       |
+|   [5]   | `projects`     | `{organization, total, projects[]}`                  |
+|   [6]   | `hotspots`     | `{project, total, hotspots[]}`                       |
+
+---
+## [5][ENVIRONMENT]
+
+| [VAR]         | [REQUIRED] | [DESCRIPTION]                         |
+| ------------- | ---------- | ------------------------------------- |
+| `SONAR_TOKEN` | Yes        | SonarCloud API token (1Password)      |
+
+---
+## [6][ERROR_HANDLING]
+
+- HTTP errors print `[ERROR] <status>: <body>` and exit 1
+- Missing token: `[ERROR] SONAR_TOKEN environment variable not set`
+- Project not found: `[ERROR] 404: Component not found`
+- Invalid metric name: returns empty metric value (not an error)

@@ -56,6 +56,7 @@ Frontmatter indexed at session start (~100 tokens). Description is ONLY field pa
 **Best-Practices:**
 - **Length** — 1-2 sentences. Concise triggers outperform verbose explanations.
 - **Classification** — Include `type` and `depth` fields for refine workflow detection.
+- **Invocation Control** — `disable-model-invocation: true` for user-only; `user-invocable: false` for Claude-only.
 
 ---
 ## [2][STRUCTURE]

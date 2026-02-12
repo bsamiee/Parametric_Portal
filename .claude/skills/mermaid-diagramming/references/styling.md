@@ -22,12 +22,23 @@ Visual styling includes `themes`, `looks`, `themeVariables`, `classDef`, `linkSt
 |   [4]   | `forest`  |       No       | Nature/organic themes   |
 |   [5]   | `neutral` |       No       | Print-friendly, minimal |
 
-| [INDEX] | [LOOK]    | [ENGINE] | [VERSION] | [DESCRIPTION]          |
-| :-----: | --------- | -------- | --------- | ---------------------- |
-|   [1]   | `neo`     | Standard | v11.0+    | Default modern style   |
-|   [2]   | `classic` | Standard | v11.0+    | Traditional appearance |
+| [INDEX] | [LOOK]      | [ENGINE] | [VERSION] | [DESCRIPTION]              |
+| :-----: | ----------- | -------- | --------- | -------------------------- |
+|   [1]   | `neo`       | Standard | v11.0+    | Default modern style       |
+|   [2]   | `classic`   | Standard | v11.0+    | Traditional appearance     |
+|   [3]   | `handDrawn` | Standard | v11.0+    | Sketch-style hand-drawn    |
 
 [IMPORTANT] ONLY `theme: base` accepts `themeVariables`; looks apply to `flowchart`, `state`, `packet` diagrams—expanding coverage.
+
+```yaml
+---
+config:
+  look: handDrawn
+  theme: base
+  themeVariables:
+    primaryColor: "#ff0000"
+---
+```
 
 ```yaml
 ---

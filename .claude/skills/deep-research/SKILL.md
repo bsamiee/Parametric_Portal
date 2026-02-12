@@ -24,7 +24,9 @@ Conduct comprehensive topic research via parallel agent dispatch.
 5. §CRITIQUE_2 — Synthesize holistically, deduplicate, produce final output
 
 **Dependencies:**
-- `exa-tools` — Web search and code context queries
+- `exa-tools` — Web search and code context queries (primary)
+- `perplexity-tools` — Deep research and reasoning queries (supplementary)
+- `tavily-tools` — Web search with domain governance (supplementary)
 - `parallel-dispatch` — Agent orchestration mechanics
 
 **Input:**
@@ -51,7 +53,9 @@ Produce facet list (6-10 independent research areas) for Round 1.
 [IMPORTANT]:
 - [ALWAYS] Execute 3 Exa searches via `exa-tools` skill before dispatch.
 - [ALWAYS] Extract facet boundaries from results.
+- [ALWAYS] Use `deep` search tier for highest-quality results when topic warrants it.
 - [NEVER] Dispatch before orient completes.
+- [NEVER] Accept sources older than 6 months unless topic is historical.
 
 ---
 ## [2][ROUND_1]
@@ -87,8 +91,8 @@ Main agent (NOT sub-agent) processes Round 1 outputs.
 
 | [INDEX] | [ACTION] | [CRITERIA]                                                                  |
 | :-----: | -------- | --------------------------------------------------------------------------- |
-|   [1]   | Remove   | Lacks focus, duplicates content, missing sources, pre-2024, fails quality   |
-|   [2]   | Retain   | Addresses topic, includes sources, dates 2024-2025, converges across agents |
+|   [1]   | Remove   | Lacks focus, duplicates content, missing sources, pre-2025, fails quality   |
+|   [2]   | Retain   | Addresses topic, includes sources, dates 2025-2026, converges across agents |
 
 **Skeleton:** Build from retained → `[Domain N]: [findings]` + `Gaps:` + `Depth-Targets:`
 

@@ -1,0 +1,69 @@
+# Example: Workflow with Intentional Errors
+# This workflow contains common errors for testing validation
+# Use: bash scripts/validate_workflow.sh examples/with-errors.yml
+# Use: bash scripts/validate_workflow.sh --check-best-practices examples/with-errors.yml
+#
+# ACTIONLINT ERRORS:
+# 1. Line 26: Typo in runner label (ubuntu-lastest) [runner-label]
+# 2. Line 16: Invalid CRON expression (day 8 doesn't exist) [events]
+# 3. Line 20: Invalid glob pattern (** without /) [glob]
+# 4. Line 37: Script injection vulnerability [expression]
+# 5. Line 44: Undefined job dependency (biuld instead of build) [job-needs]
+#
+# BEST PRACTICE VIOLATIONS (caught by --check-best-practices):
+# 6. No top-level permissions: block [PERMISSIONS]
+# 7. No timeout-minutes on any job [TIMEOUT]
+# 8. Unpinned actions (tag only, no SHA) [UNPINNED]
+# 9. No concurrency group [CONCURRENCY]
+# 10. Deprecated set-output command [DEPRECATED-CMD]
+
+name: Workflow with Errors
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    # ERROR: Invalid CRON - day of week 8 doesn't exist (should be 0-6)
+    - cron: '0 0 * * 8'
+  pull_request:
+    paths:
+      # ERROR: Invalid glob pattern - should be **/*.js
+      - '**.js'
+
+# MISSING: permissions: block (defaults to read-write)
+# MISSING: concurrency: group
+
+jobs:
+  build:
+    name: Build
+    # ERROR: Typo in runner label (should be ubuntu-latest)
+    runs-on: ubuntu-lastest
+    # MISSING: timeout-minutes
+
+    steps:
+      # UNPINNED: uses tag only, not SHA
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build
+        run: npm run build
+
+      # ERROR: Script injection vulnerability - untrusted input directly in script
+      - name: Process issue
+        run: |
+          echo "Processing: ${{ github.event.issue.title }}"
+
+      # DEPRECATED: set-output command
+      - name: Set output (deprecated)
+        run: echo "::set-output name=result::success"
+
+  deploy:
+    name: Deploy
+    runs-on: ubuntu-latest
+    # ERROR: Undefined job dependency (typo: biuld instead of build)
+    needs: biuld
+    # MISSING: timeout-minutes
+
+    steps:
+      - name: Deploy
+        run: echo "Deploying..."

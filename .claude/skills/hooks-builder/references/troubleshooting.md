@@ -44,15 +44,19 @@ Platform-specific bugs, timing issues, and configuration gotchas.
 ### [2.1][DEDUPLICATION_PATTERN]
 
 ```python
-import fcntl, sys
+import fcntl, sys, contextlib
 from pathlib import Path
+from typing import Final
 
-LOCK = Path("/tmp/claude-hook.lock")
-try:
-    f = LOCK.open("w")
-    fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
-except BlockingIOError:
-    sys.exit(0)  # Another instance running
+LOCK: Final = Path("/tmp/claude-hook.lock")
+
+def _acquire_lock() -> bool:
+    with contextlib.suppress(BlockingIOError):
+        fcntl.flock(LOCK.open("w"), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        return True
+    return False
+
+_acquire_lock() or sys.exit(0)  # Another instance running
 ```
 
 ---
@@ -110,6 +114,6 @@ except BlockingIOError:
 |   [2]   | List active hooks  | `/hooks`                                        |
 |   [3]   | Test hook directly | `echo '{"tool_name":"Bash"}' \| python hook.py` |
 |   [4]   | Check exit code    | `echo $?` after hook execution                  |
-|   [5]   | View hook output   | Press `Ctrl-R` in session                       |
+|   [5]   | View hook output   | Press `Ctrl+O` for verbose mode                 |
 
 [REFERENCE] Validation checklist: [→validation.md§6](./validation.md#6troubleshooting_gate)

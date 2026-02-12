@@ -9,30 +9,26 @@ const _safeKey = fc.string({ maxLength: 24, minLength: 1 }).filter((k) => !['__p
 const _json = fc.dictionary(_safeKey, fc.jsonValue({ maxDepth: 3 }), { maxKeys: 8 }).filter((o) => !JSON.stringify(o).includes('"__proto__"'));
 
 // --- [ALGEBRAIC] -------------------------------------------------------------
-
 // P1: Identity Law - create(x, x) = null
 it.effect.prop('P1: identity', { x: _json }, ({ x }) => Effect.sync(() => { expect(Diff.create(x, x)).toBeNull(); }), { fastCheck: { numRuns: 200 } });
-
 // P2: Inverse Law (symmetric) - apply(source, create(source, target)) = target
 it.effect.prop('P2: inverse', { x: _json, y: _json }, ({ x, y }) =>
     Effect.forEach([[x, y], [y, x]] as const, ([s, t]) => Effect.fromNullable(Diff.create(s, t)).pipe(Effect.andThen((p) => Diff.apply(s, p)), Effect.tap((r) => { expect(r).toEqual(t); }), Effect.optionFromOptional))
-        .pipe(Effect.tap(() => { Diff.create(x, y) ?? expect(x).toEqual(y); }), Effect.asVoid), { fastCheck: { numRuns: 200 } });
-
+        .pipe(Effect.tap(() => { Diff.create(x, y) ?? expect(x).toEqual(y); }), Effect.asVoid), { fastCheck: { examples: [{ x: {}, y: { a: 1 } }, { x: { a: [1, 2] }, y: { a: [1] } }], numRuns: 200 } });
 // P3: Empty Patch Identity - apply(x, ∅) = x
 it.effect.prop('P3: empty patch', { x: _json }, ({ x }) => Diff.apply(x, { ops: [] }).pipe(
     Effect.tap((r) => { expect(r).toEqual(x); }),
     Effect.asVoid,
 ), { fastCheck: { numRuns: 200 } });
-
 // P4: Immutability - apply does not mutate input
 it.effect.prop('P4: immutability', { x: _json, y: _json }, ({ x, y }) => {
     const original = structuredClone(x);
     return Effect.fromNullable(Diff.create(x, y)).pipe(Effect.andThen((p) => Diff.apply(x, p)), Effect.optionFromOptional, Effect.tap(() => { expect(x).toEqual(original); }), Effect.asVoid);
 }, { fastCheck: { numRuns: 200 } });
-
 // P5: Composition - apply(apply(a, p1), p2) ≡ apply(a, concat(p1, p2))
-it.effect.prop('P5: composition', { a: _json, b: _json, c: _json }, ({ a, b, c }) => {
+it.effect.prop('P5: composition', { a: _json, b: _json, c: _json, ctx: fc.context() }, ({ a, b, c, ctx }) => {
     const [p1, p2] = [Diff.create(a, b), Diff.create(b, c)];
+    ctx.log(`p1: ${p1 ? p1.ops.length : 'null'} ops, p2: ${p2 ? p2.ops.length : 'null'} ops`);
     return Effect.all([
         Effect.gen(function* () { const mid = p1 ? yield* Diff.apply(a, p1) : a; return p2 ? yield* Diff.apply(mid, p2) : mid; }),
         Diff.apply(a, { ops: [...(p1?.ops ?? []), ...(p2?.ops ?? [])] }),
@@ -41,7 +37,6 @@ it.effect.prop('P5: composition', { a: _json, b: _json, c: _json }, ({ a, b, c }
         Effect.asVoid,
     );
 }, { fastCheck: { numRuns: 200 } });
-
 // P6: All RFC 6902 operations - parallel execution, single structural assertion
 it.effect('P6: RFC6902 ops', () => Effect.all([
     Diff.apply({ a: 1 },        { ops: [{ op: 'add',     path: '/b',     value: 2 }] }),
@@ -55,13 +50,11 @@ it.effect('P6: RFC6902 ops', () => Effect.all([
 ]).pipe(Effect.map((r) => expect(r).toEqual([{ a: 1, b: 2 }, { a: 1 }, { a: 9 }, { b: 2, c: 1 }, { a: 1, b: 1 }, { a: 1 }, { arr: [0, 1, 2] }, { arr: [1, 2, 3] }]))));
 
 // --- [OPTION COMBINATORS] ----------------------------------------------------
-
 // P7: fromSnapshots - Option semantics (Some/Some yields diff, None yields None)
 it.effect.prop('P7: fromSnapshots', { x: _json, y: _json }, ({ x, y }) => Effect.sync(() => {
     const [direct, wrapped] = [Diff.create(x, y), Diff.fromSnapshots(Option.some(x), Option.some(y))];
     direct ? expect(Option.isSome(wrapped) && wrapped.value.ops).toEqual(direct.ops) : expect(Option.isNone(wrapped)).toBe(true);
 }), { fastCheck: { numRuns: 200 } });
-
 // P8: fromSnapshots None → None + enrich (single + array)
 it.effect('P8: Option combinators', () => Effect.sync(() => {
     const opts = [Option.none(), Option.some({})] as const;
@@ -70,9 +63,14 @@ it.effect('P8: Option combinators', () => Effect.sync(() => {
     expect(Option.isSome(enriched.diff)).toBe(true);
     expect(Diff.enrich([{ newData: Option.some({ a: 2 }), oldData: Option.some({ a: 1 }) }, { newData: Option.some({ b: 1 }), oldData: Option.some({ b: 1 }) }]).map((e) => Option.isSome(e.diff))).toEqual([true, false]);
 }));
+// P10: enrich None → diff is None
+it.effect('P10: enrich None paths', () => Effect.sync(() => {
+    const none = Diff.enrich({ newData: Option.none(), oldData: Option.none() });
+    const mixed = Diff.enrich({ newData: Option.some({ a: 1 }), oldData: Option.none() });
+    expect([Option.isNone(none.diff), Option.isNone(mixed.diff)]).toEqual([true, true]);
+}));
 
 // --- [SECURITY + ERROR] ------------------------------------------------------
-
 // P9: Prototype Pollution Prevention + Error aggregation
 it.effect('P9: security + errors', () => Effect.all([
     Effect.all(['/__proto__/polluted', '/constructor/prototype/polluted'].map((p) => Diff.apply({}, { ops: [{ op: 'add', path: p, value: true }] }).pipe(Effect.ignore))).pipe(Effect.map(() => expect(({} as Record<string, unknown>)['polluted']).toBeUndefined())),

@@ -1,0 +1,261 @@
+# Common LogQL Query Patterns
+
+## === BASIC LOG QUERIES ===
+{job="app"} |= "error"
+{job="app"} |~ "error|fatal"
+{job="app"} |= "error" != "timeout"
+{job="nginx"} |~ "HTTP/[0-9.]+ (4|5)[0-9]{2}"
+
+## === PATTERN MATCH (3.0+, 10x faster than regex) ===
+{service_name="distributor"} |> "<_> level=debug <_> msg=\"POST /push <_>\""
+{service_name="api"} !> "<_> level=debug <_>"
+{job="nginx"} |> "<_> \"GET <_>\" 500 <_>"
+
+## === JSON PARSING ===
+{app="api"} | json | level="error"
+{app="api"} | json | method="POST" | status_code >= 400
+{app="api"} | json status, method, duration
+{app="api"} | json method="request.method", status="response.status_code"
+{app="api"} | json first_server="servers[0]", ua="request.headers[\"User-Agent\"]"
+{app="api"} | json | line_format "{{.level}}: {{.message}}"
+
+## === LOGFMT PARSING ===
+{app="app"} | logfmt | level="error" | caller="database.go"
+{app="api"} | logfmt --strict | __error__ != ""
+{app="api"} | logfmt --strict --keep-empty
+{app="api"} | logfmt --strict | __error__="" | level="error"
+
+## === PATTERN PARSER / REGEX ===
+{job="nginx"} | pattern "<ip> - - [<timestamp>] \"<method> <path> <protocol>\" <status> <size>"
+{job="nginx"} | pattern "<ip> - - [<_>] \"<method> <_>\" <status> <_>" | status >= 400
+{app="app"} | regexp "(?P<level>\\w+): (?P<message>.+)"
+
+## === DECOLORIZE ===
+{app="app"} | decolorize | logfmt | level="error"
+{app="app"} | decolorize | json | status >= 500
+
+## === ERROR ANALYSIS ===
+count_over_time({app="api"} | json | level="error" [5m])
+sum(rate({app="api"} | json | level="error" [5m]))
+# Error percentage
+(sum(rate({app="api"} | json | level="error" [5m])) / sum(rate({app="api"}[5m]))) * 100
+# Errors by type
+sum by (error_type) (count_over_time({app="api"} | json | level="error" [5m]))
+# Top 10 error messages
+topk(10, sum by (error_message) (count_over_time({app="api"} | json | level="error" [1h])))
+
+## === PERFORMANCE ===
+{app="api"} | json | duration > 1
+avg_over_time({app="api"} | json | unwrap duration [5m])
+quantile_over_time(0.95, {app="api"} | json | unwrap duration [5m])
+quantile_over_time(0.99, {app="api"} | json | unwrap duration [5m])
+max_over_time({app="api"} | json | unwrap duration [5m])
+
+## === TRAFFIC ===
+sum(rate({namespace="production"}[5m]))
+sum by (app) (rate({namespace="production"}[5m]))
+sum(bytes_rate({job="app"}[5m]))
+sum by (endpoint) (rate({app="api"} | json [5m]))
+sum by (status_code) (count_over_time({app="api"} | json [5m]))
+
+## === SECURITY ===
+{app="auth"} | json | event="login_failed"
+sum by (username) (count_over_time({app="auth"} | json | event="login_failed" [1h]))
+topk(10, sum by (username) (count_over_time({app="auth"} | json | event="login_failed" [1h])))
+{app="api"} | json | (status_code == 401 or status_code == 403)
+{app="api"} |~ "union.*select|select.*from.*where"
+
+## === IP FILTERING ===
+{job="nginx"} | logfmt | remote_addr = ip("192.168.1.0/24")
+{job="nginx"} | logfmt | remote_addr != ip("10.0.0.0/8")
+{job="nginx"} | logfmt | remote_addr = ip("192.168.4.5-192.168.4.20")
+{job="nginx"} | logfmt | remote_addr = ip("192.168.0.0/16") or remote_addr = ip("10.0.0.0/8")
+{job="nginx"} | logfmt | remote_addr = ip("2001:db8::1-2001:db8::8")
+
+## === TIME COMPARISONS ===
+# Current vs 1 hour ago
+sum(rate({app="api"} | json | level="error" [5m])) - sum(rate({app="api"} | json | level="error" [5m] offset 1h))
+# Current vs yesterday
+sum(rate({app="api"}[5m])) / sum(rate({app="api"}[5m] offset 1d))
+# Week-over-week
+sum(rate({app="api"} | json | level="error" [5m])) / sum(rate({app="api"} | json | level="error" [5m] offset 1w))
+
+## === AGGREGATION ===
+sum(sum_over_time({app="api"} | json | unwrap duration [5m]))
+avg by (pod) (avg_over_time({app="api"} | json | unwrap duration [5m]))
+max without (instance, pod) (max_over_time({app="api"} | json | unwrap response_size [5m]))
+# Count distinct values
+count(count by (user_id) ({app="api"} | json))
+
+## === ALERTING ===
+# Error rate > 5%
+(sum(rate({app="api"} | json | level="error" [5m])) / sum(rate({app="api"}[5m]))) > 0.05
+# Low log volume
+sum(rate({app="api"}[5m])) < 0.1
+# High latency p95 > 2s
+quantile_over_time(0.95, {app="api"} | json | unwrap duration [5m]) > 2
+# Dead service
+absent_over_time({app="api"}[5m])
+# Failed logins spike
+sum(rate({app="auth"} | json | event="login_failed" [5m])) > 10
+# vector() fallback for sparse logs (parentheses required -- or binds looser than >)
+(sum(rate({app="api"} | json | level="error" [5m])) or vector(0)) > 10
+# Percentage with fallback
+((sum(rate({app="api"} | json | level="error" [5m])) or vector(0)) / (sum(rate({app="api"}[5m])) or vector(1))) * 100
+
+## === APPROX_TOPK (3.6+, probabilistic, instant queries only) ===
+approx_topk(10, sum by (endpoint) (rate({app="api"}[5m])))
+approx_topk(20, sum by (error_message) (count_over_time({app="api"} | json | level="error" [1h])))
+
+## === RATE_COUNTER (counter-like log values) ===
+rate_counter({app="api"} | json | unwrap total_requests [5m])
+sum by (app) (rate_counter({app="api"} | json | unwrap bytes_processed [5m]))
+
+## === STRUCTURED METADATA (3.0+) ===
+{app="api"} | trace_id="abc123"
+{app="api"} | trace_id="abc123" | json | level="error"
+{app="api"} | user_id="12345" | request_id="req-abc"
+
+## === QUERY ACCELERATION (bloom filters, 3.3+) ===
+# ACCELERATED: structured metadata BEFORE parser
+{cluster="prod"} | detected_level="error" | json
+{cluster="prod"} | detected_level="error" | logfmt
+# ACCELERATED: OR filter
+{app="api"} | detected_level="error" or detected_level="warn" | json
+# NOT ACCELERATED: filter AFTER parser
+{cluster="prod"} | json | detected_level="error"
+
+## === AUTOMATIC LABELS ===
+# service_name (auto-populated from container name / OTel service.name)
+{service_name="my-api"} | json | level="error"
+sum by (service_name) (rate({namespace="production"} | json | level="error" [5m]))
+# detected_level (structured metadata, place BEFORE parser for acceleration)
+{cluster="prod"} | detected_level="error" | json
+sum by (detected_level) (rate({app="api"} | detected_level!="" | json [5m]))
+
+## === __ERROR__ DEBUGGING ===
+{app="api"} | json | __error__ != ""
+{app="api"} | json | __error__="" | level="error"
+{app="api"} | json | __error__ != "" | line_format "ERROR: {{.__error__}} LINE: {{.__line__}}"
+sum by (__error__) (count_over_time({app="api"} | json | __error__ != "" [5m]))
+
+## === TEMPLATE FUNCTIONS ===
+# String: replace + truncate + upper
+{app="api"} | json | line_format "{{.path | replace \" \" \"_\" | trunc 50 | upper}}"
+# Date formatting
+{app="api"} | json | line_format "{{__timestamp__ | date \"2006-01-02T15:04:05\"}}: {{.message}}"
+# Math: duration conversion
+{app="api"} | json | line_format "Duration: {{div .duration_ms 1000}}s"
+# Float division
+{app="api"} | json | line_format "Duration: {{divf .duration_ns 1000000}}ms"
+# Conditional label
+{app="api"} | json | label_format severity="{{if ge .status_code 500}}critical{{else if ge .status_code 400}}warning{{else}}info{{end}}"
+# Original line access
+{app="api"} | json | line_format "ORIGINAL: {{__line__ | lower}}"
+# Printf formatting
+{app="api"} | json | line_format "{{printf \"%-40.40s\" .request_uri}} {{printf \"%5.5s\" .method}}"
+# Iterate JSON array
+{job="api"} | json | line_format "{{ range $item := fromJson .items }}{{ $item.name }} {{ end }}"
+# Regex replace with capture group
+{app="api"} | json | line_format "{{regexReplaceAll \"user_(\\\\d+)\" .message \"User ID: $1\"}}"
+
+## === LABEL OPERATIONS ===
+{app="api"} | json | keep namespace, pod, level, message
+{app="api"} | json | drop instance, pod
+{app="api"} | json | label_format env=`{{.environment}}`, svc=`{{.service}}`
+
+## === LABEL_REPLACE ===
+# Extract service name from compound label
+label_replace(rate({job="api-server", service="payment:v2"} |= "err" [1m]), "service_name", "$1", "service", "(.*):.*")
+# Environment from namespace
+label_replace(sum by (namespace) (rate({job="app"}[5m])), "env", "$1", "namespace", "(prod|staging|dev).*")
+# Pod to deployment name
+label_replace(sum by (pod) (rate({namespace="prod"}[5m])), "deployment", "$1", "pod", "(.*)-[a-f0-9]+-[a-z0-9]+")
+# Chained: extract team + service from job "team-platform/service-api"
+label_replace(label_replace(sum by (job) (rate({namespace="production"}[5m])), "team", "$1", "job", "team-([^/]+)/.*"), "service", "$1", "job", "[^/]+/service-(.*)")
+
+## === SORTING ===
+sort(sum by (app) (rate({job="api"}[5m])))
+sort_desc(sum by (app) (rate({job="api"}[5m])))
+sort_desc(topk(10, sum by (endpoint) (rate({app="api"}[5m]))))
+
+## === CONVERSION FUNCTIONS ===
+avg_over_time({app="api"} | json | unwrap duration_seconds(response_time) [5m])
+sum_over_time({app="api"} | json | unwrap bytes(payload_size) [5m])
+
+## === UNWRAPPED RANGE FUNCTIONS ===
+first_over_time({app="api"} | json | unwrap request_count [5m])
+last_over_time({app="api"} | json | unwrap request_count [5m])
+stddev_over_time({app="api"} | json | unwrap duration [5m])
+bytes_over_time({app="api"}[5m])
+
+## === SUBQUERY (nested range over instant) ===
+max_over_time(sum(rate({namespace="production"}[5m]))[24h:5m])
+
+## === ADVANCED MULTI-STAGE ===
+# Complex multi-condition filter
+{app="api"} | json | (status_code >= 400 and status_code < 500) or (status_code >= 500 and duration > 1) | method != "HEAD" | path !~ "/health|/metrics"
+# Multi-stage parse + conditional format
+{job="nginx"} | pattern "<ip> - - [<timestamp>] \"<method> <path> <_>\" <status> <size>" | json | label_format status_class="{{if ge .status 500}}5xx{{else if ge .status 400}}4xx{{else}}ok{{end}}" | line_format "{{.status_class}}: {{.method}} {{.path}}"
+
+## === UNPACK PARSER ===
+{cluster="us-central1", job="myjob"} | unpack
+{cluster="us-central1", job="myjob"} | unpack | container="myapp" | json
+
+## === PROMTAIL-TO-ALLOY MIGRATION PATTERNS ===
+# Promtail is EOL March 2, 2026. Migrate to Alloy using `alloy convert` or rewrite configs.
+#
+# Promtail scrape_configs -> Alloy loki.source.file + loki.relabel:
+#   scrape_configs:                  ->  loki.source.file "logs" {
+#     - job_name: app                      targets    = [...]
+#       static_configs:                    forward_to = [loki.relabel.app.receiver]
+#         - targets: [localhost]          }
+#           labels:                       loki.relabel "app" {
+#             job: app                      forward_to = [loki.write.default.receiver]
+#             __path__: /var/log/*.log      rule { source_labels = ["filename"]
+#                                                  target_label  = "job"
+#                                                  replacement   = "app" }
+#                                         }
+#
+# Promtail pipeline_stages.json -> Alloy loki.process stage.json:
+#   pipeline_stages:                 ->  loki.process "app" {
+#     - json:                              forward_to = [loki.write.default.receiver]
+#         expressions:                     stage.json { expressions = {"level" = "", "msg" = ""} }
+#           level:                         stage.labels { values = {"level" = ""} }
+#           msg:                         }
+#     - labels:
+#         level:
+#
+# Promtail pipeline_stages.multiline -> Alloy loki.process stage.multiline:
+#   pipeline_stages:                 ->  loki.process "multiline" {
+#     - multiline:                         forward_to = [loki.write.default.receiver]
+#         firstline: '^\d{4}-\d{2}'        stage.multiline {
+#         max_lines: 128                     firstline = "^\\d{4}-\\d{2}"
+#         max_wait_time: 3s                  max_lines = 128
+#                                            max_wait_time = "3s"
+#                                          }
+#                                        }
+#
+# Structured metadata (Alloy, replaces custom label extraction for high-cardinality fields):
+#   loki.process "structured" {
+#     forward_to = [loki.write.default.receiver]
+#     stage.json { expressions = {"trace_id" = "", "user_id" = ""} }
+#     stage.structured_metadata { values = {"trace_id" = "", "user_id" = ""} }
+#   }
+# Query: {app="api"} | trace_id="abc123" | json | level="error"
+#
+# Convert existing Promtail config automatically:
+#   alloy convert --source-format=promtail --output=config.alloy promtail.yaml
+
+## === ALLOY NATIVE OTEL PIPELINE (no Promtail equivalent) ===
+# Alloy receives OTEL logs natively via otelcol.receiver.otlp:
+#   otelcol.receiver.otlp "default" {
+#     grpc { endpoint = "0.0.0.0:4317" }
+#     http { endpoint = "0.0.0.0:4318" }
+#     output { logs = [otelcol.exporter.loki.default.input] }
+#   }
+#   otelcol.exporter.loki "default" {
+#     forward_to = [loki.write.default.receiver]
+#   }
+# OTEL resource attributes map to structured metadata automatically.
+# Query OTEL-sourced logs: {service_name="my-api"} | detected_level="error" | json

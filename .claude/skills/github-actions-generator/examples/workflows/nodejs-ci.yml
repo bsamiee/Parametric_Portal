@@ -1,0 +1,71 @@
+# Node.js CI -- Matrix testing, caching, artifacts, coverage, attestation
+name: Node.js CI
+on:
+  push: { branches: [main, develop] }
+  pull_request: { branches: [main] }
+  workflow_dispatch:
+
+permissions: { contents: read }
+concurrency: { group: '${{ github.workflow }}-${{ github.ref }}', cancel-in-progress: true }
+env: { NODE_VERSION: '24' }
+
+jobs:
+  lint:
+    name: Lint Code
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/setup-node@6044e13b5dc448c55e2357c09f80417699197238 # v6.2.0
+        with: { node-version: '${{ env.NODE_VERSION }}', cache: npm }
+      - run: npm ci
+      - run: npm run lint
+
+  test:
+    name: Test ${{ matrix.runner }} / Node ${{ matrix.node-version }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    permissions: { contents: read, checks: write }
+    strategy:
+      matrix:
+        runner: [ubuntu-latest, windows-latest, macos-latest]
+        node-version: [20, 22, 24]
+        exclude:
+          - { runner: macos-latest, node-version: 20 }
+        include:
+          - { runner: ubuntu-latest-arm64, node-version: 24 }
+      fail-fast: false
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/setup-node@6044e13b5dc448c55e2357c09f80417699197238 # v6.2.0
+        with: { node-version: '${{ matrix.node-version }}', cache: npm }
+      - run: npm ci
+      - run: npm test
+      - if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with: { name: 'test-results-${{ matrix.runner }}-${{ matrix.node-version }}', path: test-results/, retention-days: 7 }
+      - if: matrix.runner == 'ubuntu-latest' && matrix.node-version == 24
+        uses: codecov/codecov-action@0561704f0f02c16a585d4c7555e57fa2e44cf909 # v5.5.2
+        with: { token: '${{ secrets.CODECOV_TOKEN }}', fail_ci_if_error: true }
+      - if: always()
+        run: |
+          echo "## Test Results (${{ matrix.runner }} / Node ${{ matrix.node-version }})" >> $GITHUB_STEP_SUMMARY
+          echo "Status: ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
+
+  build:
+    name: Build Application
+    needs: [lint, test]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions: { contents: read, id-token: write, attestations: write }
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/setup-node@6044e13b5dc448c55e2357c09f80417699197238 # v6.2.0
+        with: { node-version: '${{ env.NODE_VERSION }}', cache: npm }
+      - run: npm ci
+      - run: npm run build
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with: { name: 'build-${{ github.sha }}', path: dist/, retention-days: 7, if-no-files-found: error }
+      - if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/attest-build-provenance@62fc1d596301d0ab9914e1fec14dc5c8d93f65cd # v3.2.0
+        with: { subject-path: dist/ }

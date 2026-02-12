@@ -13,7 +13,9 @@ description: >-
 
 <br>
 
-Query Context7 library documentation. Matches MCP tool structure.
+Query Context7 library documentation. Matches MCP tool structure (resolve-library-id, query-docs).
+
+[IMPORTANT] Context7 pulls up-to-date, version-specific documentation from source. Supports private documents (early access). Community-driven library coverage.
 
 ---
 ## [1][COMMANDS]
@@ -28,22 +30,65 @@ Query Context7 library documentation. Matches MCP tool structure.
 ## [2][USAGE]
 
 ```bash
-# Resolve library → see options
+# Resolve library -> see options
 uv run .claude/skills/context7-tools/scripts/context7.py resolve effect
+
+# Resolve with query filter
+uv run .claude/skills/context7-tools/scripts/context7.py resolve react "server components"
 
 # Fetch docs for specific ID
 uv run .claude/skills/context7-tools/scripts/context7.py docs /effect-ts/effect "Services"
 
 # Unified: resolve + docs
 uv run .claude/skills/context7-tools/scripts/context7.py lookup react "hooks"
+
+# Unified: with version-specific query
+uv run .claude/skills/context7-tools/scripts/context7.py lookup vite "v7 migration guide"
 ```
 
-Slash command: `/lib-docs react "hooks and state"`
+---
+## [3][ARGUMENTS]
+
+**resolve**: `<library> [query]`
+- `library` — Library name to search (required, e.g., `effect`, `react`, `vite`)
+- `query` — Optional query to narrow results
+
+**docs**: `<library-id> <query>`
+- `library-id` — Context7 library ID (required, e.g., `/effect-ts/effect`)
+- `query` — Documentation topic to retrieve (required)
+
+**lookup**: `<library> <query>`
+- `library` — Library name (required)
+- `query` — Topic to fetch docs for (required)
 
 ---
-## [3][SELECTION_LOGIC]
+## [4][SELECTION_LOGIC]
 
-`lookup` auto-selects library by: VIP status → highest benchmark score.
+`lookup` auto-selects library by: VIP status -> highest benchmark score.
 
-Use `resolve` first when disambiguation needed.
+Use `resolve` first when disambiguation needed (e.g., multiple React packages).
 
+---
+## [5][OUTPUT]
+
+Commands return JSON or plain text.
+
+| [INDEX] | [CMD]     | [RESPONSE]                                             |
+| :-----: | --------- | ------------------------------------------------------ |
+|   [1]   | `resolve` | JSON array: `[{id, title, score, vip}]`               |
+|   [2]   | `docs`    | Plain text documentation prefixed with `[library-id]`  |
+|   [3]   | `lookup`  | Plain text documentation (same as docs)                |
+
+---
+## [6][ENVIRONMENT]
+
+| [VAR]             | [REQUIRED] | [DESCRIPTION]                    |
+| ----------------- | ---------- | -------------------------------- |
+| `CONTEXT7_API_KEY` | No        | Optional bearer token for auth   |
+
+---
+## [7][ERROR_HANDLING]
+
+- HTTP errors print `[ERROR] <status>: <body>` and exit 1
+- Connection errors print `[ERROR] <message>` and exit 1
+- No library found returns `[ERROR] No library found for '<query>'`

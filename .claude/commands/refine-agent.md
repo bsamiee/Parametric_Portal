@@ -52,7 +52,7 @@ Target Type: ${3:-current}
 | :-----: | ------------ | ----------------------------- | :-----: | ----------------------- |
 |   [1]   | readonly     | Read, Glob, Grep              | sonnet  | Analysis, review, audit |
 |   [2]   | write        | Read, Edit, Write, Glob, Bash | sonnet  | Implementation          |
-|   [3]   | orchestrator | Task, Read, Glob, TodoWrite   |  opus   | Agent dispatch          |
+|   [3]   | orchestrator | Task, Read, Glob, TaskCreate  |  opus   | Agent dispatch          |
 |   [4]   | full         | *(omit field)*                | session | General-purpose         |
 
 ---
@@ -90,7 +90,7 @@ Prompt LOC: ${loc} | Sections: ${section_list}
 Auto-detect type from tools field:
 - `Read, Glob, Grep` → readonly
 - `Read, Edit, Write, Glob, Bash` → write
-- `Task, Read, Glob, TodoWrite` → orchestrator
+- `Task, Read, Glob, TaskCreate` → orchestrator
 - *(omitted)* → full
 
 ---

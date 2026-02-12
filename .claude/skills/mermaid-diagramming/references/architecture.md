@@ -326,12 +326,20 @@ timeline
 **Example:**
 
 ```yaml
-%%{init: {'theme':'forest', 'themeVariables': {'cScale0':'#ff0000', 'cScale1':'#00ff00'}}}%%
+---
+config:
+  theme: forest
+  themeVariables:
+    cScale0: "#ff0000"
+    cScale1: "#00ff00"
+---
 timeline
     title Timeline
     section Q1
         Jan : Event
 ```
+
+[CRITICAL] `%%{init:...}%%` deprecated v10.5.0; use YAML frontmatter exclusively.
 
 [IMPORTANT] Timeline experimental—icon integration unstable, core syntax stable.
 
@@ -416,10 +424,18 @@ gitGraph
 **Example:**
 
 ```yaml
-%%{init: {'theme':'base', 'themeVariables': {'git0':'#ff0000', 'commitLabelFontSize':'16px'}}}%%
+---
+config:
+  theme: base
+  themeVariables:
+    git0: "#ff0000"
+    commitLabelFontSize: "16px"
+---
 gitGraph
     commit
 ```
+
+[CRITICAL] `%%{init:...}%%` deprecated v10.5.0; use YAML frontmatter exclusively.
 
 ---
 ## [6][KANBAN]

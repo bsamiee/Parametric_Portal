@@ -180,39 +180,39 @@ const AdminLive = HttpApiBuilder.group(ParametricApi, 'admin', (handlers) =>
                 Effect.mapError((error) => HttpError.is(error) ? error : HttpError.Internal.of('Tenant creation failed', error)),
                 Telemetry.span('admin.createTenant'),
             )))
-                .handle('getTenant', ({ path }) => Middleware.guarded('admin', 'getTenant', 'api', database.apps.one([{ field: 'id', value: path.id }]).pipe(
-                    Effect.mapError((error) => HttpError.Internal.of('tenant lookup failed', error)),
+            .handle('getTenant', ({ path }) => Middleware.guarded('admin', 'getTenant', 'api', database.apps.one([{ field: 'id', value: path.id }]).pipe(
+                Effect.mapError((error) => HttpError.Internal.of('tenant lookup failed', error)),
+                Effect.flatMap(Option.match({
+                    onNone: () => Effect.fail(HttpError.NotFound.of('tenant', path.id)),
+                    onSome: Effect.succeed,
+                })),
+                Telemetry.span('admin.getTenant'),
+            )))
+            .handle('updateTenant', ({ path, payload }) => Middleware.guarded('admin', 'updateTenant', 'mutation', database.withTransaction(
+                database.apps.readSettings(path.id, 'update').pipe(
+                    Effect.mapError(constant(HttpError.Internal.of('tenant lookup failed'))),
                     Effect.flatMap(Option.match({
                         onNone: () => Effect.fail(HttpError.NotFound.of('tenant', path.id)),
                         onSome: Effect.succeed,
                     })),
-                    Telemetry.span('admin.getTenant'),
-                )))
-                .handle('updateTenant', ({ path, payload }) => Middleware.guarded('admin', 'updateTenant', 'mutation', database.withTransaction(
-                    database.apps.readSettings(path.id, 'update').pipe(
-                        Effect.mapError(constant(HttpError.Internal.of('tenant lookup failed'))),
-                        Effect.flatMap(Option.match({
-                            onNone: () => Effect.fail(HttpError.NotFound.of('tenant', path.id)),
-                            onSome: Effect.succeed,
-                        })),
-                        Effect.bindTo('loaded'),
-                        Effect.let('updates', ({ loaded }) => ({
-                            ...(payload.name === undefined ? {} : { name: payload.name }),
-                            ...(payload.settings === undefined ? {} : { settings: { ...loaded.settings, ...payload.settings } }),
-                        })),
-                        Effect.bind('updated', ({ loaded, updates }) =>
-                            database.apps.set(path.id, updates).pipe(
-                                Effect.mapError(constant(HttpError.Internal.of('Tenant update failed'))),
-                                Effect.when(constant(Object.keys(updates).length > 0)),
-                                Effect.map(Option.getOrElse(constant(loaded.app))),
-                            ),
+                    Effect.bindTo('loaded'),
+                    Effect.let('updates', ({ loaded }) => ({
+                        ...(payload.name === undefined ? {} : { name: payload.name }),
+                        ...(payload.settings === undefined ? {} : { settings: { ...loaded.settings, ...payload.settings } }),
+                    })),
+                    Effect.bind('updated', ({ loaded, updates }) =>
+                        database.apps.set(path.id, updates).pipe(
+                            Effect.mapError(constant(HttpError.Internal.of('Tenant update failed'))),
+                            Effect.when(constant(Object.keys(updates).length > 0)),
+                            Effect.map(Option.getOrElse(constant(loaded.app))),
                         ),
-                        Effect.tap(() => audit.log('App.update', { details: { tenantId: path.id } })),
-                        Effect.tap(() => eventBus.publish({ aggregateId: path.id, payload: { _tag: 'app', action: 'settings.updated' }, tenantId: path.id }).pipe(Effect.ignore)),
+                    ),
+                    Effect.tap(() => audit.log('App.update', { details: { tenantId: path.id } })),
+                    Effect.tap(() => eventBus.publish({ aggregateId: path.id, payload: { _tag: 'app', action: 'settings.updated' }, tenantId: path.id }).pipe(Effect.ignore)),
                     Effect.map(({ updated }) => updated),
-                )).pipe(
-                    Effect.mapError((error) => HttpError.is(error) ? error : HttpError.Internal.of('Tenant update failed', error)),
-                    Telemetry.span('admin.updateTenant'),
+            )).pipe(
+                Effect.mapError((error) => HttpError.is(error) ? error : HttpError.Internal.of('Tenant update failed', error)),
+                Telemetry.span('admin.updateTenant'),
             )))
             .handle('deactivateTenant', ({ path }) => Middleware.guarded('admin', 'deactivateTenant', 'mutation', database.apps.one([{ field: 'id', value: path.id }]).pipe(
                 Effect.mapError(constant(HttpError.Internal.of('tenant lookup failed'))),
@@ -269,53 +269,53 @@ const AdminLive = HttpApiBuilder.group(ParametricApi, 'admin', (handlers) =>
                 Effect.as({ success: true as const }),
                 Telemetry.span('admin.purgeTenant'),
             )))
-                .handle('getTenantOAuth', ({ path }) => Middleware.guarded('admin', 'getTenantOAuth', 'api', database.apps.readSettings(path.id).pipe(
+            .handle('getTenantOAuth', ({ path }) => Middleware.guarded('admin', 'getTenantOAuth', 'api', database.apps.readSettings(path.id).pipe(
+                Effect.mapError(constant(HttpError.Internal.of('tenant lookup failed'))),
+                Effect.filterOrFail(Option.isSome, constant(HttpError.NotFound.of('tenant', path.id))),
+                Effect.map(({ value: { settings } }) => settings.oauthProviders),
+                Effect.map(Arr.map(({ clientSecretEncrypted, ...rest }) => ({ ...rest, clientSecretSet: clientSecretEncrypted.length > 0 }))),
+                Effect.map((providers) => ({ providers })),
+                Telemetry.span('admin.getTenantOAuth'),
+            )))
+            .handle('updateTenantOAuth', ({ path, payload }) => Middleware.guarded('admin', 'updateTenantOAuth', 'mutation',
+                database.apps.readSettings(path.id, 'update').pipe(
                     Effect.mapError(constant(HttpError.Internal.of('tenant lookup failed'))),
                     Effect.filterOrFail(Option.isSome, constant(HttpError.NotFound.of('tenant', path.id))),
-                    Effect.map(({ value: { settings } }) => settings.oauthProviders),
-                    Effect.map(Arr.map(({ clientSecretEncrypted, ...rest }) => ({ ...rest, clientSecretSet: clientSecretEncrypted.length > 0 }))),
-                    Effect.map((providers) => ({ providers })),
-                    Telemetry.span('admin.getTenantOAuth'),
-                )))
-                .handle('updateTenantOAuth', ({ path, payload }) => Middleware.guarded('admin', 'updateTenantOAuth', 'mutation',
-                    database.apps.readSettings(path.id, 'update').pipe(
-                        Effect.mapError(constant(HttpError.Internal.of('tenant lookup failed'))),
-                        Effect.filterOrFail(Option.isSome, constant(HttpError.NotFound.of('tenant', path.id))),
-                        Effect.map(Struct.get('value')),
-                        Effect.bindTo('loaded'),
-                        Effect.let('secretsByProvider', ({ loaded }) => Arr.groupBy(loaded.settings.oauthProviders, Struct.get('provider'))),
-                        Effect.bind('encrypted', ({ secretsByProvider }) =>
-                            Effect.forEach(payload.providers, (provider): Effect.Effect<string, HttpError.Validation | HttpError.Internal, Crypto.Service> => pipe(
-                                Option.fromNullable(provider.clientSecret),
-                                Option.match({
-                                    onNone: constant(
-                                        Effect.fromNullable(secretsByProvider[provider.provider]?.[0]).pipe(
-                                            Effect.mapError(constant(HttpError.Validation.of('clientSecret', `Missing clientSecret for provider '${provider.provider}'`))),
-                                            Effect.map(Struct.get('clientSecretEncrypted')),
-                                        )
-                                    ),
-                                    onSome: flow(Crypto.encrypt, Effect.mapError(constant(HttpError.Internal.of('Encryption failed'))), Effect.map(Encoding.encodeBase64)),
-                                }),
-                            ), { concurrency: 'unbounded' }),
-                        ),
-                        Effect.let('oauthProviders', flow(
-                            Struct.get('encrypted'),
-                            Arr.zipWith(payload.providers, (enc, provider) => ({ ...Struct.omit(provider, 'clientSecret'), clientSecretEncrypted: enc })),
-                        )),
-                        Effect.tap(({ loaded, oauthProviders }) =>
-                            database.apps.updateSettings(loaded.app.id, { ...loaded.settings, oauthProviders }),
-                        ),
-                        Effect.mapError((error) => HttpError.is(error) ? error : HttpError.Internal.of('Tenant OAuth config update failed', error)),
-                        Effect.tap(constant(audit.log('App.update', { details: { tenantId: path.id } }))),
-                        Effect.tap(constant(eventBus.publish({ aggregateId: path.id, payload: { _tag: 'app', action: 'settings.updated' }, tenantId: path.id }).pipe(Effect.ignore))),
-                        Effect.map(flow(
-                            Struct.get('oauthProviders'),
-                            Arr.map(({ clientSecretEncrypted, ...rest }) => ({ ...rest, clientSecretSet: clientSecretEncrypted.length > 0 })),
-                            (providers) => ({ providers }),
-                        )),
-                        Telemetry.span('admin.updateTenantOAuth'),
+                    Effect.map(Struct.get('value')),
+                    Effect.bindTo('loaded'),
+                    Effect.let('secretsByProvider', ({ loaded }) => Arr.groupBy(loaded.settings.oauthProviders, Struct.get('provider'))),
+                    Effect.bind('encrypted', ({ secretsByProvider }) =>
+                        Effect.forEach(payload.providers, (provider): Effect.Effect<string, HttpError.Validation | HttpError.Internal, Crypto.Service> => pipe(
+                            Option.fromNullable(provider.clientSecret),
+                            Option.match({
+                                onNone: constant(
+                                    Effect.fromNullable(secretsByProvider[provider.provider]?.[0]).pipe(
+                                        Effect.mapError(constant(HttpError.Validation.of('clientSecret', `Missing clientSecret for provider '${provider.provider}'`))),
+                                        Effect.map(Struct.get('clientSecretEncrypted')),
+                                    )
+                                ),
+                                onSome: flow(Crypto.encrypt, Effect.mapError(constant(HttpError.Internal.of('Encryption failed'))), Effect.map(Encoding.encodeBase64)),
+                            }),
+                        ), { concurrency: 'unbounded' }),
                     ),
-                ))
+                    Effect.let('oauthProviders', flow(
+                        Struct.get('encrypted'),
+                        Arr.zipWith(payload.providers, (enc, provider) => ({ ...Struct.omit(provider, 'clientSecret'), clientSecretEncrypted: enc })),
+                    )),
+                    Effect.tap(({ loaded, oauthProviders }) =>
+                        database.apps.updateSettings(loaded.app.id, { ...loaded.settings, oauthProviders }),
+                    ),
+                    Effect.mapError((error) => HttpError.is(error) ? error : HttpError.Internal.of('Tenant OAuth config update failed', error)),
+                    Effect.tap(constant(audit.log('App.update', { details: { tenantId: path.id } }))),
+                    Effect.tap(constant(eventBus.publish({ aggregateId: path.id, payload: { _tag: 'app', action: 'settings.updated' }, tenantId: path.id }).pipe(Effect.ignore))),
+                    Effect.map(flow(
+                        Struct.get('oauthProviders'),
+                        Arr.map(({ clientSecretEncrypted, ...rest }) => ({ ...rest, clientSecretSet: clientSecretEncrypted.length > 0 })),
+                        (providers) => ({ providers }),
+                    )),
+                    Telemetry.span('admin.updateTenantOAuth'),
+                ),
+            ))
             .handle('getFeatureFlags', () => Middleware.guarded('admin', 'getFeatureFlags', 'api', features.getAll.pipe(
                 Telemetry.span('admin.getFeatureFlags'),
             )))

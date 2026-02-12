@@ -45,9 +45,9 @@ const handleIngest = (signal: (typeof _CONFIG.signal)[number], request: HttpServ
                 : HttpClientRequest.bodyText(payload.body, payload.contentType),
         );
         yield* Resilience.run(_CONFIG.telemetry.circuit,
-                Effect.flatMap(HttpClient.HttpClient, (client) => client.pipe(HttpClient.filterStatusOk).execute(outbound).pipe(Effect.scoped, Effect.asVoid)).pipe(Effect.provide(FetchHttpClient.layer)),
-                    { circuit: _CONFIG.telemetry.circuit, retry: 'brief', timeout: Duration.seconds(5) },
-                );
+            Effect.flatMap(HttpClient.HttpClient, (client) => client.pipe(HttpClient.filterStatusOk).execute(outbound).pipe(Effect.scoped, Effect.asVoid)).pipe(Effect.provide(FetchHttpClient.layer)),
+            { circuit: _CONFIG.telemetry.circuit, retry: 'brief', timeout: Duration.seconds(5) },
+        );
     }).pipe(
         Effect.as(HttpServerResponse.empty({ status: _CONFIG.response.accepted })),
         Effect.tapError((error) => Effect.logWarning('Telemetry proxy failed', { error: String(error), signal })),

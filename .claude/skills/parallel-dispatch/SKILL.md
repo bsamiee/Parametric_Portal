@@ -103,20 +103,34 @@ Context: [Relevant background—agents execute statelessly]
 
 <br>
 
-[CRITICAL] Dispatch ALL agents in ONE message block:
+[CRITICAL] Dispatch ALL agents in ONE message block. Call multiple Task tools in a single response:
 
 ```text
-Task("Agent A: [scope, objective, output format]", subagent_type="Explore")
-Task("Agent B: [scope, objective, output format]", subagent_type="Explore")
-Task("Agent C: [scope, objective, output format]", subagent_type="general-purpose")
-Task("Agent D: [scope, objective, output format]", run_in_background=true)
+Task(description="Agent A: [scope, objective, output format]", subagent_type="Explore")
+Task(description="Agent B: [scope, objective, output format]", subagent_type="Explore")
+Task(description="Agent C: [scope, objective, output format]", subagent_type="general-purpose")
 ```
 
+**Tool Parameters:**
+
+| [INDEX] | [PARAMETER]    | [TYPE]   | [REQUIRED] | [DESCRIPTION]                                          |
+| :-----: | -------------- | -------- | :--------: | ------------------------------------------------------ |
+|   [1]   | `description`  | string   |    Yes     | Full agent prompt with scope, objective, output format  |
+|   [2]   | `subagent_type`| string   |    No      | `"Explore"` for research; omit for general-purpose     |
+
+**Agent Type Selection:**
+
+| [INDEX] | [TYPE]            | [ACCESS]                  | [USE_WHEN]                                      |
+| :-----: | ----------------- | ------------------------- | ----------------------------------------------- |
+|   [1]   | `"Explore"`       | Glob, Grep, Read, WebFetch | Codebase search, file analysis, web research    |
+|   [2]   | (omit/default)    | All tools                 | General tasks, file creation, code modification |
+
 [IMPORTANT]:
-- [ALWAYS] Include complete context per agent—stateless execution.
-- [ALWAYS] Specify `subagent_type` for optimal agent selection.
-- [ALWAYS] Use `run_in_background=true` for long-running tasks.
-- [NEVER] Chain agent outputs—parallel means independent.
+- [ALWAYS] Include complete context per agent — stateless execution.
+- [ALWAYS] Use `subagent_type="Explore"` for codebase/research tasks needing Glob, Grep, Read access.
+- [ALWAYS] Place ALL Task tool calls in a single response — parallel execution requires single message.
+- [NEVER] Chain agent outputs — parallel means independent.
+- [NEVER] Use placeholder values — each agent prompt must be self-contained.
 
 ---
 ## [5][SYNTHESIS]

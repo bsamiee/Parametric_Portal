@@ -76,80 +76,80 @@ class AuthService extends Effect.Service<AuthService>()('server/Auth', {
             _CONFIG.sessionCache,
             SqlClient.SqlClient,
         ]);
-            const _caps = (provider: typeof OAuthProviderSchema.Type) => Context.Request.config.oauth.capabilities[provider];
-                const baseUrl = yield* Config.string('API_BASE_URL').pipe(Config.withDefault('http://localhost:4000'));
-                const _redirect = (provider: typeof OAuthProviderSchema.Type) => `${baseUrl}/api/auth/oauth/${provider}/callback`;
-                    const _providerConfig = (provider: typeof OAuthProviderSchema.Type) => Effect.gen(function* () {
-                        const tenantId = yield* Context.Request.currentTenantId;
-                        const loaded = yield* db.apps.readSettings(tenantId).pipe(
-                            Effect.mapError((error) => AuthError.from('config_failed', { op: 'oauth_tenant_lookup', provider, tenantId }, error)),
-                            Effect.flatMap(Option.match({
-                                onNone: () => Effect.fail(AuthError.from('config_failed', { op: 'oauth_tenant_missing', provider, tenantId })),
-                                onSome: Effect.succeed,
-                            })),
-                        );
-                        const providerSettings = yield* Option.fromNullable(loaded.settings.oauthProviders.find((candidate) => candidate.provider === provider && candidate.enabled)).pipe(Option.match({
-                            onNone: () => Effect.fail(AuthError.from('config_failed', { op: 'oauth_provider_missing', provider, tenantId })),
-                            onSome: Effect.succeed,
-                        }));
-                    const clientSecret = yield* Encoding.decodeBase64(providerSettings.clientSecretEncrypted).pipe(
-                        Effect.mapError((error) => AuthError.from('config_failed', { op: 'oauth_secret_decode', provider, tenantId }, error)),
-                        Effect.flatMap(Crypto.decrypt),
-                        Effect.mapError((error) => AuthError.from('config_failed', { op: 'oauth_secret_decrypt', provider, tenantId }, error)),
-                    );
-                    return { clientSecret, providerSettings };
+        const _caps = (provider: typeof OAuthProviderSchema.Type) => Context.Request.config.oauth.capabilities[provider];
+        const baseUrl = yield* Config.string('API_BASE_URL').pipe(Config.withDefault('http://localhost:4000'));
+        const _redirect = (provider: typeof OAuthProviderSchema.Type) => `${baseUrl}/api/auth/oauth/${provider}/callback`;
+        const _providerConfig = (provider: typeof OAuthProviderSchema.Type) => Effect.gen(function* () {
+            const tenantId = yield* Context.Request.currentTenantId;
+            const loaded = yield* db.apps.readSettings(tenantId).pipe(
+                Effect.mapError((error) => AuthError.from('config_failed', { op: 'oauth_tenant_lookup', provider, tenantId }, error)),
+                Effect.flatMap(Option.match({
+                    onNone: () => Effect.fail(AuthError.from('config_failed', { op: 'oauth_tenant_missing', provider, tenantId })),
+                    onSome: Effect.succeed,
+                })),
+            );
+            const providerSettings = yield* Option.fromNullable(loaded.settings.oauthProviders.find((candidate) => candidate.provider === provider && candidate.enabled)).pipe(Option.match({
+                onNone: () => Effect.fail(AuthError.from('config_failed', { op: 'oauth_provider_missing', provider, tenantId })),
+                onSome: Effect.succeed,
+            }));
+            const clientSecret = yield* Encoding.decodeBase64(providerSettings.clientSecretEncrypted).pipe(
+                Effect.mapError((error) => AuthError.from('config_failed', { op: 'oauth_secret_decode', provider, tenantId }, error)),
+                Effect.flatMap(Crypto.decrypt),
+                Effect.mapError((error) => AuthError.from('config_failed', { op: 'oauth_secret_decrypt', provider, tenantId }, error)),
+            );
+            return { clientSecret, providerSettings };
+        });
+        const oauth = {
+            authUrl: (provider: typeof OAuthProviderSchema.Type, state: string, verifier?: string) => Effect.gen(function* () {
+                const { clientSecret, providerSettings } = yield* _providerConfig(provider);
+                const defaultScopes = Match.value(_caps(provider).oidc).pipe(Match.when(true, () => Context.Request.config.oauth.scopes.oidc), Match.orElse(() => Context.Request.config.oauth.scopes.github));
+                const scopes = providerSettings.scopes && providerSettings.scopes.length > 0 ? providerSettings.scopes : defaultScopes;
+                const client = yield* Match.value(provider).pipe(
+                    Match.when('apple', () => providerSettings.teamId && providerSettings.keyId
+                        ? Effect.succeed(new Apple(providerSettings.clientId, providerSettings.teamId, providerSettings.keyId, new TextEncoder().encode(clientSecret), _redirect('apple')))
+                        : Effect.fail(AuthError.from('config_failed', { op: 'oauth_apple_fields', provider }))),
+                    Match.when('github', () => Effect.succeed(new GitHub(providerSettings.clientId, clientSecret, _redirect('github')))),
+                    Match.when('google', () => Effect.succeed(new Google(providerSettings.clientId, clientSecret, _redirect('google')))),
+                    Match.orElse(() => Effect.succeed(new MicrosoftEntraId(providerSettings.tenant ?? 'common', providerSettings.clientId, clientSecret, _redirect('microsoft')))),
+                );
+                return _caps(provider).pkce
+                    ? (client as Google | MicrosoftEntraId).createAuthorizationURL(state, verifier as string, [...scopes])
+                    : (client as GitHub | Apple).createAuthorizationURL(state, [...scopes]);
+            }),
+            exchange: (provider: typeof OAuthProviderSchema.Type, code: string, verifier?: string) => Effect.gen(function* () {
+                const { clientSecret, providerSettings } = yield* _providerConfig(provider);
+                const client = yield* Match.value(provider).pipe(
+                    Match.when('apple', () => providerSettings.teamId && providerSettings.keyId
+                        ? Effect.succeed(new Apple(providerSettings.clientId, providerSettings.teamId, providerSettings.keyId, new TextEncoder().encode(clientSecret), _redirect('apple')))
+                        : Effect.fail(AuthError.from('config_failed', { op: 'oauth_apple_fields', provider }))),
+                    Match.when('github', () => Effect.succeed(new GitHub(providerSettings.clientId, clientSecret, _redirect('github')))),
+                    Match.when('google', () => Effect.succeed(new Google(providerSettings.clientId, clientSecret, _redirect('google')))),
+                    Match.orElse(() => Effect.succeed(new MicrosoftEntraId(providerSettings.tenant ?? 'common', providerSettings.clientId, clientSecret, _redirect('microsoft')))),
+                );
+                return yield* Effect.tryPromise({
+                    catch: (error) => AuthError.from('oauth_exchange_failed', { provider }, error),
+                    try: () => _caps(provider).pkce
+                        ? (client as Google | MicrosoftEntraId).validateAuthorizationCode(code, verifier as string)
+                        : (client as GitHub | Apple).validateAuthorizationCode(code),
                 });
-                const oauth = {
-                    authUrl: (provider: typeof OAuthProviderSchema.Type, state: string, verifier?: string) => Effect.gen(function* () {
-                        const { clientSecret, providerSettings } = yield* _providerConfig(provider);
-                        const defaultScopes = Match.value(_caps(provider).oidc).pipe(Match.when(true, () => Context.Request.config.oauth.scopes.oidc), Match.orElse(() => Context.Request.config.oauth.scopes.github));
-                        const scopes = providerSettings.scopes && providerSettings.scopes.length > 0 ? providerSettings.scopes : defaultScopes;
-                        const client = yield* Match.value(provider).pipe(
-                            Match.when('apple', () => providerSettings.teamId && providerSettings.keyId
-                                ? Effect.succeed(new Apple(providerSettings.clientId, providerSettings.teamId, providerSettings.keyId, new TextEncoder().encode(clientSecret), _redirect('apple')))
-                                : Effect.fail(AuthError.from('config_failed', { op: 'oauth_apple_fields', provider }))),
-                            Match.when('github', () => Effect.succeed(new GitHub(providerSettings.clientId, clientSecret, _redirect('github')))),
-                            Match.when('google', () => Effect.succeed(new Google(providerSettings.clientId, clientSecret, _redirect('google')))),
-                            Match.orElse(() => Effect.succeed(new MicrosoftEntraId(providerSettings.tenant ?? 'common', providerSettings.clientId, clientSecret, _redirect('microsoft')))),
-                        );
-                        return _caps(provider).pkce
-                            ? (client as Google | MicrosoftEntraId).createAuthorizationURL(state, verifier as string, [...scopes])
-                            : (client as GitHub | Apple).createAuthorizationURL(state, [...scopes]);
-                    }),
-                    exchange: (provider: typeof OAuthProviderSchema.Type, code: string, verifier?: string) => Effect.gen(function* () {
-                        const { clientSecret, providerSettings } = yield* _providerConfig(provider);
-                        const client = yield* Match.value(provider).pipe(
-                            Match.when('apple', () => providerSettings.teamId && providerSettings.keyId
-                                ? Effect.succeed(new Apple(providerSettings.clientId, providerSettings.teamId, providerSettings.keyId, new TextEncoder().encode(clientSecret), _redirect('apple')))
-                                : Effect.fail(AuthError.from('config_failed', { op: 'oauth_apple_fields', provider }))),
-                            Match.when('github', () => Effect.succeed(new GitHub(providerSettings.clientId, clientSecret, _redirect('github')))),
-                            Match.when('google', () => Effect.succeed(new Google(providerSettings.clientId, clientSecret, _redirect('google')))),
-                            Match.orElse(() => Effect.succeed(new MicrosoftEntraId(providerSettings.tenant ?? 'common', providerSettings.clientId, clientSecret, _redirect('microsoft')))),
-                        );
-                        return yield* Effect.tryPromise({
-                            catch: (error) => AuthError.from('oauth_exchange_failed', { provider }, error),
-                            try: () => _caps(provider).pkce
-                                ? (client as Google | MicrosoftEntraId).validateAuthorizationCode(code, verifier as string)
-                                : (client as GitHub | Apple).validateAuthorizationCode(code),
-                        });
-                    }),
-                    extractUser: (provider: typeof OAuthProviderSchema.Type, tokens: OAuth2Tokens): Effect.Effect<{ externalId: string; email: Option.Option<string> }, AuthError> => _caps(provider).oidc
-                        ? Effect.try({ catch: (error) => AuthError.from('oauth_user_fetch', { provider }, error), try: () => decodeIdToken(tokens.idToken()) as { sub: string; email?: string } }).pipe(Effect.map((decoded) => ({ email: Option.fromNullable(decoded.email), externalId: decoded.sub })))
-                        : Effect.gen(function* () {
-                            const [requestContext, span] = yield* Effect.all([Context.Request.current, Effect.optionFromOptional(Effect.currentSpan)], { concurrency: 'unbounded' });
-                            const traceHeaders = Option.match(span, { onNone: () => ({}), onSome: HttpTraceContext.toHeaders });
-                            const response = yield* Effect.tryPromise({
-                                catch: (error) => AuthError.from('oauth_user_fetch', { provider }, error),
-                                try: () => fetch(Context.Request.config.endpoints.githubApi, { headers: { ...traceHeaders, Authorization: `Bearer ${tokens.accessToken()}`, 'User-Agent': 'ParametricPortal/1.0', [Context.Request.Headers.requestId]: requestContext.requestId } }),
-                            });
-                            yield* Effect.liftPredicate(response, (r) => r.ok, (r) => AuthError.from('oauth_user_fetch', { provider }, new Error(`github_user_fetch_${r.status}`)));
-                            const decoded = yield* Effect.tryPromise({
-                                catch: (error) => AuthError.from('oauth_user_fetch', { provider }, error),
-                                try: () => response.json() as Promise<{ id: number; email?: string | null }>,
-                            });
-                            return { email: Option.fromNullable(decoded.email), externalId: String(decoded.id) };
-                        }),
-                };
+            }),
+            extractUser: (provider: typeof OAuthProviderSchema.Type, tokens: OAuth2Tokens): Effect.Effect<{ externalId: string; email: Option.Option<string> }, AuthError> => _caps(provider).oidc
+                ? Effect.try({ catch: (error) => AuthError.from('oauth_user_fetch', { provider }, error), try: () => decodeIdToken(tokens.idToken()) as { sub: string; email?: string } }).pipe(Effect.map((decoded) => ({ email: Option.fromNullable(decoded.email), externalId: decoded.sub })))
+                : Effect.gen(function* () {
+                    const [requestContext, span] = yield* Effect.all([Context.Request.current, Effect.optionFromOptional(Effect.currentSpan)], { concurrency: 'unbounded' });
+                    const traceHeaders = Option.match(span, { onNone: () => ({}), onSome: HttpTraceContext.toHeaders });
+                    const response = yield* Effect.tryPromise({
+                        catch: (error) => AuthError.from('oauth_user_fetch', { provider }, error),
+                        try: () => fetch(Context.Request.config.endpoints.githubApi, { headers: { ...traceHeaders, Authorization: `Bearer ${tokens.accessToken()}`, 'User-Agent': 'ParametricPortal/1.0', [Context.Request.Headers.requestId]: requestContext.requestId } }),
+                    });
+                    yield* Effect.liftPredicate(response, (r) => r.ok, (r) => AuthError.from('oauth_user_fetch', { provider }, new Error(`github_user_fetch_${r.status}`)));
+                    const decoded = yield* Effect.tryPromise({
+                        catch: (error) => AuthError.from('oauth_user_fetch', { provider }, error),
+                        try: () => response.json() as Promise<{ id: number; email?: string | null }>,
+                    });
+                    return { email: Option.fromNullable(decoded.email), externalId: String(decoded.id) };
+                }),
+        };
         const cache = yield* CacheService.cache<CacheKey, unknown, never>({
             inMemoryCapacity: sessionCacheConfig.capacity,
             lookup: (key) => Match.value(key.scope).pipe(
@@ -203,7 +203,7 @@ class AuthService extends Effect.Service<AuthService>()('server/Auth', {
                     const excess = count - _CONFIG.oauthRateLimit.maxAttempts;
                     yield* CacheService.kv.set(rlKey, { count, lastFailure: now, lockedUntil: excess >= 0 ? now + Math.min(_CONFIG.oauthRateLimit.baseMs * (2 ** excess), _CONFIG.oauthRateLimit.maxMs) : 0 }, _CONFIG.oauthRateLimit.ttl);
                 }).pipe(Effect.ignore);
-                    const oauthTokens = yield* oauth.exchange(provider, code, verifier).pipe(Effect.tapError(() => recordFailure));
+                const oauthTokens = yield* oauth.exchange(provider, code, verifier).pipe(Effect.tapError(() => recordFailure));
                 const userInfo = yield* oauth.extractUser(provider, oauthTokens).pipe(Effect.tapError(() => recordFailure));
                 yield* CacheService.kv.del(rlKey).pipe(Effect.ignore);
                 const externalAccountOpt = yield* db.oauthAccounts.byExternal(provider, userInfo.externalId);
@@ -261,8 +261,8 @@ class AuthService extends Effect.Service<AuthService>()('server/Auth', {
                 );
                 yield* MetricsService.inc((yield* MetricsService).oauth.authorizations, MetricsService.label({ provider }));
                 yield* CacheService.kv.set(_STATE_KEY('oauth', tenantId, cookie), { _tag: 'oauth', provider, requestId, tenantId }, Context.Request.config.durations.pkce);
-                    const authUrl = yield* oauth.authUrl(provider, oauthState, verifier);
-                    return { _tag: 'Initiate' as const, authUrl: authUrl.toString(), cookie };
+                const authUrl = yield* oauth.authUrl(provider, oauthState, verifier);
+                return { _tag: 'Initiate' as const, authUrl: authUrl.toString(), cookie };
             }).pipe(Effect.mapError((error) => HttpError.OAuth.of(provider, error instanceof AuthError ? error.reason : 'internal', error)), Telemetry.span('auth.oauth.start', { metrics: false, 'oauth.provider': provider })),
         };
         const session = {

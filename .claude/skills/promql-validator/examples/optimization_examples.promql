@@ -1,0 +1,152 @@
+# PromQL Optimization Examples (Before -> After)
+# Prometheus 3.10+ (native histograms stable 3.8+, no feature flag 3.9+)
+
+# --- OPT 1: Reduce cardinality with specific labels (10-50x faster) ---
+# WHY: Unbounded selectors scan entire TSDB index; label filters use inverted index for O(1) lookup
+# BEFORE: ~10000 series, 2-5s
+sum(rate(container_cpu_usage_seconds_total[5m]))
+# AFTER: ~50 series, 100-200ms
+sum(rate(container_cpu_usage_seconds_total{namespace="production", deployment="api-service"}[5m]))
+
+# --- OPT 2: Exact match over regex (5x faster) ---
+# WHY: Exact match uses O(1) inverted index lookup; regex requires pattern evaluation per series
+# BEFORE: pattern matching, ~500ms
+sum(rate(http_requests_total{status=~"200"}[5m]))
+# AFTER: index lookup, ~100ms
+sum(rate(http_requests_total{status="200"}[5m]))
+
+# --- OPT 3: Recording rules for complex queries (20-40x faster) ---
+# WHY: Pre-computation at scrape time reduces query-time cost; single lookup vs full computation
+# BEFORE: 1-2s per exec, 100 times/min
+sum by (job, instance, path) (rate(http_request_duration_seconds_sum{job="api"}[5m])) / sum by (job, instance, path) (rate(http_request_duration_seconds_count{job="api"}[5m]))
+# AFTER: pre-computed, ~50ms
+# record: job_instance_path:http_request_duration_seconds:mean5m
+job_instance_path:http_request_duration_seconds:mean5m
+
+# --- OPT 4: irate vs rate (correctness) ---
+# WHY: irate only uses last 2 samples; extra range is wasted lookback, not averaged
+# BEFORE: irate over 1h (wasted range, only 2 samples used)
+irate(http_requests_total{job="api"}[1h])
+# AFTER: rate uses full range
+rate(http_requests_total{job="api"}[1h])
+
+# --- OPT 5: Regex alternation over OR (4x faster) ---
+# WHY: Single regex alternation is one query execution vs N separate queries merged
+# BEFORE: 3 independent queries, ~800ms
+sum(rate(http_requests_total{path="/api/users"}[5m])) or sum(rate(http_requests_total{path="/api/products"}[5m])) or sum(rate(http_requests_total{path="/api/orders"}[5m]))
+# AFTER: single query, ~200ms
+sum by (path) (rate(http_requests_total{path=~"/api/(users|products|orders)"}[5m]))
+
+# --- OPT 6: Filter before aggregation (10-100x faster) ---
+# WHY: Aggregation first processes all series, then discards most; filter early to reduce cardinality
+# BEFORE: aggregates all then filters
+sum(rate(http_requests_total[5m])) and {job="api"}
+# AFTER: filters first
+sum(rate(http_requests_total{job="api"}[5m]))
+
+# --- OPT 7: without() over verbose by() (maintainability) ---
+# WHY: Dropping known high-cardinality labels is more maintainable than enumerating all keepers
+# BEFORE: enumerate all labels
+sum by (job, instance, environment, datacenter, region, cluster) (rate(http_requests_total[5m]))
+# AFTER: drop high-cardinality only
+sum without (pod, container) (rate(http_requests_total[5m]))
+
+# --- OPT 8: Avoid redundant nested aggregations (2x faster) ---
+# WHY: avg_over_time already computes per-series mean; outer avg without by() is identity or unclear
+# BEFORE: redundant avg wrapping avg_over_time
+avg(avg_over_time(node_cpu_usage_percent{job="node-exporter"}[5m]))
+# AFTER: avg_over_time already computes mean
+avg_over_time(node_cpu_usage_percent{job="node-exporter"}[5m])
+
+# --- OPT 9: Limit subquery ranges (100x+ faster) ---
+# WHY: Long subqueries materialize millions of intermediate samples causing OOM
+# BEFORE: 95d, timeout risk
+max_over_time(rate(http_requests_total[5m])[95d:1m])
+# AFTER: 7d or recording rule
+max_over_time(rate(http_requests_total[5m])[7d:1m])
+
+# --- OPT 10: Pre-aggregate histograms (5-10x faster) ---
+# WHY: Without grouping, all label combinations are preserved, multiplying series count
+# BEFORE: all label combinations
+histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[5m]))
+# AFTER: aggregate by relevant labels
+histogram_quantile(0.95, sum by (job, le) (rate(http_request_duration_seconds_bucket[5m])))
+
+# --- OPT 11: Recording rule for multi-quantile (3x reduction) ---
+# WHY: Shared recording rule computes rate(bucket) once; 3 quantiles read pre-computed result
+# BEFORE: 3 separate queries each scanning buckets
+histogram_quantile(0.99, sum by (le) (rate(http_request_duration_seconds_bucket[5m])))
+histogram_quantile(0.95, sum by (le) (rate(http_request_duration_seconds_bucket[5m])))
+histogram_quantile(0.50, sum by (le) (rate(http_request_duration_seconds_bucket[5m])))
+# AFTER: shared recording rule
+# record: :http_request_duration_seconds_bucket:rate5m
+#   expr: sum by (le) (rate(http_request_duration_seconds_bucket[5m]))
+histogram_quantile(0.99, :http_request_duration_seconds_bucket:rate5m)
+histogram_quantile(0.95, :http_request_duration_seconds_bucket:rate5m)
+histogram_quantile(0.50, :http_request_duration_seconds_bucket:rate5m)
+
+# --- OPT 12: Shared label filters in error rate ---
+# WHY: Mismatched filters between numerator/denominator produce partial results or wrong ratios
+# BEFORE: mismatched filters
+rate(http_requests_total{status=~"5.."}[5m]) / rate(http_requests_total[5m])
+# AFTER: aligned filters + recording rule
+rate(http_requests_total{job="api", status=~"5.."}[5m]) / rate(http_requests_total{job="api"}[5m])
+# BEST: job:http_requests:error_rate5m{job="api"}
+
+# --- OPT 13: Native histograms replace classic (3.8+ stable, single series vs 10-30 series) ---
+# WHY: Native histograms encode bucket boundaries internally; single series per histogram vs 10-30 for classic
+# BEFORE (classic): 30 _bucket series + _sum + _count = 32 series per histogram
+histogram_quantile(0.95, sum by (job, le) (rate(http_request_duration_seconds_bucket{job="api"}[5m])))
+# AFTER (native, 3.8+): 1 series per histogram, no le label
+histogram_quantile(0.95, sum by (job) (rate(http_request_duration_seconds{job="api"}[5m])))
+
+# --- OPT 14: histogram_avg replaces manual division (3.8+) ---
+# WHY: Single function instead of dividing two separate rate() computations
+# BEFORE (classic): two rate() calls, two series
+rate(http_request_duration_seconds_sum{job="api"}[5m]) / rate(http_request_duration_seconds_count{job="api"}[5m])
+# AFTER (native, 3.8+): one function, one series
+histogram_avg(rate(http_request_duration_seconds{job="api"}[5m]))
+
+# --- OPT 15: histogram_fraction for latency SLO (3.8+) ---
+# WHY: Exact fraction under threshold without bucket boundary interpolation errors
+# BEFORE (classic): depends on bucket boundaries containing threshold value
+sum(rate(http_request_duration_seconds_bucket{le="0.2", job="api"}[5m])) / sum(rate(http_request_duration_seconds_count{job="api"}[5m]))
+# AFTER (native, 3.8+): precise fraction, no bucket boundary dependency
+histogram_fraction(0, 0.2, rate(http_request_duration_seconds{job="api"}[5m]))
+
+# --- OPT 16: info() replaces manual group_left (3.0+ experimental) ---
+# WHY: Automatic metadata enrichment without manual label matching and group_left boilerplate
+# BEFORE: manual join with explicit label matching
+rate(http_requests_total{job="api"}[5m]) * on (job, instance) group_left (version) service_info
+# AFTER (3.0+ experimental): automatic metadata join
+info(rate(http_requests_total{job="api"}[5m]))
+# Selective enrichment: only enrich with specific info metric labels
+info(rate(http_requests_total{job="api"}[5m]), {k8s_cluster=~".+"})
+
+# --- OPT 17: Anchor regex for prefix optimization ---
+# WHY: Unanchored regex scans all label values; anchored enables prefix index optimization
+# BEFORE: unanchored, full scan
+{env=~"prod-.*"}
+# AFTER: anchored, prefix optimization
+{env=~"^prod-.*"}
+
+# --- OPT 18: limitk for cardinality exploration (3.0+ experimental) ---
+# WHY: Scanning all series for debugging wastes resources; limitk samples N series
+# BEFORE: fetches all series, then human picks a few
+http_requests_total{job="api"}
+# AFTER: deterministic N-series sample
+limitk(10, http_requests_total{job="api"})
+
+# --- OPT 19: limit_ratio for cost-effective sampling (3.0+ experimental) ---
+# WHY: Full cardinality queries on dashboards that only need trend direction waste resources
+# BEFORE: process all series for approximate trend
+sum by (endpoint) (rate(http_requests_total{job="api"}[5m]))
+# AFTER: ~10% deterministic sample for trend estimation
+sum by (endpoint) (limit_ratio(0.1, rate(http_requests_total{job="api"}[5m])))
+
+# --- OPT 20: UTF-8 metric names avoid sanitization overhead (3.0+) ---
+# WHY: OTEL metrics with dots no longer need name conversion; UTF-8 is default since 3.0
+# BEFORE: OTEL metric names sanitized to underscores (information loss)
+http_server_request_duration_seconds_total{job="api"}
+# AFTER: Native OTEL names preserved with UTF-8 support
+{"http.server.request.duration", job="api"}

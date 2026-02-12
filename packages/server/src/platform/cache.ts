@@ -86,14 +86,14 @@ const _redisConfig = Config.all({
         tls, username: Option.getOrUndefined(config.username),
     } as const;
     const withHost = { ...baseOpts, host: config.host, port: config.port };
-        return Match.value(config.mode).pipe(
-            Match.when('standalone', () => ({
-                connect: () => new Redis(withHost),
-                mode: 'standalone' as const,
-                redisOpts: withHost satisfies RedisOptions,
-            })),
-            Match.when('sentinel', () => {
-                const sentinels = _parseNodes(config.sentinelNodes);
+    return Match.value(config.mode).pipe(
+        Match.when('standalone', () => ({
+            connect: () => new Redis(withHost),
+            mode: 'standalone' as const,
+            redisOpts: withHost satisfies RedisOptions,
+        })),
+        Match.when('sentinel', () => {
+            const sentinels = _parseNodes(config.sentinelNodes);
             const sentinelList = sentinels.length > 0 ? [...sentinels] : [{ host: config.host, port: 26379 }];
             const sentinelOpts = {
                 ...baseOpts,
@@ -102,8 +102,8 @@ const _redisConfig = Config.all({
                 sentinelCommandTimeout: Option.getOrUndefined(config.sentinelCommandTimeout),
                 sentinelPassword: optValue(config.sentinelPassword), sentinels: sentinelList, sentinelUsername: optValue(config.sentinelUsername),
             } satisfies RedisOptions;
-                return { connect: () => new Redis(sentinelOpts), mode: 'sentinel' as const, redisOpts: sentinelOpts };
-            }),
+            return { connect: () => new Redis(sentinelOpts), mode: 'sentinel' as const, redisOpts: sentinelOpts };
+        }),
         Match.exhaustive,
     );
 }));
@@ -153,10 +153,10 @@ class CacheService extends Effect.Service<CacheService>()('server/CacheService',
         ));
         const kv = {
             del: (key: string) => _runRedis('del', () => redis.del(key)).pipe(Effect.ignore),
-                get: <A, I = A, R = never>(key: string, schema: S.Schema<A, I, R>) => _runRedis('get', () => redis.get(key)).pipe(
-                    Effect.flatMap((value) => value === null ? Effect.succeed(Option.none<A>()) : S.decode(S.parseJson(schema))(value).pipe(Effect.map(Option.some))),
-                    Effect.catchAll((error) => Effect.logWarning('cache.kv.get failed', { error: String(error), key }).pipe(Effect.as(Option.none<A>()))),
-                ),
+            get: <A, I = A, R = never>(key: string, schema: S.Schema<A, I, R>) => _runRedis('get', () => redis.get(key)).pipe(
+                Effect.flatMap((value) => value === null ? Effect.succeed(Option.none<A>()) : S.decode(S.parseJson(schema))(value).pipe(Effect.map(Option.some))),
+                Effect.catchAll((error) => Effect.logWarning('cache.kv.get failed', { error: String(error), key }).pipe(Effect.as(Option.none<A>()))),
+            ),
             set: (key: string, value: unknown, ttl: Duration.Duration) => S.encode(S.parseJson(S.Unknown))(value).pipe(Effect.flatMap((json) => _runRedis('set', () => redis.set(key, json, 'PX', Duration.toMillis(ttl)))), Effect.ignore),
         } as const;
         const sets = {
@@ -172,11 +172,11 @@ class CacheService extends Effect.Service<CacheService>()('server/CacheService',
             touch: (key: string, ttl: Duration.Duration) =>
                 _runRedis('expire', () => redis.expire(key, Math.max(1, Math.ceil(Duration.toSeconds(ttl))))).pipe(Effect.ignore),
         } as const;
-            const pubsub = {
-                duplicate: Effect.sync(() => redis.duplicate()),
-                publish: (channel: string, payload: string) => _runRedis('publish', () => redis.publish(channel, payload)),
-                subscribe: (connection: Redis, channel: string) => _runRedis('subscribe', () => connection.subscribe(channel)),
-            } as const;
+        const pubsub = {
+            duplicate: Effect.sync(() => redis.duplicate()),
+            publish: (channel: string, payload: string) => _runRedis('publish', () => redis.publish(channel, payload)),
+            subscribe: (connection: Redis, channel: string) => _runRedis('subscribe', () => connection.subscribe(channel)),
+        } as const;
         yield* Effect.logInfo('CacheService initialized', { mode: config.mode });
         return {
             _invalidateLocal: invalidateLocal,
@@ -217,62 +217,62 @@ class CacheService extends Effect.Service<CacheService>()('server/CacheService',
             const service = yield* CacheService;
             const metricsOpt = yield* Effect.serviceOption(MetricsService);
             const labels = MetricsService.label({ storeId: options.storeId });
-                const lookup = (key: K): Effect.Effect<S.WithResult.Success<K>, S.WithResult.Failure<K>, R> =>
-                    'map' in options
-                        ? Option.match(metricsOpt, {
-                            onNone: () => options.lookup(key).pipe(
-                                Effect.tap(Option.match({ onNone: constant(Effect.void), onSome: options.onSome ?? Effect.succeed })),
-                                Effect.map(Option.match({ onNone: constant(Option.none()), onSome: flow(options.map, Option.some) }) as unknown as (opt: Option.Option<A>) => S.WithResult.Success<K>),
-                            ),
-                            onSome: (metrics) => options.lookup(key).pipe(
-                                Effect.tap(Option.match({ onNone: constant(Effect.void), onSome: options.onSome ?? Effect.succeed })),
-                                Effect.tap(Option.match({
-                                    onNone: constant(MetricsService.inc(metrics.cache.misses, labels)),
-                                    onSome: constant(MetricsService.inc(metrics.cache.hits, labels)),
-                                })),
-                                Effect.map(Option.match({ onNone: constant(Option.none()), onSome: flow(options.map, Option.some) }) as unknown as (opt: Option.Option<A>) => S.WithResult.Success<K>),
-                                Metric.trackDuration(Metric.taggedWithLabels(metrics.cache.lookupDuration, labels)),
-                                Effect.tapError(constant(MetricsService.inc(metrics.cache.misses, labels))),
-                            ),
-                        })
-                        : Option.match(metricsOpt, {
-                            onNone: () => options.lookup(key),
-                            onSome: (metrics) => options.lookup(key).pipe(
-                                Metric.trackDuration(Metric.taggedWithLabels(metrics.cache.lookupDuration, labels)),
-                                Effect.tapBoth({
-                                    onFailure: constant(MetricsService.inc(metrics.cache.misses, labels)),
-                                    onSuccess: constant(MetricsService.inc(metrics.cache.hits, labels)),
-                                }),
-                            ),
-                        });
-                const memTtl = Duration.decode(options.inMemoryTTL ?? Duration.seconds(30));
-                const persistedTtl = Duration.decode(options.timeToLive ?? Duration.minutes(5));
-                const registrationTtlMs = Math.max(Duration.toMillis(memTtl), Duration.toMillis(persistedTtl));
-                const cache = yield* PersistedCache.make({ inMemoryCapacity: options.inMemoryCapacity ?? 1000, inMemoryTTL: memTtl, lookup, storeId: options.storeId, timeToLive: () => persistedTtl });
-                const registered = new Map<string, { expiresAt: number; primary: string; unregister: () => unknown }>();
-                const pruneOnce = Clock.currentTimeMillis.pipe(Effect.flatMap((now) => Effect.forEach(
-                    [...registered.entries()].filter(([, entry]) => entry.expiresAt <= now),
-                    ([id, entry]) => Effect.sync(entry.unregister).pipe(
-                        Effect.andThen(Effect.sync(service._unregisterCacheKey.bind(null, options.storeId, entry.primary))),
-                        Effect.andThen(Effect.sync(registered.delete.bind(registered, id))),
-                        Effect.asVoid,
-                    ),
-                    { discard: true },
-                ).pipe(Effect.as(now))));
-                yield* Effect.forkScoped(pruneOnce.pipe(Effect.repeat(Schedule.spaced(memTtl))));
-                const ensureRegistered = (key: K, primary: string) => {
-                    const id = `${options.storeId}:${primary}`;
-                    return pruneOnce.pipe(Effect.flatMap((now) => {
-                        registered.get(id) ?? service._registerCacheKey(options.storeId, primary);
-                        const entry = registered.get(id) ?? { expiresAt: now, primary, unregister: service._reactivity.unsafeRegister([id], Effect.runFork.bind(null, cache.invalidate(key).pipe(Effect.ignore))) };
-                        registered.set(id, { ...entry, expiresAt: now + registrationTtlMs });
-                        return Effect.void;
-                    }));
-                };
-                yield* Effect.addFinalizer(() => Effect.forEach([...registered.values()], (entry) => Effect.sync(entry.unregister).pipe(
+            const lookup = (key: K): Effect.Effect<S.WithResult.Success<K>, S.WithResult.Failure<K>, R> =>
+                'map' in options
+                    ? Option.match(metricsOpt, {
+                        onNone: () => options.lookup(key).pipe(
+                            Effect.tap(Option.match({ onNone: constant(Effect.void), onSome: options.onSome ?? Effect.succeed })),
+                            Effect.map(Option.match({ onNone: constant(Option.none()), onSome: flow(options.map, Option.some) }) as unknown as (opt: Option.Option<A>) => S.WithResult.Success<K>),
+                        ),
+                        onSome: (metrics) => options.lookup(key).pipe(
+                            Effect.tap(Option.match({ onNone: constant(Effect.void), onSome: options.onSome ?? Effect.succeed })),
+                            Effect.tap(Option.match({
+                                onNone: constant(MetricsService.inc(metrics.cache.misses, labels)),
+                                onSome: constant(MetricsService.inc(metrics.cache.hits, labels)),
+                            })),
+                            Effect.map(Option.match({ onNone: constant(Option.none()), onSome: flow(options.map, Option.some) }) as unknown as (opt: Option.Option<A>) => S.WithResult.Success<K>),
+                            Metric.trackDuration(Metric.taggedWithLabels(metrics.cache.lookupDuration, labels)),
+                            Effect.tapError(constant(MetricsService.inc(metrics.cache.misses, labels))),
+                        ),
+                    })
+                    : Option.match(metricsOpt, {
+                        onNone: () => options.lookup(key),
+                        onSome: (metrics) => options.lookup(key).pipe(
+                            Metric.trackDuration(Metric.taggedWithLabels(metrics.cache.lookupDuration, labels)),
+                            Effect.tapBoth({
+                                onFailure: constant(MetricsService.inc(metrics.cache.misses, labels)),
+                                onSuccess: constant(MetricsService.inc(metrics.cache.hits, labels)),
+                            }),
+                        ),
+                    });
+            const memTtl = Duration.decode(options.inMemoryTTL ?? Duration.seconds(30));
+            const persistedTtl = Duration.decode(options.timeToLive ?? Duration.minutes(5));
+            const registrationTtlMs = Math.max(Duration.toMillis(memTtl), Duration.toMillis(persistedTtl));
+            const cache = yield* PersistedCache.make({ inMemoryCapacity: options.inMemoryCapacity ?? 1000, inMemoryTTL: memTtl, lookup, storeId: options.storeId, timeToLive: () => persistedTtl });
+            const registered = new Map<string, { expiresAt: number; primary: string; unregister: () => unknown }>();
+            const pruneOnce = Clock.currentTimeMillis.pipe(Effect.flatMap((now) => Effect.forEach(
+                [...registered.entries()].filter(([, entry]) => entry.expiresAt <= now),
+                ([id, entry]) => Effect.sync(entry.unregister).pipe(
                     Effect.andThen(Effect.sync(service._unregisterCacheKey.bind(null, options.storeId, entry.primary))),
+                    Effect.andThen(Effect.sync(registered.delete.bind(registered, id))),
                     Effect.asVoid,
-                ), { discard: true }).pipe(Effect.andThen(Effect.sync(registered.clear.bind(registered)))));
+                ),
+                { discard: true },
+            ).pipe(Effect.as(now))));
+            yield* Effect.forkScoped(pruneOnce.pipe(Effect.repeat(Schedule.spaced(memTtl))));
+            const ensureRegistered = (key: K, primary: string) => {
+                const id = `${options.storeId}:${primary}`;
+                return pruneOnce.pipe(Effect.flatMap((now) => {
+                    registered.get(id) ?? service._registerCacheKey(options.storeId, primary);
+                    const entry = registered.get(id) ?? { expiresAt: now, primary, unregister: service._reactivity.unsafeRegister([id], Effect.runFork.bind(null, cache.invalidate(key).pipe(Effect.ignore))) };
+                    registered.set(id, { ...entry, expiresAt: now + registrationTtlMs });
+                    return Effect.void;
+                }));
+            };
+            yield* Effect.addFinalizer(() => Effect.forEach([...registered.values()], (entry) => Effect.sync(entry.unregister).pipe(
+                Effect.andThen(Effect.sync(service._unregisterCacheKey.bind(null, options.storeId, entry.primary))),
+                Effect.asVoid,
+            ), { discard: true }).pipe(Effect.andThen(Effect.sync(registered.clear.bind(registered)))));
             return {
                 get: (key) => { const primary = PrimaryKey.value(key); return ensureRegistered(key, primary).pipe(Effect.andThen(cache.get(key))); },
                 invalidate: (key) => { const primary = PrimaryKey.value(key); return ensureRegistered(key, primary).pipe(Effect.andThen(CacheService.invalidate(options.storeId, primary)), Effect.provideService(CacheService, service), Effect.asVoid); },
@@ -346,15 +346,15 @@ class CacheService extends Effect.Service<CacheService>()('server/CacheService',
         const requestContext = yield* Context.Request.current;
         return Option.match(requestContext.rateLimit, {
             onNone: () => response,
-                onSome: (rateLimit) => {
-                    const resetSec = String(Math.ceil(Duration.toMillis(rateLimit.resetAfter) / 1000));
-                    return HttpServerResponse.setHeaders(response, {
-                        [Context.Request.Headers.rateLimit.retryAfter]: resetSec,
-                        [Context.Request.Headers.rateLimit.limit]: String(rateLimit.limit),
-                        [Context.Request.Headers.rateLimit.remaining]: String(Math.max(0, Math.min(rateLimit.limit, rateLimit.remaining))),
-                        [Context.Request.Headers.rateLimit.reset]: resetSec,
-                    });
-                },
+            onSome: (rateLimit) => {
+                const resetSec = String(Math.ceil(Duration.toMillis(rateLimit.resetAfter) / 1000));
+                return HttpServerResponse.setHeaders(response, {
+                    [Context.Request.Headers.rateLimit.retryAfter]: resetSec,
+                    [Context.Request.Headers.rateLimit.limit]: String(rateLimit.limit),
+                    [Context.Request.Headers.rateLimit.remaining]: String(Math.max(0, Math.min(rateLimit.limit, rateLimit.remaining))),
+                    [Context.Request.Headers.rateLimit.reset]: resetSec,
+                });
+            },
             });
         }));
     static readonly health = () =>

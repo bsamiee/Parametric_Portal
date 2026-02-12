@@ -1,5 +1,6 @@
 #!/usr/bin/env -S uv run --quiet --script
 # /// script
+# requires-python = ">=3.14"
 # ///
 """GitHub CLI — unified interface for repository operations.
 
@@ -53,13 +54,12 @@ Commands:
     repo-view [repo]                        View repository
     api <endpoint> [method]                 Raw API call
 """
-from __future__ import annotations
-
 import json
 import os
 import subprocess
 import sys
-from typing import Any, Callable, Final
+from collections.abc import Callable
+from typing import Any, Final
 
 # --- [CONSTANTS] --------------------------------------------------------------
 DEFAULT_STATE: Final = "open"
@@ -68,44 +68,78 @@ DEFAULT_BRANCH: Final = "main"
 DEFAULT_OWNER: Final = "@me"
 
 # --- [TYPES] ------------------------------------------------------------------
-Handler = tuple[Callable[[dict], tuple[str, ...]], Callable[[str, dict], dict]]
+type Handler = tuple[Callable[[dict], tuple[str, ...]], Callable[[str, dict], dict]]
 
-# --- [HELPERS] ----------------------------------------------------------------
-def _run(cmd: tuple[str, ...], env: dict | None = None) -> tuple[bool, str]:
-    """Run gh command, return (success, output)."""
-    r = subprocess.run(cmd, capture_output=True, text=True, env=env)
-    return r.returncode == 0, (r.stdout or r.stderr).strip()
+# --- [FUNCTIONS] --------------------------------------------------------------
+def _run(command: tuple[str, ...], env: dict | None = None) -> tuple[bool, str]:
+    """Run gh command, return (success, output).
+
+    Args:
+        command: Tuple of command and arguments.
+        env: Optional environment variables override.
+
+    Returns:
+        Tuple of (success, output_text).
+    """
+    result = subprocess.run(command, capture_output=True, text=True, env=env)
+    return result.returncode == 0, (result.stdout or result.stderr).strip()
 
 
-def _json(o: str) -> Any:
-    """Parse JSON output."""
-    return json.loads(o) if o else {}
+def _json(output: str) -> Any:
+    """Parse JSON output, returning empty dict for empty strings.
+
+    Args:
+        output: Raw JSON string.
+
+    Returns:
+        Parsed JSON data.
+    """
+    return json.loads(output) if output else {}
 
 
 def _repo_vars() -> tuple[str, ...]:
-    """Get GraphQL owner/repo vars for current repo."""
+    """Get GraphQL owner/repo vars for current repo.
+
+    Returns:
+        Tuple of GraphQL variable flags.
+    """
     ok, out = _run(("gh", "repo", "view", "--json=owner,name"))
-    d = _json(out) if ok else {}
-    return ("-f", f"owner={d.get('owner', {}).get('login', '')}", "-f", f"repo={d.get('name', '')}")
+    data = _json(out) if ok else {}
+    return ("-f", f"owner={data.get('owner', {}).get('login', '')}", "-f", f"repo={data.get('name', '')}")
 
 
 def _repo_id() -> str:
-    """Get repository node ID."""
+    """Get repository node ID.
+
+    Returns:
+        Repository node ID string.
+    """
     ok, out = _run(("gh", "repo", "view", "--json=id"))
     return _json(out).get("id", "") if ok else ""
 
 
 def _project_env() -> dict | None:
-    """Get env with GH_PROJECTS_TOKEN if available."""
+    """Get env with GH_PROJECTS_TOKEN if available.
+
+    Returns:
+        Environment dict with project token, or None.
+    """
     return {**os.environ, "GH_TOKEN": os.environ["GH_PROJECTS_TOKEN"]} if os.environ.get("GH_PROJECTS_TOKEN") else None
 
 
-def _edit_flags(a: dict) -> tuple[str, ...]:
-    """Build edit flags for title/body/labels."""
-    return tuple(f"--{k}={v}" for k, v in [("title", a.get("title")), ("body", a.get("body")), ("add-label", a.get("labels"))] if v)
+def _edit_flags(args: dict) -> tuple[str, ...]:
+    """Build edit flags for title/body/labels.
+
+    Args:
+        args: Dict with optional title, body, labels keys.
+
+    Returns:
+        Tuple of CLI flag strings.
+    """
+    return tuple(f"--{key}={value}" for key, value in (("title", args.get("title")), ("body", args.get("body")), ("add-label", args.get("labels"))) if value)
 
 
-# --- [HANDLERS] ---------------------------------------------------------------
+# --- [DISPATCH_TABLES] --------------------------------------------------------
 # Format: (required_args, optional_args, (cmd_builder, output_formatter))
 CMDS: dict[str, tuple[tuple[str, ...], tuple[str, ...], Handler]] = {
     # --- Issues ---
@@ -338,35 +372,35 @@ CMDS: dict[str, tuple[tuple[str, ...], tuple[str, ...], Handler]] = {
 
 # --- [ENTRY_POINT] ------------------------------------------------------------
 def main() -> int:
-    """Dispatch command and print JSON output."""
-    match sys.argv[1:]:
-        case [cmd_name, *args] if cmd_name in CMDS:
-            req, opt, (builder, formatter) = CMDS[cmd_name]
-            all_args = req + opt
+    """Dispatch command and print JSON output.
 
-            # Check required args
-            if len(args) < len(req):
-                print(f"Usage: gh.py {cmd_name} {' '.join(f'<{a}>' for a in req)} {' '.join(f'[{a}]' for a in opt)}")
+    Returns:
+        Exit code: 0 for success, 1 for failure.
+    """
+    match sys.argv[1:]:
+        case [cmd_name, *cmd_args] if cmd_name in CMDS:
+            required, optional, (builder, formatter) = CMDS[cmd_name]
+            all_params = required + optional
+
+            if len(cmd_args) < len(required):
+                sys.stdout.write(f"Usage: gh.py {cmd_name} {' '.join(f'<{param}>' for param in required)} {' '.join(f'[{param}]' for param in optional)}\n")
                 return 1
 
-            # Map positional args to dict
-            opts = dict(zip(all_args, args))
-
-            # Execute command
+            opts = dict(zip(all_params, cmd_args))
             env = _project_env() if cmd_name.startswith("project-") else None
             ok, out = _run(builder(opts), env)
 
             result = {"status": "success", **formatter(out, opts)} if ok else {"status": "error", "message": f"{cmd_name} failed", "stderr": out}
-            print(json.dumps(result, indent=2))
+            sys.stdout.write(json.dumps(result, indent=2) + "\n")
             return 0 if ok else 1
 
         case [cmd_name, *_]:
-            print(f"[ERROR] Unknown command '{cmd_name}'\n")
-            print(__doc__)
+            sys.stdout.write(f"[ERROR] Unknown command '{cmd_name}'\n\n")
+            sys.stdout.write(__doc__ + "\n")
             return 1
 
         case _:
-            print(__doc__)
+            sys.stdout.write(__doc__ + "\n")
             return 1
 
 

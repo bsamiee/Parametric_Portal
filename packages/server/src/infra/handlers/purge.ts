@@ -101,47 +101,47 @@ class PurgeService extends Effect.Service<PurgeService>()('server/Purge', {
                 Effect.asVoid, Telemetry.span(`jobs.${name}`, { metrics: false }),
             );
         }));
-        static readonly _scheduledJobs = R.keys(_JOBS).filter((name) => _JOBS[name].cron !== null);
-        static readonly Crons = Layer.unwrapEffect(
-            Effect.orDie(_config).pipe(Effect.map((resolvedConfig) => Layer.mergeAll(
-                ...(PurgeService._scheduledJobs.map((name) => ClusterService.Schedule.cron({
-                    cron: Cron.unsafeParse(resolvedConfig.jobs[name].cron),
-                    execute: Effect.gen(function* () {
-                        const [jobs, database] = yield* Effect.all([JobService, DatabaseService]);
-                        const submitTenant = (tenantId: string) => Context.Request.withinSync(
-                            tenantId,
-                            jobs.submit(name, null),
-                            Context.Request.system(),
-                        ).pipe(Effect.asVoid);
-                        const submitAllApps = database.apps.find([]).pipe(
-                            Effect.map(A.map((app) => app.id)),
-                            Effect.andThen(Effect.forEach(submitTenant, { discard: true }))
-                        );
-                        return yield* Match.value(_JOBS[name].scope).pipe(
-                            Match.when('global', () => submitTenant(Context.Request.Id.system)),
-                            Match.when('manual', () => Effect.void),
-                            Match.orElse(() => Context.Request.withinSync(Context.Request.Id.system, submitAllApps, Context.Request.system())),
-                        );
-                    }),
-                    name,
-                })) as [Layer.Layer<never>, ...Layer.Layer<never>[]]),
-            ))),
-        );
-        static readonly SweepCron = ClusterService.Schedule.cron({
-            cron: Cron.unsafeParse('0 3 * * *'),
-            execute: Effect.gen(function* () {
-                const [jobs, database, sql] = yield* Effect.all([JobService, DatabaseService, SqlClient.SqlClient]);
-                const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-                const apps = yield* Context.Request.withinSync(Context.Request.Id.system, database.apps.find([]), Context.Request.system()).pipe(Effect.provideService(SqlClient.SqlClient, sql));
-                const archived = A.filter(apps, (app) => app.status === 'archived' && app.updatedAt < thirtyDaysAgo);
-                yield* Effect.forEach(archived, (app) => Context.Request.withinSync(
-                    app.id,
-                    jobs.submit('purge-tenant-data', null),
-                    Context.Request.system(),
-                ).pipe(Effect.asVoid), { discard: true });
-            }),
-            name: 'sweep-archived-tenants',
-        });
+    static readonly _scheduledJobs = R.keys(_JOBS).filter((name) => _JOBS[name].cron !== null);
+    static readonly Crons = Layer.unwrapEffect(
+        Effect.orDie(_config).pipe(Effect.map((resolvedConfig) => Layer.mergeAll(
+            ...(PurgeService._scheduledJobs.map((name) => ClusterService.Schedule.cron({
+                cron: Cron.unsafeParse(resolvedConfig.jobs[name].cron),
+                execute: Effect.gen(function* () {
+                    const [jobs, database] = yield* Effect.all([JobService, DatabaseService]);
+                    const submitTenant = (tenantId: string) => Context.Request.withinSync(
+                        tenantId,
+                        jobs.submit(name, null),
+                        Context.Request.system(),
+                    ).pipe(Effect.asVoid);
+                    const submitAllApps = database.apps.find([]).pipe(
+                        Effect.map(A.map((app) => app.id)),
+                        Effect.andThen(Effect.forEach(submitTenant, { discard: true }))
+                    );
+                    return yield* Match.value(_JOBS[name].scope).pipe(
+                        Match.when('global', () => submitTenant(Context.Request.Id.system)),
+                        Match.when('manual', () => Effect.void),
+                        Match.orElse(() => Context.Request.withinSync(Context.Request.Id.system, submitAllApps, Context.Request.system())),
+                    );
+                }),
+                name,
+            })) as [Layer.Layer<never>, ...Layer.Layer<never>[]]),
+        ))),
+    );
+    static readonly SweepCron = ClusterService.Schedule.cron({
+        cron: Cron.unsafeParse('0 3 * * *'),
+        execute: Effect.gen(function* () {
+            const [jobs, database, sql] = yield* Effect.all([JobService, DatabaseService, SqlClient.SqlClient]);
+            const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+            const apps = yield* Context.Request.withinSync(Context.Request.Id.system, database.apps.find([]), Context.Request.system()).pipe(Effect.provideService(SqlClient.SqlClient, sql));
+            const archived = A.filter(apps, (app) => app.status === 'archived' && app.updatedAt < thirtyDaysAgo);
+            yield* Effect.forEach(archived, (app) => Context.Request.withinSync(
+                app.id,
+                jobs.submit('purge-tenant-data', null),
+                Context.Request.system(),
+            ).pipe(Effect.asVoid), { discard: true });
+        }),
+        name: 'sweep-archived-tenants',
+    });
     static readonly Handlers = Layer.effectDiscard(Effect.gen(function* () {
         const [jobs, database, storage, audit, metrics, sql] = yield* Effect.all([JobService, DatabaseService, StorageService, AuditService, MetricsService, SqlClient.SqlClient]);
         const registerHandler = (name: keyof typeof _JOBS) => jobs.registerHandler(

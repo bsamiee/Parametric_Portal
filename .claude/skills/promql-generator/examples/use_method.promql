@@ -1,0 +1,65 @@
+# USE Method — Utilization, Saturation, Errors for resources
+# Prometheus 3.10+ (native histograms stable 3.8+, no feature flag 3.9+)
+
+## ===== CPU =====
+(1 - avg(rate(node_cpu_seconds_total{mode="idle"}[5m]))) * 100                                    # Utilization %
+100 - (avg by (instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100)                   # By instance
+node_load1 / count without (cpu, mode) (node_cpu_seconds_total{mode="idle"})                      # Saturation (load/cores)
+rate(node_cpu_guest_seconds_total[5m])                                                             # Errors (throttle)
+
+## ===== MEMORY =====
+((node_memory_MemTotal_bytes - node_memory_MemAvailable_bytes) / node_memory_MemTotal_bytes) * 100  # Utilization %
+node_memory_MemAvailable_bytes / 1024^3                                                 # Available GB
+((node_memory_SwapTotal_bytes - node_memory_SwapFree_bytes) / node_memory_SwapTotal_bytes) * 100     # Swap %
+rate(node_vmstat_pswpout[5m])                                                                        # Saturation (swap out)
+rate(node_vmstat_pgmajfault[5m])                                                                     # Saturation (major faults)
+rate(node_vmstat_oom_kill[5m])                                                                       # Errors (OOM kills)
+
+## ===== DISK =====
+((node_filesystem_size_bytes - node_filesystem_avail_bytes) / node_filesystem_size_bytes) * 100     # Utilization %
+node_filesystem_avail_bytes / 1024^3                                                    # Available GB
+rate(node_disk_io_time_seconds_total[5m]) * 100                                                     # I/O utilization %
+rate(node_disk_io_time_weighted_seconds_total[5m])                                                  # Saturation (queue)
+rate(node_disk_reads_completed_total[5m]) + rate(node_disk_writes_completed_total[5m])              # IOPS
+rate(node_disk_read_time_seconds_total[5m]) / rate(node_disk_reads_completed_total[5m])             # Avg read latency
+rate(node_disk_write_time_seconds_total[5m]) / rate(node_disk_writes_completed_total[5m])           # Avg write latency
+
+## ===== NETWORK =====
+rate(node_network_receive_bytes_total[5m]) / 1024^2                                            # Receive MB/s
+rate(node_network_transmit_bytes_total[5m]) / 1024^2                                           # Transmit MB/s
+(rate(node_network_transmit_bytes_total[5m]) / node_network_speed_bytes) * 100                      # Utilization %
+rate(node_network_transmit_drop_total[5m])                                                           # Saturation (drops)
+rate(node_network_receive_errs_total[5m]) + rate(node_network_transmit_errs_total[5m])              # Errors
+
+## ===== ANOMALY DETECTION (3.5+ experimental, promql-experimental-functions) =====
+# MAD-based z-score: robust to non-normal distributions unlike stddev
+(1 - avg by (instance) (rate(node_cpu_seconds_total{mode="idle"}[5m]))) * 100
+  > avg_over_time(((1 - avg by (instance) (rate(node_cpu_seconds_total{mode="idle"}[5m]))) * 100)[1h:5m])
+  + 3 * mad_over_time(((1 - avg by (instance) (rate(node_cpu_seconds_total{mode="idle"}[5m]))) * 100)[1h:5m])    # CPU anomaly
+
+node_memory_MemAvailable_bytes
+  < avg_over_time(node_memory_MemAvailable_bytes[1h])
+  - 3 * mad_over_time(node_memory_MemAvailable_bytes[1h])                                         # Memory anomaly (available drops)
+
+## ===== FORECASTING =====
+predict_linear(node_filesystem_avail_bytes{mountpoint="/"}[6h], 4*3600) < 0                        # Disk full in 4h
+predict_linear(node_memory_MemAvailable_bytes[1h], 3600) < 0                                       # Memory exhausted in 1h
+# double_exponential_smoothing (3.0+, experimental): trend-aware forecasting for seasonal workloads
+double_exponential_smoothing(node_memory_MemAvailable_bytes[6h], 0.3, 0.1)                         # Smoothed memory trend
+
+## ===== CARDINALITY CONTROL (3.0+ experimental) =====
+# Explore high-cardinality resource metrics without scanning all series
+limitk(5, rate(node_cpu_seconds_total{mode="idle"}[5m]))                                           # Sample 5 CPU series
+limit_ratio(0.1, rate(node_disk_io_time_seconds_total[5m]))                                        # ~10% of disk series
+
+## ===== INFO JOINS (3.0+ experimental, replaces manual group_left for node metadata) =====
+# Automatic metadata enrichment via info() -- no need to specify join labels
+info((1 - avg by (instance) (rate(node_cpu_seconds_total{mode="idle"}[5m]))) * 100)                # CPU util + node metadata
+info(node_memory_MemAvailable_bytes / 1024^3)                                                      # Available GB + node info
+
+## ===== ALERTS =====
+(1 - avg(rate(node_cpu_seconds_total{mode="idle"}[5m]))) * 100 > 80                                # CPU > 80%
+node_load1 / count without (cpu, mode) (node_cpu_seconds_total{mode="idle"}) > 2                   # Load > 2x cores
+((node_memory_MemTotal_bytes - node_memory_MemAvailable_bytes) / node_memory_MemTotal_bytes) * 100 > 90  # Memory > 90%
+((node_filesystem_size_bytes - node_filesystem_avail_bytes) / node_filesystem_size_bytes) * 100 > 90     # Disk > 90%
+rate(node_network_receive_errs_total[5m]) + rate(node_network_transmit_errs_total[5m]) > 1         # Network errors

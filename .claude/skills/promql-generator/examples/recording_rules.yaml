@@ -1,0 +1,137 @@
+# Prometheus Recording Rules
+# Naming: level:metric:operations
+# Deployed via Pulumi (infrastructure/src/deploy.ts), not prometheus.yml.
+# Prometheus 3.10+ (native histograms stable, info() experimental)
+
+groups:
+  - name: http_request_rules
+    interval: 30s
+    rules:
+      - record: job:http_requests:rate5m
+        expr: sum by (job) (rate(http_requests_total[5m]))
+      - record: job_endpoint:http_requests:rate5m
+        expr: sum by (job, endpoint) (rate(http_requests_total[5m]))
+      - record: job:http_requests:error_ratio_rate5m
+        expr: sum by (job) (rate(http_requests_total{status_code=~"5.."}[5m])) / sum by (job) (rate(http_requests_total[5m]))
+      - record: job:http_requests:success_ratio_rate5m
+        expr: 1 - job:http_requests:error_ratio_rate5m
+
+  - name: http_latency_rules_classic
+    # Classic histogram rules: require _bucket suffix and le in by()
+    # Keep these for backward compatibility even with native histograms enabled
+    interval: 30s
+    rules:
+      - record: job:http_request_duration_seconds_bucket:rate5m
+        # Pre-compute rate on buckets: shared by all quantile rules below (3x reduction in bucket scanning)
+        expr: sum by (job, le) (rate(http_request_duration_seconds_bucket[5m]))
+      - record: job:http_request_duration_seconds:p50
+        expr: histogram_quantile(0.5, job:http_request_duration_seconds_bucket:rate5m)
+      - record: job:http_request_duration_seconds:p90
+        expr: histogram_quantile(0.9, job:http_request_duration_seconds_bucket:rate5m)
+      - record: job:http_request_duration_seconds:p95
+        expr: histogram_quantile(0.95, job:http_request_duration_seconds_bucket:rate5m)
+      - record: job:http_request_duration_seconds:p99
+        expr: histogram_quantile(0.99, job:http_request_duration_seconds_bucket:rate5m)
+      - record: job_endpoint:http_request_duration_seconds:p95
+        expr: histogram_quantile(0.95, sum by (job, endpoint, le) (rate(http_request_duration_seconds_bucket[5m])))
+      - record: job:http_request_duration_seconds:avg
+        expr: sum by (job) (rate(http_request_duration_seconds_sum[5m])) / sum by (job) (rate(http_request_duration_seconds_count[5m]))
+
+  - name: http_latency_rules_native
+    # Native histogram rules (3.8+ stable, 3.9+ no feature flag)
+    # No _bucket suffix, no le label needed -- single series per histogram
+    # Activate via scrape_native_histograms: true in scrape config
+    interval: 30s
+    rules:
+      - record: job:http_request_duration_seconds:p50_native
+        expr: histogram_quantile(0.5, sum by (job) (rate(http_request_duration_seconds[5m])))
+      - record: job:http_request_duration_seconds:p90_native
+        expr: histogram_quantile(0.9, sum by (job) (rate(http_request_duration_seconds[5m])))
+      - record: job:http_request_duration_seconds:p95_native
+        expr: histogram_quantile(0.95, sum by (job) (rate(http_request_duration_seconds[5m])))
+      - record: job:http_request_duration_seconds:p99_native
+        expr: histogram_quantile(0.99, sum by (job) (rate(http_request_duration_seconds[5m])))
+      - record: job:http_request_duration_seconds:avg_native
+        # histogram_avg replaces manual _sum/_count division (single function, single series)
+        expr: histogram_avg(sum by (job) (rate(http_request_duration_seconds[5m])))
+      - record: job:http_request_duration_seconds:stddev_native
+        expr: histogram_stddev(sum by (job) (rate(http_request_duration_seconds[5m])))
+      - record: job:http_request_duration_seconds:count_rate5m
+        expr: sum by (job) (histogram_count(rate(http_request_duration_seconds[5m])))
+      - record: job:http_request_duration_seconds:fraction_under_200ms
+        # Fraction of requests completing under 200ms threshold -- precise without bucket boundary interpolation
+        expr: histogram_fraction(0, 0.2, sum by (job) (rate(http_request_duration_seconds[5m])))
+      - record: job:http_request_duration_seconds:fraction_under_500ms
+        expr: histogram_fraction(0, 0.5, sum by (job) (rate(http_request_duration_seconds[5m])))
+
+  - name: slo_rules
+    interval: 30s
+    rules:
+      - record: job:slo_errors_per_request:ratio_rate5m
+        expr: sum by (job) (rate(http_requests_total{status_code=~"5.."}[5m])) / sum by (job) (rate(http_requests_total[5m]))
+      - record: job:slo_errors_per_request:ratio_rate1h
+        expr: sum by (job) (rate(http_requests_total{status_code=~"5.."}[1h])) / sum by (job) (rate(http_requests_total[1h]))
+      - record: job:slo_errors_per_request:ratio_rate6h
+        expr: sum by (job) (rate(http_requests_total{status_code=~"5.."}[6h])) / sum by (job) (rate(http_requests_total[6h]))
+      - record: job:slo_burn_rate:1h
+        expr: job:slo_errors_per_request:ratio_rate1h / 0.001
+      - record: job:slo_burn_rate:6h
+        expr: job:slo_errors_per_request:ratio_rate6h / 0.001
+      - record: job:slo_availability:ratio_rate1h
+        expr: 1 - job:slo_errors_per_request:ratio_rate1h
+      # Latency SLO burn rate (native histograms, 3.8+)
+      - record: job:slo_latency_violation:ratio_rate5m
+        # Fraction of requests violating 200ms SLO -- precise via histogram_fraction
+        expr: 1 - histogram_fraction(0, 0.2, sum by (job) (rate(http_request_duration_seconds[5m])))
+      - record: job:slo_latency_violation:ratio_rate1h
+        expr: 1 - histogram_fraction(0, 0.2, sum by (job) (rate(http_request_duration_seconds[1h])))
+
+  - name: node_rules
+    interval: 30s
+    rules:
+      - record: instance:node_cpu:utilization
+        expr: (1 - avg by (instance) (rate(node_cpu_seconds_total{mode="idle"}[5m]))) * 100
+      - record: instance:node_memory:utilization
+        expr: ((node_memory_MemTotal_bytes - node_memory_MemAvailable_bytes) / node_memory_MemTotal_bytes) * 100
+      - record: instance_mountpoint:node_filesystem:utilization
+        expr: ((node_filesystem_size_bytes - node_filesystem_avail_bytes) / node_filesystem_size_bytes) * 100
+      - record: instance:node_network_receive:rate5m_mb
+        expr: sum by (instance) (rate(node_network_receive_bytes_total[5m])) / 1024 / 1024
+      - record: instance:node_network_transmit:rate5m_mb
+        expr: sum by (instance) (rate(node_network_transmit_bytes_total[5m])) / 1024 / 1024
+
+  - name: kubernetes_rules
+    interval: 30s
+    rules:
+      - record: namespace:container_cpu:usage_rate5m
+        expr: sum by (namespace) (rate(container_cpu_usage_seconds_total{container!="", container!="POD"}[5m]))
+      - record: namespace:container_memory:working_set_gb
+        expr: sum by (namespace) (container_memory_working_set_bytes{container!="", container!="POD"}) / 1024^3
+      - record: namespace:kube_pod:count
+        expr: count by (namespace) (kube_pod_info)
+      - record: namespace_pod:container_cpu:throttle_ratio
+        # Pre-compute CPU throttle ratio: expensive join of two rate() computations
+        expr: |
+          sum by (namespace, pod) (increase(container_cpu_cfs_throttled_periods_total{container!=""}[5m]))
+          / sum by (namespace, pod) (increase(container_cpu_cfs_periods_total{container!=""}[5m]))
+
+  - name: cluster_rules
+    interval: 60s
+    rules:
+      - record: cluster:node_cpu:utilization
+        expr: avg(instance:node_cpu:utilization)
+      - record: cluster:node_memory:utilization
+        expr: (sum(node_memory_MemTotal_bytes - node_memory_MemAvailable_bytes) / sum(node_memory_MemTotal_bytes)) * 100
+      - record: cluster:http_requests:rate5m
+        expr: sum(job:http_requests:rate5m)
+      - record: cluster:http_requests:error_ratio_rate5m
+        expr: sum(rate(http_requests_total{status_code=~"5.."}[5m])) / sum(rate(http_requests_total[5m]))
+      - record: cluster:container_cpu:request_utilization
+        # Cluster-wide CPU request utilization: how much of requested CPU is actually used
+        expr: |
+          sum(rate(container_cpu_usage_seconds_total{container!="", container!="POD"}[5m]))
+          / sum(kube_pod_container_resource_requests{resource="cpu"})
+      - record: cluster:container_memory:limit_utilization
+        expr: |
+          sum(container_memory_working_set_bytes{container!="", container!="POD"})
+          / sum(kube_pod_container_resource_limits{resource="memory"})

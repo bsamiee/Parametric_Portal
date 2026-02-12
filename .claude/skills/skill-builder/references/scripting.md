@@ -30,8 +30,8 @@ Scripts extend skill capabilities with executable automation. Required for: CLI 
 - *Validation:* Enforce constraints beyond LLM generation (schema compliance, AST transforms).
 
 **Tooling:**
-- *Python:* 3.14+ with `slots=True`, `Final`, type hints. Standard library first.
-- *TypeScript:* 6.0+ with Effect 3.19+, ESM imports, `satisfies` for exhaustiveness.
+- *Python:* 3.14+ with `frozen=True, slots=True`, `Final`, `type` aliases, `match`. Standard library first.
+- *TypeScript:* 6.0+ with Effect 3.19+, ESM imports, `satisfies` for exhaustiveness, `as const`.
 
 **Philosophy:**
 - *Algorithmic:* Derive values from frozen `B` constant.
@@ -53,6 +53,7 @@ Maximum functionality in minimum LOC. Single script addresses single concern. No
 ```python
 #!/usr/bin/env -S uv run --quiet --script
 # /// script
+# requires-python = ">=3.14"
 # ///
 """Transform input through format-specific handlers."""
 
@@ -78,27 +79,31 @@ class _B:
 B: Final[_B] = _B()
 
 # --- [PURE_FUNCTIONS] ---------------------------------------------------------
-# (stateless utilities would go here)
+_transform_str = lambda d, fn: {k: (fn(v) if isinstance(v, str) else v) for k, v in d.items()}
 
 # --- [DISPATCH_TABLES] --------------------------------------------------------
 handlers: dict[str, Handler] = {
-    "upper": lambda d: {k: (v.upper() if isinstance(v, str) else v) for k, v in d.items()},
-    "lower": lambda d: {k: (v.lower() if isinstance(v, str) else v) for k, v in d.items()},
+    "upper": lambda d: _transform_str(d, str.upper),
+    "lower": lambda d: _transform_str(d, str.lower),
     "keys": lambda d: {"keys": list(d.keys())},
 }
 
 # --- [ENTRY_POINT] ------------------------------------------------------------
+_ARGS: Final = (
+    ("-i", {"dest": "input", "type": Path, "required": True}),
+    ("-o", {"dest": "output", "type": Path}),
+    ("-m", {"dest": "mode", "choices": tuple(handlers.keys()), "default": "upper"}),
+)
+
 def main() -> int:
-    p = argparse.ArgumentParser(description=__doc__)
-    [p.add_argument(a, **o) for a, o in [
-        ("-i", {"dest": "input", "type": Path, "required": True}),
-        ("-o", {"dest": "output", "type": Path}),
-        ("-m", {"dest": "mode", "choices": handlers.keys(), "default": "upper"}),
-    ]]
-    a = p.parse_args()
-    data = json.loads(a.input.read_text(B.encoding))
-    result = json.dumps({"status": "success", "data": handlers[a.mode](data)}, indent=B.indent)
-    _ = a.output.write_text(result, encoding=B.encoding) if a.output else print(result)
+    parser = argparse.ArgumentParser(description=__doc__)
+    [parser.add_argument(flag, **opts) for flag, opts in _ARGS]
+    args = parser.parse_args()
+    data = json.loads(args.input.read_text(B.encoding))
+    result = json.dumps({"status": "success", "data": handlers[args.mode](data)}, indent=B.indent)
+    match args.output:
+        case Path() as path: path.write_text(result, encoding=B.encoding)
+        case None: print(result)
     return 0
 
 if __name__ == "__main__":

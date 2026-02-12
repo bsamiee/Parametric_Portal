@@ -1,0 +1,44 @@
+# Monorepo CI -- Nx affected detection, pnpm workspace, cache v5, harden-runner
+name: Monorepo CI
+on:
+    push: { branches: [main, develop] }
+    pull_request: { branches: [main] }
+    workflow_dispatch:
+
+permissions: { contents: read }
+concurrency: { group: '${{ github.workflow }}-${{ github.ref }}', cancel-in-progress: true }
+env: { NODE_VERSION: '24' }
+
+jobs:
+    ci:
+        runs-on: ubuntu-latest
+        timeout-minutes: 30
+        steps:
+            - uses: step-security/harden-runner@002fdce3c6a235733a90a27c80493a3241e56863 # v2.12.0
+              with: { egress-policy: audit }
+            - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+              with: { fetch-depth: 0 }
+
+            - uses: nrwl/nx-set-shas@3e9ad7370203c1e93d109be57f3b72eb0eb511b1 # v4.4.0
+
+            - uses: actions/setup-node@6044e13b5dc448c55e2357c09f80417699197238 # v6.2.0
+              with: { node-version: '${{ env.NODE_VERSION }}' }
+
+            - run: corepack enable
+
+            - uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
+              with:
+                  path: |
+                      ~/.local/share/pnpm/store
+                      .nx/cache
+                  key: ${{ runner.os }}-pnpm-nx-${{ hashFiles('pnpm-lock.yaml') }}
+                  restore-keys: ${{ runner.os }}-pnpm-nx-
+
+            - run: pnpm install --frozen-lockfile
+
+            - run: pnpm exec nx affected -t lint,test,build --base=${{ env.NX_BASE }} --head=${{ env.NX_HEAD }}
+
+            - if: always()
+              run: |
+                  echo "## Nx Affected Results" >> $GITHUB_STEP_SUMMARY
+                  echo "Base: \`${{ env.NX_BASE }}\` | Head: \`${{ env.NX_HEAD }}\`" >> $GITHUB_STEP_SUMMARY

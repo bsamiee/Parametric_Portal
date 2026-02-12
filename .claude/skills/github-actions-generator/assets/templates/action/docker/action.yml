@@ -1,0 +1,40 @@
+name: '[ACTION_NAME]'
+description: '[ACTION_DESCRIPTION]'
+author: '[AUTHOR_NAME]'
+
+inputs:
+    [input-name]:
+        description: '[INPUT_DESCRIPTION]'
+        required: [true/false]
+        default: '[DEFAULT_VALUE]'
+
+outputs:
+    [output-name]:
+        description: '[OUTPUT_DESCRIPTION]'
+
+branding:
+    icon: '[ICON_NAME]'
+    color: '[COLOR]'
+
+runs:
+    using: 'docker'
+    image: 'Dockerfile'     # Or: 'docker://[REGISTRY]/[IMAGE]:[TAG]'
+    args: ['${{ inputs.[input-name] }}']
+    env: { [ENV_VAR]: '${{ inputs.[input-name] }}' }
+
+# --- Dockerfile (save as Dockerfile alongside this action.yml) ----------------
+# FROM [BASE_IMAGE]:[TAG]
+# RUN [PACKAGE_MANAGER] update && [PACKAGE_MANAGER] install -y [PACKAGES] && [CLEANUP]
+# COPY entrypoint.sh /entrypoint.sh
+# RUN chmod +x /entrypoint.sh
+# ENTRYPOINT ["/entrypoint.sh"]
+#
+# --- entrypoint.sh (save as entrypoint.sh alongside this action.yml) ----------
+# #!/bin/bash
+# set -e
+# INPUT_1="$1"
+# if [ -z "$INPUT_1" ]; then echo "::error::input is required"; exit 1; fi
+# echo "::group::Running [ACTION_NAME]"
+# [MAIN_COMMAND]
+# echo "[output-name]=[OUTPUT_VALUE]" >> "$GITHUB_OUTPUT"
+# echo "::endgroup::"

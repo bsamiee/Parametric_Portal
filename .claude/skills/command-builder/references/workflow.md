@@ -14,7 +14,7 @@
 Confirm before proceeding:
 - `Name` — Verb-first, lowercase, hyphens. Reject: run, do, execute, go.
 - `Pattern` — file|multi|agent|skill|free. Gates structure + tools.
-- `Arguments` — Structured ($1-$N) or free-form ($ARGUMENTS)?
+- `Arguments` — Structured ($1-$N or $ARGUMENTS[N]) or free-form ($ARGUMENTS)?
 - `Tools` — What permissions? Match @path→Read, !cmd→Bash.
 - `Triggers` — What user intent activates this command?
 
@@ -111,9 +111,9 @@ Create `.claude/commands/${name}.md`:
 | [PATTERN] | [TOOLS]                     | [MODEL] | [STRUCTURE]                 |
 | --------- | --------------------------- | :-----: | --------------------------- |
 | file      | Read                        |  haiku  | @$1 target, analyze, report |
-| multi     | Read, Edit, Glob, TodoWrite | sonnet  | Glob $1, iterate, apply     |
-| agent     | Task, Read, Glob, TodoWrite |  opus   | Dispatch Task, synthesize   |
-| skill     | Read, Task, Edit, TodoWrite | sonnet  | Load @skill, validate       |
+| multi     | Read, Edit, Glob, TaskCreate | sonnet  | Glob $1, iterate, apply     |
+| agent     | Task, Read, Glob, TaskCreate |  opus   | Dispatch Task, synthesize   |
+| skill     | Read, Task, Edit, TaskCreate | sonnet  | Load @skill, validate       |
 | free      | Varies                      | session | $ARGUMENTS prose            |
 
 [CRITICAL]:

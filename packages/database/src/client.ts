@@ -112,7 +112,7 @@ const Client = (() => {
                 Effect.orElseSucceed(() => false),
                 Effect.timed,
             );
-                return { healthy, latencyMs: Duration.toMillis(duration) };
+            return { healthy, latencyMs: Duration.toMillis(duration) };
         }),
         layer: _layer,
         listen: {
@@ -161,22 +161,22 @@ const Client = (() => {
                 })),
             } as const;
             return tenant;
-            })(),
-            vector: {
-                getConfig: Effect.fn('db.vectorConfig')(function* () {
-                    const db = yield* sql;
-                    return yield* db<{ name: string; setting: string }>`SELECT name, setting FROM pg_settings WHERE name LIKE 'hnsw.%'`;
-                }),
-                indexStats: (tableName: string, indexName: string) => sql.pipe(Effect.flatMap((db) => db<{ idxScan: bigint; idxTupFetch: bigint; idxTupRead: bigint }>`SELECT idx_scan, idx_tup_read, idx_tup_fetch FROM pg_stat_user_indexes WHERE relname = ${tableName} AND indexrelname = ${indexName}`)),
-                withIterativeScan: <A, E, R>(mode: 'relaxed_order' | 'strict_order' | 'off', effect: Effect.Effect<A, E, R>) => sql.pipe(
-                    Effect.flatMap((db) => db.withTransaction(
-                        db`SET LOCAL hnsw.iterative_scan = ${mode}`.pipe(
-                            Effect.andThen(effect),
-                            Effect.provideService(SqlClient.SqlClient, db),
-                        ),
-                    )),
-                ),
-            },
+        })(),
+        vector: {
+            getConfig: Effect.fn('db.vectorConfig')(function* () {
+                const db = yield* sql;
+                return yield* db<{ name: string; setting: string }>`SELECT name, setting FROM pg_settings WHERE name LIKE 'hnsw.%'`;
+            }),
+            indexStats: (tableName: string, indexName: string) => sql.pipe(Effect.flatMap((db) => db<{ idxScan: bigint; idxTupFetch: bigint; idxTupRead: bigint }>`SELECT idx_scan, idx_tup_read, idx_tup_fetch FROM pg_stat_user_indexes WHERE relname = ${tableName} AND indexrelname = ${indexName}`)),
+            withIterativeScan: <A, E, R>(mode: 'relaxed_order' | 'strict_order' | 'off', effect: Effect.Effect<A, E, R>) => sql.pipe(
+                Effect.flatMap((db) => db.withTransaction(
+                    db`SET LOCAL hnsw.iterative_scan = ${mode}`.pipe(
+                        Effect.andThen(effect),
+                        Effect.provideService(SqlClient.SqlClient, db),
+                    ),
+                )),
+            ),
+        },
         } as const;
     })();
 

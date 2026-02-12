@@ -51,11 +51,11 @@ class PollingService extends Effect.Service<PollingService>()('server/Polling', 
         );
         const _isCritical = (items: ReadonlyArray<typeof _AlertSchema.Type>, metric: string) => items.some((alert) => alert.metric === metric && alert.severity === 'critical');
         const initial = yield* _loadAlerts;
-            const alerts = yield* STM.commit(TRef.make(initial));
-            const ioStatsState = yield* STM.commit(TRef.make<{ avgHitRatio: number; totalReads: number; totalWrites: number }>({ ..._CONFIG.fallback.ioStats }));
-            const metricState = yield* STM.commit(TRef.make({} as Record<string, number>));
-            const lastFailureAtMs = yield* STM.commit(TRef.make(Option.none<number>()));
-            const lastSuccessAtMs = yield* STM.commit(TRef.make(Option.none<number>()));
+        const alerts = yield* STM.commit(TRef.make(initial));
+        const ioStatsState = yield* STM.commit(TRef.make<{ avgHitRatio: number; totalReads: number; totalWrites: number }>({ ..._CONFIG.fallback.ioStats }));
+        const metricState = yield* STM.commit(TRef.make({} as Record<string, number>));
+        const lastFailureAtMs = yield* STM.commit(TRef.make(Option.none<number>()));
+        const lastSuccessAtMs = yield* STM.commit(TRef.make(Option.none<number>()));
         const persistAlerts = (updated: typeof initial) => database.kvStore.setJson(_CONFIG.kvKey, [...updated], S.Array(_AlertSchema)).pipe(Effect.ignoreLogged);
         const publishFailure = (metric: string, error: unknown) => eventBus.publish({ aggregateId: metric, payload: { _tag: 'polling', action: 'error', error: String(error), metric }, tenantId: Context.Request.Id.system }).pipe(Effect.ignore);
         const recoverWith = <A>(metric: string, message: string, fallback: Effect.Effect<A>) => (error: unknown) => Clock.currentTimeMillis.pipe(
@@ -101,12 +101,12 @@ class PollingService extends Effect.Service<PollingService>()('server/Polling', 
         const pollDlqSize = pollMetric({ fetch: _sumTenantMetric(() => database.jobDlq.countPending()), gauge: metrics.jobs.dlqSize, metric: 'jobs_dlq_size', spanName: 'polling.dlqSize', thresholds: _CONFIG.thresholds.dlqSize, warningMessage: 'DLQ size critical' });
         const pollJobQueueDepth = pollMetric({ fetch: _sumTenantMetric(() => database.jobs.countByStatuses('queued', 'processing')), gauge: metrics.jobs.queueDepth, metric: 'jobs_queue_depth', spanName: 'polling.jobQueueDepth', thresholds: _CONFIG.thresholds.jobQueueDepth, warningMessage: 'Job queue depth critical' });
         const pollEventOutboxDepth = pollMetric({ fetch: database.eventOutbox.count, gauge: metrics.events.outboxDepth, metric: 'events_outbox_depth', spanName: 'polling.eventOutboxDepth', thresholds: _CONFIG.thresholds.eventOutboxDepth, warningMessage: 'Event outbox depth critical' });
-            const pollIoStats = Effect.gen(function* () {
-                const rows = yield* database.monitoring.cacheHitRatio();
-                const zero = Number(_CONFIG.fallback.metric);
-                const totalReads = rows.reduce<number>((sum, row) => sum + row.reads, zero);
-                const totalHits = rows.reduce<number>((sum, row) => sum + row.hits, zero);
-                const totalWrites = rows.reduce<number>((sum, row) => sum + row.writes, zero);
+        const pollIoStats = Effect.gen(function* () {
+            const rows = yield* database.monitoring.cacheHitRatio();
+            const zero = Number(_CONFIG.fallback.metric);
+            const totalReads = rows.reduce<number>((sum, row) => sum + row.reads, zero);
+            const totalHits = rows.reduce<number>((sum, row) => sum + row.hits, zero);
+            const totalWrites = rows.reduce<number>((sum, row) => sum + row.writes, zero);
             const avgHitRatio = totalReads + totalHits > zero ? (totalHits / (totalReads + totalHits)) * 100 : zero;
             yield* Effect.all([Metric.set(metrics.database.cacheHitRatio, avgHitRatio), Metric.set(metrics.database.ioReads, totalReads), Metric.set(metrics.database.ioWrites, totalWrites)], { discard: true });
             yield* Effect.when(Effect.logWarning('Cache hit ratio below threshold', { avgHitRatio, threshold: _CONFIG.thresholds.cacheHitRatio.warning }), () => avgHitRatio > zero && avgHitRatio < _CONFIG.thresholds.cacheHitRatio.warning);
@@ -117,38 +117,38 @@ class PollingService extends Effect.Service<PollingService>()('server/Polling', 
             Effect.catchAll(recoverWith('pg_stat_io', 'Polling io stats failed', STM.commit(TRef.get(ioStatsState)).pipe(Effect.map(({ avgHitRatio, totalReads }) => ({ avgHitRatio, totalReads }))))),
             Telemetry.span('polling.ioStats', { metrics: false, 'polling.metric': 'pg_stat_io' }),
         );
-            const refresh = (force = false) => Effect.gen(function* () {
-                const now = yield* Clock.currentTimeMillis;
-                const elapsed = now - (Option.getOrUndefined(yield* STM.commit(TRef.get(lastSuccessAtMs))) ?? _CONFIG.fallback.metric);
-                yield* Effect.when(
-                    Effect.all([pollDlqSize, pollJobQueueDepth, pollEventOutboxDepth, pollIoStats], { discard: true }),
-                    () => force || elapsed >= Duration.toMillis(_CONFIG.refresh.minInterval),
-                );
-            }).pipe(Telemetry.span('polling.refresh', { metrics: false }));
-            const getHealth = () => Effect.gen(function* () {
-                const latest = yield* _loadAlerts.pipe(
-                    Effect.tap((loaded) => STM.commit(TRef.set(alerts, loaded))),
-                    Effect.tapError((error) => Effect.logError('Polling health refresh failed', { error: String(error) })),
-                    Effect.orElse(() => STM.commit(TRef.get(alerts))),
-                );
-                const now = yield* Clock.currentTimeMillis;
-                const [lastSuccess, lastFailure] = yield* Effect.all([
-                    STM.commit(TRef.get(lastSuccessAtMs)),
-                    STM.commit(TRef.get(lastFailureAtMs)),
-                ], { concurrency: 'unbounded' });
-                const staleThresholdMs = Duration.toMillis(_CONFIG.refresh.minInterval) * _CONFIG.refresh.staleMultiplier;
-                const stale = Option.match(lastSuccess, {
-                    onNone: () => true,
-                    onSome: (timestamp) => now - timestamp > staleThresholdMs,
-                });
-                return {
-                    alerts: latest,
-                    lastFailureAtMs: Option.getOrUndefined(lastFailure),
-                    lastSuccessAtMs: Option.getOrUndefined(lastSuccess),
-                    stale,
-                };
-            }).pipe(Telemetry.span('polling.getHealth', { metrics: false }));
-            return { getHealth, pollDlqSize, pollEventOutboxDepth, pollIoStats, pollJobQueueDepth, refresh };
+        const refresh = (force = false) => Effect.gen(function* () {
+            const now = yield* Clock.currentTimeMillis;
+            const elapsed = now - (Option.getOrUndefined(yield* STM.commit(TRef.get(lastSuccessAtMs))) ?? _CONFIG.fallback.metric);
+            yield* Effect.when(
+                Effect.all([pollDlqSize, pollJobQueueDepth, pollEventOutboxDepth, pollIoStats], { discard: true }),
+                () => force || elapsed >= Duration.toMillis(_CONFIG.refresh.minInterval),
+            );
+        }).pipe(Telemetry.span('polling.refresh', { metrics: false }));
+        const getHealth = () => Effect.gen(function* () {
+            const latest = yield* _loadAlerts.pipe(
+                Effect.tap((loaded) => STM.commit(TRef.set(alerts, loaded))),
+                Effect.tapError((error) => Effect.logError('Polling health refresh failed', { error: String(error) })),
+                Effect.orElse(() => STM.commit(TRef.get(alerts))),
+            );
+            const now = yield* Clock.currentTimeMillis;
+            const [lastSuccess, lastFailure] = yield* Effect.all([
+                STM.commit(TRef.get(lastSuccessAtMs)),
+                STM.commit(TRef.get(lastFailureAtMs)),
+            ], { concurrency: 'unbounded' });
+            const staleThresholdMs = Duration.toMillis(_CONFIG.refresh.minInterval) * _CONFIG.refresh.staleMultiplier;
+            const stale = Option.match(lastSuccess, {
+                onNone: () => true,
+                onSome: (timestamp) => now - timestamp > staleThresholdMs,
+            });
+            return {
+                alerts: latest,
+                lastFailureAtMs: Option.getOrUndefined(lastFailure),
+                lastSuccessAtMs: Option.getOrUndefined(lastSuccess),
+                stale,
+            };
+        }).pipe(Telemetry.span('polling.getHealth', { metrics: false }));
+        return { getHealth, pollDlqSize, pollEventOutboxDepth, pollIoStats, pollJobQueueDepth, refresh };
         }),
     }) {
     static readonly Crons = Layer.mergeAll(

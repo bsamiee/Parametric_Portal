@@ -3,7 +3,7 @@
 # requires-python = ">=3.14"
 # dependencies = ["httpx"]
 # ///
-"""Hostinger API CLI — polymorphic interface with zero-arg defaults."""
+"""Hostinger API CLI -- polymorphic interface with zero-arg defaults."""
 
 # --- [IMPORTS] ----------------------------------------------------------------
 import json
@@ -11,9 +11,10 @@ import os
 import sys
 from collections.abc import Callable
 from dataclasses import dataclass
+from functools import reduce
 from typing import Any, Final
-from urllib.request import Request, urlopen
 from urllib.error import HTTPError
+from urllib.request import Request, urlopen
 
 
 # --- [TYPES] ------------------------------------------------------------------
@@ -24,8 +25,10 @@ type Handler = tuple[CmdBuilder, OutputFormatter]
 
 
 # --- [CONSTANTS] --------------------------------------------------------------
-@dataclass(frozen=True, slots=True)
-class _B:
+@dataclass(frozen=True, slots=True, kw_only=True)
+class _Defaults:
+    """Immutable API configuration defaults."""
+
     base_url: str = "https://developers.hostinger.com"
     token_env: str = "HOSTINGER_TOKEN"
     limit: int = 30
@@ -35,7 +38,7 @@ class _B:
     page: int = 1
 
 
-B: Final[_B] = _B()
+DEFAULTS: Final[_Defaults] = _Defaults()
 
 SCRIPT_PATH: Final[str] = "uv run .claude/skills/hostinger-tools/scripts/hostinger.py"
 
@@ -237,66 +240,179 @@ REQUIRED: Final[dict[str, tuple[str, ...]]] = {
 }
 
 
-# --- [PURE_FUNCTIONS] ---------------------------------------------------------
+# --- [FUNCTIONS] --------------------------------------------------------------
 def _api(method: str, path: str, body: dict[str, Any] | None = None) -> dict[str, Any]:
-    """Execute Hostinger API request with token auth."""
-    token = os.environ.get(B.token_env, "")
-    url = f"{B.base_url}{path}"
+    """Execute Hostinger API request with token auth.
+
+    Args:
+        method: HTTP method (GET, POST, PUT, DELETE).
+        path: API path relative to base URL.
+        body: Optional JSON body for request.
+
+    Returns:
+        Parsed JSON response or error dict.
+    """
+    token = os.environ.get(DEFAULTS.token_env, "")
+    url = f"{DEFAULTS.base_url}{path}"
     headers = {
         "Authorization": f"Bearer {token}",
         "Content-Type": "application/json",
-        "User-Agent": B.user_agent,
+        "User-Agent": DEFAULTS.user_agent,
         "Accept": "application/json",
     }
-    data = json.dumps(body).encode(B.encoding) if body else None
-    req = Request(url, data=data, headers=headers, method=method)
+    data = json.dumps(body).encode(DEFAULTS.encoding) if body else None
+    request = Request(url, data=data, headers=headers, method=method)
     try:
-        with urlopen(req, timeout=B.timeout) as resp:
-            return json.loads(resp.read().decode(B.encoding)) if resp.status == 200 else {}
-    except HTTPError as e:
-        return {"error": e.reason, "code": e.code, "body": e.read().decode(B.encoding)}
+        with urlopen(request, timeout=DEFAULTS.timeout) as response:
+            return json.loads(response.read().decode(DEFAULTS.encoding)) if response.status == 200 else {}
+    except HTTPError as error:
+        return {"error": error.reason, "code": error.code, "body": error.read().decode(DEFAULTS.encoding)}
 
 
-def _usage_error(message: str, cmd: str | None = None) -> dict[str, Any]:
-    """Generate usage error with correct syntax."""
-    lines = [f"[ERROR] {message}", "", "[USAGE]"]
-    lines += (
-        [
-            f"  {SCRIPT_PATH} {cmd} {COMMANDS[cmd]['opts']}",
-            *(f"  Required: {COMMANDS[cmd]['req']}" for _ in [1] if COMMANDS[cmd]["req"]),
-        ]
-        if cmd and cmd in COMMANDS
-        else [
+def _usage_error(message: str, command: str | None = None) -> dict[str, Any]:
+    """Generate usage error with correct syntax.
+
+    Args:
+        message: Error message to display.
+        command: Optional command name for specific usage.
+
+    Returns:
+        Error dict with status and formatted message.
+    """
+    lines = (
+        (
+            f"[ERROR] {message}",
+            "",
+            "[USAGE]",
+            f"  {SCRIPT_PATH} {command} {COMMANDS[command]['opts']}",
+            *(f"  Required: {COMMANDS[command]['req']}" for _ in (1,) if COMMANDS[command]["req"]),
+        )
+        if command and command in COMMANDS
+        else (
+            f"[ERROR] {message}",
+            "",
+            "[USAGE]",
             f"  {SCRIPT_PATH} <command> [options]",
             "",
             "[ZERO_ARG_COMMANDS]",
-            *[f"  {n:<28} {i['desc']}" for n, i in COMMANDS.items() if not i["req"]],
+            *tuple(f"  {name:<28} {info['desc']}" for name, info in COMMANDS.items() if not info["req"]),
             "",
             "[REQUIRED_ARG_COMMANDS]",
-            *[f"  {n:<28} {i['desc']}" for n, i in COMMANDS.items() if i["req"]],
-        ]
+            *tuple(f"  {name:<28} {info['desc']}" for name, info in COMMANDS.items() if info["req"]),
+        )
     )
     return {"status": "error", "message": "\n".join(lines)}
 
 
-def _validate_args(cmd: str, args: Args) -> list[str]:
-    """Return missing required arguments for command."""
-    return [f"--{k.replace('_', '-')}" for k in REQUIRED.get(cmd, ()) if args.get(k) is None]
+def _validate_args(command: str, args: Args) -> tuple[str, ...]:
+    """Return missing required arguments for command.
+
+    Args:
+        command: Command name to validate.
+        args: Parsed argument dict.
+
+    Returns:
+        Tuple of missing argument flag names.
+    """
+    return tuple(
+        f"--{key.replace('_', '-')}"
+        for key in REQUIRED.get(command, ())
+        if args.get(key) is None
+    )
+
+
+def _normalize_key(raw: str) -> str:
+    """Normalize a CLI flag key, handling --from/--to date aliases.
+
+    Args:
+        raw: Raw flag name without leading dashes.
+
+    Returns:
+        Normalized key suitable for args dict.
+    """
+    key = raw.replace("-", "_")
+    match key:
+        case "from":
+            return "from_date"
+        case "to":
+            return "to_date"
+        case _:
+            return key
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class _ParseState:
+    """Immutable accumulator for CLI flag parsing."""
+
+    opts: dict[str, Any]
+    skip_next: bool
+
+
+def _parse_flags(args: tuple[str, ...]) -> Args:
+    """Parse CLI flags into args dict via functional fold.
+
+    Args:
+        args: Tuple of CLI argument strings (after command name).
+
+    Returns:
+        Dict mapping normalized keys to values.
+    """
+    def _fold(state: _ParseState, indexed: tuple[int, str]) -> _ParseState:
+        """Process a single argument, accumulating into immutable state."""
+        index, arg = indexed
+        match (state.skip_next, arg.startswith("--")):
+            case (True, _):
+                return _ParseState(opts=state.opts, skip_next=False)
+            case (_, True):
+                key = _normalize_key(arg[2:])
+                next_index = index + 1
+                has_value = next_index < len(args) and not args[next_index].startswith("--")
+                value = args[next_index] if has_value else True
+                return _ParseState(opts={**state.opts, key: value}, skip_next=has_value)
+            case _:
+                return state
+
+    return reduce(
+        _fold,
+        enumerate(args),
+        _ParseState(opts={}, skip_next=False),
+    ).opts
 
 
 def _list_fmt(key: str) -> OutputFormatter:
-    """Create list formatter extracting array from response."""
-    return lambda r, _: {key: r if isinstance(r, list) else r.get("data", r.get(key, r))}
+    """Create list formatter extracting array from response.
+
+    Args:
+        key: Key name for the formatted output.
+
+    Returns:
+        Formatter function for list responses.
+    """
+    return lambda response, _: {key: response if isinstance(response, list) else response.get("data", response.get(key, response))}
 
 
 def _item_fmt(key: str) -> OutputFormatter:
-    """Create item formatter for single resource."""
-    return lambda r, a: {"id": a.get("id"), key: r} if isinstance(a, dict) else {"id": None, key: r}
+    """Create item formatter for single resource.
+
+    Args:
+        key: Key name for the formatted output.
+
+    Returns:
+        Formatter function for single-item responses.
+    """
+    return lambda response, args: {"id": args.get("id"), key: response} if isinstance(args, dict) else {"id": None, key: response}
 
 
 def _action_fmt(action: str) -> OutputFormatter:
-    """Create action formatter for mutations."""
-    return lambda r, a: {"id": a.get("id"), action: "error" not in r}
+    """Create action formatter for mutations.
+
+    Args:
+        action: Action name key for the formatted output.
+
+    Returns:
+        Formatter function for mutation responses.
+    """
+    return lambda response, args: {"id": args.get("id"), action: "error" not in response}
 
 
 # --- [DISPATCH_TABLES] --------------------------------------------------------
@@ -307,115 +423,115 @@ handlers: dict[str, Handler] = {
         _list_fmt("machines"),
     ),
     "vps-view": (
-        lambda a: ("GET", f"/api/vps/v1/virtual-machines/{a['id']}", None),
+        lambda args: ("GET", f"/api/vps/v1/virtual-machines/{args['id']}", None),
         _item_fmt("machine"),
     ),
     "vps-start": (
-        lambda a: ("POST", f"/api/vps/v1/virtual-machines/{a['id']}/start", None),
+        lambda args: ("POST", f"/api/vps/v1/virtual-machines/{args['id']}/start", None),
         _action_fmt("started"),
     ),
     "vps-stop": (
-        lambda a: ("POST", f"/api/vps/v1/virtual-machines/{a['id']}/stop", None),
+        lambda args: ("POST", f"/api/vps/v1/virtual-machines/{args['id']}/stop", None),
         _action_fmt("stopped"),
     ),
     "vps-restart": (
-        lambda a: ("POST", f"/api/vps/v1/virtual-machines/{a['id']}/restart", None),
+        lambda args: ("POST", f"/api/vps/v1/virtual-machines/{args['id']}/restart", None),
         _action_fmt("restarted"),
     ),
     "vps-metrics": (
-        lambda a: ("GET", f"/api/vps/v1/virtual-machines/{a['id']}/metrics?date_from={a['from_date']}&date_to={a['to_date']}", None),
+        lambda args: ("GET", f"/api/vps/v1/virtual-machines/{args['id']}/metrics?date_from={args['from_date']}&date_to={args['to_date']}", None),
         _item_fmt("metrics"),
     ),
     "vps-actions": (
-        lambda a: ("GET", f"/api/vps/v1/virtual-machines/{a['id']}/actions", None),
+        lambda args: ("GET", f"/api/vps/v1/virtual-machines/{args['id']}/actions", None),
         _list_fmt("actions"),
     ),
     "vps-action-view": (
-        lambda a: ("GET", f"/api/vps/v1/virtual-machines/{a['id']}/actions/{a['action_id']}", None),
-        lambda r, a: {"id": a["id"], "action_id": a["action_id"], "action": r},
+        lambda args: ("GET", f"/api/vps/v1/virtual-machines/{args['id']}/actions/{args['action_id']}", None),
+        lambda response, args: {"id": args["id"], "action_id": args["action_id"], "action": response},
     ),
     # --- VPS_CONFIG ---
     "vps-hostname-set": (
-        lambda a: ("PUT", f"/api/vps/v1/virtual-machines/{a['id']}/hostname", {"hostname": a["hostname"]}),
-        lambda r, a: {"id": a["id"], "hostname": a["hostname"], "set": "error" not in r},
+        lambda args: ("PUT", f"/api/vps/v1/virtual-machines/{args['id']}/hostname", {"hostname": args["hostname"]}),
+        lambda response, args: {"id": args["id"], "hostname": args["hostname"], "set": "error" not in response},
     ),
     "vps-hostname-reset": (
-        lambda a: ("DELETE", f"/api/vps/v1/virtual-machines/{a['id']}/hostname", None),
+        lambda args: ("DELETE", f"/api/vps/v1/virtual-machines/{args['id']}/hostname", None),
         _action_fmt("reset"),
     ),
     "vps-nameservers-set": (
-        lambda a: ("PUT", f"/api/vps/v1/virtual-machines/{a['id']}/nameservers", {"ns1": a["ns1"], **({"ns2": a["ns2"]} if a.get("ns2") else {})}),
-        lambda r, a: {"id": a["id"], "ns1": a["ns1"], "set": "error" not in r},
+        lambda args: ("PUT", f"/api/vps/v1/virtual-machines/{args['id']}/nameservers", {"ns1": args["ns1"], **({"ns2": args["ns2"]} if args.get("ns2") else {})}),
+        lambda response, args: {"id": args["id"], "ns1": args["ns1"], "set": "error" not in response},
     ),
     "vps-password-set": (
-        lambda a: ("PUT", f"/api/vps/v1/virtual-machines/{a['id']}/root-password", {"password": a["password"]}),
+        lambda args: ("PUT", f"/api/vps/v1/virtual-machines/{args['id']}/root-password", {"password": args["password"]}),
         _action_fmt("set"),
     ),
     "vps-panel-password-set": (
-        lambda a: ("PUT", f"/api/vps/v1/virtual-machines/{a['id']}/panel-password", {"password": a["password"]}),
+        lambda args: ("PUT", f"/api/vps/v1/virtual-machines/{args['id']}/panel-password", {"password": args["password"]}),
         _action_fmt("set"),
     ),
     "vps-ptr-create": (
-        lambda a: ("POST", f"/api/vps/v1/virtual-machines/{a['id']}/ptr/{a['ip_id']}", {"domain": a["domain"]}),
-        lambda r, a: {"id": a["id"], "ip_id": a["ip_id"], "domain": a["domain"], "created": "error" not in r},
+        lambda args: ("POST", f"/api/vps/v1/virtual-machines/{args['id']}/ptr/{args['ip_id']}", {"domain": args["domain"]}),
+        lambda response, args: {"id": args["id"], "ip_id": args["ip_id"], "domain": args["domain"], "created": "error" not in response},
     ),
     "vps-ptr-delete": (
-        lambda a: ("DELETE", f"/api/vps/v1/virtual-machines/{a['id']}/ptr/{a['ip_id']}", None),
-        lambda r, a: {"id": a["id"], "ip_id": a["ip_id"], "deleted": "error" not in r},
+        lambda args: ("DELETE", f"/api/vps/v1/virtual-machines/{args['id']}/ptr/{args['ip_id']}", None),
+        lambda response, args: {"id": args["id"], "ip_id": args["ip_id"], "deleted": "error" not in response},
     ),
     # --- VPS_RECOVERY ---
     "vps-recovery-start": (
-        lambda a: ("POST", f"/api/vps/v1/virtual-machines/{a['id']}/recovery", {"root_password": a["root_password"]}),
+        lambda args: ("POST", f"/api/vps/v1/virtual-machines/{args['id']}/recovery", {"root_password": args["root_password"]}),
         _action_fmt("started"),
     ),
     "vps-recovery-stop": (
-        lambda a: ("DELETE", f"/api/vps/v1/virtual-machines/{a['id']}/recovery", None),
+        lambda args: ("DELETE", f"/api/vps/v1/virtual-machines/{args['id']}/recovery", None),
         _action_fmt("stopped"),
     ),
     "vps-recreate": (
-        lambda a: ("POST", f"/api/vps/v1/virtual-machines/{a['id']}/recreate", {"template_id": int(a["template_id"]), **({"password": a["password"]} if a.get("password") else {})}),
+        lambda args: ("POST", f"/api/vps/v1/virtual-machines/{args['id']}/recreate", {"template_id": int(args["template_id"]), **({"password": args["password"]} if args.get("password") else {})}),
         _action_fmt("recreated"),
     ),
     # --- DOCKER ---
     "docker-list": (
-        lambda a: ("GET", f"/api/vps/v1/virtual-machine/{a['id']}/docker-compose/project?page=1", None),
+        lambda args: ("GET", f"/api/vps/v1/virtual-machine/{args['id']}/docker-compose/project?page=1", None),
         _list_fmt("projects"),
     ),
     "docker-view": (
-        lambda a: ("GET", f"/api/vps/v1/virtual-machine/{a['id']}/docker-compose/project/{a['project']}", None),
-        lambda r, a: {"project": a["project"], "contents": r},
+        lambda args: ("GET", f"/api/vps/v1/virtual-machine/{args['id']}/docker-compose/project/{args['project']}", None),
+        lambda response, args: {"project": args["project"], "contents": response},
     ),
     "docker-containers": (
-        lambda a: ("GET", f"/api/vps/v1/virtual-machine/{a['id']}/docker-compose/project/{a['project']}/containers", None),
-        lambda r, a: {"project": a["project"], "containers": r if isinstance(r, list) else r.get("data", r)},
+        lambda args: ("GET", f"/api/vps/v1/virtual-machine/{args['id']}/docker-compose/project/{args['project']}/containers", None),
+        lambda response, args: {"project": args["project"], "containers": response if isinstance(response, list) else response.get("data", response)},
     ),
     "docker-logs": (
-        lambda a: ("GET", f"/api/vps/v1/virtual-machine/{a['id']}/docker-compose/project/{a['project']}/logs", None),
-        lambda r, a: {"project": a["project"], "logs": r.get("logs", r) if isinstance(r, dict) else r},
+        lambda args: ("GET", f"/api/vps/v1/virtual-machine/{args['id']}/docker-compose/project/{args['project']}/logs", None),
+        lambda response, args: {"project": args["project"], "logs": response.get("logs", response) if isinstance(response, dict) else response},
     ),
     "docker-create": (
-        lambda a: ("POST", f"/api/vps/v1/virtual-machine/{a['id']}/docker-compose/project", {"project_name": a["project"], "content": a["content"]}),
-        lambda r, a: {"project": a["project"], "created": "error" not in str(r)},
+        lambda args: ("POST", f"/api/vps/v1/virtual-machine/{args['id']}/docker-compose/project", {"project_name": args["project"], "content": args["content"]}),
+        lambda response, args: {"project": args["project"], "created": "error" not in str(response)},
     ),
     "docker-start": (
-        lambda a: ("POST", f"/api/vps/v1/virtual-machine/{a['id']}/docker-compose/project/{a['project']}/start", None),
-        lambda r, a: {"project": a["project"], "started": "error" not in str(r)},
+        lambda args: ("POST", f"/api/vps/v1/virtual-machine/{args['id']}/docker-compose/project/{args['project']}/start", None),
+        lambda response, args: {"project": args["project"], "started": "error" not in str(response)},
     ),
     "docker-stop": (
-        lambda a: ("POST", f"/api/vps/v1/virtual-machine/{a['id']}/docker-compose/project/{a['project']}/stop", None),
-        lambda r, a: {"project": a["project"], "stopped": "error" not in str(r)},
+        lambda args: ("POST", f"/api/vps/v1/virtual-machine/{args['id']}/docker-compose/project/{args['project']}/stop", None),
+        lambda response, args: {"project": args["project"], "stopped": "error" not in str(response)},
     ),
     "docker-restart": (
-        lambda a: ("POST", f"/api/vps/v1/virtual-machine/{a['id']}/docker-compose/project/{a['project']}/restart", None),
-        lambda r, a: {"project": a["project"], "restarted": "error" not in str(r)},
+        lambda args: ("POST", f"/api/vps/v1/virtual-machine/{args['id']}/docker-compose/project/{args['project']}/restart", None),
+        lambda response, args: {"project": args["project"], "restarted": "error" not in str(response)},
     ),
     "docker-update": (
-        lambda a: ("PUT", f"/api/vps/v1/virtual-machine/{a['id']}/docker-compose/project/{a['project']}", None),
-        lambda r, a: {"project": a["project"], "updated": "error" not in str(r)},
+        lambda args: ("PUT", f"/api/vps/v1/virtual-machine/{args['id']}/docker-compose/project/{args['project']}", None),
+        lambda response, args: {"project": args["project"], "updated": "error" not in str(response)},
     ),
     "docker-delete": (
-        lambda a: ("DELETE", f"/api/vps/v1/virtual-machine/{a['id']}/docker-compose/project/{a['project']}", None),
-        lambda r, a: {"project": a["project"], "deleted": "error" not in str(r)},
+        lambda args: ("DELETE", f"/api/vps/v1/virtual-machine/{args['id']}/docker-compose/project/{args['project']}", None),
+        lambda response, args: {"project": args["project"], "deleted": "error" not in str(response)},
     ),
     # --- FIREWALL ---
     "firewall-list": (
@@ -423,40 +539,40 @@ handlers: dict[str, Handler] = {
         _list_fmt("firewalls"),
     ),
     "firewall-view": (
-        lambda a: ("GET", f"/api/vps/v1/firewall/{a['id']}", None),
+        lambda args: ("GET", f"/api/vps/v1/firewall/{args['id']}", None),
         _item_fmt("firewall"),
     ),
     "firewall-create": (
-        lambda a: ("POST", "/api/vps/v1/firewall", {"name": a["name"]}),
-        lambda r, a: {"name": a["name"], "created": r.get("id") if isinstance(r, dict) else None, "firewall": r},
+        lambda args: ("POST", "/api/vps/v1/firewall", {"name": args["name"]}),
+        lambda response, args: {"name": args["name"], "created": response.get("id") if isinstance(response, dict) else None, "firewall": response},
     ),
     "firewall-delete": (
-        lambda a: ("DELETE", f"/api/vps/v1/firewall/{a['id']}", None),
+        lambda args: ("DELETE", f"/api/vps/v1/firewall/{args['id']}", None),
         _action_fmt("deleted"),
     ),
     "firewall-activate": (
-        lambda a: ("POST", f"/api/vps/v1/firewall/{a['firewall_id']}/virtual-machine/{a['vps_id']}", None),
-        lambda r, a: {"firewall_id": a["firewall_id"], "vps_id": a["vps_id"], "activated": "error" not in r},
+        lambda args: ("POST", f"/api/vps/v1/firewall/{args['firewall_id']}/virtual-machine/{args['vps_id']}", None),
+        lambda response, args: {"firewall_id": args["firewall_id"], "vps_id": args["vps_id"], "activated": "error" not in response},
     ),
     "firewall-deactivate": (
-        lambda a: ("DELETE", f"/api/vps/v1/firewall/{a['firewall_id']}/virtual-machine/{a['vps_id']}", None),
-        lambda r, a: {"firewall_id": a["firewall_id"], "vps_id": a["vps_id"], "deactivated": "error" not in r},
+        lambda args: ("DELETE", f"/api/vps/v1/firewall/{args['firewall_id']}/virtual-machine/{args['vps_id']}", None),
+        lambda response, args: {"firewall_id": args["firewall_id"], "vps_id": args["vps_id"], "deactivated": "error" not in response},
     ),
     "firewall-sync": (
-        lambda a: ("POST", f"/api/vps/v1/firewall/{a['firewall_id']}/virtual-machine/{a['vps_id']}/sync", None),
-        lambda r, a: {"firewall_id": a["firewall_id"], "vps_id": a["vps_id"], "synced": "error" not in r},
+        lambda args: ("POST", f"/api/vps/v1/firewall/{args['firewall_id']}/virtual-machine/{args['vps_id']}/sync", None),
+        lambda response, args: {"firewall_id": args["firewall_id"], "vps_id": args["vps_id"], "synced": "error" not in response},
     ),
     "firewall-rule-create": (
-        lambda a: ("POST", f"/api/vps/v1/firewall/{a['id']}/rules", {"protocol": a["protocol"], "port": a["port"], "source": a["source"], "source_detail": a["source_detail"]}),
-        lambda r, a: {"id": a["id"], "created": "error" not in r, "rule": r},
+        lambda args: ("POST", f"/api/vps/v1/firewall/{args['id']}/rules", {"protocol": args["protocol"], "port": args["port"], "source": args["source"], "source_detail": args["source_detail"]}),
+        lambda response, args: {"id": args["id"], "created": "error" not in response, "rule": response},
     ),
     "firewall-rule-update": (
-        lambda a: ("PUT", f"/api/vps/v1/firewall/{a['id']}/rules/{a['rule_id']}", {"protocol": a["protocol"], "port": a["port"], "source": a["source"], "source_detail": a["source_detail"]}),
-        lambda r, a: {"id": a["id"], "rule_id": a["rule_id"], "updated": "error" not in r},
+        lambda args: ("PUT", f"/api/vps/v1/firewall/{args['id']}/rules/{args['rule_id']}", {"protocol": args["protocol"], "port": args["port"], "source": args["source"], "source_detail": args["source_detail"]}),
+        lambda response, args: {"id": args["id"], "rule_id": args["rule_id"], "updated": "error" not in response},
     ),
     "firewall-rule-delete": (
-        lambda a: ("DELETE", f"/api/vps/v1/firewall/{a['id']}/rules/{a['rule_id']}", None),
-        lambda r, a: {"id": a["id"], "rule_id": a["rule_id"], "deleted": "error" not in r},
+        lambda args: ("DELETE", f"/api/vps/v1/firewall/{args['id']}/rules/{args['rule_id']}", None),
+        lambda response, args: {"id": args["id"], "rule_id": args["rule_id"], "deleted": "error" not in response},
     ),
     # --- SSH_KEYS ---
     "ssh-key-list": (
@@ -464,19 +580,19 @@ handlers: dict[str, Handler] = {
         _list_fmt("keys"),
     ),
     "ssh-key-create": (
-        lambda a: ("POST", "/api/vps/v1/public-keys", {"name": a["name"], "key": a["key"]}),
-        lambda r, a: {"name": a["name"], "created": r.get("id"), "key": r},
+        lambda args: ("POST", "/api/vps/v1/public-keys", {"name": args["name"], "key": args["key"]}),
+        lambda response, args: {"name": args["name"], "created": response.get("id"), "key": response},
     ),
     "ssh-key-delete": (
-        lambda a: ("DELETE", f"/api/vps/v1/public-keys/{a['id']}", None),
+        lambda args: ("DELETE", f"/api/vps/v1/public-keys/{args['id']}", None),
         _action_fmt("deleted"),
     ),
     "ssh-key-attach": (
-        lambda a: ("POST", f"/api/vps/v1/virtual-machines/{a['vps_id']}/public-keys", {"ids": [int(i) for i in str(a["key_ids"]).split(",")]}),
-        lambda r, a: {"vps_id": a["vps_id"], "attached": "error" not in r},
+        lambda args: ("POST", f"/api/vps/v1/virtual-machines/{args['vps_id']}/public-keys", {"ids": [int(identifier) for identifier in str(args["key_ids"]).split(",")]}),
+        lambda response, args: {"vps_id": args["vps_id"], "attached": "error" not in response},
     ),
     "ssh-key-attached": (
-        lambda a: ("GET", f"/api/vps/v1/virtual-machines/{a['vps_id']}/public-keys", None),
+        lambda args: ("GET", f"/api/vps/v1/virtual-machines/{args['vps_id']}/public-keys", None),
         _list_fmt("keys"),
     ),
     # --- SCRIPTS ---
@@ -485,54 +601,54 @@ handlers: dict[str, Handler] = {
         _list_fmt("scripts"),
     ),
     "script-view": (
-        lambda a: ("GET", f"/api/vps/v1/post-install-scripts/{a['id']}", None),
+        lambda args: ("GET", f"/api/vps/v1/post-install-scripts/{args['id']}", None),
         _item_fmt("script"),
     ),
     "script-create": (
-        lambda a: ("POST", "/api/vps/v1/post-install-scripts", {"name": a["name"], "content": a["content"]}),
-        lambda r, a: {"name": a["name"], "created": r.get("id") if isinstance(r, dict) else None, "script": r},
+        lambda args: ("POST", "/api/vps/v1/post-install-scripts", {"name": args["name"], "content": args["content"]}),
+        lambda response, args: {"name": args["name"], "created": response.get("id") if isinstance(response, dict) else None, "script": response},
     ),
     "script-update": (
-        lambda a: ("PUT", f"/api/vps/v1/post-install-scripts/{a['id']}", {"name": a["name"], "content": a["content"]}),
-        lambda r, a: {"id": a["id"], "updated": "error" not in r},
+        lambda args: ("PUT", f"/api/vps/v1/post-install-scripts/{args['id']}", {"name": args["name"], "content": args["content"]}),
+        lambda response, args: {"id": args["id"], "updated": "error" not in response},
     ),
     "script-delete": (
-        lambda a: ("DELETE", f"/api/vps/v1/post-install-scripts/{a['id']}", None),
+        lambda args: ("DELETE", f"/api/vps/v1/post-install-scripts/{args['id']}", None),
         _action_fmt("deleted"),
     ),
     # --- SNAPSHOTS ---
     "snapshot-view": (
-        lambda a: ("GET", f"/api/vps/v1/virtual-machines/{a['id']}/snapshot", None),
+        lambda args: ("GET", f"/api/vps/v1/virtual-machines/{args['id']}/snapshot", None),
         _item_fmt("snapshot"),
     ),
     "snapshot-create": (
-        lambda a: ("POST", f"/api/vps/v1/virtual-machines/{a['id']}/snapshot", None),
+        lambda args: ("POST", f"/api/vps/v1/virtual-machines/{args['id']}/snapshot", None),
         _action_fmt("created"),
     ),
     "snapshot-delete": (
-        lambda a: ("DELETE", f"/api/vps/v1/virtual-machines/{a['id']}/snapshot", None),
+        lambda args: ("DELETE", f"/api/vps/v1/virtual-machines/{args['id']}/snapshot", None),
         _action_fmt("deleted"),
     ),
     "snapshot-restore": (
-        lambda a: ("POST", f"/api/vps/v1/virtual-machines/{a['id']}/snapshot/restore", None),
+        lambda args: ("POST", f"/api/vps/v1/virtual-machines/{args['id']}/snapshot/restore", None),
         _action_fmt("restored"),
     ),
     "backup-list": (
-        lambda a: ("GET", f"/api/vps/v1/virtual-machines/{a['id']}/backups", None),
+        lambda args: ("GET", f"/api/vps/v1/virtual-machines/{args['id']}/backups", None),
         _list_fmt("backups"),
     ),
     "backup-restore": (
-        lambda a: ("POST", f"/api/vps/v1/virtual-machines/{a['id']}/backups/{a['backup_id']}/restore", None),
-        lambda r, a: {"id": a["id"], "backup_id": a["backup_id"], "restored": "error" not in r},
+        lambda args: ("POST", f"/api/vps/v1/virtual-machines/{args['id']}/backups/{args['backup_id']}/restore", None),
+        lambda response, args: {"id": args["id"], "backup_id": args["backup_id"], "restored": "error" not in response},
     ),
     # --- DNS ---
     "dns-records": (
-        lambda a: ("GET", f"/api/dns/v1/zones/{a['domain']}", None),
-        lambda r, a: {"domain": a["domain"], "records": r if isinstance(r, list) else r.get("zone", r)},
+        lambda args: ("GET", f"/api/dns/v1/zones/{args['domain']}", None),
+        lambda response, args: {"domain": args["domain"], "records": response if isinstance(response, list) else response.get("zone", response)},
     ),
     "dns-snapshots": (
-        lambda a: ("GET", f"/api/dns/v1/snapshots/{a['domain']}", None),
-        lambda r, a: {"domain": a["domain"], "snapshots": r if isinstance(r, list) else r.get("data", r)},
+        lambda args: ("GET", f"/api/dns/v1/snapshots/{args['domain']}", None),
+        lambda response, args: {"domain": args["domain"], "snapshots": response if isinstance(response, list) else response.get("data", response)},
     ),
     # --- DOMAINS ---
     "domain-list": (
@@ -540,16 +656,16 @@ handlers: dict[str, Handler] = {
         _list_fmt("domains"),
     ),
     "domain-view": (
-        lambda a: ("GET", f"/api/domains/v1/portfolio/{a['domain']}", None),
-        lambda r, a: {"domain": a["domain"], "details": r},
+        lambda args: ("GET", f"/api/domains/v1/portfolio/{args['domain']}", None),
+        lambda response, args: {"domain": args["domain"], "details": response},
     ),
     "domain-check": (
-        lambda a: ("POST", "/api/domains/v1/availability", {"domain": a["domain"], "tlds": str(a["tlds"]).split(",")}),
-        lambda r, a: {"domain": a["domain"], "availability": r if isinstance(r, list) else r.get("results", r)},
+        lambda args: ("POST", "/api/domains/v1/availability", {"domain": args["domain"], "tlds": str(args["tlds"]).split(",")}),
+        lambda response, args: {"domain": args["domain"], "availability": response if isinstance(response, list) else response.get("results", response)},
     ),
     # --- BILLING ---
     "billing-catalog": (
-        lambda a: ("GET", f"/api/billing/v1/catalog{'?category=' + a['category'] if a.get('category') else ''}", None),
+        lambda args: ("GET", f"/api/billing/v1/catalog{'?category=' + args['category'] if args.get('category') else ''}", None),
         _list_fmt("items"),
     ),
     "billing-payment-methods": (
@@ -557,11 +673,11 @@ handlers: dict[str, Handler] = {
         _list_fmt("methods"),
     ),
     "billing-payment-method-set-default": (
-        lambda a: ("PUT", f"/api/billing/v1/payment-methods/{a['id']}/default", None),
+        lambda args: ("PUT", f"/api/billing/v1/payment-methods/{args['id']}/default", None),
         _action_fmt("set"),
     ),
     "billing-payment-method-delete": (
-        lambda a: ("DELETE", f"/api/billing/v1/payment-methods/{a['id']}", None),
+        lambda args: ("DELETE", f"/api/billing/v1/payment-methods/{args['id']}", None),
         _action_fmt("deleted"),
     ),
     "billing-subscriptions": (
@@ -569,16 +685,16 @@ handlers: dict[str, Handler] = {
         _list_fmt("subscriptions"),
     ),
     "billing-subscription-cancel": (
-        lambda a: ("DELETE", f"/api/billing/v1/subscriptions/{a['id']}", None),
-        lambda r, a: {"id": a["id"], "cancelled": "error" not in r},
+        lambda args: ("DELETE", f"/api/billing/v1/subscriptions/{args['id']}", None),
+        lambda response, args: {"id": args["id"], "cancelled": "error" not in response},
     ),
     "billing-auto-renewal-enable": (
-        lambda a: ("POST", f"/api/billing/v1/subscriptions/{a['id']}/auto-renewal", None),
-        lambda r, a: {"id": a["id"], "enabled": "error" not in r},
+        lambda args: ("POST", f"/api/billing/v1/subscriptions/{args['id']}/auto-renewal", None),
+        lambda response, args: {"id": args["id"], "enabled": "error" not in response},
     ),
     "billing-auto-renewal-disable": (
-        lambda a: ("DELETE", f"/api/billing/v1/subscriptions/{a['id']}/auto-renewal", None),
-        lambda r, a: {"id": a["id"], "disabled": "error" not in r},
+        lambda args: ("DELETE", f"/api/billing/v1/subscriptions/{args['id']}/auto-renewal", None),
+        lambda response, args: {"id": args["id"], "disabled": "error" not in response},
     ),
     # --- HOSTING ---
     "hosting-orders-list": (
@@ -590,66 +706,66 @@ handlers: dict[str, Handler] = {
         _list_fmt("websites"),
     ),
     "hosting-website-create": (
-        lambda a: ("POST", "/api/hosting/v1/websites", {"domain": a["domain"], "order_id": int(a["order_id"]), **({} if not a.get("datacenter") else {"datacenter_code": a["datacenter"]})}),
-        lambda r, a: {"domain": a["domain"], "created": "error" not in str(r), "website": r},
+        lambda args: ("POST", "/api/hosting/v1/websites", {"domain": args["domain"], "order_id": int(args["order_id"]), **({} if not args.get("datacenter") else {"datacenter_code": args["datacenter"]})}),
+        lambda response, args: {"domain": args["domain"], "created": "error" not in str(response), "website": response},
     ),
     "hosting-datacenters-list": (
-        lambda a: ("GET", f"/api/hosting/v1/orders/{a['order_id']}/data-centers", None),
+        lambda args: ("GET", f"/api/hosting/v1/orders/{args['order_id']}/data-centers", None),
         _list_fmt("datacenters"),
     ),
     # --- DOMAIN_EXTENDED ---
     "domain-lock-enable": (
-        lambda a: ("POST", f"/api/domains/v1/portfolio/{a['domain']}/domain-lock", None),
-        lambda r, a: {"domain": a["domain"], "locked": "error" not in str(r)},
+        lambda args: ("POST", f"/api/domains/v1/portfolio/{args['domain']}/domain-lock", None),
+        lambda response, args: {"domain": args["domain"], "locked": "error" not in str(response)},
     ),
     "domain-lock-disable": (
-        lambda a: ("DELETE", f"/api/domains/v1/portfolio/{a['domain']}/domain-lock", None),
-        lambda r, a: {"domain": a["domain"], "unlocked": "error" not in str(r)},
+        lambda args: ("DELETE", f"/api/domains/v1/portfolio/{args['domain']}/domain-lock", None),
+        lambda response, args: {"domain": args["domain"], "unlocked": "error" not in str(response)},
     ),
     "domain-privacy-enable": (
-        lambda a: ("POST", f"/api/domains/v1/portfolio/{a['domain']}/privacy-protection", None),
-        lambda r, a: {"domain": a["domain"], "privacy_enabled": "error" not in str(r)},
+        lambda args: ("POST", f"/api/domains/v1/portfolio/{args['domain']}/privacy-protection", None),
+        lambda response, args: {"domain": args["domain"], "privacy_enabled": "error" not in str(response)},
     ),
     "domain-privacy-disable": (
-        lambda a: ("DELETE", f"/api/domains/v1/portfolio/{a['domain']}/privacy-protection", None),
-        lambda r, a: {"domain": a["domain"], "privacy_disabled": "error" not in str(r)},
+        lambda args: ("DELETE", f"/api/domains/v1/portfolio/{args['domain']}/privacy-protection", None),
+        lambda response, args: {"domain": args["domain"], "privacy_disabled": "error" not in str(response)},
     ),
     "domain-forwarding-view": (
-        lambda a: ("GET", f"/api/domains/v1/portfolio/{a['domain']}/forwarding", None),
-        lambda r, a: {"domain": a["domain"], "forwarding": r},
+        lambda args: ("GET", f"/api/domains/v1/portfolio/{args['domain']}/forwarding", None),
+        lambda response, args: {"domain": args["domain"], "forwarding": response},
     ),
     "domain-forwarding-create": (
-        lambda a: ("POST", f"/api/domains/v1/portfolio/{a['domain']}/forwarding", {"redirect_url": a["redirect_url"], "redirect_type": a["redirect_type"]}),
-        lambda r, a: {"domain": a["domain"], "created": "error" not in str(r), "forwarding": r},
+        lambda args: ("POST", f"/api/domains/v1/portfolio/{args['domain']}/forwarding", {"redirect_url": args["redirect_url"], "redirect_type": args["redirect_type"]}),
+        lambda response, args: {"domain": args["domain"], "created": "error" not in str(response), "forwarding": response},
     ),
     "domain-forwarding-delete": (
-        lambda a: ("DELETE", f"/api/domains/v1/portfolio/{a['domain']}/forwarding", None),
-        lambda r, a: {"domain": a["domain"], "deleted": "error" not in str(r)},
+        lambda args: ("DELETE", f"/api/domains/v1/portfolio/{args['domain']}/forwarding", None),
+        lambda response, args: {"domain": args["domain"], "deleted": "error" not in str(response)},
     ),
     "domain-nameservers-set": (
-        lambda a: ("PUT", f"/api/domains/v1/portfolio/{a['domain']}/nameservers", {"ns1": a["ns1"], "ns2": a["ns2"], **({} if not a.get("ns3") else {"ns3": a["ns3"]}), **({} if not a.get("ns4") else {"ns4": a["ns4"]})}),
-        lambda r, a: {"domain": a["domain"], "nameservers_set": "error" not in str(r)},
+        lambda args: ("PUT", f"/api/domains/v1/portfolio/{args['domain']}/nameservers", {"ns1": args["ns1"], "ns2": args["ns2"], **({} if not args.get("ns3") else {"ns3": args["ns3"]}), **({} if not args.get("ns4") else {"ns4": args["ns4"]})}),
+        lambda response, args: {"domain": args["domain"], "nameservers_set": "error" not in str(response)},
     ),
     # --- WHOIS ---
     "whois-list": (
-        lambda a: ("GET", f"/api/domains/v1/whois{'?tld=' + a['tld'] if a.get('tld') else ''}", None),
+        lambda args: ("GET", f"/api/domains/v1/whois{'?tld=' + args['tld'] if args.get('tld') else ''}", None),
         _list_fmt("profiles"),
     ),
     "whois-view": (
-        lambda a: ("GET", f"/api/domains/v1/whois/{a['id']}", None),
+        lambda args: ("GET", f"/api/domains/v1/whois/{args['id']}", None),
         _item_fmt("profile"),
     ),
     "whois-create": (
-        lambda a: ("POST", "/api/domains/v1/whois", {"tld": a["tld"], "entity_type": a["entity_type"], "country": a["country"], "whois_details": json.loads(a["whois_details"]) if isinstance(a["whois_details"], str) else a["whois_details"]}),
-        lambda r, a: {"tld": a["tld"], "created": r.get("id") if isinstance(r, dict) else None, "profile": r},
+        lambda args: ("POST", "/api/domains/v1/whois", {"tld": args["tld"], "entity_type": args["entity_type"], "country": args["country"], "whois_details": json.loads(args["whois_details"]) if isinstance(args["whois_details"], str) else args["whois_details"]}),
+        lambda response, args: {"tld": args["tld"], "created": response.get("id") if isinstance(response, dict) else None, "profile": response},
     ),
     "whois-delete": (
-        lambda a: ("DELETE", f"/api/domains/v1/whois/{a['id']}", None),
+        lambda args: ("DELETE", f"/api/domains/v1/whois/{args['id']}", None),
         _action_fmt("deleted"),
     ),
     "whois-usage": (
-        lambda a: ("GET", f"/api/domains/v1/whois/{a['id']}/usage", None),
-        lambda r, a: {"id": a["id"], "domains": r if isinstance(r, list) else r.get("domains", r)},
+        lambda args: ("GET", f"/api/domains/v1/whois/{args['id']}/usage", None),
+        lambda response, args: {"id": args["id"], "domains": response if isinstance(response, list) else response.get("domains", response)},
     ),
     # --- REFERENCE ---
     "datacenter-list": (
@@ -661,7 +777,7 @@ handlers: dict[str, Handler] = {
         _list_fmt("templates"),
     ),
     "template-view": (
-        lambda a: ("GET", f"/api/vps/v1/templates/{a['id']}", None),
+        lambda args: ("GET", f"/api/vps/v1/templates/{args['id']}", None),
         _item_fmt("template"),
     ),
 }
@@ -669,51 +785,46 @@ handlers: dict[str, Handler] = {
 
 # --- [ENTRY_POINT] ------------------------------------------------------------
 def main() -> int:
-    """CLI entry point — zero-arg defaults with optional args."""
-    args = sys.argv[1:] if len(sys.argv) > 1 else []
+    """CLI entry point -- zero-arg defaults with optional args.
 
-    if not args or args[0] in ("-h", "--help"):
-        print(json.dumps(_usage_error("No command specified"), indent=2))
-        return 1
+    Returns:
+        Exit code: 0 for success, 1 for failure.
+    """
+    match sys.argv[1:]:
+        case [] | ["-h" | "--help", *_]:
+            sys.stdout.write(json.dumps(_usage_error("No command specified"), indent=2) + "\n")
+            return 1
 
-    cmd = args[0]
-    if cmd not in COMMANDS:
-        print(json.dumps(_usage_error(f"Unknown command: {cmd}"), indent=2))
-        return 1
+        case [command, *rest] if command not in COMMANDS:
+            sys.stdout.write(json.dumps(_usage_error(f"Unknown command: {command}"), indent=2) + "\n")
+            return 1
 
-    # Parse optional flags
-    opts: Args = {}
-    i = 1
-    while i < len(args):
-        arg = args[i]
-        if arg.startswith("--"):
-            key = arg[2:].replace("-", "_")
-            key = "from_date" if key == "from" else "to_date" if key == "to" else key
-            opts[key] = (
-                args[i + 1] if i + 1 < len(args) and not args[i + 1].startswith("--") else True
+        case [command, *rest]:
+            opts = _parse_flags(tuple(rest))
+
+            if missing := _validate_args(command, opts):
+                sys.stdout.write(json.dumps(_usage_error(f"Missing required: {', '.join(missing)}", command), indent=2) + "\n")
+                return 1
+
+            if not os.environ.get(DEFAULTS.token_env):
+                sys.stdout.write(json.dumps({"status": "error", "message": f"Missing {DEFAULTS.token_env} environment variable"}, indent=2) + "\n")
+                return 1
+
+            builder, formatter = handlers[command]
+            method, path, body = builder(opts)
+            response = _api(method, path, body)
+
+            result = (
+                {"status": "success", **formatter(response, opts)}
+                if "error" not in response
+                else {"status": "error", "message": response.get("error", "API request failed"), **response}
             )
-            i += 1 if opts[key] is not True else 0
-        i += 1
+            sys.stdout.write(json.dumps(result, indent=2) + "\n")
+            return 0 if result["status"] == "success" else 1
 
-    if missing := _validate_args(cmd, opts):
-        print(json.dumps(_usage_error(f"Missing required: {', '.join(missing)}", cmd), indent=2))
-        return 1
-
-    if not os.environ.get(B.token_env):
-        print(json.dumps({"status": "error", "message": f"Missing {B.token_env} environment variable"}, indent=2))
-        return 1
-
-    builder, formatter = handlers[cmd]
-    method, path, body = builder(opts)
-    response = _api(method, path, body)
-
-    result = (
-        {"status": "success", **formatter(response, opts)}
-        if "error" not in response
-        else {"status": "error", "message": response.get("error", "API request failed"), **response}
-    )
-    print(json.dumps(result, indent=2))
-    return 0 if result["status"] == "success" else 1
+        case _:
+            sys.stdout.write(json.dumps(_usage_error("No command specified"), indent=2) + "\n")
+            return 1
 
 
 if __name__ == "__main__":

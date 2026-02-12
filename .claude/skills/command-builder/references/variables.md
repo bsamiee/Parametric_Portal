@@ -11,11 +11,14 @@
 
 <br>
 
-| [INDEX] | [SYNTAX]          | [BEHAVIOR]                  | [USE_WHEN]           |
-| :-----: | ----------------- | --------------------------- | -------------------- |
-|   [1]   | **`$ARGUMENTS`**  | All args as single string   | Free-form input      |
-|   [2]   | **`$1`, `$2`...** | Positional parameter access | Structured multi-arg |
-|   [3]   | **`${N:-val}`**   | Default if argument missing | Optional parameters  |
+| [INDEX] | [SYNTAX]                   | [BEHAVIOR]                          | [USE_WHEN]           |
+| :-----: | -------------------------- | ----------------------------------- | -------------------- |
+|   [1]   | **`$ARGUMENTS`**           | All args as single string           | Free-form input      |
+|   [2]   | **`$1`, `$2`...**          | Positional parameter (1-based)      | Structured multi-arg |
+|   [3]   | **`$ARGUMENTS[N]`**        | Indexed parameter (0-based)         | Indexed access       |
+|   [4]   | **`$N`**                   | Shorthand for `$ARGUMENTS[N]` (0-based) | Indexed shorthand |
+|   [5]   | **`${N:-val}`**            | Default if argument missing         | Optional parameters  |
+|   [6]   | **`${CLAUDE_SESSION_ID}`** | Current session identifier          | Session-specific     |
 
 **Examples:**
 ```markdown
@@ -23,8 +26,12 @@
 Fix issue #$ARGUMENTS following project standards.
 # /fix 123 high priority → "Fix issue #123 high priority..."
 
-# Positional — structured
+# Positional — structured (1-based)
 Compare @$1 with @$2.
+# /compare src/a.ts src/b.ts → includes both files
+
+# Indexed — structured (0-based)
+Compare @$ARGUMENTS[0] with @$ARGUMENTS[1].
 # /compare src/a.ts src/b.ts → includes both files
 
 # Defaults — optional
@@ -115,7 +122,7 @@ Analyze changes since last release.
 ```markdown
 ---
 description: Validate target against skill standards
-allowed-tools: Read, Task, TodoWrite
+allowed-tools: Read, Task, TaskCreate
 ---
 ## Skill Context
 @.claude/skills/style-standards/SKILL.md
@@ -145,18 +152,21 @@ allowed-tools: Read, Task, TodoWrite
 
 <br>
 
-| [INDEX] | [SCENARIO]                   | [PATTERN]       | [EXAMPLE]             |
-| :-----: | ---------------------------- | --------------- | --------------------- |
-|   [1]   | **Single free-form input**   | `$ARGUMENTS`    | Issue description     |
-|   [2]   | **Multiple structured args** | `$1`, `$2`...   | File paths, options   |
-|   [3]   | **Optional parameters**      | `${N:-default}` | Fallback values       |
-|   [4]   | **File analysis**            | `@path`         | Code review           |
-|   [5]   | **Dynamic context**          | `` !`cmd` ``    | Git info, environment |
-|   [6]   | **Validation authority**     | `@skill/...`    | Standards enforcement |
+| [INDEX] | [SCENARIO]                   | [PATTERN]              | [EXAMPLE]             |
+| :-----: | ---------------------------- | ---------------------- | --------------------- |
+|   [1]   | **Single free-form input**   | `$ARGUMENTS`           | Issue description     |
+|   [2]   | **Multiple structured args** | `$1`, `$2`...          | File paths, options   |
+|   [3]   | **Indexed access (0-based)** | `$ARGUMENTS[N]`        | Indexed parameters    |
+|   [4]   | **Indexed shorthand**        | `$0`, `$1`...          | Shorthand for `$ARGUMENTS[N]` |
+|   [5]   | **Optional parameters**      | `${N:-default}`        | Fallback values       |
+|   [6]   | **Session identifier**       | `${CLAUDE_SESSION_ID}` | Session-specific logs |
+|   [7]   | **File analysis**            | `@path`                | Code review           |
+|   [8]   | **Dynamic context**          | `` !`cmd` ``           | Git info, environment |
+|   [9]   | **Validation authority**     | `@skill/...`           | Standards enforcement |
 
 [CRITICAL]:
 - [ALWAYS] Choose ONE argument pattern per command.
-- [NEVER] Mix `$ARGUMENTS` with `$1-$N`—causes unpredictable substitution.
+- [NEVER] Mix `$ARGUMENTS` with positional `$1-$N`—causes unpredictable substitution.
 
 ---
 ## [6][ANTI_PATTERNS]

@@ -203,19 +203,19 @@ const import_ = (input: Codec.Input | readonly Codec.Input[], opts: {
                 const result: _Stream = opts.mode === 'file'
                     ? Stream.make(Either.right({ content: codec.content(item), ordinal: 1, type: assetType }))
                     : Codec.dispatch<_Stream>(codec.ext, item, {
-                            archive:    (detected, raw) => _archive(detected, raw, assetType),
-                            delimited:  (detected, raw) => _delimited(detected, raw, assetType),
-                            none:       (detected, raw) => {
-                                const content = detected.content(raw);
-                                const type = assetType === 'unknown' ? detected.ext : assetType;
-                                const tooLarge = !detected.binary && Codec.size(content) > limits.entryBytes;
-                                return Stream.make(tooLarge
-                                    ? Either.left(new Parse({ code: 'TOO_LARGE', ordinal: 1 }))
-                                    : Either.right({ content, mime: detected.mime, ordinal: 1, type }));
-                            },
-                            stream:     (detected, raw) => _streamed(detected, raw, assetType),
-                            tree:       (detected, raw) => _tree(detected, raw, assetType),
-                        });
+                        archive:    (detected, raw) => _archive(detected, raw, assetType),
+                        delimited:  (detected, raw) => _delimited(detected, raw, assetType),
+                        none:       (detected, raw) => {
+                            const content = detected.content(raw);
+                            const type = assetType === 'unknown' ? detected.ext : assetType;
+                            const tooLarge = !detected.binary && Codec.size(content) > limits.entryBytes;
+                            return Stream.make(tooLarge
+                                ? Either.left(new Parse({ code: 'TOO_LARGE', ordinal: 1 }))
+                                : Either.right({ content, mime: detected.mime, ordinal: 1, type }));
+                        },
+                        stream:     (detected, raw) => _streamed(detected, raw, assetType),
+                        tree:       (detected, raw) => _tree(detected, raw, assetType),
+                    });
                 return opts.format
                     ? result : Stream.fromEffect(Effect.logDebug('Transfer: auto-detected', { format: codec.ext })).pipe(Stream.flatMap(() => result));
             }),

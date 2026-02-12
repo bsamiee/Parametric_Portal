@@ -131,16 +131,25 @@ stopAndError outputs to error workflow; errorTrigger catches errors from other w
 
 <br>
 
-| [INDEX] | [TYPE]           | [KEY_PARAMETERS]                 |
-| :-----: | ---------------- | -------------------------------- |
-|   [1]   | `mcpTrigger`     | —                                |
-|   [2]   | `toolMcp`        | —                                |
-|   [3]   | `aiEvaluation`   | evaluationType, criteria         |
-|   [4]   | `modelSelector`  | models, selectionStrategy        |
-|   [5]   | `guardrails`     | rules, action                    |
-|   [6]   | `deepseek`       | model, credentials               |
+| [INDEX] | [TYPE]           | [KEY_PARAMETERS]                          | [ROLE]                                 |
+| :-----: | ---------------- | ----------------------------------------- | -------------------------------------- |
+|   [1]   | `mcpTrigger`     | —                                         | Expose workflow as MCP server          |
+|   [2]   | `toolMcp`        | —                                         | Call MCP server tools (legacy)         |
+|   [3]   | `mcpClient`      | sseEndpoint, credentials                  | Standalone MCP client node (2025)      |
+|   [4]   | `aiEvaluation`   | evaluationType, criteria                  | Evaluate AI output quality             |
+|   [5]   | `modelSelector`  | models, selectionStrategy                 | Dynamic model routing                  |
+|   [6]   | `guardrails`     | rules, action                             | AI output safety enforcement           |
+|   [7]   | `deepseek`       | model, credentials                        | DeepSeek model integration             |
 
-MCP nodes enable AI agent interoperability via Model Context Protocol.
+**MCP Architecture:**
+- `mcpTrigger` — Exposes n8n workflow as MCP server; external AI agents call workflow tools via MCP protocol.
+- `mcpClient` — Standalone node connecting to external MCP servers; discovers and calls remote tools dynamically. Connects via `ai_tool` to Agent. Supports OAuth 2.1 credential exchange.
+- `toolMcp` — Legacy MCP tool node; prefer `mcpClient` for new workflows.
+
+[CRITICAL]:
+- [ALWAYS] Use `mcpClient` (not `toolMcp`) for new MCP integrations — standalone node with OAuth support.
+- [ALWAYS] Connect `mcpClient` to Agent via `ai_tool` connection type.
+- [NEVER] Hardcode MCP tool schemas — `mcpClient` discovers tools at runtime from server.
 
 ---
 ## [11][MEMORY]

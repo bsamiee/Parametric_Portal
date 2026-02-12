@@ -14,7 +14,7 @@ Consolidated checklist for command-builder. SKILL.md §VALIDATION contains high-
 [VERIFY] Requirements captured:
 - [ ] Name follows verb-first convention (reject: run, do, execute, go).
 - [ ] Pattern explicitly stated (file|multi|agent|skill|free).
-- [ ] Argument style determined ($ARGUMENTS OR $1-$N).
+- [ ] Argument style determined ($ARGUMENTS OR $1-$N/$ARGUMENTS[N]).
 - [ ] Tool list scoped to pattern.
 
 ---
@@ -31,7 +31,7 @@ Consolidated checklist for command-builder. SKILL.md §VALIDATION contains high-
 [VERIFY] Plan compliance:
 - [ ] Tools match Pattern gate.
 - [ ] LOC estimate <125.
-- [ ] No $ARGUMENTS + $1-$N mixing.
+- [ ] No $ARGUMENTS + positional mixing.
 
 ---
 ## [3][ARTIFACT_GATE]
@@ -46,7 +46,7 @@ Consolidated checklist for command-builder. SKILL.md §VALIDATION contains high-
 - [ ] `allowed-tools` declares all required tools.
 
 [VERIFY] Variables:
-- [ ] No `$ARGUMENTS` + `$1-$N` mixing.
+- [ ] No `$ARGUMENTS` + positional (`$1-$N`/`$ARGUMENTS[N]`) mixing.
 - [ ] All `@path` have `Read` declared.
 - [ ] All `!command` have `Bash` declared.
 - [ ] Optional parameters use `${N:-default}` syntax.

@@ -170,36 +170,36 @@ const _ClusterEntityLive = _ClusterEntity.toLayer(Effect.gen(function* () {
     const activationLabels = MetricsService.label({ entity_type: 'Cluster' });
     const activatedAt = yield* Clock.currentTimeMillis;
     yield* Metric.increment(Metric.taggedWithLabels(metrics.cluster.entityActivations, activationLabels));
-        yield* Effect.addFinalizer(() => Clock.currentTimeMillis.pipe(
-            Effect.flatMap((deactivatedAt) => Effect.all([
-                Metric.increment(Metric.taggedWithLabels(metrics.cluster.entityDeactivations, activationLabels)),
-                Metric.update(Metric.taggedWithLabels(metrics.cluster.entityLifetime, activationLabels), Duration.millis(deactivatedAt - activatedAt)),
-            ], { discard: true })),
-        ));
+    yield* Effect.addFinalizer(() => Clock.currentTimeMillis.pipe(
+        Effect.flatMap((deactivatedAt) => Effect.all([
+            Metric.increment(Metric.taggedWithLabels(metrics.cluster.entityDeactivations, activationLabels)),
+            Metric.update(Metric.taggedWithLabels(metrics.cluster.entityLifetime, activationLabels), Duration.millis(deactivatedAt - activatedAt)),
+        ], { discard: true })),
+    ));
     return {
         clusterHealth: () => _rpcSpan('clusterHealth', Effect.all({
             entities: _readMetric(ClusterMetrics.entities), runners: _readMetric(ClusterMetrics.runners),
             runnersHealthy: _readMetric(ClusterMetrics.runnersHealthy), shards: _readMetric(ClusterMetrics.shards), singletons: _readMetric(ClusterMetrics.singletons),
         }).pipe(Effect.map((m) => ({ ...m, degraded: m.runnersHealthy < m.runners, healthy: m.runnersHealthy > 0 && m.singletons > 0 })))),
-            invalidate: ({ payload }) => _rpcSpan(
-                'invalidate.controlPlane',
-                Effect.succeed(payload).pipe(
-                    Effect.filterOrFail(
-                        ({ storeId, target }) => storeId.trim().length > 0 && target.trim().length > 0,
-                        () => InfraError.from('InvalidPattern', `${payload.storeId}:${payload.target}`),
-                    ),
-                    Effect.tap(({ mode, storeId, target }) => Effect.logDebug('Cluster invalidation RPC', { mode, storeId, target })),
-                    Effect.flatMap(({ mode, storeId, target }) =>
-                        (mode === 'key' ? CacheService.invalidate(storeId, target) : CacheService.invalidatePattern(storeId, target)).pipe(
-                            Effect.filterOrFail(
-                                (count) => Number.isFinite(count) && count >= 0,
-                                () => InfraError.from('StoreUnavailable', `${storeId}:${target}`),
-                            ),
-                            Effect.map((count) => ({ count, mode, target })),
-                            Effect.tap((result) => Effect.logDebug('Cluster invalidation RPC completed', result)),
-                        )),
+        invalidate: ({ payload }) => _rpcSpan(
+            'invalidate.controlPlane',
+            Effect.succeed(payload).pipe(
+                Effect.filterOrFail(
+                    ({ storeId, target }) => storeId.trim().length > 0 && target.trim().length > 0,
+                    () => InfraError.from('InvalidPattern', `${payload.storeId}:${payload.target}`),
                 ),
+                Effect.tap(({ mode, storeId, target }) => Effect.logDebug('Cluster invalidation RPC', { mode, storeId, target })),
+                Effect.flatMap(({ mode, storeId, target }) =>
+                    (mode === 'key' ? CacheService.invalidate(storeId, target) : CacheService.invalidatePattern(storeId, target)).pipe(
+                        Effect.filterOrFail(
+                            (count) => Number.isFinite(count) && count >= 0,
+                            () => InfraError.from('StoreUnavailable', `${storeId}:${target}`),
+                        ),
+                        Effect.map((count) => ({ count, mode, target })),
+                        Effect.tap((result) => Effect.logDebug('Cluster invalidation RPC completed', result)),
+                    )),
             ),
+        ),
         leaderInfo: ({ payload }) => _rpcSpan('leaderInfo', ShardingConfig.ShardingConfig.pipe(
             Effect.map((config) => ({
                 runnerId: Option.getOrUndefined(Option.map(config.runnerAddress, (a) => a.toString())),
@@ -345,20 +345,20 @@ class ClusterService extends Effect.Service<ClusterService>()('server/Cluster', 
                 return next.done || n >= limit ? Option.none() : Option.some([next.value, n + 1] as const);
             }) };
         }),
-            singleton: <E, R, StateSchema extends S.Schema.Any = never>(
-                name: string,
-                run: (stateRef: Ref.Ref<S.Schema.Type<StateSchema> | undefined>) => Effect.Effect<void, E, R>,
-                options?: {
-                readonly shardGroup?: string;
-                readonly state?: {
-                    readonly schema: StateSchema;
-                    readonly initial: S.Schema.Type<StateSchema>;
-                    readonly version?: number;
-                    readonly migrate?: (oldState: unknown, oldVersion: number) => S.Schema.Type<StateSchema>;
-                };
-                readonly onBecomeLeader?: Effect.Effect<void, never, R>;
-                readonly onLoseLeadership?: Effect.Effect<void, never, R>;
-            },
+        singleton: <E, R, StateSchema extends S.Schema.Any = never>(
+            name: string,
+            run: (stateRef: Ref.Ref<S.Schema.Type<StateSchema> | undefined>) => Effect.Effect<void, E, R>,
+            options?: {
+            readonly shardGroup?: string;
+            readonly state?: {
+                readonly schema: StateSchema;
+                readonly initial: S.Schema.Type<StateSchema>;
+                readonly version?: number;
+                readonly migrate?: (oldState: unknown, oldVersion: number) => S.Schema.Type<StateSchema>;
+            };
+            readonly onBecomeLeader?: Effect.Effect<void, never, R>;
+            readonly onLoseLeadership?: Effect.Effect<void, never, R>;
+        },
         ) => {
             const stateVersion = options?.state?.version ?? _CONFIG.singleton.schemaVersion;
             const stateKey = _versionedStateKey(name, stateVersion);
@@ -372,56 +372,56 @@ class ClusterService extends Effect.Service<ClusterService>()('server/Cluster', 
                     const stateLabels = MetricsService.label({ singleton: name });
                     const taggedOperations = Metric.taggedWithLabels(metrics.singleton.stateOperations, stateLabels);
                     const taggedErrors = Metric.taggedWithLabels(metrics.singleton.stateErrors, stateLabels);
-                        yield* Effect.annotateLogsScoped({ 'service.name': `singleton.${name}` });
-                        yield* options?.onBecomeLeader ?? Effect.void;
-                        yield* Effect.addFinalizer(() => options?.onLoseLeadership ?? Effect.void);
-                        const stateRef = yield* Option.match(Option.fromNullable(options?.state), {
-                            onNone: () => Ref.make(undefined),
-                            onSome: (stateConfig) => Effect.gen(function* () {
-                                const database = yield* DatabaseService;
-                                const loaded = yield* database.kvStore.getJson(stateKey, stateConfig.schema).pipe(
-                                    Effect.tap(() => Metric.increment(taggedOperations)),
-                                Effect.flatMap(Option.match({
-                                    onNone: () => stateVersion > _CONFIG.singleton.schemaVersion
-                                        ? Effect.iterate(
-                                            { candidateVersion: stateVersion - 1, loaded: Option.none<{ readonly value: unknown; readonly version: number }>() },
-                                            {
-                                                body: ({ candidateVersion }) => database.kvStore.getJson(_versionedStateKey(name, candidateVersion), S.Unknown).pipe(
-                                                    Effect.map((found) => ({ candidateVersion: candidateVersion - 1, loaded: Option.map(found, (value) => ({ value, version: candidateVersion })) })),
-                                                ),
-                                                while: ({ candidateVersion, loaded }) => Option.isNone(loaded) && candidateVersion >= _CONFIG.singleton.schemaVersion,
-                                            },
-                                        ).pipe(
-                                            Effect.flatMap(({ loaded }) => Option.match(loaded, {
-                                                onNone: () => Effect.succeed(stateConfig.initial),
-                                                onSome: ({ value, version }) => Option.match(Option.fromNullable(stateConfig.migrate), {
-                                                    onNone: () => Effect.succeed(stateConfig.initial),
-                                                    onSome: (migrate) => Effect.sync(() => migrate(value, version)),
-                                                }),
-                                            })),
-                                        )
-                                        : Effect.succeed(stateConfig.initial),
-                                    onSome: Effect.succeed,
-                                })),
-                                Effect.retry(_retrySchedule(_CONFIG.retry.maxAttempts.state)),
-                                Effect.catchAllCause((cause) => Metric.increment(taggedErrors).pipe(
-                                    Effect.zipRight(Effect.logWarning('State load failed, using initial', { cause })),
-                                    Effect.as(stateConfig.initial),
-                                )),
-                                );
-                                const reference = yield* Ref.make(loaded);
-                                yield* Effect.addFinalizer(() => Ref.get(reference).pipe(
-                                    Effect.flatMap((value) => database.kvStore.setJson(stateKey, value, stateConfig.schema)),
-                                    Effect.retry(_retrySchedule(_CONFIG.retry.maxAttempts.state)),
+                    yield* Effect.annotateLogsScoped({ 'service.name': `singleton.${name}` });
+                    yield* options?.onBecomeLeader ?? Effect.void;
+                    yield* Effect.addFinalizer(() => options?.onLoseLeadership ?? Effect.void);
+                    const stateRef = yield* Option.match(Option.fromNullable(options?.state), {
+                        onNone: () => Ref.make(undefined),
+                        onSome: (stateConfig) => Effect.gen(function* () {
+                            const database = yield* DatabaseService;
+                            const loaded = yield* database.kvStore.getJson(stateKey, stateConfig.schema).pipe(
                                 Effect.tap(() => Metric.increment(taggedOperations)),
-                                Effect.catchAllCause((cause) => Metric.increment(taggedErrors).pipe(
-                                    Effect.zipRight(Effect.logError('State persist failed - potential data loss', { cause, singleton: name })),
-                                    Effect.zipRight(Effect.die(SingletonError.from('StatePersistFailed', name, cause))),
-                                )),
-                            ));
-                            return reference;
-                        }),
-                    });
+                            Effect.flatMap(Option.match({
+                                onNone: () => stateVersion > _CONFIG.singleton.schemaVersion
+                                    ? Effect.iterate(
+                                        { candidateVersion: stateVersion - 1, loaded: Option.none<{ readonly value: unknown; readonly version: number }>() },
+                                        {
+                                            body: ({ candidateVersion }) => database.kvStore.getJson(_versionedStateKey(name, candidateVersion), S.Unknown).pipe(
+                                                Effect.map((found) => ({ candidateVersion: candidateVersion - 1, loaded: Option.map(found, (value) => ({ value, version: candidateVersion })) })),
+                                            ),
+                                            while: ({ candidateVersion, loaded }) => Option.isNone(loaded) && candidateVersion >= _CONFIG.singleton.schemaVersion,
+                                        },
+                                    ).pipe(
+                                        Effect.flatMap(({ loaded }) => Option.match(loaded, {
+                                            onNone: () => Effect.succeed(stateConfig.initial),
+                                            onSome: ({ value, version }) => Option.match(Option.fromNullable(stateConfig.migrate), {
+                                                onNone: () => Effect.succeed(stateConfig.initial),
+                                                onSome: (migrate) => Effect.sync(() => migrate(value, version)),
+                                            }),
+                                        })),
+                                    )
+                                    : Effect.succeed(stateConfig.initial),
+                                onSome: Effect.succeed,
+                            })),
+                            Effect.retry(_retrySchedule(_CONFIG.retry.maxAttempts.state)),
+                            Effect.catchAllCause((cause) => Metric.increment(taggedErrors).pipe(
+                                Effect.zipRight(Effect.logWarning('State load failed, using initial', { cause })),
+                                Effect.as(stateConfig.initial),
+                            )),
+                            );
+                            const reference = yield* Ref.make(loaded);
+                            yield* Effect.addFinalizer(() => Ref.get(reference).pipe(
+                                Effect.flatMap((value) => database.kvStore.setJson(stateKey, value, stateConfig.schema)),
+                                Effect.retry(_retrySchedule(_CONFIG.retry.maxAttempts.state)),
+                            Effect.tap(() => Metric.increment(taggedOperations)),
+                            Effect.catchAllCause((cause) => Metric.increment(taggedErrors).pipe(
+                                Effect.zipRight(Effect.logError('State persist failed - potential data loss', { cause, singleton: name })),
+                                Effect.zipRight(Effect.die(SingletonError.from('StatePersistFailed', name, cause))),
+                            )),
+                        ));
+                        return reference;
+                    }),
+                });
                     const migrationDuration = Duration.millis((yield* Clock.currentTimeMillis) - leaderTimestamp);
                     yield* Metric.set(Metric.taggedWithLabels(metrics.singleton.migrationDuration, stateLabels), Duration.toSeconds(migrationDuration));
                     yield* Effect.when(

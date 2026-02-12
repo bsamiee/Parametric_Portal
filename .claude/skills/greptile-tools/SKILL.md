@@ -15,18 +15,19 @@ description: >-
 
 <br>
 
-Query indexed repositories via Greptile API. Defaults to current repo.
+Query indexed repositories via Greptile API v2. Defaults to current repo.
 
-[IMPORTANT] Repository must be indexed before querying. Check `status` first.
+[IMPORTANT] Repository must be indexed before querying. Check `status` first. Supports natural language queries against a comprehensive code graph with file/function/class references.
 
 ---
 ## [1][COMMANDS]
 
-| [CMD]   | [ARGS]                   | [PURPOSE]                          |
-| ------- | ------------------------ | ---------------------------------- |
-| index   | —                        | Trigger repository indexing        |
-| status  | —                        | Check indexing progress/completion |
-| query   | `<question> [genius]`    | Natural language codebase Q&A      |
+| [CMD]    | [ARGS]                   | [PURPOSE]                          |
+| -------- | ------------------------ | ---------------------------------- |
+| index    | --                       | Trigger repository indexing        |
+| status   | --                       | Check indexing progress/completion  |
+| query    | `<question> [genius]`    | Natural language codebase Q&A      |
+| search   | `<question>`             | Code search (files only, no answer)|
 
 ---
 ## [2][USAGE]
@@ -43,6 +44,9 @@ uv run .claude/skills/greptile-tools/scripts/greptile.py query "How does authent
 
 # Deep analysis with genius mode
 uv run .claude/skills/greptile-tools/scripts/greptile.py query "Explain Effect pipeline patterns" genius
+
+# Code search (files/functions only, no generated answer)
+uv run .claude/skills/greptile-tools/scripts/greptile.py search "rate limiting implementation"
 ```
 
 ---
@@ -50,13 +54,19 @@ uv run .claude/skills/greptile-tools/scripts/greptile.py query "Explain Effect p
 
 **index**: (no arguments)
 - Triggers indexing on default repo (bsamiee/Parametric_Portal)
+- Set `reload=True` to force re-index
 
 **status**: (no arguments)
-- Returns indexing status, progress, and readiness
+- Returns indexing status, files processed count, SHA, readiness
 
 **query**: `<question> [genius]`
 - `question` — Natural language query (required)
-- `genius` — Pass literal `genius` for deep analysis mode
+- `genius` — Pass literal `genius` for deep analysis mode (slower, more thorough)
+- Returns: answer text + source file references with line ranges
+
+**search**: `<question>`
+- `question` — Natural language code search (required)
+- Returns: matching files/functions/classes (no generated answer)
 
 ---
 ## [4][OUTPUT]
@@ -66,7 +76,16 @@ Commands return: `{"status": "success|error", ...}`.
 | [INDEX] | [CMD]    | [RESPONSE]                                          |
 | :-----: | -------- | --------------------------------------------------- |
 |   [1]   | `index`  | `{repo, message}`                                   |
-|   [2]   | `status` | `{repo, indexing, sha, progress, ready}`            |
+|   [2]   | `status` | `{repo, indexing, sha, progress, ready}`             |
 |   [3]   | `query`  | `{query, answer, sources: [{file, lines}]}`         |
+|   [4]   | `search` | `{query, results: [{file, lines, summary}]}`        |
 
-Error responses include `retryable: bool` for transient failures.
+Error responses include `retryable: bool` for transient failures (5xx, 429).
+
+---
+## [5][ENVIRONMENT]
+
+| [VAR]            | [REQUIRED] | [DESCRIPTION]                          |
+| ---------------- | ---------- | -------------------------------------- |
+| `GREPTILE_TOKEN` | Yes        | Greptile API bearer token              |
+| `GITHUB_TOKEN`   | Yes        | GitHub token for repo access (or `GH_TOKEN`) |

@@ -4,9 +4,22 @@ description: >-
   ${capability-statement}. Use proactively when ${scenario-1},
   ${scenario-2}, or ${scenario-3}.
 tools: ${tool-list}
+# disallowedTools: ${denylist}
 model: ${model-choice|inherit}
-# skills: ${skill-name}
-# color: "#RRGGBB"
+# permissionMode: ${default|acceptEdits|delegate|dontAsk|bypassPermissions|plan}
+# maxTurns: ${number}
+# skills: ${skill-names}
+# memory: ${user|project|local}
+# mcpServers:
+#   ${server-name}:
+#     command: "${executable}"
+#     args: ["${arg1}", "${arg2}"]
+# hooks:
+#   PreToolUse:
+#     - matcher: "${tool-pattern}"
+#       hooks:
+#         - type: command
+#           command: "${script-path}"
 ---
 
 ${role-line-imperative-single-sentence}.

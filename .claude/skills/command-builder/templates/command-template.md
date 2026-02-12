@@ -51,9 +51,10 @@ VARIABLE REFERENCE:
 
 Arguments:
   $ARGUMENTS       → All args as string (free-form input)
-  $1, $2...        → Positional parameters (structured args)
+  $1, $2...        → Positional parameters (1-based)
+  $ARGUMENTS[N]    → Indexed parameters (0-based)
   ${N:-default}    → Fallback value if arg missing
-  [CRITICAL] Select $ARGUMENTS OR $1-$N — never mix.
+  [CRITICAL] Select $ARGUMENTS OR positional — never mix.
 
 Files:
   @path            → Include file contents

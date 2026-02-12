@@ -1,0 +1,114 @@
+# Good PromQL Query Examples
+# Prometheus 3.10+ (native histograms stable 3.8+, no feature flag 3.9+)
+
+# --- RATE ON COUNTERS ---
+rate(http_requests_total{job="api-service", status="200"}[5m])
+histogram_quantile(0.95, sum by (job, le) (rate(http_request_duration_seconds_bucket{job="api"}[5m])))
+(rate(http_requests_total{job="api", status=~"5.."}[5m]) / rate(http_requests_total{job="api"}[5m])) * 100
+increase(http_requests_total{job="api"}[1h])
+
+# --- AGGREGATIONS WITH GROUPING ---
+sum by (job, path) (rate(http_requests_total[5m]))
+avg without (pod) (node_memory_usage_bytes{job="node-exporter"})
+count by (job) (up{job="api-service"})
+topk(5, sum by (service) (rate(http_requests_total[5m])))
+
+# --- GAUGE METRICS ---
+node_memory_usage_bytes{instance="prod-1"}
+avg_over_time(node_memory_usage_bytes{job="node-exporter"}[5m])
+max_over_time(node_cpu_usage_percent{instance="prod-1"}[1h])
+
+# --- SPECIFIC LABEL FILTERS ---
+up{job="prometheus", instance="localhost:9090"}
+http_requests_total{job="api-service", environment="production", datacenter="us-east-1"}
+
+# --- COMPLEX QUERIES ---
+# Success rate
+sum by (job) (rate(http_requests_total{status=~"2.."}[5m])) / sum by (job) (rate(http_requests_total[5m]))
+# Memory percentage
+(node_memory_usage_bytes{job="node-exporter"} / node_memory_total_bytes{job="node-exporter"}) * 100
+# Disk fill prediction (range >= 10m for reliable linear regression)
+predict_linear(node_filesystem_avail_bytes{mountpoint="/"}[1h], 4 * 3600)
+# Second derivative
+deriv(rate(http_requests_total{job="api"}[5m])[10m:1m])
+
+# --- PROPER RANGES ---
+rate(http_requests_total{job="api"}[2m])
+irate(http_requests_total{job="api"}[2m])
+
+# --- HISTOGRAM (classic) ---
+rate(http_request_duration_seconds_sum{job="api"}[5m]) / rate(http_request_duration_seconds_count{job="api"}[5m])
+
+# --- NATIVE HISTOGRAM (3.8+ stable, no le in by()) ---
+# P95 -- no _bucket suffix, no le label needed
+histogram_quantile(0.95, sum by (job) (rate(http_request_duration_seconds{job="api"}[5m])))
+# Average -- single function instead of _sum/_count division
+histogram_avg(rate(http_request_duration_seconds{job="api"}[5m]))
+# Latency SLO -- fraction of requests completing under 200ms threshold
+histogram_fraction(0, 0.2, rate(http_request_duration_seconds{job="api"}[5m])) * 100
+# Standard deviation
+histogram_stddev(rate(http_request_duration_seconds{job="api"}[5m]))
+# Variance
+histogram_stdvar(rate(http_request_duration_seconds{job="api"}[5m]))
+# Request count from native histogram
+histogram_count(rate(http_request_duration_seconds{job="api"}[5m]))
+# Sum of observations from native histogram
+histogram_sum(rate(http_request_duration_seconds{job="api"}[5m]))
+
+# --- TIME-BASED ---
+rate(http_requests_total{job="api"}[5m]) / rate(http_requests_total{job="api"}[5m] offset 1h)
+topk(5, rate(http_requests_total[1h] @ end()))
+
+# --- JOINS ---
+# Manual info metric join with group_left
+rate(http_requests_total[5m]) * on (job, instance) group_left (version) service_info
+# info() experimental (3.0+) -- automatic metadata enrichment
+info(rate(http_requests_total{job="api"}[5m]))
+# Selective info enrichment -- only K8s labels
+info(rate(http_requests_total{job="api"}[5m]), {k8s_cluster=~".+"})
+
+# --- SUBQUERIES ---
+max_over_time(rate(http_requests_total{job="api"}[5m])[30m:1m])
+
+# --- BOOLEAN ---
+(rate(http_requests_total{status=~"5.."}[5m]) > 0.1) and (rate(http_requests_total[5m]) < 10)
+(node_memory_usage_percent > 90) unless (maintenance_mode{job="node-exporter"} == 1)
+
+# --- ABSENT ---
+absent(up{job="critical-service"})
+absent_over_time(up{job="critical-service"}[5m])
+
+# --- ANOMALY DETECTION (3.5+ experimental, promql-experimental-functions) ---
+# MAD-based z-score: flags values > 3 median absolute deviations from 1h median
+node_cpu_usage_percent > avg_over_time(node_cpu_usage_percent[1h]) + 3 * mad_over_time(node_cpu_usage_percent[1h])
+
+# --- EXPERIMENTAL TIMESTAMP FUNCTIONS (3.5+/3.7+) ---
+# Time of last sample (staleness detection)
+time() - ts_of_last_over_time(up{job="api"}[5m]) > 120
+# First value in window (value drift detection)
+first_over_time(node_memory_usage_bytes{job="node-exporter"}[1h])
+# Timestamp of peak value
+ts_of_max_over_time(node_cpu_usage_percent{job="node-exporter"}[1h])
+
+# --- DEPRECATED FUNCTION REPLACEMENT (3.0+) ---
+# CORRECT: double_exponential_smoothing (replaces holt_winters)
+double_exponential_smoothing(node_cpu_usage_percent{job="node-exporter"}[10m], 0.5, 0.5)
+
+# --- SORTING (3.5+) ---
+sort_by_label(rate(http_requests_total{job="api"}[5m]), "endpoint")
+sort_by_label_desc(sum by (job) (rate(http_requests_total[5m])), "job")
+
+# --- CARDINALITY CONTROL (3.0+ experimental) ---
+# Sample N series for exploration (deterministic, hash-based)
+limitk(10, http_requests_total{job="api"})
+# Deterministic ~10% sample
+limit_ratio(0.1, rate(http_requests_total{job="api"}[5m]))
+# Complement: remaining ~90% (precisely those NOT returned by 0.1)
+limit_ratio(-0.9, rate(http_requests_total{job="api"}[5m]))
+
+# --- UTF-8 METRIC NAMES (3.0+ -- OTEL compatibility) ---
+# OTEL-originated metrics use dot-separated names; quoted syntax required
+sum(rate({"http.server.request.duration", job="api"}[5m]))
+histogram_quantile(0.95, sum by (job) (rate({"http.server.request.duration", job="api"}[5m])))
+# Anchored regex for prefix optimization on UTF-8 labels
+{"http.server.request.duration", "http.route"=~"^/api/.*"}

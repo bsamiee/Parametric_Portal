@@ -12,5 +12,13 @@
 |   [5]   | **`ALWAYS`**    |      **90%** | **Style Convention.** Consistency.                        |
 |   [6]   | **`[VERIFY]`**  |  **Agentic** | **Self-Correction.** Triggers agent verification.         |
 
+**Conditional Keywords:**
+
+| [INDEX] | [KEYWORD]      | [COMPLIANCE] | [DEFINITION]                                                 |
+| :-----: | :------------- | -----------: | :----------------------------------------------------------- |
+|   [1]   | **`PREFER`**   |      **80%** | **Soft Convention.** Use unless explicit override warranted.  |
+|   [2]   | **`ALLOW`**    |      **70%** | **Permitted Deviation.** Acceptable when conditions are met. |
+|   [3]   | **`CONDITIONAL`** |   **65%** | **Context-Dependent.** Requires justification.               |
+
 [IMPORTANT] Max 2-3 keywords per section. Diminishing returns after 5.<br>
 [IMPORTANT] Positive framing outperforms negative by 8-15%. Negation blindness causes 39% accuracy.

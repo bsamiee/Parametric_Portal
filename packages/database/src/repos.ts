@@ -206,8 +206,8 @@ const makeKvStoreRepo = Effect.gen(function* () {
     return { ...repository,
         byKey: (key: string) => repository.by('byKey', key),
         deleteByPrefix: (prefix: string) => repository.fn('delete_kv_by_prefix', { prefix }),
-            getJson: <A, I, R>(key: string, schema: S.Schema<A, I, R>) => repository.by('byKey', key).pipe(Effect.flatMap(repository.json.decode('value', schema))),
-            setJson: <A, I, R>(key: string, jsonValue: A, schema: S.Schema<A, I, R>, expiresAt?: Date) => repository.json.encode(schema)(jsonValue).pipe(Effect.flatMap((encoded) => repository.upsert({ expiresAt, key, value: encoded }))),
+        getJson: <A, I, R>(key: string, schema: S.Schema<A, I, R>) => repository.by('byKey', key).pipe(Effect.flatMap(repository.json.decode('value', schema))),
+        setJson: <A, I, R>(key: string, jsonValue: A, schema: S.Schema<A, I, R>, expiresAt?: Date) => repository.json.encode(schema)(jsonValue).pipe(Effect.flatMap((encoded) => repository.upsert({ expiresAt, key, value: encoded }))),
     };
 });
 const makeSystemRepo = Effect.gen(function* () {
@@ -224,8 +224,8 @@ const makeSystemRepo = Effect.gen(function* () {
             },
             list_event_journal_entries: {
                 args: ['sinceSequenceId', 'sinceTimestamp', 'eventType', 'batchSize'],
-                    params: S.Struct({ batchSize: S.Number, eventType: S.NullOr(S.String), sinceSequenceId: S.String, sinceTimestamp: S.NullOr(S.Number) }),
-                    schema: S.Struct({ payload: S.String, primaryKey: S.String }),
+                params: S.Struct({ batchSize: S.Number, eventType: S.NullOr(S.String), sinceSequenceId: S.String, sinceTimestamp: S.NullOr(S.Number) }),
+                schema: S.Struct({ payload: S.String, primaryKey: S.String }),
                 },
         },
         fnTyped: {
@@ -275,26 +275,26 @@ class DatabaseService extends Effect.Service<DatabaseService>()('database/Databa
             ioConfig: Effect.fn('db.ioConfig')(system.dbIoConfig),
             ioStats: Effect.fn('db.ioStats')(system.dbIoStats),
         } as const;
-            return {
-                apiKeys, apps, assets, audit, eventJournal: {
-                    byPrimaryKey: (primaryKey: string) => system.eventJournalByPrimaryKey(primaryKey),
-                    purge: (olderThanDays: number) => system.eventJournalPurge(olderThanDays),
-                    replay: (input: { batchSize: number; eventType?: string; sinceSequenceId: string; sinceTimestamp?: number }) => system.eventJournalReplay(input),
-                }, eventOutbox: { count: system.eventOutboxCount() },
-                jobDlq, jobs, kvStore,
-                listCronJobs: Effect.fn('db.listCronJobs')(() => system.listCronJobs()),
-                listPartitionHealth: Effect.fn('db.listPartitionHealth')((parentTable = 'public.sessions') => system.listPartitionHealth(parentTable)),
-                listStatKcache: Effect.fn('db.listStatKcache')((limit = 100) => system.listStatKcache(limit)),
-                listStatStatements: Effect.fn('db.listStatStatements')((limit = 100) => system.listStatStatements(limit)),
-                listWalInspect: Effect.fn('db.listWalInspect')((limit = 100) => system.listWalInspect(limit)),
-                mfaSecrets,
-                monitoring, notifications, oauthAccounts, permissions,
-                reconcileMaintenanceCronJobs: Effect.fn('db.reconcileMaintenanceCronJobs')(() => system.reconcileMaintenanceCronJobs()),
-                search: searchRepo, sessions,
-                system: { purgeTenantCascade: (appId: string) => system.purgeTenantCascade(appId) },
-                users, webauthnCredentials, withTransaction: sqlClient.withTransaction,
-            };
-        }),
+        return {
+            apiKeys, apps, assets, audit, eventJournal: {
+                byPrimaryKey: (primaryKey: string) => system.eventJournalByPrimaryKey(primaryKey),
+                purge: (olderThanDays: number) => system.eventJournalPurge(olderThanDays),
+                replay: (input: { batchSize: number; eventType?: string; sinceSequenceId: string; sinceTimestamp?: number }) => system.eventJournalReplay(input),
+            }, eventOutbox: { count: system.eventOutboxCount() },
+            jobDlq, jobs, kvStore,
+            listCronJobs: Effect.fn('db.listCronJobs')(() => system.listCronJobs()),
+            listPartitionHealth: Effect.fn('db.listPartitionHealth')((parentTable = 'public.sessions') => system.listPartitionHealth(parentTable)),
+            listStatKcache: Effect.fn('db.listStatKcache')((limit = 100) => system.listStatKcache(limit)),
+            listStatStatements: Effect.fn('db.listStatStatements')((limit = 100) => system.listStatStatements(limit)),
+            listWalInspect: Effect.fn('db.listWalInspect')((limit = 100) => system.listWalInspect(limit)),
+            mfaSecrets,
+            monitoring, notifications, oauthAccounts, permissions,
+            reconcileMaintenanceCronJobs: Effect.fn('db.reconcileMaintenanceCronJobs')(() => system.reconcileMaintenanceCronJobs()),
+            search: searchRepo, sessions,
+            system: { purgeTenantCascade: (appId: string) => system.purgeTenantCascade(appId) },
+            users, webauthnCredentials, withTransaction: sqlClient.withTransaction,
+        };
+    }),
 }) {}
 
 // --- [NAMESPACE] -------------------------------------------------------------

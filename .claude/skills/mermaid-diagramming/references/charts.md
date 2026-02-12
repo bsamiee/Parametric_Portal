@@ -415,17 +415,22 @@ gantt
 |  [15]   | `todayLineColor`        | Today marker                   |
 
 **Theme syntax:**
+```yaml
+---
+config:
+  theme: base
+  themeVariables:
+    activeTaskBkgColor: "#00008b"
+    activeTaskBorderColor: "#d3d3d3"
+    critBkgColor: "#800080"
+    doneTaskBkgColor: "#808080"
+    excludeBkgColor: "#eeeeee"
+    gridColor: "#d3d3d3"
+    todayLineColor: "#ff0000"
+---
 ```
-%%{init: {'theme': 'base', 'themeVariables': {
-  'activeTaskBkgColor': '#darkblue',
-  'activeTaskBorderColor': '#lightgrey',
-  'critBkgColor': '#purple',
-  'doneTaskBkgColor': '#grey',
-  'excludeBkgColor': '#eeeeee',
-  'gridColor': '#lightgrey',
-  'todayLineColor': '#red'
-}}}%%
-```
+
+[CRITICAL] `%%{init:...}%%` deprecated v10.5.0; use YAML frontmatter exclusively.
 
 ---
 ### [4.2][TREEMAP]

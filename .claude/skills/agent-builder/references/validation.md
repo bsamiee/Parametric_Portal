@@ -24,12 +24,12 @@ Operational verification procedures for agent-builder. SKILL.md §VALIDATION con
 <br>
 
 [VERIFY] Plan synthesis complete:
-- [ ] Frontmatter fields defined.
+- [ ] Frontmatter fields defined (all 11 fields considered).
 - [ ] Prompt sections outlined.
 - [ ] Trigger coverage confirmed.
 
 [VERIFY] Plan compliance:
-- [ ] Tools match Type gate.
+- [ ] Tools match Type gate (or use `disallowedTools` denylist).
 - [ ] Model matches Type gate.
 - [ ] Description includes "Use when" + 3+ triggers.
 
@@ -47,6 +47,15 @@ Operational verification procedures for agent-builder. SKILL.md §VALIDATION con
 - [ ] `description`: includes "Use when" + 3+ trigger scenarios.
 - [ ] `description`: catch-all phrase for broader applicability.
 - [ ] Multi-line: folded scalar `>-` only—never `|`.
+- [ ] `tools`: allowlist matches agent type (or omit for full access).
+- [ ] `disallowedTools`: denylist removes from inherited/allowed set.
+- [ ] `model`: valid enum (`haiku`, `sonnet`, `opus`, `inherit`).
+- [ ] `permissionMode`: valid enum if present (`default`, `acceptEdits`, `delegate`, `dontAsk`, `bypassPermissions`, `plan`).
+- [ ] `maxTurns`: positive integer if present.
+- [ ] `skills`: valid skill names if present.
+- [ ] `memory`: valid enum if present (`user`, `project`, `local`).
+- [ ] `mcpServers`: valid nested YAML with command/args if present.
+- [ ] `hooks`: valid nested YAML with event/matcher/hook structure if present.
 
 ---
 ## [4][PROMPT_GATE]
@@ -61,6 +70,8 @@ Operational verification procedures for agent-builder. SKILL.md §VALIDATION con
 - [ ] Output spec: explicit format defined.
 - [ ] No verbose introductions or explanations.
 - [ ] Stateless operation—no prior context assumptions.
+
+[IMPORTANT] Subagents receive ONLY their system prompt (markdown body) plus environment details. They do NOT receive the full Claude Code system prompt.
 
 ---
 ## [5][ARTIFACT_GATE]
@@ -78,6 +89,7 @@ Operational verification procedures for agent-builder. SKILL.md §VALIDATION con
 - [ ] Sections: H2 with numbered sigils.
 - [ ] Constraints: [CRITICAL]/[IMPORTANT] markers present.
 - [ ] Output spec: explicit format defined.
+- [ ] Location: `.claude/agents/` (project) or `~/.claude/agents/` (user).
 
 ---
 ## [6][ERROR_SYMPTOMS]
@@ -85,16 +97,20 @@ Operational verification procedures for agent-builder. SKILL.md §VALIDATION con
 
 <br>
 
-| [SYMPTOM]             | [CAUSE]                 | [FIX]                      |
-| --------------------- | ----------------------- | -------------------------- |
-| YAML parse failure    | Tab character           | Replace with spaces        |
-| Frontmatter ignored   | Missing delimiter       | Add `---` before and after |
-| Registration fails    | Name mismatch           | Match filename exactly     |
-| Discovery fails       | Vague description       | Add "Use when" + triggers  |
-| Agent not invoked     | No catch-all phrase     | Add "or related tasks"     |
-| Wrong model selected  | Type gate mismatch      | Match model to type        |
-| Tool permission error | Missing tool in list    | Add required tool          |
-| Indexing error        | Wrong multi-line scalar | Use `>-` not `\|`          |
+| [SYMPTOM]                | [CAUSE]                    | [FIX]                            |
+| ------------------------ | -------------------------- | -------------------------------- |
+| YAML parse failure       | Tab character              | Replace with spaces              |
+| Frontmatter ignored      | Missing delimiter          | Add `---` before and after       |
+| Registration fails       | Name mismatch              | Match filename exactly           |
+| Discovery fails          | Vague description          | Add "Use when" + triggers        |
+| Agent not invoked        | No catch-all phrase        | Add "or related tasks"           |
+| Wrong model selected     | Type gate mismatch         | Match model to type              |
+| Tool permission error    | Missing tool in list       | Add required tool                |
+| Indexing error           | Wrong multi-line scalar    | Use `>-` not `\|`               |
+| Subagent spawns blocked  | Missing Task(type) syntax  | Use `Task(worker, researcher)`   |
+| Memory not persisting    | Missing memory field       | Add `memory: user\|project\|local` |
+| Permission prompts       | Wrong permissionMode       | Set appropriate permission mode  |
+| Tools appearing blocked  | disallowedTools too broad  | Narrow denylist scope            |
 
 ---
 ## [7][OPERATIONAL_COMMANDS]
@@ -104,7 +120,7 @@ Operational verification procedures for agent-builder. SKILL.md §VALIDATION con
 
 ```bash
 # YAML validation
-head -20 .claude/agents/my-agent.md  # Check frontmatter
+head -30 .claude/agents/my-agent.md  # Check frontmatter (11 fields possible)
 
 # Name matching
 basename .claude/agents/my-agent.md .md  # Should match name field
@@ -115,6 +131,12 @@ grep -i "use when" .claude/agents/my-agent.md  # Must exist
 
 # Tool declaration
 grep "^tools:" .claude/agents/my-agent.md
+grep "^disallowedTools:" .claude/agents/my-agent.md
+
+# Optional fields
+grep "^permissionMode:" .claude/agents/my-agent.md
+grep "^memory:" .claude/agents/my-agent.md
+grep "^maxTurns:" .claude/agents/my-agent.md
 
 # Filename convention
 ls .claude/agents/ | grep -v "^[a-z-]*\.md$"  # Find violations

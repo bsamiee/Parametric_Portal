@@ -91,13 +91,13 @@ const _run = <A, E, R>(operation: string, eff: Effect.Effect<A, E, R>, configura
             Option.liftPredicate(inc('bulkheadRejections'), F.constant(error instanceof BulkheadError)),
             F.constant(Effect.void),
         );
-            const withBulkhead = bulkhead === undefined
-                ? pipeline
-                : STM.commit(TMap.get(semStore, bulkheadKey)).pipe(
-                    Effect.flatMap(Option.match({
-                        onNone: () => Effect.makeSemaphore(bulkhead).pipe(Effect.tap((sem) => STM.commit(TMap.set(semStore, bulkheadKey, sem)))),
-                        onSome: Effect.succeed,
-                    })),
+        const withBulkhead = bulkhead === undefined
+            ? pipeline
+            : STM.commit(TMap.get(semStore, bulkheadKey)).pipe(
+                Effect.flatMap(Option.match({
+                    onNone: () => Effect.makeSemaphore(bulkhead).pipe(Effect.tap((sem) => STM.commit(TMap.set(semStore, bulkheadKey, sem)))),
+                    onSome: Effect.succeed,
+                })),
                 Effect.flatMap((sem) => {
                     const bulkheadError = BulkheadError.of(operation, bulkhead);
                     return Effect.acquireUseRelease(
@@ -112,7 +112,7 @@ const _run = <A, E, R>(operation: string, eff: Effect.Effect<A, E, R>, configura
                         () => sem.release(1).pipe(Effect.asVoid),
                     );
                 }),
-                );
+            );
         return Telemetry.span(withBulkhead, `resilience.${operation}`, { metrics: false, 'resilience.operation': operation });
     }));
 

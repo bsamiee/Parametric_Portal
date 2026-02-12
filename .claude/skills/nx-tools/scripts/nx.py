@@ -1,5 +1,6 @@
 #!/usr/bin/env -S uv run --quiet --script
 # /// script
+# requires-python = ">=3.14"
 # ///
 """Nx workspace CLI — query monorepo metadata via unified interface.
 
@@ -15,7 +16,6 @@ Commands:
     tokens [path]                 Count tokens in file/directory (default: .)
     docs [topic]                  View Nx command documentation
 """
-from __future__ import annotations
 
 import json
 import os
@@ -29,8 +29,12 @@ BASE_BRANCH: Final = "main"
 GRAPH_OUTPUT: Final = ".nx/graph.json"
 TOKEN_SCRIPT: Final = "tools/scripts/count-tokens.ts"
 
+# --- [TYPES] ------------------------------------------------------------------
+type CommandEntry = tuple[Callable[..., dict], int]
+type CommandRegistry = dict[str, CommandEntry]
+
 # --- [DISPATCH] ---------------------------------------------------------------
-CMDS: Final[dict[str, tuple[Callable[..., dict], int]]] = {}
+CMDS: Final[CommandRegistry] = {}
 
 
 def cmd(argc: int) -> Callable[[Callable[..., dict]], Callable[..., dict]]:
@@ -41,18 +45,46 @@ def cmd(argc: int) -> Callable[[Callable[..., dict]], Callable[..., dict]]:
     return register
 
 
-# --- [SUBPROCESS] -------------------------------------------------------------
+# --- [FUNCTIONS] --------------------------------------------------------------
 def _run(*args: str) -> tuple[bool, str]:
-    """Run pnpm exec nx command, return (success, output)."""
+    """Run pnpm exec nx command, return (success, output).
+
+    Args:
+        args: Nx CLI arguments to pass after 'pnpm exec nx'.
+
+    Returns:
+        Tuple of (success, output) where output is stdout or stderr.
+    """
     env = {**os.environ, "NX_DAEMON": "false"}
-    r = subprocess.run(("pnpm", "exec", "nx", *args), capture_output=True, text=True, env=env)
-    return r.returncode == 0, (r.stdout or r.stderr).strip()
+    result = subprocess.run(("pnpm", "exec", "nx", *args), capture_output=True, text=True, env=env)
+    return result.returncode == 0, (result.stdout or result.stderr).strip()
 
 
 def _run_tsx(*args: str) -> tuple[bool, str]:
-    """Run pnpm exec tsx command, return (success, output)."""
-    r = subprocess.run(("pnpm", "exec", "tsx", *args), capture_output=True, text=True)
-    return r.returncode == 0, (r.stdout or r.stderr).strip()
+    """Run pnpm exec tsx command, return (success, output).
+
+    Args:
+        args: TSX CLI arguments to pass after 'pnpm exec tsx'.
+
+    Returns:
+        Tuple of (success, output) where output is stdout or stderr.
+    """
+    result = subprocess.run(("pnpm", "exec", "tsx", *args), capture_output=True, text=True)
+    return result.returncode == 0, (result.stdout or result.stderr).strip()
+
+
+def _parse_or_error(ok: bool, out: str, success_fn: Callable[[Any], dict]) -> dict:
+    """Parse JSON output on success, return error dict on failure.
+
+    Args:
+        ok: Whether the command succeeded.
+        out: Raw command output.
+        success_fn: Function to build success dict from parsed JSON.
+
+    Returns:
+        Success dict via success_fn or error dict.
+    """
+    return success_fn(json.loads(out)) if ok else {"status": "error", "message": out}
 
 
 # --- [COMMANDS] ---------------------------------------------------------------
@@ -60,14 +92,14 @@ def _run_tsx(*args: str) -> tuple[bool, str]:
 def workspace() -> dict:
     """List all projects in workspace."""
     ok, out = _run("show", "projects", "--json")
-    return {"status": "success", "projects": json.loads(out)} if ok else {"status": "error", "message": out}
+    return _parse_or_error(ok, out, lambda data: {"status": "success", "projects": data})
 
 
 @cmd(0)
 def path() -> dict:
     """Get workspace root path."""
-    p = os.environ.get("CLAUDE_PROJECT_DIR", os.getcwd())
-    return {"status": "success", "path": p}
+    workspace_path = os.environ.get("CLAUDE_PROJECT_DIR", os.getcwd())
+    return {"status": "success", "path": workspace_path}
 
 
 @cmd(0)
@@ -81,7 +113,7 @@ def generators() -> dict:
 def project(name: str) -> dict:
     """View project configuration."""
     ok, out = _run("show", "project", name, "--json")
-    return {"status": "success", "name": name, "project": json.loads(out)} if ok else {"status": "error", "message": out}
+    return _parse_or_error(ok, out, lambda data: {"status": "success", "name": name, "project": data})
 
 
 @cmd(1)
@@ -101,25 +133,25 @@ def schema(generator: str) -> dict:
 @cmd(0)
 def affected(base: str = "") -> dict:
     """List affected projects."""
-    b = base or BASE_BRANCH
-    ok, out = _run("show", "projects", "--affected", f"--base={b}", "--json")
-    return {"status": "success", "base": b, "affected": json.loads(out)} if ok else {"status": "error", "message": out}
+    branch = base or BASE_BRANCH
+    ok, out = _run("show", "projects", "--affected", f"--base={branch}", "--json")
+    return _parse_or_error(ok, out, lambda data: {"status": "success", "base": branch, "affected": data})
 
 
 @cmd(0)
 def graph(output: str = "") -> dict:
     """Generate dependency graph."""
-    o = output or GRAPH_OUTPUT
-    ok, out = _run("graph", f"--file={o}")
-    return {"status": "success", "file": o} if ok else {"status": "error", "message": out}
+    output_path = output or GRAPH_OUTPUT
+    ok, out = _run("graph", f"--file={output_path}")
+    return {"status": "success", "file": output_path} if ok else {"status": "error", "message": out}
 
 
 @cmd(0)
 def tokens(path_: str = "") -> dict:
     """Count tokens in file/directory."""
-    p = path_ or "."
-    ok, out = _run_tsx(TOKEN_SCRIPT, p)
-    return {"status": "success", "path": p, "output": out} if ok else {"status": "error", "message": out}
+    target_path = path_ or "."
+    ok, out = _run_tsx(TOKEN_SCRIPT, target_path)
+    return {"status": "success", "path": target_path, "output": out} if ok else {"status": "error", "message": out}
 
 
 @cmd(0)
@@ -136,22 +168,24 @@ def main() -> int:
     match sys.argv[1:]:
         case [cmd_name, *cmd_args] if (entry := CMDS.get(cmd_name)):
             fn, argc = entry
-            if len(cmd_args) < argc:
-                print(f"Usage: nx.py {cmd_name} {' '.join(f'<arg{i+1}>' for i in range(argc))}")
-                return 1
-            try:
-                result = fn(*cmd_args[:argc + 1])  # required + up to 1 optional
-                print(json.dumps(result, indent=2))
-                return 0 if result["status"] == "success" else 1
-            except json.JSONDecodeError as e:
-                print(json.dumps({"status": "error", "message": f"Invalid JSON: {e}"}))
-                return 1
+            match cmd_args:
+                case _ if len(cmd_args) < argc:
+                    sys.stdout.write(f"Usage: nx.py {cmd_name} {' '.join(f'<arg{index + 1}>' for index in range(argc))}\n")
+                    return 1
+                case _:
+                    try:
+                        result = fn(*cmd_args[:argc + 1])
+                        sys.stdout.write(json.dumps(result, indent=2) + "\n")
+                        return 0 if result["status"] == "success" else 1
+                    except json.JSONDecodeError as error:
+                        sys.stdout.write(json.dumps({"status": "error", "message": f"Invalid JSON: {error}"}) + "\n")
+                        return 1
         case [cmd_name, *_]:
-            print(f"[ERROR] Unknown command '{cmd_name}'\n")
-            print(__doc__)
+            sys.stdout.write(f"[ERROR] Unknown command '{cmd_name}'\n\n")
+            sys.stdout.write(__doc__ + "\n")
             return 1
         case _:
-            print(__doc__)
+            sys.stdout.write(__doc__ + "\n")
             return 1
 
 

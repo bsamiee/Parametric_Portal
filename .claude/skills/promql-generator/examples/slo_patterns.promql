@@ -1,0 +1,58 @@
+# SLO, Error Budget, and Burn Rate Patterns
+# Ref: https://sre.google/workbook/alerting-on-slos/
+# Prometheus 3.10+ (native histograms stable 3.8+, no feature flag 3.9+)
+
+## ===== ERROR BUDGET (99.9% SLO, 30d window) =====
+1 - (sum(rate(http_requests_total{job="api", status_code=~"5.."}[30d])) / sum(rate(http_requests_total{job="api"}[30d]))) / 0.001                      # Budget remaining (0-1)
+(sum(rate(http_requests_total{job="api", status_code=~"5.."}[30d])) / sum(rate(http_requests_total{job="api"}[30d]))) / 0.001 * 100                    # Budget consumed %
+(sum(rate(http_requests_total{job="api", status_code!~"5.."}[30d])) / sum(rate(http_requests_total{job="api"}[30d]))) * 100                            # Availability %
+
+## ===== BURN RATE =====
+(sum(rate(http_requests_total{job="api", status_code=~"5.."}[1h])) / sum(rate(http_requests_total{job="api"}[1h]))) / 0.001                            # 1h window
+(sum(rate(http_requests_total{job="api", status_code=~"5.."}[5m])) / sum(rate(http_requests_total{job="api"}[5m]))) / 0.001                            # 5m window
+(sum(rate(http_requests_total{job="api", status_code=~"5.."}[6h])) / sum(rate(http_requests_total{job="api"}[6h]))) / 0.001                            # 6h window
+
+## ===== MULTI-WINDOW BURN RATE ALERTS =====
+# Page: burn rate 14.4 (2% budget in 1h)
+(sum(rate(http_requests_total{job="api", status_code=~"5.."}[1h])) / sum(rate(http_requests_total{job="api"}[1h]))) > 14.4 * 0.001 and (sum(rate(http_requests_total{job="api", status_code=~"5.."}[5m])) / sum(rate(http_requests_total{job="api"}[5m]))) > 14.4 * 0.001
+
+# Ticket: burn rate 6 (5% budget in 6h)
+(sum(rate(http_requests_total{job="api", status_code=~"5.."}[6h])) / sum(rate(http_requests_total{job="api"}[6h]))) > 6 * 0.001 and (sum(rate(http_requests_total{job="api", status_code=~"5.."}[30m])) / sum(rate(http_requests_total{job="api"}[30m]))) > 6 * 0.001
+
+# Low: burn rate 1 (10% budget in 3d)
+(sum(rate(http_requests_total{job="api", status_code=~"5.."}[3d])) / sum(rate(http_requests_total{job="api"}[3d]))) > 1 * 0.001 and (sum(rate(http_requests_total{job="api", status_code=~"5.."}[6h])) / sum(rate(http_requests_total{job="api"}[6h]))) > 1 * 0.001
+
+## ===== LATENCY SLO (classic histograms) =====
+(sum(rate(http_request_duration_seconds_bucket{le="0.2", job="api"}[5m])) / sum(rate(http_request_duration_seconds_count{job="api"}[5m]))) * 100       # % under 200ms
+(1 - (sum(rate(http_request_duration_seconds_bucket{le="0.5", job="api"}[5m])) / sum(rate(http_request_duration_seconds_count{job="api"}[5m])))) * 100 # % violating 500ms
+(sum(rate(http_request_duration_seconds_bucket{le="0.2", job="api"}[5m])) / sum(rate(http_request_duration_seconds_count{job="api"}[5m]))) >= 0.9      # 90% under 200ms?
+
+## ===== LATENCY SLO (native histograms, 3.8+ -- precise fraction without bucket boundary guessing) =====
+histogram_fraction(0, 0.2, rate(http_request_duration_seconds{job="api"}[5m])) * 100                                                                   # % under 200ms
+(1 - histogram_fraction(0, 0.5, rate(http_request_duration_seconds{job="api"}[5m]))) * 100                                                             # % violating 500ms
+histogram_fraction(0, 0.2, rate(http_request_duration_seconds{job="api"}[5m])) >= 0.9                                                                  # 90% under 200ms?
+# Latency SLO burn rate: fraction violating threshold over longer windows
+(1 - histogram_fraction(0, 0.2, rate(http_request_duration_seconds{job="api"}[1h]))) / 0.1                                                             # Latency burn rate (10% SLO)
+
+## ===== APDEX (satisfied<500ms, tolerating<2s) =====
+# Classic: Apdex = (satisfied + tolerating/2) / total = (satisfied_bucket + tolerating_bucket) / (2 * total)
+(sum(rate(http_request_duration_seconds_bucket{le="0.5", job="api"}[5m])) + sum(rate(http_request_duration_seconds_bucket{le="2", job="api"}[5m]))) / (2 * sum(rate(http_request_duration_seconds_count{job="api"}[5m])))
+
+## ===== APDEX (native histograms, 3.8+ -- precise fraction without bucket interpolation) =====
+# satisfied = fraction(0, 0.5), tolerating = fraction(0, 2) - fraction(0, 0.5)
+# Apdex = (satisfied + tolerating/2) / 1 = fraction(0, 0.5) + (fraction(0, 2) - fraction(0, 0.5)) / 2
+(histogram_fraction(0, 0.5, rate(http_request_duration_seconds{job="api"}[5m])) + (histogram_fraction(0, 2, rate(http_request_duration_seconds{job="api"}[5m])) - histogram_fraction(0, 0.5, rate(http_request_duration_seconds{job="api"}[5m]))) / 2)
+
+## ===== OTEL METRIC NAMES (UTF-8, 3.0+) =====
+# OTEL SDK emits metrics with dot-separated names -- Prometheus 3.0+ preserves them with UTF-8 support
+histogram_fraction(0, 0.2, rate({"http.server.request.duration", job="api"}[5m])) * 100                                                                # OTEL latency SLO
+(sum(rate({"http.server.request.duration_count", job="api", "http.response.status_code"=~"5.."}[5m])) / sum(rate({"http.server.request.duration_count", job="api"}[5m]))) * 100  # OTEL error %
+
+## ===== DASHBOARD =====
+(sum(rate(http_requests_total{job="api", status_code!~"5.."}[30d])) / sum(rate(http_requests_total{job="api"}[30d]))) >= 0.999                         # SLO status (bool)
+sum by (endpoint) (rate(http_requests_total{status_code=~"5.."}[5m])) / sum by (endpoint) (rate(http_requests_total[5m]))                              # Error rate by endpoint
+histogram_quantile(0.95, sum by (endpoint, le) (rate(http_request_duration_seconds_bucket[5m])))                                                        # P95 by endpoint (classic)
+histogram_quantile(0.95, sum by (endpoint) (rate(http_request_duration_seconds[5m])))                                                                   # P95 by endpoint (native)
+
+# Burn Rate Reference:
+# 1 = 30d exhaust (none) | 2 = 15d (low) | 6 = 5d (ticket) | 14.4 = ~2d (page) | 36 = ~20h (urgent page)

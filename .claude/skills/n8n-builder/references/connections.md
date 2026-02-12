@@ -25,14 +25,21 @@
 ---
 ## [2][CONNECTION_TYPES]
 
-| [INDEX] | [KEY]              | [SOURCE]             | [TARGET]        | [ROLE]              |
-| :-----: | ------------------ | -------------------- | --------------- | ------------------- |
-|   [1]   | `main`             | Trigger/Logic/Action | Logic/Action    | Sequential flow     |
-|   [2]   | `ai_tool`          | Tool node            | AI Agent        | Callable function   |
-|   [3]   | `ai_languageModel` | Model node           | AI Agent        | Cognitive engine    |
-|   [4]   | `ai_memory`        | Memory node          | AI Agent        | Context persistence |
-|   [5]   | `ai_outputParser`  | Parser node          | AI Agent        | Structured output   |
-|   [6]   | `ai_textSplitter`  | Splitter             | Document Loader | RAG pipeline        |
+| [INDEX] | [KEY]              | [SOURCE]             | [TARGET]        | [ROLE]                  |
+| :-----: | ------------------ | -------------------- | --------------- | ----------------------- |
+|   [1]   | `main`             | Trigger/Logic/Action | Logic/Action    | Sequential flow         |
+|   [2]   | `ai_tool`          | Tool node / MCP      | AI Agent        | Callable function       |
+|   [3]   | `ai_languageModel` | Model node           | AI Agent        | Cognitive engine        |
+|   [4]   | `ai_memory`        | Memory node          | AI Agent        | Context persistence     |
+|   [5]   | `ai_outputParser`  | Parser node          | AI Agent        | Structured output       |
+|   [6]   | `ai_embedding`     | Embedding node       | Vector Store    | Text vectorization      |
+|   [7]   | `ai_vectorStore`   | Vector Store node    | Tool/Retriever  | Document retrieval      |
+|   [8]   | `ai_textSplitter`  | Splitter             | Document Loader | RAG pipeline            |
+|   [9]   | `ai_retriever`     | Retriever node       | Chain/Agent     | Semantic search         |
+|  [10]   | `ai_tool`          | `mcpClient`          | AI Agent        | MCP server tools (2025) |
+
+`mcpClient` exposes external MCP server tools via `ai_tool` connection — agent discovers tools dynamically at runtime.
+`ai_embedding` and `ai_vectorStore` form the RAG data pipeline; `ai_retriever` feeds Q&A chains or agents.
 
 ---
 ## [3][MULTI-OUTPUT]

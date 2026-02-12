@@ -1,0 +1,210 @@
+# Prometheus Alerting Rules
+# Deployed via Pulumi (infrastructure/src/deploy.ts), not prometheus.yml.
+# Prometheus 3.10+ (native histograms stable, info() experimental, keep_firing_for stable 3.0+)
+#
+# RATIONALE for `for:` durations:
+#   0m  = immediate (already happened, e.g., OOMKill)
+#   2m  = fast detection with minimal noise (critical SLO violations)
+#   5m  = standard symptom detection (balances speed vs false positives)
+#   10m = sustained conditions (resource pressure, capacity warnings)
+#   15m = slow-moving issues (replica drift, rollout stalls)
+#   30m = trend confirmation (disk fill predictions, gradual degradation)
+#
+# `keep_firing_for:` (3.0+ stable):
+#   Prevents alert flapping when condition briefly clears during evaluation.
+#   Alert stays firing for the specified duration after expr becomes false.
+#   Use for intermittent conditions that require continued attention.
+
+groups:
+  - name: application_alerts
+    interval: 30s
+    rules:
+      - alert: HighErrorRate
+        expr: (sum(rate(http_requests_total{status_code=~"5.."}[5m])) by (job, service) / sum(rate(http_requests_total[5m])) by (job, service)) > 0.05
+        for: 5m
+        keep_firing_for: 10m
+        # WHY 5m: Error rate > 5% sustained for 5 minutes eliminates transient spikes (deploy rollouts, upstream
+        # hiccups) while catching sustained degradation before significant user impact compounds.
+        # WHY keep_firing_for 10m: Error spikes often oscillate around threshold during partial outages.
+        labels: { severity: critical }
+        annotations:
+          summary: "High error rate detected"
+          description: "Service {{ $labels.service }} error rate {{ $value | humanizePercentage }} (threshold: 5%)"
+
+      - alert: HighLatencyClassic
+        # Classic histogram version: requires _bucket suffix and le in by()
+        expr: histogram_quantile(0.95, sum by (job, le) (rate(http_request_duration_seconds_bucket[5m]))) > 1
+        for: 5m
+        # WHY 5m: P95 > 1s indicates slow queries or dependency degradation. 5m filters GC pauses and cold starts.
+        labels: { severity: warning }
+        annotations: { summary: "P95 latency {{ $value | humanizeDuration }} for {{ $labels.job }} (threshold: 1s)" }
+
+      - alert: HighLatencyNative
+        # Native histogram version (3.8+ stable): no _bucket suffix, no le in by()
+        # Use this when scrape_native_histograms: true is configured
+        expr: histogram_quantile(0.95, sum by (job) (rate(http_request_duration_seconds[5m]))) > 1
+        for: 5m
+        labels: { severity: warning }
+        annotations: { summary: "P95 latency {{ $value | humanizeDuration }} for {{ $labels.job }} (threshold: 1s, native histogram)" }
+
+      - alert: LatencySLOViolationNative
+        # Fraction of requests above 200ms threshold using native histogram precision
+        # histogram_fraction gives exact fraction without bucket boundary interpolation errors
+        expr: (1 - histogram_fraction(0, 0.2, sum by (job) (rate(http_request_duration_seconds[5m])))) > 0.1
+        for: 5m
+        keep_firing_for: 15m
+        # WHY: More than 10% of requests exceeding 200ms SLO target. histogram_fraction provides precise
+        # measurement without depending on pre-defined bucket boundaries.
+        # WHY keep_firing_for 15m: SLO violations often resolve briefly then recur -- keep attention focused.
+        labels: { severity: warning, alert_type: slo }
+        annotations: { summary: "{{ $labels.job }} has {{ $value | humanizePercentage }} requests above 200ms SLO" }
+
+      - alert: ServiceDown
+        expr: up == 0
+        for: 2m
+        # WHY 2m: Target unreachable. 2m confirms it is not a brief network blip or rolling restart.
+        # Shorter `for` than resource alerts because service availability is a critical SLI.
+        labels: { severity: critical }
+        annotations: { summary: "{{ $labels.job }} on {{ $labels.instance }} down for 2+ minutes" }
+
+  - name: slo_alerts
+    rules:
+      - alert: SLOBurnRateCritical
+        # Page: burn rate 14.4 = 2% error budget consumed in 1h
+        # Multi-window: long (1h) AND short (5m) must both exceed threshold
+        # Ref: https://sre.google/workbook/alerting-on-slos/
+        expr: |
+          ((sum(rate(http_requests_total{status_code=~"5.."}[1h])) by (service) / sum(rate(http_requests_total[1h])) by (service)) > 14.4 * 0.001)
+          and
+          ((sum(rate(http_requests_total{status_code=~"5.."}[5m])) by (service) / sum(rate(http_requests_total[5m])) by (service)) > 14.4 * 0.001)
+        for: 2m
+        keep_firing_for: 15m
+        # WHY 2m: At burn rate 14.4, the entire error budget exhausts in ~2 days. Short `for` is critical
+        # because delay compounds budget consumption. The short-window (5m) AND condition already filters noise.
+        # WHY keep_firing_for 15m: At this burn rate, brief clearance during oscillation does not mean resolution.
+        labels: { severity: critical, alert_type: slo }
+        annotations: { summary: "{{ $labels.service }} consuming error budget at 14.4x rate (2% in 1h)" }
+
+      - alert: SLOBurnRateHigh
+        # Ticket: burn rate 6 = 5% error budget consumed in 6h
+        expr: |
+          ((sum(rate(http_requests_total{status_code=~"5.."}[6h])) by (service) / sum(rate(http_requests_total[6h])) by (service)) > 6 * 0.001)
+          and
+          ((sum(rate(http_requests_total{status_code=~"5.."}[30m])) by (service) / sum(rate(http_requests_total[30m])) by (service)) > 6 * 0.001)
+        for: 5m
+        # WHY 5m: At burn rate 6, budget exhausts in ~5 days. 5m `for` provides reasonable reaction time
+        # while the 6h long-window smooths daily traffic patterns.
+        labels: { severity: warning, alert_type: slo }
+        annotations: { summary: "{{ $labels.service }} consuming error budget at 6x rate (5% in 6h)" }
+
+  - name: node_alerts
+    rules:
+      - alert: HighCPUUsage
+        expr: (1 - avg by (instance) (rate(node_cpu_seconds_total{mode="idle"}[5m]))) * 100 > 80
+        for: 10m
+        # WHY 10m: CPU > 80% for 10m confirms sustained pressure, not transient burst from cron jobs or
+        # garbage collection. At 80%, scheduling latency for new processes increases measurably.
+        labels: { severity: warning }
+        annotations: { summary: "CPU {{ $value | humanize }}% on {{ $labels.instance }}" }
+
+      - alert: HighMemoryUsage
+        expr: ((node_memory_MemTotal_bytes - node_memory_MemAvailable_bytes) / node_memory_MemTotal_bytes) * 100 > 90
+        for: 10m
+        # WHY 10m: Memory > 90% means ~10% headroom for kernel buffers and process spikes. 10m confirms
+        # sustained pressure and not transient cache growth (which Linux will reclaim under pressure).
+        labels: { severity: warning }
+        annotations: { summary: "Memory {{ $value | humanize }}% on {{ $labels.instance }}" }
+
+      - alert: LowDiskSpace
+        expr: ((node_filesystem_size_bytes - node_filesystem_avail_bytes) / node_filesystem_size_bytes) * 100 > 85
+        for: 10m
+        # WHY 10m: Disk > 85% is a capacity planning signal. Slow-moving; 10m filters log rotation spikes.
+        # At 95%+ ext4 reserves blocks for root, so effective capacity is lower than reported.
+        labels: { severity: warning }
+        annotations: { summary: "Disk {{ $value | humanize }}% on {{ $labels.instance }}:{{ $labels.mountpoint }}" }
+
+      - alert: DiskWillFillSoon
+        expr: predict_linear(node_filesystem_avail_bytes[6h], 4*3600) < 0
+        for: 30m
+        # WHY 30m: Prediction-based alert needs 30m to confirm the trend is real, not driven by a single
+        # large write burst. 6h lookback + 4h forecast provides reliable linear regression.
+        labels: { severity: critical }
+        annotations: { summary: "Disk {{ $labels.mountpoint }} on {{ $labels.instance }} predicted full within 4h" }
+
+      - alert: AnomalousCPUUsage
+        # Experimental (3.5+): MAD-based anomaly detection, robust to non-normal distributions
+        # Unlike stddev, MAD is not inflated by outliers -- better for heterogeneous workloads
+        expr: |
+          (1 - avg by (instance) (rate(node_cpu_seconds_total{mode="idle"}[5m]))) * 100
+          > avg_over_time(((1 - avg by (instance) (rate(node_cpu_seconds_total{mode="idle"}[5m]))) * 100)[1h:5m])
+          + 3 * mad_over_time(((1 - avg by (instance) (rate(node_cpu_seconds_total{mode="idle"}[5m]))) * 100)[1h:5m])
+        for: 10m
+        labels: { severity: info }
+        annotations: { summary: "Anomalous CPU on {{ $labels.instance }}: {{ $value | humanize }}% (>3 MADs from 1h median)" }
+
+  - name: kubernetes_alerts
+    rules:
+      - alert: PodCrashLoopBackOff
+        expr: kube_pod_container_status_waiting_reason{reason="CrashLoopBackOff"} == 1
+        for: 5m
+        # WHY 5m: CrashLoopBackOff for 5m means K8s exponential backoff has triggered multiple times.
+        # The container has restarted at least 2-3 times and is not recovering.
+        labels: { severity: critical }
+        annotations: { summary: "{{ $labels.namespace }}/{{ $labels.pod }} in CrashLoopBackOff" }
+
+      - alert: DeploymentReplicasMismatch
+        expr: kube_deployment_spec_replicas != kube_deployment_status_replicas_available
+        for: 15m
+        keep_firing_for: 5m
+        # WHY 15m: Rolling deployments temporarily create replica mismatches. 15m provides generous window
+        # for standard rollouts (default maxSurge/maxUnavailable) to complete. Shorter `for` causes
+        # false positives during every deployment.
+        # WHY keep_firing_for 5m: Brief clearance during rollout oscillation should not silence the alert.
+        labels: { severity: warning }
+        annotations: { summary: "{{ $labels.namespace }}/{{ $labels.deployment }} has unavailable replicas" }
+
+      - alert: NodeNotReady
+        expr: kube_node_status_condition{condition="Ready", status="true"} == 0
+        for: 5m
+        # WHY 5m: Node not ready for 5m is beyond kubelet's normal heartbeat cycle (40s) and past
+        # the node-status-update-frequency. At 5m, the node is genuinely unhealthy.
+        labels: { severity: critical }
+        annotations: { summary: "Node {{ $labels.node }} not ready for 5+ minutes" }
+
+      - alert: HPAMaxedOut
+        expr: |
+          kube_horizontalpodautoscaler_status_current_replicas == kube_horizontalpodautoscaler_spec_max_replicas
+          and kube_horizontalpodautoscaler_status_current_replicas > 1
+        for: 15m
+        # WHY 15m: HPA at max for 15m means autoscaling has reached its ceiling and demand may still be
+        # growing. Indicates max_replicas needs increase or capacity planning review.
+        labels: { severity: warning }
+        annotations: { summary: "HPA {{ $labels.namespace }}/{{ $labels.horizontalpodautoscaler }} at max replicas" }
+
+  - name: prometheus_alerts
+    rules:
+      - alert: PrometheusConfigReloadFailed
+        expr: prometheus_config_last_reload_successful == 0
+        for: 5m
+        labels: { severity: critical }
+        annotations: { summary: "Prometheus config reload failed" }
+
+      - alert: PrometheusStorageFilling
+        expr: (prometheus_tsdb_storage_blocks_bytes / prometheus_tsdb_retention_limit_bytes) > 0.8
+        for: 10m
+        labels: { severity: warning }
+        annotations: { summary: "Prometheus storage {{ $value | humanizePercentage }} full" }
+
+      - alert: PrometheusTargetScrapeFailure
+        # Targets failing to scrape but not fully down (partial failures)
+        expr: up{job!="prometheus"} == 0 and count by (job) (up{job!="prometheus"}) > 1
+        for: 5m
+        labels: { severity: warning }
+        annotations: { summary: "{{ $labels.job }}/{{ $labels.instance }} failing to scrape" }
+
+      - alert: PrometheusRuleEvaluationSlow
+        # Rule evaluation taking longer than interval -- indicates overloaded Prometheus
+        expr: prometheus_rule_group_last_duration_seconds > prometheus_rule_group_interval_seconds
+        for: 10m
+        labels: { severity: warning }
+        annotations: { summary: "Rule group {{ $labels.rule_group }} evaluation ({{ $value | humanizeDuration }}) exceeds interval" }

@@ -40,23 +40,18 @@ const _CONFIG = {
         ],
         maxAge: 7200
     },
-        security: {
-            base: {'cache-control': 'no-store', 'content-security-policy': "default-src 'none'; frame-ancestors 'none'", 'cross-origin-opener-policy': 'same-origin', 'cross-origin-resource-policy': 'same-origin', 'permissions-policy': 'accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()', 'referrer-policy': 'strict-origin-when-cross-origin', 'x-content-type-options': 'nosniff', 'x-frame-options': 'DENY'} satisfies Record<string, string>,
-            hsts: { includeSubDomains: true, maxAge: 31536000 }
-        },
-        tenantAsyncContextPrefixes: ['/api/admin/events', '/api/jobs/subscribe', '/api/users/me/notifications/subscribe', '/api/ws'] as ReadonlyArray<string>,
-        tenantExemptPrefixes: ['/api/health', '/api/v1/traces', '/api/v1/metrics', '/api/v1/logs', '/docs'] as ReadonlyArray<string>,
-    } as const;
+    security: {
+        base: {'cache-control': 'no-store', 'content-security-policy': "default-src 'none'; frame-ancestors 'none'", 'cross-origin-opener-policy': 'same-origin', 'cross-origin-resource-policy': 'same-origin', 'permissions-policy': 'accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()', 'referrer-policy': 'strict-origin-when-cross-origin', 'x-content-type-options': 'nosniff', 'x-frame-options': 'DENY'} satisfies Record<string, string>,
+        hsts: { includeSubDomains: true, maxAge: 31536000 }
+    },
+    tenantAsyncContextPrefixes: ['/api/admin/events', '/api/jobs/subscribe', '/api/users/me/notifications/subscribe', '/api/ws'] as ReadonlyArray<string>,
+    tenantExemptPrefixes:       ['/api/health', '/api/v1/traces', '/api/v1/metrics', '/api/v1/logs', '/docs'] as ReadonlyArray<string>,
+} as const;
 const _proxyConfig = (() => {
     const enabledRaw = process.env['TRUST_PROXY'] ?? 'false';
     const hopsRaw = Number(process.env['PROXY_HOPS'] ?? '1');
     return { enabled: enabledRaw === 'true' || enabledRaw === '1', hops: Number.isFinite(hopsRaw) && hopsRaw > 0 ? Math.floor(hopsRaw) : 1 } as const;
 })();
-
-// --- [ERRORS] ----------------------------------------------------------------
-
-const _TenantSuspended = Data.TaggedError('TenantSuspended')<{ readonly tenantId: string }>;
-const _TenantArchived = Data.TaggedError('TenantArchived')<{ readonly tenantId: string }>;
 
 // --- [GLOBAL_MIDDLEWARE] -----------------------------------------------------
 
@@ -78,71 +73,61 @@ const _security = (hsts: typeof _CONFIG.security.hsts | false = _CONFIG.security
         HttpServerResponse.setHeaders(res, hsts
             ? { ..._CONFIG.security.base, 'strict-transport-security': `max-age=${hsts.maxAge}${hsts.includeSubDomains ? '; includeSubDomains' : ''}` }
             : _CONFIG.security.base))));
-const _serverTiming = HttpMiddleware.make((app) => Effect.timed(app).pipe(Effect.map(([duration, response]) => HttpServerResponse.setHeader(response, 'server-timing', `total;dur=${Duration.toMillis(duration)}`))));
-
 // --- [CONTEXT_MIDDLEWARE] ----------------------------------------------------
-
 const _makeRequestContext = (database: { readonly apps: { readonly byNamespace: (namespace: string) => Effect.Effect<Option.Option<{ readonly id: string; readonly namespace: string; readonly status: 'active' | 'suspended' | 'archived' }>, unknown> } }) =>
     HttpMiddleware.make((app) => pipe(Effect.gen(function* () {
         const request = yield* HttpServerRequest.HttpServerRequest;
-            const req = pipe(
-                _proxyConfig.enabled
-                    ? Option.firstSomeOf([
-                    pipe(
-                        Headers.get(request.headers, Context.Request.Headers.forwardedFor),
-                        Option.map((raw) => raw.split(',').map((segment) => segment.trim()).filter((segment): segment is string => segment !== '' && isIP(segment) !== 0)),
-                        Option.flatMap((segments) => A.get(segments, Math.max(0, segments.length - _proxyConfig.hops - 1))),
-                    ),
-                    Option.filter(Headers.get(request.headers, Context.Request.Headers.cfConnectingIp), (value) => isIP(value) !== 0),
-                    Option.filter(Headers.get(request.headers, Context.Request.Headers.realIp), (value) => isIP(value) !== 0),
-                ])
-                    : Option.none<string>(),
-                Option.match({ onNone: () => request, onSome: (remoteAddress) => request.modify({ remoteAddress }) }),
-            );
-            const requestIdHeader = Headers.get(req.headers, Context.Request.Headers.requestId);
-            const requestId = Option.match(requestIdHeader, {
-                onNone: crypto.randomUUID,
-                onSome: (value) => S.is(S.UUID)(value) ? value : crypto.randomUUID(),
-            });
-            const namespaceOpt = Headers.get(req.headers, Context.Request.Headers.appId);
-            const path = req.url.split('?', 2)[0] ?? '/';
-            const isExemptPath = A.some(_CONFIG.tenantExemptPrefixes, (prefix) => path === prefix || path.startsWith(`${prefix}/`));
-        const exemptEffect = Effect.succeed(Context.Request.Id.system);
-        const missingHeaderEffect = Effect.fail(new (class extends Data.TaggedError('MissingTenantHeader')<Record<string, never>> {})({}));
-        const exemptOrMissing = Effect.if(isExemptPath, { onTrue: constant(exemptEffect), onFalse: constant(missingHeaderEffect) });
-        const tenantId = yield* Option.match(namespaceOpt, {
-            onNone: constant(exemptOrMissing),
-            onSome: (namespace) => database.apps.byNamespace(namespace).pipe(
-                Effect.flatMap(Option.match({
-                    onNone: () => Effect.fail(new (class extends Data.TaggedError('UnknownTenantHeader')<{ readonly namespace: string }> {})({ namespace })),
-                    onSome: Effect.succeed,
-                })),
-                Effect.filterOrFail(
-                    (tenant) => tenant.status !== 'suspended',
-                    (tenant) => new _TenantSuspended({ tenantId: tenant.id }),
+        const req = pipe(
+            _proxyConfig.enabled
+                ? Option.firstSomeOf([
+                pipe(
+                    Headers.get(request.headers, Context.Request.Headers.forwardedFor),
+                    Option.map((raw) => raw.split(',')),
+                    Option.map(A.map((s: string) => s.trim())),
+                    Option.map(A.filter((s): s is string => s !== '' && isIP(s) !== 0)),
+                    Option.flatMap((segments) => A.get(segments, Math.max(0, segments.length - _proxyConfig.hops - 1))),
                 ),
-                Effect.filterOrFail(
-                    (tenant) => tenant.status !== 'archived',
-                    (tenant) => new _TenantArchived({ tenantId: tenant.id }),
-                ),
-                Effect.map((tenant) => tenant.id),
-            ),
-            });
-            const ipAddress: Option.Option<string> = req.remoteAddress;
-            const isAsyncTenantContextPath = A.some(_CONFIG.tenantAsyncContextPrefixes, (prefix) => path === prefix || path.startsWith(`${prefix}/`));
-            const withTenantContext = isAsyncTenantContextPath
-                ? Context.Request.within
-                : Context.Request.withinSync;
-        const appWithRequest = Effect.provideService(app, HttpServerRequest.HttpServerRequest, req);
-        const ctx: Context.Request.Data = { appNamespace: namespaceOpt, circuit: Option.none(), cluster: Option.none(), ipAddress, rateLimit: Option.none(), requestId, session: Option.none(), tenantId, userAgent: Headers.get(req.headers, 'user-agent') };
-        const resultEffect = Effect.all([appWithRequest, Context.Request.current]).pipe(
-            Effect.map(([response, requestContext]) => ({ circuit: requestContext.circuit, response })),
-            Effect.annotateSpans('tenant.id', tenantId),
-            Effect.annotateSpans('request.id', requestId),
+                Option.filter(Headers.get(request.headers, Context.Request.Headers.cfConnectingIp), (value) => isIP(value) !== 0),
+                Option.filter(Headers.get(request.headers, Context.Request.Headers.realIp), (value) => isIP(value) !== 0),
+            ])
+                : Option.none<string>(),
+            Option.match({ onNone: () => request, onSome: (remoteAddress) => request.modify({ remoteAddress }) }),
         );
-        const { circuit, response } = yield* withTenantContext(tenantId, resultEffect, ctx);
-        const circuitState = Option.getOrUndefined(Option.map(circuit, (c) => c.state));
-        return HttpServerResponse.setHeaders(response, { [Context.Request.Headers.requestId]: requestId, ...(circuitState ? { [Context.Request.Headers.circuitState]: circuitState } : {}) });
+        const requestId = Option.match(Headers.get(req.headers, Context.Request.Headers.requestId), {
+            onNone: crypto.randomUUID,
+            onSome: (value) => S.is(S.UUID)(value) ? value : crypto.randomUUID(),
+        });
+        const namespaceOpt = Headers.get(req.headers, Context.Request.Headers.appId);
+        const path = req.url.split('?', 2)[0] ?? '/';
+        const tenantId = yield* pipe(
+            Option.match<string, ReturnType<typeof database.apps.byNamespace>>(namespaceOpt, {
+                onNone: constant(Effect.if(A.some(_CONFIG.tenantExemptPrefixes, (prefix) => path === prefix || path.startsWith(`${prefix}/`)), { onTrue: constant(Effect.succeed(Option.some({ id: Context.Request.Id.system, namespace: '', status: 'active' as const }))), onFalse: constant(Effect.fail(new (class extends Data.TaggedError('MissingTenantHeader')<Record<string, never>> {})({}))) })),
+                onSome: (namespace) => database.apps.byNamespace(namespace),
+            }),
+            Effect.flatMap(Option.match({
+                onNone: constant(Effect.fail(new (class extends Data.TaggedError('UnknownTenantHeader')<{ readonly namespace: string }> {})({ namespace: Option.getOrElse(namespaceOpt, constant('')) }))),
+                onSome: Effect.succeed,
+            })),
+            Effect.filterOrFail(
+                (tenant) => tenant.status !== 'suspended',
+                (tenant) => new (class extends Data.TaggedError('TenantSuspended')<{ readonly tenantId: string }> {})({ tenantId: tenant.id }),
+            ),
+            Effect.filterOrFail(
+                (tenant) => tenant.status !== 'archived',
+                (tenant) => new (class extends Data.TaggedError('TenantArchived')<{ readonly tenantId: string }> {})({ tenantId: tenant.id }),
+            ),
+            Effect.map((tenant) => tenant.id),
+        );
+        const { circuit, response } = yield* (A.some(_CONFIG.tenantAsyncContextPrefixes, (prefix) => path === prefix || path.startsWith(`${prefix}/`)) ? Context.Request.within : Context.Request.withinSync)(
+            tenantId,
+            Effect.all([Effect.provideService(app, HttpServerRequest.HttpServerRequest, req), Context.Request.current]).pipe(
+                Effect.map(([response, requestContext]) => ({ circuit: requestContext.circuit, response })),
+                Effect.annotateSpans('tenant.id', tenantId),
+                Effect.annotateSpans('request.id', requestId),
+            ),
+            { appNamespace: namespaceOpt, circuit: Option.none(), cluster: Option.none(), ipAddress: req.remoteAddress, rateLimit: Option.none(), requestId, session: Option.none(), tenantId, userAgent: Headers.get(req.headers, 'user-agent') } as Context.Request.Data,
+        );
+        return HttpServerResponse.setHeaders(response, { [Context.Request.Headers.requestId]: requestId, ...pipe(circuit, Option.map((c) => ({ [Context.Request.Headers.circuitState]: c.state })), Option.getOrElse(constant({}))) });
     }), Effect.catchTags({
         MissingTenantHeader: () => Effect.succeed(HttpServerResponse.unsafeJson({ details: 'X-App-Id header is required', error: 'MissingTenantHeader' }, { status: 400 })),
         TenantArchived: ({ tenantId }: { readonly tenantId: string }) => Effect.succeed(HttpServerResponse.unsafeJson({ details: 'Tenant is archived', error: 'TenantArchived', tenantId }, { status: 410 })),
@@ -152,11 +137,6 @@ const _makeRequestContext = (database: { readonly apps: { readonly byNamespace: 
         }), Effect.catchAll((error) =>
             Effect.logError('Request context middleware failed', { error: String(error) }).pipe(Effect.andThen(Effect.succeed(HttpServerResponse.unsafeJson({ details: 'Internal server error', error: 'RequestContextFailed' }, { status: 500 }))),)
         )));
-const _cors = (origins?: ReadonlyArray<string>) => pipe(
-    (origins ?? _CONFIG.cors.allowedOrigins).map((o) => o.trim()).filter(Boolean),
-    (list) => HttpApiBuilder.middlewareCors({ ..._CONFIG.cors, allowedOrigins: list, credentials: !list.includes('*') && _CONFIG.cors.credentials }),
-);
-
 // --- [SERVICES] --------------------------------------------------------------
 
 class Middleware extends HttpApiMiddleware.Tag<Middleware>()('server/Middleware', {
@@ -190,53 +170,50 @@ class Middleware extends HttpApiMiddleware.Tag<Middleware>()('server/Middleware'
     static readonly _makeAuthLayer = (
         sessionLookup: (hash: Hex64) => Effect.Effect<Option.Option<Context.Request.Session>, unknown>,
         apiKeyLookup: (hash: Hex64) => Effect.Effect<Option.Option<{ readonly id: string; readonly userId: string }>, unknown>,) =>
-                Layer.effect(this, Effect.map(Effect.all([MetricsService, AuditService, SqlClient.SqlClient]), ([metrics, audit, sqlClient]) => Middleware.of({
-                    bearer: (token: Redacted.Redacted<string>) => Effect.gen(function* () {
-                            const tenantId = yield* Context.Request.currentTenantId;
-                            const hash = yield* Crypto.hmac(tenantId, Redacted.value(token));
-                            const missingSessionEffect = Effect.all([Metric.increment(metrics.auth.session.misses), audit.log('auth_failure', { details: { reason: 'invalid_session' } })], { discard: true });
-                            yield* Metric.increment(metrics.auth.session.lookups);
-                                const sessionOpt = yield* Context.Request.within(tenantId, sessionLookup(hash)).pipe(
-                                    Effect.provideService(SqlClient.SqlClient, sqlClient),
-                                    Effect.catchAll((error) =>
-                                        Effect.logError('Session lookup failed', { error: String(error) }).pipe(
-                                            Effect.andThen(Effect.fail(HttpError.Internal.of('Session lookup failed', error))),
-                                        )),
-                                );
-                            const session = yield* Effect.fromNullable(Option.getOrUndefined(sessionOpt)).pipe(
-                                Effect.tapError(constant(missingSessionEffect)),
-                                Effect.mapError(constant(HttpError.Auth.of('Invalid session'))),
-                            );
-                        yield* Context.Request.update({ session: Option.some(session) }).pipe(
-                            Effect.tap(constant(Metric.increment(metrics.auth.session.hits))),
-                        );
-                    }),
-                    apiKey: (token: Redacted.Redacted<string>) => Effect.gen(function* () {
-                            const tenantId = yield* Context.Request.currentTenantId;
-                            const hash = yield* Crypto.hmac(tenantId, Redacted.value(token));
-                            const missingKeyEffect = Effect.all([Metric.increment(metrics.auth.apiKey.misses), audit.log('auth_failure', { details: { reason: 'invalid_api_key' } })], { discard: true });
-                            yield* Metric.increment(metrics.auth.apiKey.lookups);
-                                const keyOpt = yield* Context.Request.within(tenantId, apiKeyLookup(hash)).pipe(
-                                    Effect.provideService(SqlClient.SqlClient, sqlClient),
-                                    Effect.catchAll((error) =>
-                                        Effect.logError('API key lookup failed', { error: String(error) }).pipe(
-                                            Effect.andThen(Effect.fail(HttpError.Internal.of('API key lookup failed', error))),
-                                        )),
-                                );
-                                const key = yield* Effect.fromNullable(Option.getOrUndefined(keyOpt)).pipe(
-                                    Effect.tapError(constant(missingKeyEffect)),
-                                    Effect.mapError(constant(HttpError.Auth.of('Invalid API key'))),
-                                );
-                            const validKeyEffect = Context.Request.update({ session: Option.some({ appId: tenantId, id: key.id, kind: 'apiKey', mfaEnabled: false, userId: key.userId, verifiedAt: Option.none() }) }).pipe(Effect.tap(constant(Metric.increment(metrics.auth.apiKey.hits))));
-                            yield* validKeyEffect;
-                        }),
-                })));
-    static readonly pipeline = (database: Parameters<typeof _makeRequestContext>[0], options?: { readonly hsts?: typeof _CONFIG.security.hsts | false }) =>
+        Layer.effect(this, Effect.map(Effect.all([MetricsService, AuditService, SqlClient.SqlClient]), ([metrics, audit, sqlClient]) => Middleware.of({
+            bearer: Effect.fn(function* (token: Redacted.Redacted<string>) {
+                const tenantId = yield* Context.Request.currentTenantId;
+                const hash = yield* Crypto.hmac(tenantId, Redacted.value(token));
+                yield* Metric.increment(metrics.auth.session.lookups);
+                const sessionOpt = yield* Context.Request.within(tenantId, sessionLookup(hash)).pipe(
+                    Effect.provideService(SqlClient.SqlClient, sqlClient),
+                    Effect.catchAll((error) =>
+                        Effect.logError('Session lookup failed', { error: String(error) }).pipe(
+                            Effect.andThen(Effect.fail(HttpError.Internal.of('Session lookup failed', error))),
+                        )),
+                );
+                const session = yield* Effect.fromNullable(Option.getOrUndefined(sessionOpt)).pipe(
+                    Effect.tapError(constant(Effect.all([Metric.increment(metrics.auth.session.misses), audit.log('auth_failure', { details: { reason: 'invalid_session' } })], { discard: true }))),
+                    Effect.mapError(constant(HttpError.Auth.of('Invalid session'))),
+                );
+                yield* Context.Request.update({ session: Option.some(session) }).pipe(
+                    Effect.tap(constant(Metric.increment(metrics.auth.session.hits))),
+                );
+            }),
+            apiKey: Effect.fn(function* (token: Redacted.Redacted<string>) {
+                const tenantId = yield* Context.Request.currentTenantId;
+                const hash = yield* Crypto.hmac(tenantId, Redacted.value(token));
+                yield* Metric.increment(metrics.auth.apiKey.lookups);
+                const keyOpt = yield* Context.Request.within(tenantId, apiKeyLookup(hash)).pipe(
+                    Effect.provideService(SqlClient.SqlClient, sqlClient),
+                    Effect.catchAll((error) =>
+                        Effect.logError('API key lookup failed', { error: String(error) }).pipe(
+                            Effect.andThen(Effect.fail(HttpError.Internal.of('API key lookup failed', error))),
+                        )),
+                );
+                const key = yield* Effect.fromNullable(Option.getOrUndefined(keyOpt)).pipe(
+                    Effect.tapError(constant(Effect.all([Metric.increment(metrics.auth.apiKey.misses), audit.log('auth_failure', { details: { reason: 'invalid_api_key' } })], { discard: true }))),
+                    Effect.mapError(constant(HttpError.Auth.of('Invalid API key'))),
+                );
+                yield* Context.Request.update({ session: Option.some({ appId: tenantId, id: key.id, kind: 'apiKey', mfaEnabled: false, userId: key.userId, verifiedAt: Option.none() }) }).pipe(Effect.tap(constant(Metric.increment(metrics.auth.apiKey.hits))));
+            }),
+        })));
+    static readonly pipeline = (database: Parameters<typeof _makeRequestContext>[0], options?: { readonly hsts?: Parameters<typeof _security>[0] }) =>
         (app: HttpApp.Default) => app.pipe(
             _trace,
             _makeRequestContext(database),
             _security(options?.hsts),
-            _serverTiming,
+            HttpMiddleware.make((app) => Effect.timed(app).pipe(Effect.map(([duration, response]) => HttpServerResponse.setHeader(response, 'server-timing', `total;dur=${Duration.toMillis(duration)}`)))),
             MetricsService.middleware,
         );
     static readonly layer = (config: {
@@ -245,7 +222,7 @@ class Middleware extends HttpApiMiddleware.Tag<Middleware>()('server/Middleware'
         readonly cors?: ReadonlyArray<string>;
     }) => Layer.merge(
         Middleware._makeAuthLayer(config.sessionLookup, config.apiKeyLookup),
-        _cors(config.cors),
+        pipe((config.cors ?? _CONFIG.cors.allowedOrigins).map((o) => o.trim()).filter(Boolean), (list) => HttpApiBuilder.middlewareCors({ ..._CONFIG.cors, allowedOrigins: list, credentials: !list.includes('*') && _CONFIG.cors.credentials })),
     );
 }
 

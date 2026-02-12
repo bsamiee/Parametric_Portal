@@ -155,17 +155,17 @@ const _importAssets = (parameters: typeof TransferQuery.Type) =>
                     return { appId, content: metadata, deletedAt: Option.none(), hash: Option.some(computedHash), name: Option.some(originalName), status: 'active' as const, storageRef: Option.some(storageKey), type: item.type, updatedAt: undefined, userId: Option.some(session.userId) };
                 })
                 : Effect.succeed({ appId, content: item.content, deletedAt: Option.none(), hash: Option.fromNullable(item.hash), name: Option.fromNullable(item.name), status: 'active' as const, storageRef: Option.none<string>(), type: item.type, updatedAt: undefined, userId: Option.some(session.userId) });
-            const processBatch = (accumulator: { readonly assets: readonly Asset[]; readonly dbFailures: readonly TransferError.Import[] }, batchItems: typeof items) => {
-                const ordinals = batchItems.map((batchItem) => batchItem.ordinal);
-                return Effect.forEach(batchItems, prepareItem, { concurrency: 10 }).pipe(
-                    Effect.flatMap((prepared) => repositories.assets.insertMany(prepared) as Effect.Effect<readonly Asset[], unknown>),
-                    Effect.map((created): typeof accumulator => ({ assets: A.appendAll(accumulator.assets, created), dbFailures: accumulator.dbFailures })),
-                    Effect.catchAll((error) => Effect.as(
-                        Effect.logError('Batch insert failed', { error: String(error), ordinals }),
-                        { assets: accumulator.assets, dbFailures: A.append(accumulator.dbFailures, new TransferError.Import({ cause: error, code: 'BATCH_FAILED', rows: ordinals })) } as typeof accumulator,
-                    )),
-                );
-            };
+        const processBatch = (accumulator: { readonly assets: readonly Asset[]; readonly dbFailures: readonly TransferError.Import[] }, batchItems: typeof items) => {
+            const ordinals = batchItems.map((batchItem) => batchItem.ordinal);
+            return Effect.forEach(batchItems, prepareItem, { concurrency: 10 }).pipe(
+                Effect.flatMap((prepared) => repositories.assets.insertMany(prepared) as Effect.Effect<readonly Asset[], unknown>),
+                Effect.map((created): typeof accumulator => ({ assets: A.appendAll(accumulator.assets, created), dbFailures: accumulator.dbFailures })),
+                Effect.catchAll((error) => Effect.as(
+                    Effect.logError('Batch insert failed', { error: String(error), ordinals }),
+                    { assets: accumulator.assets, dbFailures: A.append(accumulator.dbFailures, new TransferError.Import({ cause: error, code: 'BATCH_FAILED', rows: ordinals })) } as typeof accumulator,
+                )),
+            );
+        };
         const initial = { assets: [] as readonly Asset[], dbFailures: [] as readonly TransferError.Import[] };
         const { assets, dbFailures } = dryRun
             ? initial
@@ -177,10 +177,10 @@ const _importAssets = (parameters: typeof TransferQuery.Type) =>
                 Effect.mapError((err) => HttpError.Internal.of('Import processing failed', err)),
                 Telemetry.span('transfer.insert', { metrics: false }),
             );
-            yield* Effect.when(
-                repositories.search.refresh(appId).pipe(Effect.tapError((error) => Effect.logWarning('Search refresh failed', { error: String(error) })), Effect.catchAll(() => Effect.void)),
-                () => !dryRun && A.isNonEmptyReadonlyArray(assets),
-            );
+        yield* Effect.when(
+            repositories.search.refresh(appId).pipe(Effect.tapError((error) => Effect.logWarning('Search refresh failed', { error: String(error) })), Effect.catchAll(() => Effect.void)),
+            () => !dryRun && A.isNonEmptyReadonlyArray(assets),
+        );
         const totalFailures = failures.length + A.reduce(dbFailures, 0, (count, err) => count + err.rows.length);
         yield* Effect.all([
             MetricsService.inc(metrics.transfer.imports, MetricsService.label({ app: appId, dryRun: String(dryRun), format: codec.ext })),

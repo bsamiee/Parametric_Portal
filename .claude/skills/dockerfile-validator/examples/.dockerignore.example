@@ -1,0 +1,137 @@
+# =============================================================================
+# .dockerignore — Exclude files from Docker build context
+# =============================================================================
+# Reduces build context size, speeds up builds, and prevents secrets from
+# being accidentally included in images. Docker sends the entire build context
+# to the daemon before building — large contexts slow everything down.
+#
+# Syntax: Same as .gitignore (glob patterns, ! for negation, # for comments)
+# =============================================================================
+
+# --- Version Control ----------------------------------------------------------
+.git
+.gitignore
+.gitattributes
+.gitmodules
+
+# --- CI/CD --------------------------------------------------------------------
+.github
+.gitlab-ci.yml
+.travis.yml
+.circleci
+Jenkinsfile
+.buildkite
+
+# --- Documentation ------------------------------------------------------------
+README.md
+CHANGELOG.md
+CONTRIBUTING.md
+LICENSE
+docs/
+*.md
+!requirements.md
+
+# --- IDE and Editor -----------------------------------------------------------
+.vscode
+.idea
+.fleet
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# --- Environment and Secrets (CRITICAL — never include in build context) ------
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+*.p12
+*.pfx
+*.crt
+secrets/
+credentials/
+.npmrc
+.pypirc
+
+# --- Testing ------------------------------------------------------------------
+tests/
+test/
+spec/
+__tests__/
+*.test.*
+*.spec.*
+coverage/
+.coverage
+htmlcov/
+.nyc_output/
+.pytest_cache/
+jest.config.*
+
+# --- Node.js ------------------------------------------------------------------
+node_modules/
+npm-debug.log*
+yarn-error.log
+yarn-debug.log
+.pnpm-debug.log
+.yarn/cache
+.yarn/unplugged
+
+# --- Python -------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+.mypy_cache/
+.ruff_cache/
+
+# --- Go -----------------------------------------------------------------------
+*.exe
+*.test
+vendor/
+
+# --- Java ---------------------------------------------------------------------
+target/
+*.class
+*.jar
+*.war
+
+# --- Rust ---------------------------------------------------------------------
+target/
+Cargo.lock
+
+# --- Build Artifacts ----------------------------------------------------------
+dist/
+build/
+out/
+.next/
+.nuxt/
+
+# --- Logs ---------------------------------------------------------------------
+logs/
+*.log
+
+# --- Docker (do not include Dockerfiles in build context) ---------------------
+Dockerfile*
+docker-compose*.yml
+.dockerignore
+
+# --- Temporary ----------------------------------------------------------------
+tmp/
+temp/
+*.tmp
+*.bak
+*.orig
+
+# --- Monorepo (Nx/Turbo) — exclude unrelated workspace members ----------------
+# Uncomment and customize for monorepo builds:
+# apps/*/
+# !apps/api/
+# packages/*/
+# !packages/server/
+# !packages/shared/

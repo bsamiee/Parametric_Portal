@@ -33,10 +33,10 @@ const _CONFIG = {
 // --- [SCHEMA] ----------------------------------------------------------------
 
 const _SCHEMA = {
-    DeliveryRecord: S.Struct({ deliveredAt: S.optional(S.Number), deliveryId: S.String, durationMs: S.optional(S.Number), endpointUrl: S.String, error: S.optional(S.String), status: S.Literal('delivered', 'failed'), statusCode: S.optional(S.Number), tenantId: S.String, timestamp: S.Number, type: S.String }),
-    DeliveryResult: S.Struct({ deliveredAt: S.Number, durationMs: S.Number, statusCode: S.Number }),
-    ErrorReason: S.Literal('InvalidResponse', 'MaxRetries', 'NetworkError', 'NotFound', 'SignatureError', 'Timeout', 'VerificationFailed'),
-    RetryPayload: S.Struct({ data: S.Unknown, endpoint: S.optional(S.suspend(() => WebhookEndpoint)) }),
+    DeliveryRecord:  S.Struct({ deliveredAt: S.optional(S.Number), deliveryId: S.String, durationMs: S.optional(S.Number), endpointUrl: S.String, error: S.optional(S.String), status: S.Literal('delivered', 'failed'), statusCode: S.optional(S.Number), tenantId: S.String, timestamp: S.Number, type: S.String }),
+    DeliveryResult:  S.Struct({ deliveredAt: S.Number, durationMs: S.Number, statusCode: S.Number }),
+    ErrorReason:     S.Literal('InvalidResponse', 'MaxRetries', 'NetworkError', 'NotFound', 'SignatureError', 'Timeout', 'VerificationFailed'),
+    RetryPayload:    S.Struct({ data: S.Unknown, endpoint: S.optional(S.suspend(() => WebhookEndpoint)) }),
     WebhookSettings: S.Struct({ webhooks: S.optionalWith(S.Array(S.Struct({ active: S.Boolean, endpoint: S.suspend(() => WebhookEndpoint), eventTypes: S.Array(S.String) })), { default: () => [] }) }),
 } as const;
 
@@ -146,108 +146,108 @@ class WebhookService extends Effect.Service<WebhookService>()('server/Webhooks',
             _WebhookWorkflow.toLayer(({ endpoint, payload }) => Telemetry.span(Effect.gen(function* () {
             const database = yield* DatabaseService;
             const requestId = (yield* Context.Request.current).requestId;
-                const deliverActivity = Activity.make({ error: WebhookError, execute: _httpDeliver(endpoint, payload, payload.id, { extraHeaders: { [Context.Request.Headers.requestId]: requestId } }), name: 'webhook.deliver', success: _SCHEMA.DeliveryResult });
+            const deliverActivity = Activity.make({ error: WebhookError, execute: _httpDeliver(endpoint, payload, payload.id, { extraHeaders: { [Context.Request.Headers.requestId]: requestId } }), name: 'webhook.deliver', success: _SCHEMA.DeliveryResult });
             return yield* deliverActivity.pipe(
-                    Activity.retry({ times: _CONFIG.retry.maxAttempts, while: (error) => error.isRetryable }),
-                    _WebhookWorkflow.withCompensation((_value, cause) => Effect.gen(function* () {
-                        const tenantId = yield* Context.Request.currentTenantId;
-                        const timestamp = yield* Clock.currentTimeMillis;
-                            yield* Context.Request.withinSync(tenantId, database.jobDlq.insert({
-                                appId: tenantId, attempts: _CONFIG.retry.maxAttempts, contextRequestId: Option.none(), contextUserId: Option.none(), errorReason: 'MaxRetries', errors: [{ error: Cause.pretty(cause), timestamp }],
-                                payload: { data: payload.data, endpoint }, replayedAt: Option.none(), source: 'event', sourceId: payload.id, type: `webhook:${payload.type}`,
-                            }));
-                    }).pipe(Effect.ignore)),
-                );
+                Activity.retry({ times: _CONFIG.retry.maxAttempts, while: (error) => error.isRetryable }),
+                _WebhookWorkflow.withCompensation((_value, cause) => Effect.gen(function* () {
+                    const tenantId = yield* Context.Request.currentTenantId;
+                    const timestamp = yield* Clock.currentTimeMillis;
+                    yield* Context.Request.withinSync(tenantId, database.jobDlq.insert({
+                        appId: tenantId, attempts: _CONFIG.retry.maxAttempts, contextRequestId: Option.none(), contextUserId: Option.none(), errorReason: 'MaxRetries', errors: [{ error: Cause.pretty(cause), timestamp }],
+                        payload: { data: payload.data, endpoint }, replayedAt: Option.none(), source: 'event', sourceId: payload.id, type: `webhook:${payload.type}`,
+                    }));
+                }).pipe(Effect.ignore)),
+            );
             }), 'webhook.workflow.execute', { metrics: false, 'webhook.type': payload.type, 'webhook.url': endpoint.url })).pipe(Layer.provide(DatabaseService.Default)),
     ],
     scoped: Effect.gen(function* () {
         const [cache, database, eventBus, metrics, sql] = yield* Effect.all([CacheService, DatabaseService, EventBus, MetricsService, SqlClient.SqlClient]);
-                const throttles = yield* STM.commit(TMap.empty<string, Effect.Semaphore>());
-                    const settingsCache = yield* CacheService.cache<WebhookSettingsKey, never, never>({
-                            lookup: (key) => Context.Request.withinSync(key.tenantId, database.apps.readSettings(key.tenantId)).pipe(
-                                Effect.flatMap(Option.match({
-                                    onNone: () => Effect.succeed({ webhooks: [] }),
-                                    onSome: ({ settings }) => Effect.succeed(settings).pipe(
-                                        Effect.flatMap((settings) => S.decodeUnknown(_SCHEMA.WebhookSettings)(
-                                            { webhooks: settings.webhooks },
-                                            { errors: 'all', onExcessProperty: 'ignore' },
-                                    )),
-                                    Effect.mapError((cause) => WebhookError.from('VerificationFailed', undefined, { cause })),
-                                ),
-                            })),
-                        Effect.mapError((error) => error instanceof WebhookError ? error : WebhookError.from('NetworkError', undefined, { cause: error })),
-                        Effect.provideService(SqlClient.SqlClient, sql),
+        const throttles = yield* STM.commit(TMap.empty<string, Effect.Semaphore>());
+        const settingsCache = yield* CacheService.cache<WebhookSettingsKey, never, never>({
+            lookup: (key) => Context.Request.withinSync(key.tenantId, database.apps.readSettings(key.tenantId)).pipe(
+                Effect.flatMap(Option.match({
+                    onNone: () => Effect.succeed({ webhooks: [] }),
+                    onSome: ({ settings }) => Effect.succeed(settings).pipe(
+                        Effect.flatMap((settings) => S.decodeUnknown(_SCHEMA.WebhookSettings)(
+                            { webhooks: settings.webhooks },
+                            { errors: 'all', onExcessProperty: 'ignore' },
+                        )),
+                        Effect.mapError((cause) => WebhookError.from('VerificationFailed', undefined, { cause })),
                     ),
-                storeId: 'webhook-settings', timeToLive: _CONFIG.settings.cacheTtl,
+                })),
+                Effect.mapError((error) => error instanceof WebhookError ? error : WebhookError.from('NetworkError', undefined, { cause: error })),
+                Effect.provideService(SqlClient.SqlClient, sql),
+            ),
+            storeId: 'webhook-settings', timeToLive: _CONFIG.settings.cacheTtl,
+        });
+        const delivery = _makeDeliveryEngine({ cache, eventBus, metrics, throttles });
+        const get = (tenantId: string) => settingsCache.get(new WebhookSettingsKey({ tenantId }));
+        const invalidate = (tenantId: string) => settingsCache.invalidate(new WebhookSettingsKey({ tenantId }));
+        const update = (tenantId: string, transform: (webhooks: typeof _SCHEMA.WebhookSettings.Type['webhooks']) => typeof _SCHEMA.WebhookSettings.Type['webhooks']) => Effect.gen(function* () {
+            const appOption = yield* Context.Request.withinSync(tenantId, database.apps.readSettings(tenantId, 'update')).pipe(
+                Effect.provideService(SqlClient.SqlClient, sql),
+            );
+            const app = yield* Option.match(appOption, {
+                onNone: F.constant(Effect.fail(WebhookError.from('NotFound', undefined, { cause: `App not found: ${tenantId}` }))),
+                onSome: Effect.succeed,
             });
-            const delivery = _makeDeliveryEngine({ cache, eventBus, metrics, throttles });
-            const get = (tenantId: string) => settingsCache.get(new WebhookSettingsKey({ tenantId }));
-                const invalidate = (tenantId: string) => settingsCache.invalidate(new WebhookSettingsKey({ tenantId }));
-                        const update = (tenantId: string, transform: (webhooks: typeof _SCHEMA.WebhookSettings.Type['webhooks']) => typeof _SCHEMA.WebhookSettings.Type['webhooks']) => Effect.gen(function* () {
-                        const appOption = yield* Context.Request.withinSync(tenantId, database.apps.readSettings(tenantId, 'update')).pipe(
-                            Effect.provideService(SqlClient.SqlClient, sql),
-                        );
-                        const app = yield* Option.match(appOption, {
-                            onNone: F.constant(Effect.fail(WebhookError.from('NotFound', undefined, { cause: `App not found: ${tenantId}` }))),
-                            onSome: Effect.succeed,
-                        });
-                            const current = yield* S.decodeUnknown(_SCHEMA.WebhookSettings)(
-                                { webhooks: app.settings.webhooks },
-                                { errors: 'all', onExcessProperty: 'ignore' },
-                            ).pipe(Effect.mapError((cause) => WebhookError.from('VerificationFailed', undefined, { cause })));
-                            yield* Context.Request.withinSync(tenantId, database.apps.updateSettings(tenantId, {
-                                ...app.settings,
-                                webhooks: transform(current.webhooks),
-                            })).pipe(Effect.provideService(SqlClient.SqlClient, sql));
-                        yield* invalidate(tenantId);
-                        yield* eventBus.publish({
-                            aggregateId: tenantId,
-                            payload: { _tag: 'app', action: 'settings.updated' },
-                            tenantId,
-                        }).pipe(Effect.ignore);
-                    }).pipe(Effect.mapError((error) => error instanceof WebhookError ? error : WebhookError.from('NetworkError', undefined, { cause: error })));
-                    const list = (tenantId: string) => get(tenantId).pipe(Effect.map((current) => current.webhooks));
-                const register = (tenantId: string, input: { active: boolean; endpoint: WebhookEndpoint; eventTypes: readonly string[] }) => {
-                    const targetUrl = input.endpoint.url;
-                    const nextWebhook = {
-                        active: input.active,
-                        endpoint: input.endpoint,
-                        eventTypes: [...input.eventTypes],
-                    };
-                    return _verifyOwnership(input.endpoint).pipe(
-                        Effect.andThen(update(tenantId, (webhooks) => {
-                            const replaced = Arr.map(webhooks, (webhook) => webhook.endpoint.url === targetUrl ? nextWebhook : webhook);
-                            return Arr.some(webhooks, (webhook) => webhook.endpoint.url === targetUrl) ? replaced : Arr.append(replaced, nextWebhook);
-                        })),
+            const current = yield* S.decodeUnknown(_SCHEMA.WebhookSettings)(
+                { webhooks: app.settings.webhooks },
+                { errors: 'all', onExcessProperty: 'ignore' },
+            ).pipe(Effect.mapError((cause) => WebhookError.from('VerificationFailed', undefined, { cause })));
+            yield* Context.Request.withinSync(tenantId, database.apps.updateSettings(tenantId, {
+                ...app.settings,
+                webhooks: transform(current.webhooks),
+            })).pipe(Effect.provideService(SqlClient.SqlClient, sql));
+            yield* invalidate(tenantId);
+            yield* eventBus.publish({
+                aggregateId: tenantId,
+                payload: { _tag: 'app', action: 'settings.updated' },
+                tenantId,
+            }).pipe(Effect.ignore);
+        }).pipe(Effect.mapError((error) => error instanceof WebhookError ? error : WebhookError.from('NetworkError', undefined, { cause: error })));
+        const list = (tenantId: string) => get(tenantId).pipe(Effect.map((current) => current.webhooks));
+        const register = (tenantId: string, input: { active: boolean; endpoint: WebhookEndpoint; eventTypes: readonly string[] }) => {
+            const targetUrl = input.endpoint.url;
+            const nextWebhook = {
+                active: input.active,
+                endpoint: input.endpoint,
+                eventTypes: [...input.eventTypes],
+            };
+            return _verifyOwnership(input.endpoint).pipe(
+                Effect.andThen(update(tenantId, (webhooks) => {
+                    const replaced = Arr.map(webhooks, (webhook) => webhook.endpoint.url === targetUrl ? nextWebhook : webhook);
+                    return Arr.some(webhooks, (webhook) => webhook.endpoint.url === targetUrl) ? replaced : Arr.append(replaced, nextWebhook);
+                })),
+            );
+        };
+        const remove = (tenantId: string, endpointUrl: string) => update(tenantId, (webhooks) => webhooks.filter((webhook) => webhook.endpoint.url !== endpointUrl));
+        const settings = { get, invalidate, list, register, remove } as const;
+        const retry = (dlqId: string) => database.jobDlq.one([{ field: 'id', value: dlqId }]).pipe(
+            Effect.provideService(SqlClient.SqlClient, sql),
+            Effect.flatMap(Option.match({
+                onNone: F.constant(Effect.fail(WebhookError.from('NotFound', dlqId))),
+                onSome: (entry: typeof JobDlq.Type) => Effect.gen(function* () {
+                    const parsed = yield* S.decodeUnknown(_SCHEMA.RetryPayload)(entry.payload).pipe(
+                        Effect.map((payload) => ({ data: payload.data, endpoint: Option.fromNullable(payload.endpoint) })),
+                        Effect.orElseSucceed(() => ({ data: entry.payload, endpoint: Option.none<WebhookEndpoint>() })),
                     );
-                };
-            const remove = (tenantId: string, endpointUrl: string) => update(tenantId, (webhooks) => webhooks.filter((webhook) => webhook.endpoint.url !== endpointUrl));
-            const settings = { get, invalidate, list, register, remove } as const;
-            const retry = (dlqId: string) => database.jobDlq.one([{ field: 'id', value: dlqId }]).pipe(
-                    Effect.provideService(SqlClient.SqlClient, sql),
-                    Effect.flatMap(Option.match({
-                        onNone: F.constant(Effect.fail(WebhookError.from('NotFound', dlqId))),
-                        onSome: (entry: typeof JobDlq.Type) => Effect.gen(function* () {
-                            const parsed = yield* S.decodeUnknown(_SCHEMA.RetryPayload)(entry.payload).pipe(
-                                Effect.map((payload) => ({ data: payload.data, endpoint: Option.fromNullable(payload.endpoint) })),
-                                Effect.orElseSucceed(() => ({ data: entry.payload, endpoint: Option.none<WebhookEndpoint>() })),
-                            );
-                            const dlqType = yield* Match.value(entry.type.startsWith('webhook:')).pipe(
-                                Match.when(true, () => Effect.succeed(entry.type.replace(/^webhook:/, ''))),
-                                Match.orElse(() => Effect.fail(WebhookError.from('NotFound', dlqId, { cause: `DLQ entry ${dlqId} is not a webhook delivery` }))),
-                            );
-                            const endpoint = yield* Option.match(parsed.endpoint, {
-                                onNone: F.constant(Effect.fail(WebhookError.from('NotFound', dlqId, { cause: 'Endpoint snapshot missing' }))),
-                                onSome: Effect.succeed,
-                            });
-                            const timestamp = yield* Clock.currentTimeMillis;
-                            yield* delivery.execute('deliver', entry.appId, endpoint, new WebhookPayload({ data: parsed.data, id: crypto.randomUUID(), timestamp, type: dlqType }));
-                            yield* database.jobDlq.markReplayed(dlqId).pipe(Effect.provideService(SqlClient.SqlClient, sql));
-                        }),
-                    })),
-                    Telemetry.span('webhook.retry', { 'dlq.id': dlqId, metrics: false }),
-                );
-            const status = (tenantId: string, endpointUrl?: string) => settings.get(tenantId).pipe(Effect.flatMap((current) => delivery.status(tenantId, endpointUrl ? [endpointUrl] : current.webhooks.map((webhook) => webhook.endpoint.url))));
+                    const dlqType = yield* Match.value(entry.type.startsWith('webhook:')).pipe(
+                        Match.when(true, () => Effect.succeed(entry.type.replace(/^webhook:/, ''))),
+                        Match.orElse(() => Effect.fail(WebhookError.from('NotFound', dlqId, { cause: `DLQ entry ${dlqId} is not a webhook delivery` }))),
+                    );
+                    const endpoint = yield* Option.match(parsed.endpoint, {
+                        onNone: F.constant(Effect.fail(WebhookError.from('NotFound', dlqId, { cause: 'Endpoint snapshot missing' }))),
+                        onSome: Effect.succeed,
+                    });
+                    const timestamp = yield* Clock.currentTimeMillis;
+                    yield* delivery.execute('deliver', entry.appId, endpoint, new WebhookPayload({ data: parsed.data, id: crypto.randomUUID(), timestamp, type: dlqType }));
+                    yield* database.jobDlq.markReplayed(dlqId).pipe(Effect.provideService(SqlClient.SqlClient, sql));
+                }),
+            })),
+            Telemetry.span('webhook.retry', { 'dlq.id': dlqId, metrics: false }),
+        );
+        const status = (tenantId: string, endpointUrl?: string) => settings.get(tenantId).pipe(Effect.flatMap((current) => delivery.status(tenantId, endpointUrl ? [endpointUrl] : current.webhooks.map((webhook) => webhook.endpoint.url))));
         const test = (tenantId: string, endpoint: WebhookEndpoint) => Clock.currentTimeMillis.pipe(Effect.flatMap((timestamp) => delivery.execute('test', tenantId, endpoint, new WebhookPayload({ data: { test: true }, id: crypto.randomUUID(), timestamp, type: 'webhook.test' }))));
         const deliverEvent = (tenantId: string, eventType: string, payload: unknown, eventId?: string) => Clock.currentTimeMillis.pipe(
             Effect.flatMap((timestamp) => settings.get(tenantId).pipe(
@@ -259,9 +259,9 @@ class WebhookService extends Effect.Service<WebhookService>()('server/Webhooks',
             )),
             Telemetry.span('webhook.deliverEvent', { metrics: false, 'webhook.tenant_id': tenantId, 'webhook.type': eventType }),
         );
-            yield* Effect.forkScoped(eventBus.subscribe('app.settings.updated', S.Struct({ _tag: S.Literal('app'), action: S.Literal('settings.updated') }), (event) => settings.invalidate(event.tenantId).pipe(Effect.ignore)).pipe(Stream.catchAll(() => Stream.empty), Stream.runDrain));
-            yield* Effect.logInfo('WebhookService initialized');
-            return { deliverEvent, list: settings.list, register: settings.register, remove: settings.remove, retry, status, test };
+        yield* Effect.forkScoped(eventBus.subscribe('app.settings.updated', S.Struct({ _tag: S.Literal('app'), action: S.Literal('settings.updated') }), (event) => settings.invalidate(event.tenantId).pipe(Effect.ignore)).pipe(Stream.catchAll(() => Stream.empty), Stream.runDrain));
+        yield* Effect.logInfo('WebhookService initialized');
+        return { deliverEvent, list: settings.list, register: settings.register, remove: settings.remove, retry, status, test };
         }),
     }) {
     static readonly Config = _CONFIG;

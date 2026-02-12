@@ -3,8 +3,11 @@ name: ${kebab-case-name}
 type: standard
 depth: ${base|extended|full}
 # context: fork
-# user-invocable: false
 # agent: Explore
+# user-invocable: false
+# disable-model-invocation: true
+# allowed-tools: Read, Glob, Grep
+# argument-hint: [target] [focus?]
 description: ${action-verb-capability}. Use when ${scenario-1}, ${scenario-2}, or ${scenario-3}.
 ---
 

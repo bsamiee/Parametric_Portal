@@ -14,26 +14,9 @@ description: >-
 
 <br>
 
-Invokes Hostinger API through Python wrapper using `HOSTINGER_TOKEN` env var.
+Invokes Hostinger API through Python wrapper using `HOSTINGER_TOKEN` env var. Base URL: `https://developers.hostinger.com`.
 
-[IMPORTANT] Zero-arg commands default to `page=1`, `limit=30`.
-
-```bash
-# Zero-arg commands
-uv run .claude/skills/hostinger-tools/scripts/hostinger.py vps-list
-uv run .claude/skills/hostinger-tools/scripts/hostinger.py firewall-list
-uv run .claude/skills/hostinger-tools/scripts/hostinger.py ssh-key-list
-uv run .claude/skills/hostinger-tools/scripts/hostinger.py script-list
-uv run .claude/skills/hostinger-tools/scripts/hostinger.py domain-list
-uv run .claude/skills/hostinger-tools/scripts/hostinger.py billing-catalog
-uv run .claude/skills/hostinger-tools/scripts/hostinger.py billing-payment-methods
-uv run .claude/skills/hostinger-tools/scripts/hostinger.py billing-subscriptions
-uv run .claude/skills/hostinger-tools/scripts/hostinger.py hosting-orders-list
-uv run .claude/skills/hostinger-tools/scripts/hostinger.py hosting-websites-list
-uv run .claude/skills/hostinger-tools/scripts/hostinger.py whois-list
-uv run .claude/skills/hostinger-tools/scripts/hostinger.py datacenter-list
-uv run .claude/skills/hostinger-tools/scripts/hostinger.py template-list
-```
+[IMPORTANT] Zero-arg commands default to `page=1`, `limit=30`. Uses `--key value` flag syntax. Hostinger also provides an MCP server and n8n node for automation.
 
 ---
 ## [1][VPS_CORE]
@@ -226,3 +209,18 @@ Commands return: `{"status": "success|error", ...}`.
 |   [2]   | View commands   | `{id: int, item: object}`     |
 |   [3]   | Action commands | `{id: int, action: bool}`     |
 |   [4]   | Create commands | `{id: int, created: bool}`    |
+
+---
+## [17][ENVIRONMENT]
+
+| [VAR]              | [REQUIRED] | [DESCRIPTION]                           |
+| ------------------ | ---------- | --------------------------------------- |
+| `HOSTINGER_TOKEN`  | Yes        | Hostinger API bearer token              |
+
+---
+## [18][ERROR_HANDLING]
+
+- HTTP errors print `[ERROR] <status>: <body>` and exit 1
+- Missing token: `[ERROR] HOSTINGER_TOKEN environment variable not set`
+- VPS not found: `[ERROR] 404: Virtual machine not found`
+- Action pending: `[ERROR] 409: Action already in progress`; wait for completion

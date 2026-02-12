@@ -1,0 +1,171 @@
+# =============================================================================
+# .dockerignore — Monorepo-Optimized Build Context Exclusion
+# =============================================================================
+# Reduces build context size from GBs to MBs by excluding non-essential files.
+# Organized by category. Pattern syntax follows .gitignore rules.
+#
+# Use with: docker buildx build --file Dockerfile .
+# =============================================================================
+
+# --- Version Control ---------------------------------------------------------
+.git
+.gitignore
+.gitattributes
+.gitmodules
+
+# --- CI/CD Pipelines ---------------------------------------------------------
+.github
+.gitlab-ci.yml
+.travis.yml
+.circleci
+Jenkinsfile
+.woodpecker
+
+# --- Documentation -----------------------------------------------------------
+README.md
+CHANGELOG.md
+CONTRIBUTING.md
+CODE_OF_CONDUCT.md
+SECURITY.md
+LICENSE
+*.md
+docs/
+
+# --- Docker (prevent recursive context) --------------------------------------
+Dockerfile*
+.dockerignore
+docker-compose*.yml
+docker-compose*.yaml
+docker-bake.hcl
+
+# --- Environment / Secrets ---------------------------------------------------
+.env
+.env.*
+*.local
+.envrc
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+credentials.json
+secrets.yaml
+
+# --- Logs --------------------------------------------------------------------
+logs/
+*.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# --- IDE / Editor ------------------------------------------------------------
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+*.iml
+Thumbs.db
+.editorconfig
+
+# --- Testing -----------------------------------------------------------------
+coverage/
+.coverage
+test-results/
+*.test
+.pytest_cache/
+.tox/
+.nyc_output/
+jest.config.*
+vitest.config.*
+playwright-report/
+stryker.config.*
+
+# --- Node.js -----------------------------------------------------------------
+node_modules/
+.npm
+.yarn
+.pnp.*
+.pnpm-store
+dist/
+build/
+
+# --- Python ------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+.venv/
+env/
+ENV/
+pip-log.txt
+*.egg-info/
+.mypy_cache/
+.ruff_cache/
+
+# --- Go ----------------------------------------------------------------------
+vendor/
+*.exe
+*.out
+go.work
+go.work.sum
+
+# --- Java / JVM --------------------------------------------------------------
+target/
+*.class
+*.jar
+*.war
+*.ear
+.gradle/
+build/
+.mvn/
+!.mvn/wrapper/maven-wrapper.jar
+
+# --- Rust --------------------------------------------------------------------
+target/
+Cargo.lock
+
+# --- Build Artifacts (generic) -----------------------------------------------
+dist/
+build/
+target/
+out/
+*.tsbuildinfo
+
+# --- Monorepo Tooling (Nx / Turborepo / Vite) --------------------------------
+.nx/cache
+.nx/workspace-data
+.vite
+.vite-inspect
+.turbo/
+tmp/
+
+# --- Infrastructure / IaC ----------------------------------------------------
+infrastructure/
+pulumi/
+.pulumi/
+terraform/
+.terraform/
+*.tfstate*
+cdk.out/
+
+# --- Claude / AI Tooling -----------------------------------------------------
+.claude/
+.planning/
+.cursor/
+.windsurf/
+.aider*
+CLAUDE.md
+
+# --- Linting / Formatting Config ---------------------------------------------
+biome.json
+lefthook.yml
+.eslintrc*
+.prettierrc*
+.stylelintrc*
+commitlint.config.*
+lint-staged.config.*

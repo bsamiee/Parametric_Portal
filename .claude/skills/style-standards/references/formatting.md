@@ -64,6 +64,10 @@
 
 [^1]: Pad with dashes to column 80. Comment delimiter is language-dependent (`//`, `#`, `--`, etc.).
 
+**Canonical Code Section Order** (omit unused): TYPES → SCHEMA → CONSTANTS → ERRORS → SERVICES → FUNCTIONS → LAYERS → EXPORT.
+**Domain Extensions:** TABLES (after SCHEMA), REPOSITORIES (after SERVICES), GROUPS (after SCHEMA), MIDDLEWARE (after SERVICES).
+**Forbidden Labels:** `Helpers`, `Handlers`, `Utils`, `Config`, `Dispatch_Tables`.
+
 [IMPORTANT]:
 - [ALWAYS] Headers follow strict bracket syntax; sigils use `_` for compound words.
 - [ALWAYS] **`.claude/` infrastructure exception:** H1 label uses kebab-case matching parent folder/file name. Applies to: `skills/*/SKILL.md`, `commands/*.md`, `agents/*.md`. Example: `# [H1][STYLE-STANDARDS]` for `style-standards/SKILL.md`. Hyphens `-` permitted in H1 sigil only for these files.

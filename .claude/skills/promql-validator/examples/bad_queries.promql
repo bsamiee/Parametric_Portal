@@ -1,0 +1,175 @@
+# Bad PromQL Queries (Anti-Patterns) with Corrections
+# Each entry: WHY it is wrong, BAD query, GOOD correction
+# Prometheus 3.10+ (native histograms stable 3.8+, no feature flag 3.9+)
+
+# --- HIGH CARDINALITY ---
+# WHY: Scans entire TSDB index, causing timeouts and high memory usage
+# BAD: No filters
+http_requests_total
+# GOOD: http_requests_total{job="api-service", instance="prod-1"}
+
+# WHY: Empty matcher {} matches all series for this metric
+# BAD: Empty matcher
+http_requests_total{}
+# GOOD: http_requests_total{job="api", environment="production"}
+
+# --- REGEX OVERUSE ---
+# WHY: Exact match uses O(1) inverted index lookup; regex requires pattern evaluation (5-10x slower)
+# BAD: Regex for exact match
+http_requests_total{status=~"200"}
+# GOOD: http_requests_total{status="200"}
+
+# --- MISSING RATE ON COUNTERS ---
+# WHY: Raw counter is monotonically increasing, not useful for dashboards or alerting
+# BAD: Raw counter
+http_requests_total{job="api"}
+# GOOD: rate(http_requests_total{job="api"}[5m])
+
+# WHY: Summing raw counters produces a monotonically increasing total, not a rate
+# BAD: Summing raw counters
+sum(http_requests_total)
+# GOOD: sum(rate(http_requests_total[5m]))
+
+# --- RATE ON GAUGES ---
+# WHY: Gauges represent current state; rate() computes derivative which is meaningless
+# BAD: rate on gauge
+rate(node_memory_usage_bytes[5m])
+# GOOD: avg_over_time(node_memory_usage_bytes[5m])
+
+# WHY: irate on a gauge produces instantaneous derivative of current state
+# BAD: irate on gauge
+irate(cpu_temperature_celsius[5m])
+# GOOD: delta(cpu_temperature_celsius[5m])
+
+# --- AVERAGING QUANTILES ---
+# WHY: Quantiles are non-additive: avg(p99_a, p99_b) is NOT the p99 of a+b
+# BAD: Mathematically invalid
+avg(http_request_duration_seconds{quantile="0.95"})
+# GOOD: histogram_quantile(0.95, sum by (le) (rate(http_request_duration_seconds_bucket[5m])))
+
+# WHY: Summing pre-computed quantiles produces a meaningless number
+# BAD: Summing quantiles
+sum(response_time_seconds{quantile="0.99"})
+# GOOD: histogram_quantile(0.99, sum by (job, le) (rate(response_time_seconds_bucket[5m])))
+
+# --- IRATE MISUSE ---
+# WHY: irate() only uses last 2 samples -- extra range is wasted lookback, not averaged
+# BAD: irate with long range
+irate(http_requests_total[1h])
+# GOOD: rate(http_requests_total[1h]) or irate(http_requests_total[2m])
+
+# --- SHORT RATE RANGE ---
+# WHY: Needs >= 3 samples (4x scrape interval) for reliable extrapolation; shorter ranges produce noisy/empty results
+# BAD: Less than 4x scrape interval
+rate(http_requests_total[30s])
+# GOOD: rate(http_requests_total[2m])
+
+# --- MISSING RANGE VECTOR ---
+# WHY: Range vector is required syntax; Prometheus cannot compute rate without time window
+# BAD: rate without range
+rate(http_requests_total)
+# GOOD: rate(http_requests_total[5m])
+
+# --- EXCESSIVE SUBQUERY ---
+# WHY: Materializes millions of intermediate samples, causing OOM
+# BAD: 95-day subquery
+rate(http_requests_total[5m])[95d:1m]
+# GOOD: Use recording rules, then: job:http_requests:rate5m[7d:1m]
+
+# --- UNBOUNDED AGGREGATION ---
+# WHY: Produces single-series result losing all dimensional data for debugging
+# BAD: No grouping
+sum(rate(http_requests_total[5m]))
+# GOOD: sum by (job, instance) (rate(http_requests_total[5m]))
+
+# --- HISTOGRAM MISTAKES ---
+# WHY: Raw buckets are cumulative counters; without rate() you get lifetime percentiles, not recent
+# BAD: Missing rate
+histogram_quantile(0.95, sum by (le) (http_request_duration_seconds_bucket))
+# GOOD: histogram_quantile(0.95, sum by (le) (rate(http_request_duration_seconds_bucket[5m])))
+
+# WHY: Without le, bucket boundaries are lost and percentile computation fails
+# BAD: Missing 'le' in grouping
+histogram_quantile(0.95, sum by (job) (rate(http_request_duration_seconds_bucket[5m])))
+# GOOD: histogram_quantile(0.95, sum by (job, le) (rate(http_request_duration_seconds_bucket[5m])))
+
+# --- OFFSET MISPLACEMENT ---
+# WHY: Syntax error: offset must follow the range vector, not precede it
+# BAD: offset before range
+http_requests_total offset 1h [5m]
+# GOOD: http_requests_total[5m] offset 1h
+
+# --- INEFFICIENT LABEL MATCHING ---
+# WHY: Single regex alternation is one query execution vs N separate queries merged
+# BAD: Multiple OR for same label
+http_requests_total{job="api"} or http_requests_total{job="web"} or http_requests_total{job="worker"}
+# GOOD: http_requests_total{job=~"api|web|worker"}
+
+# --- MISSING GROUP_LEFT ---
+# WHY: Without group modifier, many-to-one joins are rejected by Prometheus
+# BAD: Join without group modifier
+rate(http_requests_total[5m]) * on (job, instance) service_info
+# GOOD: rate(http_requests_total[5m]) * on (job, instance) group_left (version, commit) service_info
+
+# --- REDUNDANT FUNCTIONS ---
+# WHY: Outer avg without by() over temporal avg is identity for single-series or unclear for multi-series
+# BAD: avg wrapping avg_over_time
+avg(avg_over_time(node_cpu_usage_percent[5m]))
+# GOOD: avg_over_time(node_cpu_usage_percent[5m])
+
+# --- DEPRECATED FUNCTION (3.0+) ---
+# WHY: holt_winters was renamed to double_exponential_smoothing in Prometheus 3.0 for clarity; old name will be removed
+# BAD: Using deprecated holt_winters
+holt_winters(node_cpu_usage_percent[10m], 0.5, 0.5)
+# GOOD: double_exponential_smoothing(node_cpu_usage_percent[10m], 0.5, 0.5)
+
+# --- ABSENT WITH AGGREGATION ---
+# WHY: Aggregation returns empty set (not absent vector) when no input, so absent() always returns empty
+# BAD: absent wrapping aggregation
+absent(sum(up{job="api"}))
+# GOOD: group(present_over_time(up{job="api"}[5m])) unless group(up{job="api"})
+
+# --- NATIVE HISTOGRAM MISTAKES (3.8+) ---
+# WHY: Native histograms encode bucket boundaries internally; le label does not exist
+# BAD: Using le in by() for native histogram
+histogram_quantile(0.95, sum by (job, le) (rate(http_request_duration_seconds[5m])))
+# GOOD: histogram_quantile(0.95, sum by (job) (rate(http_request_duration_seconds[5m])))
+
+# WHY: _bucket suffix only exists for classic histograms; native histograms use the base metric name
+# BAD: Using _bucket suffix with native histogram functions
+histogram_avg(rate(http_request_duration_seconds_bucket{job="api"}[5m]))
+# GOOD: histogram_avg(rate(http_request_duration_seconds{job="api"}[5m]))
+
+# WHY: histogram_fraction requires native histogram input; classic histograms use _bucket{le="threshold"}
+# BAD: Mixing histogram_fraction with classic histogram _bucket
+histogram_fraction(0, 0.2, rate(http_request_duration_seconds_bucket{job="api"}[5m]))
+# GOOD: histogram_fraction(0, 0.2, rate(http_request_duration_seconds{job="api"}[5m]))
+
+# WHY: predict_linear needs sufficient data for reliable regression; <10m with 30s scrape = <20 points
+# BAD: Short range for predict_linear
+predict_linear(node_filesystem_avail_bytes[5m], 3600)
+# GOOD: predict_linear(node_filesystem_avail_bytes[1h], 3600)
+
+# --- DIVISION BY ZERO ---
+# WHY: Zero-traffic periods produce NaN, breaking dashboards and alert evaluations
+# BAD: Division by rate(counter) without zero protection
+rate(http_requests_total{status=~"5.."}[5m]) / rate(http_requests_total[5m])
+# GOOD: rate(http_requests_total{status=~"5.."}[5m]) / (rate(http_requests_total[5m]) > 0)
+
+# --- UTF-8 METRIC NAME MISTAKES (3.0+) ---
+# WHY: OTEL dot-separated metric names require quoted syntax; unquoted dots cause parse errors
+# BAD: Unquoted OTEL metric name with dots
+http.server.request.duration{job="api"}
+# GOOD: {"http.server.request.duration", job="api"}
+
+# --- UNANCHORED REGEX ---
+# WHY: Unanchored regex scans all label values; anchored enables prefix index optimization
+# BAD: Unanchored regex (full scan)
+{env=~"prod-.*"}
+# GOOD: {env=~"^prod-.*"}
+
+# --- NATIVE HISTOGRAM FEATURE FLAG CONFUSION (3.9+) ---
+# WHY: Since Prometheus 3.9, --enable-feature=native-histograms is a no-op; use scrape config instead
+# BAD: Relying on feature flag for native histograms
+# --enable-feature=native-histograms  (no-op since 3.9)
+# GOOD: Set scrape_native_histograms: true in prometheus.yml scrape config

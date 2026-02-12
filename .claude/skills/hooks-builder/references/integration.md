@@ -16,17 +16,11 @@ Hooks integrate via settings files, environment variables, and context injection
 | [INDEX] | [VARIABLE]            | [SCOPE]      | [VALUE]                            |
 | :-----: | --------------------- | ------------ | ---------------------------------- |
 |   [1]   | `CLAUDE_PROJECT_DIR`  | All hooks    | Absolute path to project root      |
-|   [2]   | `CLAUDE_WORKING_DIR`  | All hooks    | Current working directory          |
-|   [3]   | `CLAUDE_SESSION_ID`   | All hooks    | Current session identifier         |
-|   [4]   | `CLAUDE_EVENT_TYPE`   | All hooks    | Event name (e.g., `PreToolUse`)    |
-|   [5]   | `CLAUDE_CODE_REMOTE`  | All hooks    | `"true"` for web, empty for CLI    |
-|   [6]   | `CLAUDE_TOOL_NAME`    | Tool hooks   | Tool being invoked (e.g., `Write`) |
-|   [7]   | `CLAUDE_TOOL_INPUT`   | Tool hooks   | Raw tool parameters as JSON        |
-|   [8]   | `CLAUDE_TOOL_OUTPUT`  | PostToolUse  | Tool execution output              |
-|   [9]   | `CLAUDE_FILE_PATHS`   | Tool hooks   | Space-separated file paths         |
-|  [10]   | `CLAUDE_NOTIFICATION` | Notification | Message content                    |
-|  [11]   | `CLAUDE_ENV_FILE`     | SessionStart | Path to append `export` statements |
-|  [12]   | `CLAUDE_PLUGIN_ROOT`  | Plugin hooks | Absolute path to plugin directory  |
+|   [2]   | `CLAUDE_CODE_REMOTE`  | All hooks    | `"true"` for web, unset for CLI    |
+|   [3]   | `CLAUDE_ENV_FILE`     | SessionStart | Path to append `export` statements |
+|   [4]   | `CLAUDE_PLUGIN_ROOT`  | Plugin hooks | Absolute path to plugin directory  |
+
+[IMPORTANT] All other event-specific data (session_id, tool_name, tool_input, cwd, etc.) is delivered via JSON stdin, NOT environment variables. Parse with `jq` (Bash) or `json.load(sys.stdin)` (Python).
 
 ### [1.2][CUSTOM_VARIABLES]
 
@@ -63,8 +57,8 @@ _debug = lambda msg: DEBUG and print(f"[hook] {msg}", file=sys.stderr)
 | :-----: | ---------------- | ---------------------------- |
 |   [1]   | SessionStart     | Added as context for Claude  |
 |   [2]   | UserPromptSubmit | Added as context for Claude  |
-|   [3]   | PreToolUse       | Shown in transcript (Ctrl-R) |
-|   [4]   | PostToolUse      | Shown in transcript (Ctrl-R) |
+|   [3]   | PreToolUse       | Shown in verbose mode (Ctrl+O) |
+|   [4]   | PostToolUse      | Shown in verbose mode (Ctrl+O) |
 |   [5]   | Others           | Debug log only (`--debug`)   |
 
 ### [2.2][SESSIONSTART_PATTERN]

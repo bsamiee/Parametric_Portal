@@ -1,4 +1,5 @@
 # [H1][TESTING_TOOLING]
+>
 >**Dictum:** *Dependency catalog enables version tracking and integration awareness.*
 
 <br>
@@ -6,233 +7,212 @@
 All versions managed via `pnpm-workspace.yaml` catalog. Reference: `"pkg": "catalog:"`.
 
 ---
+
 ## [1][UNIT_TESTING]
+>
 >**Dictum:** *Vitest ecosystem provides unified test execution.*
 
 <br>
 
-| [INDEX] | [PACKAGE]                  | [VERSION] | [INTEGRATION]                          |
-| :-----: | -------------------------- | --------- | -------------------------------------- |
-|   [1]   | vitest                     | 4.0.16    | Root config, inline projects           |
-|   [2]   | @vitest/browser-playwright | 4.0.16    | runtime-browser project, real Chromium |
-|   [3]   | @vitest/coverage-v8        | 4.0.16    | Coverage provider, 30% thresholds      |
-|   [4]   | @vitest/ui                 | 4.0.16    | Dashboard: `pnpm vitest --ui`          |
+| [INDEX] | [PACKAGE]                  | [INTEGRATION]                                                                     |
+| :-----: | -------------------------- | --------------------------------------------------------------------------------- |
+|   [1]   | vitest                     | Root config, 4 inline projects (root-tests, packages-node, runtime-browser, apps) |
+|   [2]   | @vitest/browser-playwright | runtime-browser project, real Chromium                                            |
+|   [3]   | @vitest/coverage-v8        | V8 provider, thresholds configured, currently disabled pending activation         |
+|   [4]   | @vitest/ui                 | Dashboard: `pnpm vitest --ui`                                                     |
 
 <br>
 
-**Configuration:** `vitest.config.ts` exports frozen `B` constant with tuning parameters.
+**Configuration:** `vitest.config.ts` exports `_CONFIG` constant (aliased as `VITEST_TUNING`).
 
 [IMPORTANT]:
+
 - [ALWAYS] Run via Nx: `pnpm exec nx test`.
-- [NEVER] Create per-package vitest.config.ts—use inline projects.
+- [NEVER] Create per-package vitest.config.ts -- use inline projects.
 
 ---
+
 ## [2][PROPERTY_BASED]
+>
 >**Dictum:** *Property-based testing discovers edge cases algorithmically.*
 
 <br>
 
-| [INDEX] | [PACKAGE]          | [VERSION] | [INTEGRATION]                            |
-| :-----: | ------------------ | --------- | ---------------------------------------- |
-|   [1]   | fast-check         | 4.5.2     | Arbitrary generators, shrinking          |
-|   [2]   | @fast-check/vitest | 0.2.4     | `it.prop()` syntax, Vitest integration   |
-|   [3]   | @effect/vitest     | 0.27.0    | Effect equality testers, custom matchers |
+| [INDEX] | [PACKAGE]          | [INTEGRATION]                                        |
+| :-----: | ------------------ | ---------------------------------------------------- |
+|   [1]   | fast-check         | Arbitrary generators, shrinking, model-based commands |
+|   [2]   | @fast-check/vitest | Available, unused (redundant with @effect/vitest)    |
+|   [3]   | @effect/vitest     | `it.effect.prop()`, equality testers                 |
 
 <br>
 
-**Integration Points:**
-- `FC_ARB` namespace exports domain arbitraries (`test-utils/arbitraries.ts`)
-- `TEST_CONSTANTS.fc` configures global runs (50 local, 100 CI)
-- Effect matchers registered via `test-utils/matchers/effect.ts`
+**Integration:** `@effect/vitest` provides `it.effect.prop` which integrates fast-check with Effect's runtime. `@fast-check/vitest` is redundant for Effect-based tests and not imported anywhere.
+
+**Model-Based Testing:** `fc.commands()` + `fc.asyncModelRun()` enables stateful property testing via command sequences. Used in `transfer-model.spec.ts`. [PLANNED] `Arbitrary.make(MySchema)` from `@effect/schema` replaces hand-rolled arbitraries.
+
+**Setup:** `tests/setup.ts` calls `addEqualityTesters()` -- enables structural equality for Effect types in Vitest assertions.
 
 ---
-## [3][E2E_TESTING]
+
+## [3][MUTATION_TESTING]
+>
+>**Dictum:** *Mutation testing detects circular and tautological tests.*
+
+<br>
+v
+| [INDEX] | [PACKAGE]                              | [INTEGRATION]                          |
+| :-----: | -------------------------------------- | -------------------------------------- |
+|   [1]   | @stryker-mutator/core (9.5.1)          | Mutation engine, threshold enforcement |
+|   [2]   | @stryker-mutator/vitest-runner (9.5.1) | Vitest integration for mutant runs     |v
+|   [3]   | @stryker-mutator/typescript-checker    | Type-aware mutant filtering            |
+
+**Configuration:** `stryker.config.mjs` -- targets `packages/server/src/**/*.ts`, thresholds high=80/low=60/break=50, reports to `test-results/mutation/`. Command: `pnpm test:mutate`. Keystone defense against AI-generated circular tests -- tautological assertions fail to kill mutants.
+
+---
+
+## [4][E2E_TESTING]
+>
 >**Dictum:** *Playwright enables cross-browser E2E automation.*
 
 <br>
 
-| [INDEX] | [PACKAGE]            | [VERSION] | [INTEGRATION]                             |
-| :-----: | -------------------- | --------- | ----------------------------------------- |
-|   [1]   | @playwright/test     | 1.57.0    | E2E runner, trace capture, screenshots    |
-|   [2]   | @axe-core/playwright | 4.11.0    | Accessibility assertions, WCAG compliance |
-|   [3]   | @nx/playwright       | 22.3.3    | Nx plugin: task inference, Atomizer CI    |
+| [INDEX] | [PACKAGE]        | [INTEGRATION]                          |
+| :-----: | ---------------- | -------------------------------------- |
+|   [1]   | @playwright/test | E2E runner, trace capture, screenshots |
+|   [2]   | @nx/playwright   | Nx plugin: task inference, Atomizer CI |
 
 <br>
 
 **Configuration:** `playwright.config.ts` exports frozen `B` constant with app configs.
 
 **Nx Integration:**
+
 - Plugin infers `e2e` target from `playwright.config.ts`
 - CI target `e2e-ci` enables Atomizer for parallel test sharding
 - Configured in `nx.json` plugins array
 
 **Agent Automation:**
-- `playwright-test-planner.md` — MCP tools for UI exploration
-- `playwright-test-generator.md` — Test code generation from plans
-- `playwright-test-healer.md` — Failure debugging and remediation
 
-[IMPORTANT] Dual-app bootstrap: API (4000) + Icons (3001) started via Nx dev.
+- `playwright-test-planner.md` -- MCP tools for UI exploration
+- `playwright-test-generator.md` -- Test code generation from plans
+- `playwright-test-healer.md` -- Failure debugging and remediation
 
----
-## [4][MOCKING]
->**Dictum:** *Mock utilities enable isolated unit testing.*
-
-<br>
-
-| [INDEX] | [PACKAGE]      | [VERSION] | [INTEGRATION]                             |
-| :-----: | -------------- | --------- | ----------------------------------------- |
-|   [1]   | msw            | 2.12.4    | Request interception, `MswServer` factory |
-|   [2]   | fake-indexeddb | 6.2.5     | IndexedDB mock for Node environment       |
-|   [3]   | happy-dom      | 20.0.11   | Lightweight DOM for jsdom alternative     |
-
-<br>
-
-**Factories:**
-- `MswServer` — Singleton MSW server API (`test-utils/mocks/msw.ts`)
-- `MswMock` — Type-safe request handler factory (get, post, put, patch, delete)
-- `FetchMock` — vi.fn-based fetch mock (`test-utils/mocks/fetch.ts`)
-
-**Setup:** `test-utils/setup.ts` imports fake-indexeddb in Node, clears storage.
+[IMPORTANT] E2E tests require three apps running concurrently: API server (port 4000), icons catalog (port 3001), test harness (port 3002). Started via `pnpm exec nx run-many -t dev`.
 
 ---
-## [5][VISUAL_REGRESSION]
->**Dictum:** *Visual and accessibility testing validates UI correctness.*
+
+## [5][ENVIRONMENT]
+>
+>**Dictum:** *Environment packages enable isolated testing contexts.*
 
 <br>
 
-| [INDEX] | [PACKAGE]            | [VERSION] | [INTEGRATION]                         |
-| :-----: | -------------------- | --------- | ------------------------------------- |
-|   [1]   | lost-pixel           | 3.27.0    | Visual regression screenshots         |
-|   [2]   | vitest-axe           | 0.1.0     | Axe accessibility matchers for Vitest |
-|   [3]   | snapshot-diff        | 0.10.0    | Enhanced snapshot diffing             |
-|   [4]   | vitest-browser-react | 2.0.2     | React-specific browser matchers       |
+| [INDEX] | [PACKAGE]              | [INTEGRATION]                                                            |
+| :-----: | ---------------------- | ------------------------------------------------------------------------ |
+|   [1]   | msw                    | HTTP request interception (available, unused)                            |
+|   [2]   | fake-indexeddb         | IndexedDB mock for browser tests in Node environment                     |
+|   [3]   | happy-dom              | Lightweight DOM for jsdom alternative                                    |
+|   [4]   | @testing-library/react | Component rendering, queries                                             |
+|   [5]   | vitest-browser-react   | React-specific browser matchers                                          |
+|   [6]   | testcontainers         | Docker-based services for `tests/integration/` (PostgreSQL, Redis, etc.) |
 
 <br>
 
-**React Testing:**
+**Directory Usage:**
 
-| [INDEX] | [PACKAGE]              | [VERSION] | [INTEGRATION]                |
-| :-----: | ---------------------- | --------- | ---------------------------- |
-|   [1]   | @testing-library/react | 16.3.1    | Component rendering, queries |
+- `tests/integration/` -- testcontainers for Docker-based service dependencies
+- `tests/fixtures/` -- Test data factories, shared test utilities
+- `tests/setup.ts` -- Global test configuration, equality testers
 
 ---
-## [6][UTILITY]
->**Dictum:** *Supporting packages enable test infrastructure.*
+
+## [6][QUALITY_TOOLS]
+>
+>**Dictum:** *Static analysis and hooks prevent dead code and enforce test hygiene.*
 
 <br>
 
-| [INDEX] | [PACKAGE] | [VERSION] | [INTEGRATION]                             |
-| :-----: | --------- | --------- | ----------------------------------------- |
-|   [1]   | supertest | 7.1.4     | HTTP assertion library for API tests      |
-|   [2]   | effect    | 3.19.13   | Monadic composition, Effect/Option/Either |
+### [6.1][DEAD_CODE_DETECTION]
 
----
-## [7][CATALOG_REFERENCE]
->**Dictum:** *Centralized versions prevent drift.*
-
-<br>
-
-All test dependencies in `pnpm-workspace.yaml`:
-
-```yaml
-catalog:
-  '@effect/vitest': 0.27.0
-  '@fast-check/vitest': 0.2.4
-  '@playwright/test': 1.57.0
-  '@testing-library/react': 16.3.1
-  '@vitest/browser-playwright': 4.0.16
-  '@vitest/coverage-v8': 4.0.16
-  '@vitest/ui': 4.0.16
-  '@axe-core/playwright': 4.11.0
-  fake-indexeddb: 6.2.5
-  fast-check: 4.5.2
-  happy-dom: 20.0.11
-  lost-pixel: 3.27.0
-  msw: 2.12.4
-  snapshot-diff: 0.10.0
-  supertest: 7.1.4
-  vitest: 4.0.16
-  vitest-axe: 0.1.0
-  vitest-browser-react: 2.0.2
-```
-
-[IMPORTANT]:
-- [ALWAYS] Add new test dependencies to catalog first.
-- [ALWAYS] Reference via `"pkg": "catalog:"` in package.json.
-- [NEVER] Pin versions directly in package.json.
-
----
-## [8][QUALITY_TOOLS]
->**Dictum:** *Static analysis prevents dead code and enforces monorepo hygiene.*
-
-<br>
-
-### [8.1][DEAD_CODE_DETECTION]
-
-| [INDEX] | [PACKAGE] | [VERSION] | [INTEGRATION]                       |
-| :-----: | --------- | --------- | ----------------------------------- |
-|   [1]   | knip      | latest    | Unused files, exports, dependencies |
+| [INDEX] | [PACKAGE] | [INTEGRATION]                       |
+| :-----: | --------- | ----------------------------------- |
+|   [1]   | knip      | Unused files, exports, dependencies |
 
 <br>
 
 **Zero-Config:** Knip auto-detects:
+
 - pnpm workspaces via `pnpm-workspace.yaml`
 - Nx projects via built-in Nx plugin (activates on `nx` or `@nx/*` deps)
 - Parses `nx.json`, `project.json` files automatically
 
 **Commands:**
-- `pnpm knip` — Analyze workspace for dead code
-- `pnpm knip:fix` — Auto-remove unused exports
+
+- `pnpm knip` -- Analyze workspace for dead code
+- `pnpm knip:fix` -- Auto-remove unused exports
 
 [IMPORTANT] Run `pnpm knip` before major refactors to identify cleanup targets.
 
 ---
-### [8.2][MONOREPO_LINTING]
 
-| [INDEX] | [PACKAGE] | [VERSION] | [INTEGRATION]                       |
-| :-----: | --------- | --------- | ----------------------------------- |
-|   [1]   | sherif    | latest    | Zero-config monorepo best practices |
+### [6.2][MONOREPO_LINTING]
+
+| [INDEX] | [PACKAGE] | [INTEGRATION]                       |
+| :-----: | --------- | ----------------------------------- |
+|   [1]   | sherif    | Zero-config monorepo best practices |
 
 <br>
 
 **Enforces:**
+
 - Root `private: true`
 - `@types/*` in devDependencies
 - Consistent dependency versions
 - Workspace protocol usage
 
 **Commands:**
-- `pnpm sherif` — Validate monorepo structure
-- `pnpm sherif:fix` — Auto-fix violations
+
+- `pnpm sherif` -- Validate monorepo structure
+- `pnpm sherif:fix` -- Auto-fix violations
 
 ---
-### [8.3][NX_PLUGINS]
 
-| [INDEX] | [PACKAGE]              | [VERSION] | [INTEGRATION]                       |
-| :-----: | ---------------------- | --------- | ----------------------------------- |
-|   [1]   | @nx/playwright         | 22.3.3    | E2E task inference, Atomizer CI     |
-|   [2]   | @berenddeboer/nx-biome | latest    | Biome task inference (check/format) |
+### [6.3][POSTTOOLUSE_HOOK]
+
+| [INDEX] | [TOOL]                          | [INTEGRATION]                              |
+| :-----: | ------------------------------- | ------------------------------------------ |
+|   [1]   | `.claude/hooks/validate-spec.sh` | PostToolUse hook on Edit/Write operations |
+
+**Validates:** LOC limit (125), anti-patterns (`any`/`let`/`var`/`for`/`while`/`try-catch`/`new Date`), expression-form assertions, import ordering. Outputs JSON `decision: "block"` with line-specific errors. Registered in `.claude/settings.json`.
+
+---
+
+### [6.4][NX_PLUGINS]
+
+| [INDEX] | [PACKAGE]              | [INTEGRATION]                       |
+| :-----: | ---------------------- | ----------------------------------- |
+|   [1]   | @nx/playwright         | E2E task inference, Atomizer CI     |
+|   [2]   | @berenddeboer/nx-biome | Biome task inference (check/format) |
 
 <br>
 
 **Plugin Configuration:** `nx.json` plugins array
+
 - `@nx/playwright` infers `e2e` and `e2e-ci` targets
 - `@berenddeboer/nx-biome` infers `check`, `format`, `lint` targets
 
-**Replaces Manual Targets:**
-- Removed: manual `e2e`, `check`, `lint`, `fix` targetDefaults
-- Added: Plugin inference with proper caching
-
-[IMPORTANT] Plugins provide automatic task inference—no manual target configuration required.
+[IMPORTANT] Plugins provide automatic task inference -- no manual target configuration required.
 
 ---
-## [9][REFERENCES]
+
+## [7][REFERENCES]
+>
 >**Dictum:** *Cross-references enable navigation.*
 
 <br>
 
-| [INDEX] | [DOCUMENT]                    | [SCOPE]                            |
-| :-----: | ----------------------------- | ---------------------------------- |
-|   [1]   | [→standards.md](standards.md) | Authoring standards, anti-patterns |
-|   [2]   | [→patterns.md](patterns.md)   | Test code patterns, B constant     |
-|   [3]   | [→overview.md](overview.md)   | Architecture, topology, commands   |
+| [INDEX] | [DOCUMENT]                     | [SCOPE]                           |
+| :-----: | ------------------------------ | --------------------------------- |
+|   [1]   | [->standards.md](standards.md) | Authoring standards, guardrails   |
+|   [2]   | [->patterns.md](patterns.md)   | Density techniques, code patterns |
+|   [3]   | [->overview.md](overview.md)   | Architecture, topology, commands  |

@@ -45,98 +45,98 @@ class SearchRepo extends Effect.Service<SearchRepo>()('database/Search', {
                     return { dimensions: input.dimensions, embeddingJson: JSON.stringify(pad <= _CONFIG.embedding.padValue ? vector : [...vector, ...Array.from({ length: pad }, () => _CONFIG.embedding.padValue)]), model: input.model };
                 }),
             );
-            const _buildRankedCtes = (parameters: { readonly embeddingJson?: string; readonly dimensions?: number; readonly entityTypes: readonly string[]; readonly includeGlobal: boolean; readonly model?: string; readonly scopeId: string | null; readonly term: string }) => {
-                const hasEmbedding = parameters.embeddingJson !== undefined;
-                const { entityFilter, scopeFilter } = _filters(parameters);
-                const normalizedTerm = sql`left(normalize_search_text(${parameters.term}, NULL, NULL), ${_CONFIG.fuzzy.maxInputLength})`;
-                const query = sql`websearch_to_tsquery(${_CONFIG.regconfig}::regconfig, unaccent(${parameters.term}))`;
-                const semanticCte = hasEmbedding
-                    ? sql`,
-                    semantic_candidates AS (
-                        SELECT documents.entity_type, documents.entity_id, ${1} - (embeddings.embedding <=> (${parameters.embeddingJson})::vector) AS semantic_score
-                        FROM ${sql(_CONFIG.tables.embeddings)} embeddings
-                        JOIN base_documents documents
-                            ON documents.entity_type = embeddings.entity_type
-                            AND documents.entity_id = embeddings.entity_id
-                            AND documents.document_hash = embeddings.hash
-                        WHERE embeddings.model = ${parameters.model} AND embeddings.dimensions = ${parameters.dimensions}
-                        ORDER BY embeddings.embedding <=> (${parameters.embeddingJson})::vector LIMIT ${_CONFIG.limits.candidate}
-                    ), semantic_ranked AS (SELECT entity_type, entity_id, ROW_NUMBER() OVER (ORDER BY semantic_score DESC NULLS LAST, entity_id DESC) AS semantic_rank FROM semantic_candidates)` : sql``;
-                const ctes = sql`
-                    base_documents AS (
-                        SELECT documents.entity_type, documents.entity_id, documents.scope_id, documents.display_text, documents.content_text, documents.metadata, documents.normalized_text, documents.search_vector, documents.document_hash
-                        FROM ${sql(_CONFIG.tables.documents)} documents
-                        WHERE true ${scopeFilter} ${entityFilter}
-                    ),
-                    fts_candidates AS (
-                        SELECT documents.entity_type, documents.entity_id, ts_rank_cd(documents.search_vector, ${query}, ${_CONFIG.rank.normalization}) AS fts_score
-                        FROM base_documents documents
-                        WHERE documents.search_vector @@ ${query}
-                        ORDER BY fts_score DESC NULLS LAST, documents.entity_id DESC LIMIT ${_CONFIG.limits.candidate}
-                    ),
-                    trgm_candidates AS (
-                        SELECT documents.entity_type, documents.entity_id, similarity(documents.normalized_text, ${normalizedTerm}) AS trgm_score
-                        FROM base_documents documents
-                        WHERE char_length(${normalizedTerm}) >= ${_CONFIG.fuzzy.minTermLength}
-                            AND documents.normalized_text % ${normalizedTerm}
-                            AND similarity(documents.normalized_text, ${normalizedTerm}) >= ${_CONFIG.trigram.threshold}
-                        ORDER BY trgm_score DESC NULLS LAST, documents.entity_id DESC LIMIT ${_CONFIG.limits.candidate}
-                    ),
-                        fuzzy_candidates AS (
-                            SELECT trgm.entity_type, trgm.entity_id, fuzzy.distance AS fuzzy_distance
-                            FROM trgm_candidates trgm
-                            JOIN base_documents documents ON documents.entity_type = trgm.entity_type AND documents.entity_id = trgm.entity_id
-                            CROSS JOIN LATERAL (
-                                SELECT levenshtein_less_equal(
-                                    left(documents.normalized_text, ${_CONFIG.fuzzy.maxInputLength}),
-                                    ${normalizedTerm},
-                                    ${_CONFIG.fuzzy.maxDistance}
-                                ) AS distance
-                            ) fuzzy
-                            WHERE char_length(${normalizedTerm}) >= ${_CONFIG.fuzzy.minTermLength}
-                            ORDER BY fuzzy.distance ASC NULLS LAST, documents.entity_id DESC LIMIT ${_CONFIG.limits.candidate}
-                        ),
-                    fts_ranked AS (SELECT entity_type, entity_id, ROW_NUMBER() OVER (ORDER BY fts_score DESC NULLS LAST, entity_id DESC) AS fts_rank FROM fts_candidates),
-                    trgm_ranked AS (SELECT entity_type, entity_id, ROW_NUMBER() OVER (ORDER BY trgm_score DESC NULLS LAST, entity_id DESC) AS trgm_rank FROM trgm_candidates),
-                fuzzy_ranked AS (SELECT entity_type, entity_id, ROW_NUMBER() OVER (ORDER BY fuzzy_distance ASC NULLS LAST, entity_id DESC) AS fuzzy_rank FROM fuzzy_candidates)
-                ${semanticCte},
-                ranked AS (
-                    SELECT entity_type, entity_id, 'fts' AS source, fts_rank AS rnk FROM fts_ranked
-                    UNION ALL SELECT entity_type, entity_id, 'trgm' AS source, trgm_rank AS rnk FROM trgm_ranked
-                    UNION ALL SELECT entity_type, entity_id, 'fuzzy' AS source, fuzzy_rank AS rnk FROM fuzzy_ranked
-                    ${hasEmbedding ? sql`UNION ALL SELECT entity_type, entity_id, 'semantic' AS source, semantic_rank AS rnk FROM semantic_ranked` : sql``}
+        const _buildRankedCtes = (parameters: { readonly embeddingJson?: string; readonly dimensions?: number; readonly entityTypes: readonly string[]; readonly includeGlobal: boolean; readonly model?: string; readonly scopeId: string | null; readonly term: string }) => {
+            const hasEmbedding = parameters.embeddingJson !== undefined;
+            const { entityFilter, scopeFilter } = _filters(parameters);
+            const normalizedTerm = sql`left(normalize_search_text(${parameters.term}, NULL, NULL), ${_CONFIG.fuzzy.maxInputLength})`;
+            const query = sql`websearch_to_tsquery(${_CONFIG.regconfig}::regconfig, unaccent(${parameters.term}))`;
+            const semanticCte = hasEmbedding
+                ? sql`,
+                semantic_candidates AS (
+                    SELECT documents.entity_type, documents.entity_id, ${1} - (embeddings.embedding <=> (${parameters.embeddingJson})::vector) AS semantic_score
+                    FROM ${sql(_CONFIG.tables.embeddings)} embeddings
+                    JOIN base_documents documents
+                        ON documents.entity_type = embeddings.entity_type
+                        AND documents.entity_id = embeddings.entity_id
+                        AND documents.document_hash = embeddings.hash
+                    WHERE embeddings.model = ${parameters.model} AND embeddings.dimensions = ${parameters.dimensions}
+                    ORDER BY embeddings.embedding <=> (${parameters.embeddingJson})::vector LIMIT ${_CONFIG.limits.candidate}
+                ), semantic_ranked AS (SELECT entity_type, entity_id, ROW_NUMBER() OVER (ORDER BY semantic_score DESC NULLS LAST, entity_id DESC) AS semantic_rank FROM semantic_candidates)` : sql``;
+            const ctes = sql`
+                base_documents AS (
+                    SELECT documents.entity_type, documents.entity_id, documents.scope_id, documents.display_text, documents.content_text, documents.metadata, documents.normalized_text, documents.search_vector, documents.document_hash
+                    FROM ${sql(_CONFIG.tables.documents)} documents
+                    WHERE true ${scopeFilter} ${entityFilter}
                 ),
-                scored AS (
-                    SELECT entity_type, entity_id,
-                        COALESCE(SUM(1.0 / (${_CONFIG.rrf.k} + rnk)) FILTER (WHERE source = 'fts'), 0) * ${_CONFIG.rrf.weights.fts} +
-                        COALESCE(SUM(1.0 / (${_CONFIG.rrf.k} + rnk)) FILTER (WHERE source = 'trgm'), 0) * ${_CONFIG.rrf.weights.trgm} +
-                        COALESCE(SUM(1.0 / (${_CONFIG.rrf.k} + rnk)) FILTER (WHERE source = 'fuzzy'), 0) * ${_CONFIG.rrf.weights.fuzzy} +
-                        COALESCE(SUM(1.0 / (${_CONFIG.rrf.k} + rnk)) FILTER (WHERE source = 'semantic'), 0) * ${_CONFIG.rrf.weights.semantic}
-                        AS rank
-                    FROM ranked GROUP BY entity_type, entity_id
-                )`;
+                fts_candidates AS (
+                    SELECT documents.entity_type, documents.entity_id, ts_rank_cd(documents.search_vector, ${query}, ${_CONFIG.rank.normalization}) AS fts_score
+                    FROM base_documents documents
+                    WHERE documents.search_vector @@ ${query}
+                    ORDER BY fts_score DESC NULLS LAST, documents.entity_id DESC LIMIT ${_CONFIG.limits.candidate}
+                ),
+                trgm_candidates AS (
+                    SELECT documents.entity_type, documents.entity_id, similarity(documents.normalized_text, ${normalizedTerm}) AS trgm_score
+                    FROM base_documents documents
+                    WHERE char_length(${normalizedTerm}) >= ${_CONFIG.fuzzy.minTermLength}
+                        AND documents.normalized_text % ${normalizedTerm}
+                        AND similarity(documents.normalized_text, ${normalizedTerm}) >= ${_CONFIG.trigram.threshold}
+                    ORDER BY trgm_score DESC NULLS LAST, documents.entity_id DESC LIMIT ${_CONFIG.limits.candidate}
+                ),
+                fuzzy_candidates AS (
+                    SELECT trgm.entity_type, trgm.entity_id, fuzzy.distance AS fuzzy_distance
+                    FROM trgm_candidates trgm
+                    JOIN base_documents documents ON documents.entity_type = trgm.entity_type AND documents.entity_id = trgm.entity_id
+                    CROSS JOIN LATERAL (
+                        SELECT levenshtein_less_equal(
+                            left(documents.normalized_text, ${_CONFIG.fuzzy.maxInputLength}),
+                            ${normalizedTerm},
+                            ${_CONFIG.fuzzy.maxDistance}
+                        ) AS distance
+                    ) fuzzy
+                    WHERE char_length(${normalizedTerm}) >= ${_CONFIG.fuzzy.minTermLength}
+                    ORDER BY fuzzy.distance ASC NULLS LAST, documents.entity_id DESC LIMIT ${_CONFIG.limits.candidate}
+                ),
+                fts_ranked AS (SELECT entity_type, entity_id, ROW_NUMBER() OVER (ORDER BY fts_score DESC NULLS LAST, entity_id DESC) AS fts_rank FROM fts_candidates),
+                trgm_ranked AS (SELECT entity_type, entity_id, ROW_NUMBER() OVER (ORDER BY trgm_score DESC NULLS LAST, entity_id DESC) AS trgm_rank FROM trgm_candidates),
+                fuzzy_ranked AS (SELECT entity_type, entity_id, ROW_NUMBER() OVER (ORDER BY fuzzy_distance ASC NULLS LAST, entity_id DESC) AS fuzzy_rank FROM fuzzy_candidates)
+            ${semanticCte},
+            ranked AS (
+                SELECT entity_type, entity_id, 'fts' AS source, fts_rank AS rnk FROM fts_ranked
+                UNION ALL SELECT entity_type, entity_id, 'trgm' AS source, trgm_rank AS rnk FROM trgm_ranked
+                UNION ALL SELECT entity_type, entity_id, 'fuzzy' AS source, fuzzy_rank AS rnk FROM fuzzy_ranked
+                ${hasEmbedding ? sql`UNION ALL SELECT entity_type, entity_id, 'semantic' AS source, semantic_rank AS rnk FROM semantic_ranked` : sql``}
+            ),
+            scored AS (
+                SELECT entity_type, entity_id,
+                    COALESCE(SUM(1.0 / (${_CONFIG.rrf.k} + rnk)) FILTER (WHERE source = 'fts'), 0) * ${_CONFIG.rrf.weights.fts} +
+                    COALESCE(SUM(1.0 / (${_CONFIG.rrf.k} + rnk)) FILTER (WHERE source = 'trgm'), 0) * ${_CONFIG.rrf.weights.trgm} +
+                    COALESCE(SUM(1.0 / (${_CONFIG.rrf.k} + rnk)) FILTER (WHERE source = 'fuzzy'), 0) * ${_CONFIG.rrf.weights.fuzzy} +
+                    COALESCE(SUM(1.0 / (${_CONFIG.rrf.k} + rnk)) FILTER (WHERE source = 'semantic'), 0) * ${_CONFIG.rrf.weights.semantic}
+                    AS rank
+                FROM ranked GROUP BY entity_type, entity_id
+            )`;
             return { ctes, query };
         };
         const executeSearch = SqlSchema.findAll({
             execute: (parameters) => {
                 const hasCursor = parameters.cursorRank !== undefined && parameters.cursorId !== undefined;
-                    const cursorFilter = hasCursor ? sql`WHERE (paged.rank, paged.entity_id) < (${parameters.cursorRank}, ${parameters.cursorId}::uuid)` : sql``;
-                    const { ctes, query } = _buildRankedCtes(parameters);
-                    const snippetExpr = parameters.includeSnippets
-                        ? sql`ts_headline(${_CONFIG.regconfig}::regconfig, coalesce(base_documents.display_text, '') || ' ' || coalesce(base_documents.content_text, '') || ' ' || coalesce((SELECT string_agg(value, ' ') FROM jsonb_each_text(coalesce(base_documents.metadata, '{}'::jsonb))), ''), ${query}, ${_CONFIG.snippet.opts})`
-                        : sql`NULL`;
-                    const facetsExpr = parameters.includeFacets ? sql`(SELECT jsonb_object_agg(entity_type, cnt) FROM (SELECT entity_type, COUNT(*)::int AS cnt FROM scored GROUP BY entity_type) facet)` : sql`NULL::jsonb`;
-                    return sql`
-                        WITH ${ctes},
-                        totals AS (SELECT (SELECT COUNT(*) FROM scored)::int AS total_count, ${facetsExpr} AS facets),
-                        paged AS (
-                            SELECT scored.entity_type, scored.entity_id, base_documents.display_text, base_documents.metadata, scored.rank, ${snippetExpr} AS snippet
-                            FROM scored scored JOIN base_documents ON base_documents.entity_type = scored.entity_type AND base_documents.entity_id = scored.entity_id
-                            ORDER BY scored.rank DESC, scored.entity_id DESC
-                        ),
-                    filtered AS (SELECT * FROM paged paged ${cursorFilter} LIMIT ${parameters.limit + 1})
-                    SELECT filtered.entity_type, filtered.entity_id, filtered.display_text, filtered.metadata, filtered.rank, filtered.snippet, totals.total_count, totals.facets
-                    FROM totals totals LEFT JOIN filtered filtered ON true ORDER BY filtered.rank DESC NULLS LAST, filtered.entity_id DESC NULLS LAST`;
+                const cursorFilter = hasCursor ? sql`WHERE (paged.rank, paged.entity_id) < (${parameters.cursorRank}, ${parameters.cursorId}::uuid)` : sql``;
+                const { ctes, query } = _buildRankedCtes(parameters);
+                const snippetExpr = parameters.includeSnippets
+                    ? sql`ts_headline(${_CONFIG.regconfig}::regconfig, coalesce(base_documents.display_text, '') || ' ' || coalesce(base_documents.content_text, '') || ' ' || coalesce((SELECT string_agg(value, ' ') FROM jsonb_each_text(coalesce(base_documents.metadata, '{}'::jsonb))), ''), ${query}, ${_CONFIG.snippet.opts})`
+                    : sql`NULL`;
+                const facetsExpr = parameters.includeFacets ? sql`(SELECT jsonb_object_agg(entity_type, cnt) FROM (SELECT entity_type, COUNT(*)::int AS cnt FROM scored GROUP BY entity_type) facet)` : sql`NULL::jsonb`;
+                return sql`
+                    WITH ${ctes},
+                    totals AS (SELECT (SELECT COUNT(*) FROM scored)::int AS total_count, ${facetsExpr} AS facets),
+                    paged AS (
+                        SELECT scored.entity_type, scored.entity_id, base_documents.display_text, base_documents.metadata, scored.rank, ${snippetExpr} AS snippet
+                        FROM scored scored JOIN base_documents ON base_documents.entity_type = scored.entity_type AND base_documents.entity_id = scored.entity_id
+                        ORDER BY scored.rank DESC, scored.entity_id DESC
+                    ),
+                filtered AS (SELECT * FROM paged paged ${cursorFilter} LIMIT ${parameters.limit + 1})
+                SELECT filtered.entity_type, filtered.entity_id, filtered.display_text, filtered.metadata, filtered.rank, filtered.snippet, totals.total_count, totals.facets
+                FROM totals totals LEFT JOIN filtered filtered ON true ORDER BY filtered.rank DESC NULLS LAST, filtered.entity_id DESC NULLS LAST`;
             },
             Request: S.Struct({
                 cursorId: S.optional(S.UUID), cursorRank: S.optional(S.Number), dimensions: S.optional(S.Int), embeddingJson: S.optional(S.String),

@@ -251,21 +251,21 @@ const _HealthGroup = HttpApiGroup.make('health')
         HttpApiEndpoint.get('readiness', '/readiness')
             .addSuccess(S.Struct({
                 checks: S.Struct({
-                        cache: S.Struct({ connected: S.Boolean, latencyMs: S.Number }),
-                        database: S.Struct({ healthy: S.Boolean, latencyMs: S.Number }),
-                        metrics: S.Literal('healthy', 'degraded', 'alerted'),
-                        polling: S.Struct({
-                            criticalAlerts: S.Number,
-                            lastFailureAtMs: S.optional(S.Number),
-                            lastSuccessAtMs: S.optional(S.Number),
-                            scope: S.Literal('global'),
-                            stale: S.Boolean,
-                            totalAlerts: S.Number,
-                        }),
-                        vector: S.Struct({ configured: S.Boolean }),
+                    cache: S.Struct({ connected: S.Boolean, latencyMs: S.Number }),
+                    database: S.Struct({ healthy: S.Boolean, latencyMs: S.Number }),
+                    metrics: S.Literal('healthy', 'degraded', 'alerted'),
+                    polling: S.Struct({
+                        criticalAlerts: S.Number,
+                        lastFailureAtMs: S.optional(S.Number),
+                        lastSuccessAtMs: S.optional(S.Number),
+                        scope: S.Literal('global'),
+                        stale: S.Boolean,
+                        totalAlerts: S.Number,
                     }),
-                    status: S.Literal('ok'),
-                }))
+                    vector: S.Struct({ configured: S.Boolean }),
+                }),
+                status: S.Literal('ok'),
+            }))
             .addError(HttpError.ServiceUnavailable),
     )
     .add(
@@ -353,12 +353,12 @@ const _UsersGroup = HttpApiGroup.make('users')
             .addError(HttpError.Validation)
             .annotate(OpenApi.Summary, 'Update notification preferences'),
     )
-        .add(
-            HttpApiEndpoint.get('listNotifications', '/me/notifications')
-                .setUrlParams(TemporalQuery)
-                .addSuccess(KeysetResponse(Notification.json))
-                .annotate(OpenApi.Summary, 'List own notifications'),
-        )
+    .add(
+        HttpApiEndpoint.get('listNotifications', '/me/notifications')
+            .setUrlParams(TemporalQuery)
+            .addSuccess(KeysetResponse(Notification.json))
+            .annotate(OpenApi.Summary, 'List own notifications'),
+    )
     .add(
         HttpApiEndpoint.get('subscribeNotifications', '/me/notifications/subscribe')
             .addSuccess(S.Void)
@@ -608,24 +608,24 @@ const _WebhooksGroup = HttpApiGroup.make('webhooks')
     .addError(HttpError.Internal)
     .addError(HttpError.NotFound)
     .addError(HttpError.RateLimit)
-        .add(
-            HttpApiEndpoint.get('list', '/')
-                .addSuccess(S.Array(S.Struct({
-                    active: S.Boolean,
-                    eventTypes: S.Array(S.String),
-                    timeout: S.optionalWith(S.Number, { default: () => 5000 }),
-                    url: S.String,
-                })))
-                .annotate(OpenApi.Summary, 'List registered webhooks'),
+    .add(
+        HttpApiEndpoint.get('list', '/')
+            .addSuccess(S.Array(S.Struct({
+                active: S.Boolean,
+                eventTypes: S.Array(S.String),
+                timeout: S.optionalWith(S.Number, { default: () => 5000 }),
+                url: S.String,
+            })))
+            .annotate(OpenApi.Summary, 'List registered webhooks'),
     )
-        .add(
-            HttpApiEndpoint.post('register', '/')
-                .setPayload(S.Struct({
-                    active: S.Boolean,
-                    eventTypes: S.Array(S.String),
-                    secret: S.String.pipe(S.minLength(32)),
-                    timeout: S.optionalWith(S.Number, { default: () => 5000 }),
-                    url: S.String.pipe(S.pattern(/^https:\/\/[a-zA-Z0-9]/), S.brand('WebhookUrl')),
+    .add(
+        HttpApiEndpoint.post('register', '/')
+            .setPayload(S.Struct({
+                active: S.Boolean,
+                eventTypes: S.Array(S.String),
+                secret: S.String.pipe(S.minLength(32)),
+                timeout: S.optionalWith(S.Number, { default: () => 5000 }),
+                url: S.String.pipe(S.pattern(/^https:\/\/[a-zA-Z0-9]/), S.brand('WebhookUrl')),
             }))
             .addSuccess(_Success)
             .addError(HttpError.Validation)
@@ -655,13 +655,13 @@ const _WebhooksGroup = HttpApiGroup.make('webhooks')
             .addError(HttpError.NotFound)
             .annotate(OpenApi.Summary, 'Retry failed delivery'),
     )
-        .add(
-            HttpApiEndpoint.get('status', '/status')
-                .setUrlParams(S.Struct({ url: S.optional(HttpApiSchema.param('url', S.String)) }))
-                .addSuccess(S.Array(WebhookService.DeliveryRecord))
-                .annotate(OpenApi.Summary, 'Delivery status')
-                .annotate(OpenApi.Description, 'Returns the latest delivery snapshot per endpoint URL.'),
-        );
+    .add(
+        HttpApiEndpoint.get('status', '/status')
+            .setUrlParams(S.Struct({ url: S.optional(HttpApiSchema.param('url', S.String)) }))
+            .addSuccess(S.Array(WebhookService.DeliveryRecord))
+            .annotate(OpenApi.Summary, 'Delivery status')
+            .annotate(OpenApi.Description, 'Returns the latest delivery snapshot per endpoint URL.'),
+    );
 
 // Admin: group-level auth + common errors — excluded from OpenAPI
 const _AdminGroup = HttpApiGroup.make('admin')
@@ -671,15 +671,15 @@ const _AdminGroup = HttpApiGroup.make('admin')
     .addError(HttpError.Internal)
     .addError(HttpError.Validation)
     .addError(HttpError.RateLimit)
-        .add(
-            HttpApiEndpoint.get('listUsers', '/users')
-                .setUrlParams(_PaginationBase)
-                .addSuccess(KeysetResponse(User.json))
-                .annotate(OpenApi.Summary, 'List users'),
-        )
-        .add(
-            HttpApiEndpoint.get('listSessions', '/sessions')
-                .setUrlParams(S.Struct({
+    .add(
+        HttpApiEndpoint.get('listUsers', '/users')
+            .setUrlParams(_PaginationBase)
+            .addSuccess(KeysetResponse(User.json))
+            .annotate(OpenApi.Summary, 'List users'),
+    )
+    .add(
+        HttpApiEndpoint.get('listSessions', '/sessions')
+            .setUrlParams(S.Struct({
                 cursor: S.optional(HttpApiSchema.param('cursor', S.String)),
                 ipAddress: S.optional(HttpApiSchema.param('ipAddress', S.String)),
                 limit: S.optionalWith(HttpApiSchema.param('limit', S.NumberFromString.pipe(S.int(), S.between(1, 100))), { default: () => 50 }),
@@ -688,9 +688,9 @@ const _AdminGroup = HttpApiGroup.make('admin')
                 (parameters) => !(parameters.userId !== undefined && parameters.ipAddress !== undefined),
                 { message: () => 'Provide either userId or ipAddress, not both' },
             )))
-                .addSuccess(KeysetResponse(Session.json))
-                .annotate(OpenApi.Summary, 'List sessions'),
-        )
+            .addSuccess(KeysetResponse(Session.json))
+            .annotate(OpenApi.Summary, 'List sessions'),
+    )
     .add(
         HttpApiEndpoint.del('deleteSession', '/sessions/:id')
             .setPath(S.Struct({ id: S.UUID }))
@@ -704,12 +704,12 @@ const _AdminGroup = HttpApiGroup.make('admin')
             .addSuccess(S.Struct({ revoked: S.Int }))
             .annotate(OpenApi.Summary, 'Revoke all sessions by IP'),
     )
-        .add(
-            HttpApiEndpoint.get('listJobs', '/jobs')
-                .setUrlParams(_PaginationBase)
-                .addSuccess(KeysetResponse(Job.json))
-                .annotate(OpenApi.Summary, 'List jobs'),
-        )
+    .add(
+        HttpApiEndpoint.get('listJobs', '/jobs')
+            .setUrlParams(_PaginationBase)
+            .addSuccess(KeysetResponse(Job.json))
+            .annotate(OpenApi.Summary, 'List jobs'),
+    )
     .add(
         HttpApiEndpoint.post('cancelJob', '/jobs/:id/cancel')
             .setPath(S.Struct({ id: S.String }))
@@ -717,12 +717,12 @@ const _AdminGroup = HttpApiGroup.make('admin')
             .addError(HttpError.NotFound)
             .annotate(OpenApi.Summary, 'Cancel job'),
     )
-        .add(
-            HttpApiEndpoint.get('listDlq', '/dlq')
-                .setUrlParams(_PaginationBase)
-                .addSuccess(KeysetResponse(JobDlq.json))
-                .annotate(OpenApi.Summary, 'List dead letters'),
-        )
+    .add(
+        HttpApiEndpoint.get('listDlq', '/dlq')
+            .setUrlParams(_PaginationBase)
+            .addSuccess(KeysetResponse(JobDlq.json))
+            .annotate(OpenApi.Summary, 'List dead letters'),
+    )
     .add(
         HttpApiEndpoint.post('replayDlq', '/dlq/:id/replay')
             .setPath(S.Struct({ id: S.UUID }))
@@ -731,12 +731,12 @@ const _AdminGroup = HttpApiGroup.make('admin')
             .addError(HttpError.Validation)
             .annotate(OpenApi.Summary, 'Replay dead letter'),
     )
-        .add(
-            HttpApiEndpoint.get('listNotifications', '/notifications')
-                .setUrlParams(TemporalQuery)
-                .addSuccess(KeysetResponse(Notification.json))
-                .annotate(OpenApi.Summary, 'List notifications'),
-        )
+    .add(
+        HttpApiEndpoint.get('listNotifications', '/notifications')
+            .setUrlParams(TemporalQuery)
+            .addSuccess(KeysetResponse(Notification.json))
+            .annotate(OpenApi.Summary, 'List notifications'),
+    )
     .add(
         HttpApiEndpoint.post('replayNotification', '/notifications/:id/replay')
             .setPath(S.Struct({ id: S.UUID }))
@@ -887,21 +887,21 @@ const _AdminGroup = HttpApiGroup.make('admin')
             .addError(HttpError.NotFound)
             .annotate(OpenApi.Summary, 'Purge tenant data'),
     )
-        .add(
-            HttpApiEndpoint.get('getTenantOAuth', '/tenants/:id/oauth')
-                .setPath(S.Struct({ id: S.UUID }))
-                .addSuccess(S.Struct({ providers: S.Array(_TenantOAuthProviderRead) }))
-                .addError(HttpError.NotFound)
-                .annotate(OpenApi.Summary, 'Get tenant OAuth config'),
-        )
-        .add(
-            HttpApiEndpoint.put('updateTenantOAuth', '/tenants/:id/oauth')
-                .setPath(S.Struct({ id: S.UUID }))
-                .setPayload(S.Struct({ providers: S.Array(S.Struct({ clientId: S.NonEmptyTrimmedString, clientSecret: S.optional(S.NonEmptyTrimmedString), enabled: S.Boolean, keyId: S.optional(S.NonEmptyTrimmedString), provider: OAuthProviderSchema, scopes: S.optional(S.Array(S.String)), teamId: S.optional(S.NonEmptyTrimmedString), tenant: S.optional(S.NonEmptyTrimmedString) })) }))
-                .addSuccess(S.Struct({ providers: S.Array(_TenantOAuthProviderRead) }))
-                .addError(HttpError.NotFound)
-                .addError(HttpError.Validation)
-                .annotate(OpenApi.Summary, 'Update tenant OAuth config'),
+    .add(
+        HttpApiEndpoint.get('getTenantOAuth', '/tenants/:id/oauth')
+            .setPath(S.Struct({ id: S.UUID }))
+            .addSuccess(S.Struct({ providers: S.Array(_TenantOAuthProviderRead) }))
+            .addError(HttpError.NotFound)
+            .annotate(OpenApi.Summary, 'Get tenant OAuth config'),
+    )
+    .add(
+        HttpApiEndpoint.put('updateTenantOAuth', '/tenants/:id/oauth')
+            .setPath(S.Struct({ id: S.UUID }))
+            .setPayload(S.Struct({ providers: S.Array(S.Struct({ clientId: S.NonEmptyTrimmedString, clientSecret: S.optional(S.NonEmptyTrimmedString), enabled: S.Boolean, keyId: S.optional(S.NonEmptyTrimmedString), provider: OAuthProviderSchema, scopes: S.optional(S.Array(S.String)), teamId: S.optional(S.NonEmptyTrimmedString), tenant: S.optional(S.NonEmptyTrimmedString) })) }))
+            .addSuccess(S.Struct({ providers: S.Array(_TenantOAuthProviderRead) }))
+            .addError(HttpError.NotFound)
+            .addError(HttpError.Validation)
+            .annotate(OpenApi.Summary, 'Update tenant OAuth config'),
     )
     .add(
         HttpApiEndpoint.get('getFeatureFlags', '/features')

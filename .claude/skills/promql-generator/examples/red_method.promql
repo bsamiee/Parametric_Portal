@@ -1,0 +1,66 @@
+# RED Method — Rate, Errors, Duration for request-driven services
+# Prometheus 3.10+ (native histograms stable 3.8+, no feature flag 3.9+)
+
+## ===== RATE =====
+sum(rate(http_requests_total{job="api-server"}[5m]))                                        # Total req/s
+sum by (endpoint) (rate(http_requests_total{job="api-server"}[5m]))                         # By endpoint
+sum by (method, endpoint) (rate(http_requests_total{job="api-server"}[5m]))                 # By method+endpoint
+sum by (status_code) (rate(http_requests_total{job="api-server"}[5m]))                      # By status code
+
+## ===== ERRORS =====
+sum(rate(http_requests_total{job="api-server", status_code=~"5.."}[5m])) / sum(rate(http_requests_total{job="api-server"}[5m]))          # Error ratio (0-1)
+(sum(rate(http_requests_total{job="api-server", status_code=~"5.."}[5m])) / sum(rate(http_requests_total{job="api-server"}[5m]))) * 100  # Error % (0-100)
+sum by (endpoint) (rate(http_requests_total{status_code=~"5.."}[5m])) / sum by (endpoint) (rate(http_requests_total[5m]))                # By endpoint
+1 - (sum(rate(http_requests_total{status_code=~"5.."}[5m])) / sum(rate(http_requests_total[5m])))                                        # Success rate
+
+## ===== DURATION (classic histograms) =====
+histogram_quantile(0.50, sum by (le) (rate(http_request_duration_seconds_bucket{job="api-server"}[5m])))   # P50
+histogram_quantile(0.90, sum by (le) (rate(http_request_duration_seconds_bucket{job="api-server"}[5m])))   # P90
+histogram_quantile(0.95, sum by (le) (rate(http_request_duration_seconds_bucket{job="api-server"}[5m])))   # P95
+histogram_quantile(0.99, sum by (le) (rate(http_request_duration_seconds_bucket{job="api-server"}[5m])))   # P99
+sum(rate(http_request_duration_seconds_sum{job="api-server"}[5m])) / sum(rate(http_request_duration_seconds_count{job="api-server"}[5m]))  # Avg
+histogram_quantile(0.95, sum by (endpoint, le) (rate(http_request_duration_seconds_bucket[5m])))           # P95 by endpoint
+
+## ===== DURATION (native histograms, 3.8+ stable -- no le, no _bucket suffix) =====
+histogram_quantile(0.50, sum by (job) (rate(http_request_duration_seconds{job="api-server"}[5m])))          # P50
+histogram_quantile(0.95, sum by (job) (rate(http_request_duration_seconds{job="api-server"}[5m])))          # P95
+histogram_quantile(0.99, sum by (job) (rate(http_request_duration_seconds{job="api-server"}[5m])))          # P99
+histogram_avg(rate(http_request_duration_seconds{job="api-server"}[5m]))                                    # Avg (single function)
+histogram_quantile(0.95, sum by (endpoint) (rate(http_request_duration_seconds[5m])))                       # P95 by endpoint
+histogram_count(rate(http_request_duration_seconds{job="api-server"}[5m]))                                  # Observation count/s
+histogram_sum(rate(http_request_duration_seconds{job="api-server"}[5m]))                                    # Total latency/s
+
+## ===== DASHBOARD =====
+sum(rate(http_requests_total{job="api-server"}[5m]))                                                                                     # Panel: Request rate
+(sum(rate(http_requests_total{job="api-server", status_code=~"5.."}[5m])) / sum(rate(http_requests_total{job="api-server"}[5m]))) * 100  # Panel: Error %
+topk(5, histogram_quantile(0.95, sum by (endpoint, le) (rate(http_request_duration_seconds_bucket[5m]))))                                # Panel: Top 5 slow (classic)
+topk(5, histogram_quantile(0.95, sum by (endpoint) (rate(http_request_duration_seconds[5m]))))                                           # Panel: Top 5 slow (native)
+topk(5, sum by (endpoint) (rate(http_requests_total{status_code=~"5.."}[5m])) / sum by (endpoint) (rate(http_requests_total[5m])))       # Panel: Top 5 errors
+
+## ===== LATENCY SLO (native histograms, 3.8+ -- precise fraction without bucket boundary guessing) =====
+histogram_fraction(0, 0.2, sum(rate(http_request_duration_seconds{job="api-server"}[5m])))          # Fraction under 200ms
+histogram_fraction(0, 0.5, sum(rate(http_request_duration_seconds{job="api-server"}[5m])))          # Fraction under 500ms
+(1 - histogram_fraction(0, 0.2, sum(rate(http_request_duration_seconds{job="api-server"}[5m])))) * 100  # % violating 200ms SLO
+histogram_stddev(rate(http_request_duration_seconds{job="api-server"}[5m]))                         # Latency variability
+histogram_stdvar(rate(http_request_duration_seconds{job="api-server"}[5m]))                         # Latency variance
+
+## ===== CARDINALITY CONTROL (3.0+ experimental, promql-experimental-functions) =====
+# limitk: sample N series for exploration (does not affect accuracy of kept series)
+limitk(10, rate(http_requests_total{job="api-server"}[5m]))                                         # Sample 10 series
+# limit_ratio: deterministic sampling for cost reduction (hash-based, stable across evaluations)
+limit_ratio(0.1, rate(http_requests_total{job="api-server"}[5m]))                                   # ~10% of series
+limit_ratio(-0.9, rate(http_requests_total{job="api-server"}[5m]))                                  # Complement: ~90%
+
+## ===== UTF-8 METRIC NAMES (3.0+ -- OTEL metrics use dots natively) =====
+# OTEL-originated metrics preserve dots when UTF-8 names enabled (default since 3.0)
+# Quoted syntax required for non-standard characters
+sum(rate({"http.server.request.duration", job="api-server"}[5m]))                                   # OTEL metric name
+histogram_quantile(0.95, sum by (job) (rate({"http.server.request.duration", job="api-server"}[5m])))  # P95 with OTEL name
+
+## ===== ALERTS =====
+(sum(rate(http_requests_total{job="api-server", status_code=~"5.."}[5m])) / sum(rate(http_requests_total{job="api-server"}[5m]))) > 0.05  # Error > 5%
+histogram_quantile(0.95, sum by (le) (rate(http_request_duration_seconds_bucket{job="api-server"}[5m]))) > 1                              # P95 > 1s (classic)
+histogram_quantile(0.95, sum by (job) (rate(http_request_duration_seconds{job="api-server"}[5m]))) > 1                                    # P95 > 1s (native, 3.8+)
+(1 - histogram_fraction(0, 0.2, sum(rate(http_request_duration_seconds{job="api-server"}[5m])))) > 0.1                                    # >10% above 200ms SLO (native)
+sum(rate(http_requests_total{job="api-server"}[5m])) < 10                                                                                 # Low rate (outage?)
+sum(rate(http_requests_total{job="api-server"}[5m])) > 1000                                                                               # High rate (spike?)

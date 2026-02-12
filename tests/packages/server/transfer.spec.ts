@@ -13,7 +13,6 @@ const _safe = fc.string({ maxLength: 32, minLength: 1 }).filter((v) => /^[a-zA-Z
 const _item = fc.record({ content: _safe, id: fc.uuid(), type: _safe, updatedAt: fc.integer({ max: 1_700_604_800_000, min: 1_700_000_000_000 }) });
 
 // --- [ALGEBRAIC: CODEC ROUNDTRIPS] -------------------------------------------
-
 // P1: Text codec roundtrip (ndjson, yaml)
 it.effect.prop('P1: text roundtrip', { format: fc.constantFrom<'ndjson' | 'yaml'>('ndjson', 'yaml'), items: fc.array(_item, { maxLength: 6, minLength: 1 }) }, ({ format, items }) => Effect.gen(function* () {
     const enriched: readonly Asset[] = A.map(items, (item, index) => ({ ...item, ordinal: index + 1 }));
@@ -22,7 +21,6 @@ it.effect.prop('P1: text roundtrip', { format: fc.constantFrom<'ndjson' | 'yaml'
     expect(failures).toHaveLength(0);
     expect(A.map(parsed, (x) => x.content)).toEqual(A.map(items, (x) => x.content));
 }), { fastCheck: { numRuns: 60 } });
-
 // P2: Binary codec roundtrip (xlsx, zip)
 it.effect.prop('P2: binary roundtrip', { format: fc.constantFrom<'xlsx' | 'zip'>('xlsx', 'zip'), items: fc.array(_item, { maxLength: 4, minLength: 0 }) }, ({ format, items }) => Effect.gen(function* () {
     const enriched: readonly Asset[] = A.map(items, (item, index) => ({ ...item, ordinal: index + 1 }));
@@ -34,10 +32,8 @@ it.effect.prop('P2: binary roundtrip', { format: fc.constantFrom<'xlsx' | 'zip'>
 }), { fastCheck: { numRuns: 15 } });
 
 // --- [BOUNDARY + SECURITY] ---------------------------------------------------
-
 // P3: Empty inputs = identity stream
 it.effect('P3: empty inputs', () => Effect.all((['ndjson', 'csv', 'yaml'] as const).map((fmt) => Transfer.import('', { format: fmt }).pipe(Stream.runCollect, Effect.map((c) => Chunk.size(c))))).pipe(Effect.map((sizes) => expect(sizes).toEqual([0, 0, 0]))));
-
 // P4: Import modes + row limit + too large entry
 it.effect('P4: modes + limits', () => Effect.all([
     Transfer.import('arbitrary', { format: 'txt', mode: 'file', type: 'doc' }).pipe(Stream.runCollect, Effect.map((c) => Transfer.partition(Chunk.toArray(c)).items[0]?.type)),
@@ -47,7 +43,6 @@ it.effect('P4: modes + limits', () => Effect.all([
     Transfer.import(A.replicate(JSON.stringify({ content: 'x', type: 't' }), 10_001).join('\n'), { format: 'ndjson' }).pipe(Stream.runCollect, Effect.either, Effect.map((r) => Either.isLeft(r) && r.left.code)),
     Transfer.import(`{"type":"t","content":"${'x'.repeat(1_100_000)}"}`, { format: 'ndjson' }).pipe(Stream.runCollect, Effect.map((c) => Transfer.partition(Chunk.toArray(c)).failures[0]?.code)),
 ]).pipe(Effect.map(([file, detect, fallback, csv, rowLimit, tooLarge]) => expect([file, detect, fallback, csv, rowLimit, tooLarge]).toEqual(['doc', 1, 'fallback', 'hello', 'ROW_LIMIT', 'TOO_LARGE']))));
-
 // P5: Path traversal rejected
 it.effect('P5: path security', () => Effect.promise(() => import('jszip').then((m) => m.default)).pipe(
     Effect.flatMap((JSZip) => Effect.all(['../escape.txt', '/etc/passwd'].map((path) => {
@@ -57,7 +52,6 @@ it.effect('P5: path security', () => Effect.promise(() => import('jszip').then((
         return Effect.promise(() => archive.generateAsync({ type: 'arraybuffer' })).pipe(Effect.flatMap((buf) => Transfer.import(buf, { format: 'zip' }).pipe(Stream.runCollect)), Effect.map((c) => Transfer.partition(Chunk.toArray(c)).failures.some((f) => f.code === 'INVALID_PATH')));
     }))),
     Effect.map((results) => expect(results).toEqual([true, true]))));
-
 // P6: Zip edge cases (bomb, no manifest, invalid format, invalid manifest, hash mismatch)
 it.effect('P6: zip security', () => Effect.promise(() => import('jszip').then((m) => m.default)).pipe(
     Effect.flatMap((JSZip) => {
@@ -69,15 +63,14 @@ it.effect('P6: zip security', () => Effect.promise(() => import('jszip').then((m
     }),
     Effect.flatMap(([bombBuf, plainBuf, badManifestBuf, badHashBuf]) => Effect.all([
         Transfer.import(bombBuf,        { format: 'zip' }).pipe(Stream.runCollect, Effect.flip, Effect.map((e) => ['COMPRESSION_RATIO', 'ARCHIVE_LIMIT', 'TOO_LARGE'].includes(e.code))),
-        Transfer.import(plainBuf,       { format: 'zip' }).pipe(Stream.runCollect, Effect.map((c) => Transfer.partition(Chunk.toArray(c)).items[0]?.content)),
+        Transfer.import(plainBuf,       { format: 'zip' }).pipe(Stream.runCollect, Effect.map((c) => { const item = Transfer.partition(Chunk.toArray(c)).items[0]; return [item?.content, item?.type]; })),
         Transfer.import(new Uint8Array([0, 1, 2, 3]).buffer, { format: 'zip' }).pipe(Stream.runCollect, Effect.either, Effect.map((r) => Either.isLeft(r) && r.left.code)),
         Transfer.import(badManifestBuf, { format: 'zip' }).pipe(Stream.runCollect, Effect.either, Effect.map((r) => Either.isLeft(r) && r.left.code)),
         Transfer.import(badHashBuf,     { format: 'zip' }).pipe(Stream.runCollect, Effect.map((c) => Transfer.partition(Chunk.toArray(c)).failures[0]?.code)),
     ])),
-    Effect.map(([bombErr, content, invalidFmt, invalidManifest, hashMismatch]) => expect([bombErr, content, invalidFmt, invalidManifest, hashMismatch]).toEqual([true, 'hello', 'INVALID_FORMAT', 'INVALID_MANIFEST', 'HASH_MISMATCH']))));
+    Effect.map(([bombErr, content, invalidFmt, invalidManifest, hashMismatch]) => expect([bombErr, content, invalidFmt, invalidManifest, hashMismatch]).toEqual([true, ['hello', 'txt'], 'INVALID_FORMAT', 'INVALID_MANIFEST', 'HASH_MISMATCH']))));
 
 // --- [ERROR PATHS] -----------------------------------------------------------
-
 // P7: Parse errors by format
 it.effect('P7: parse errors', () => Effect.all([
     Transfer.import('{"type":"a"}\n{invalid}\n{"type":"b"}', { format: 'ndjson' }).pipe(Stream.runCollect, Effect.map((c) => Transfer.partition(Chunk.toArray(c)).failures[0]?.code)),
@@ -86,9 +79,14 @@ it.effect('P7: parse errors', () => Effect.all([
     Transfer.import('not: valid: yaml: [',  { format: 'yaml' }).pipe(Stream.runCollect, Effect.map((c) => Transfer.partition(Chunk.toArray(c)).failures[0]?.code)),
     Transfer.import('"unclosed quote\n',    { format: 'csv' }).pipe(Stream.runCollect, Effect.either, Effect.map((r) => Either.isLeft(r) && r.left.code)),
 ]).pipe(Effect.map(([ndjson, missing, csv, yaml, parser]) => expect([ndjson, missing, csv, yaml, parser]).toEqual(['INVALID_RECORD', 'MISSING_TYPE', 'MISSING_TYPE', 'INVALID_RECORD', 'PARSER_ERROR']))));
-
-// P8: Partition separates Either + XML CDATA + exports
-it.effect('P8: partition + xml + exports', () => Effect.all([
+// P9: Multi-input array import concatenates streams
+it.effect('P9: multi-input', () => Transfer.import(['{"type":"x","content":"1"}', '{"type":"y","content":"2"}'], { format: 'ndjson' }).pipe(
+    Stream.runCollect,
+    Effect.map((c) => Transfer.partition(Chunk.toArray(c))),
+    Effect.map((r) => expect([r.items.length, r.items[0]?.content, r.items[1]?.content]).toEqual([2, '1', '2'])),
+));
+// P10: Partition separates Either + XML CDATA + exports
+it.effect('P10: partition + xml + exports', () => Effect.all([
     Effect.sync(() => Transfer.partition([Either.right({ content: 'a', ordinal: 1, type: 't' }), Either.left(new TransferError.Parse({ code: 'INVALID_RECORD', ordinal: 2 })), Either.right({ content: 'b', ordinal: 3, type: 't' })])),
     Transfer.import('<?xml version="1.0"?><root><item type="doc"><![CDATA[nested]]></item></root>', { format: 'xml' }).pipe(Stream.runCollect, Effect.map((c) => Transfer.partition(Chunk.toArray(c)).items[0]?.content)),
     Stream.fromIterable([{ content: 'test', id: '1', ordinal: 1, type: 'doc', updatedAt: 1_700_000_000_000 }] as const).pipe((s) => Transfer.export(s, 'xml'), Stream.runCollect, Effect.map((c) => Chunk.toArray(c).map((b) => new TextDecoder().decode(b)).join('').includes('CDATA'))),

@@ -46,6 +46,7 @@ Mermaid v11+ diagram creation with frontmatter YAML, ELK layout, Dracula palette
 **Guidance:**
 - `Config First` — Frontmatter YAML must precede diagram declaration. Mermaid parses config before nodes.
 - `ELK Layout` — ELK provides comprehensive graph layout via five algorithmic phases: cycle breaking, layering, crossing minimization, node placement, edge routing.
+- `Look Options` — Three visual modes: `neo` (default modern), `classic` (traditional), `handDrawn` (sketch aesthetic). Set via `look:` in frontmatter.
 
 **Best-Practices:**
 - *Load Sequence* — global-config.md → styling.md → {category}.md → compose. Never skip configuration.

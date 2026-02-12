@@ -2,7 +2,7 @@
 name: command-builder
 type: standard
 depth: base
-description: Creates and configures Claude Code slash commands with YAML frontmatter, argument handling, and tool permissions. Use when building new commands, adding $ARGUMENTS or $1-$N parameters, configuring allowed-tools, organizing command namespaces, or fixing command failures.
+description: Creates and configures Claude Code slash commands with YAML frontmatter, argument handling, and tool permissions. Use when building new commands, adding $ARGUMENTS or positional parameters, configuring allowed-tools, organizing command namespaces, or fixing command failures.
 ---
 
 # [H1][COMMAND-BUILDER]
@@ -33,7 +33,7 @@ Load commands from `.claude/commands/` (project) or `~/.claude/commands/` (user)
 ---
 description: Brief description shown in /help menu
 argument-hint: [required-arg] [optional-arg?]
-allowed-tools: Read, Write, Edit, Glob, Grep, Task, Bash, TodoWrite
+allowed-tools: Read, Write, Edit, Glob, Grep, Task, Bash, TaskCreate
 model: opus
 ---
 ```
@@ -63,11 +63,11 @@ model: opus
 
 [CRITICAL] Session inherits default model. Override for specific capability requirements.
 
-| [INDEX] | [MODEL_ID]                       | [ALIAS] | [STRENGTH]           | [LATENCY] | [COST] |
-| :-----: | -------------------------------- | ------- | -------------------- | :-------: | :----: |
-|   [1]   | **`claude-opus-4-5-20251101`**   | opus    | Complex reasoning    |   High    |  High  |
-|   [2]   | **`claude-sonnet-4-5-20250929`** | sonnet  | Balanced performance |  Medium   | Medium |
-|   [3]   | **`claude-3-5-haiku-20241022`**  | haiku   | Fast, simple tasks   |    Low    |  Low   |
+| [INDEX] | [ALIAS]  | [STRENGTH]           | [LATENCY] | [COST] |
+| :-----: | -------- | -------------------- | :-------: | :----: |
+|   [1]   | `opus`   | Complex reasoning    |   High    |  High  |
+|   [2]   | `sonnet` | Balanced performance |  Medium   | Medium |
+|   [3]   | `haiku`  | Fast, simple tasks   |    Low    |  Low   |
 
 | [INDEX] | [CHARACTERISTIC]         | [OPUS] | [SONNET] | [HAIKU] |
 | :-----: | ------------------------ | :----: | :------: | :-----: |
@@ -83,16 +83,19 @@ model: opus
 
 <br>
 
-| [INDEX] | [SYNTAX]          | [CAPTURES]            | [REQUIRED_TOOL] | [USE_WHEN]           |
-| :-----: | ----------------- | --------------------- | --------------- | -------------------- |
-|   [1]   | **`$ARGUMENTS`**  | All args as string    | None            | Free-form input      |
-|   [2]   | **`$1`, `$2`...** | Positional parameters | None            | Structured multi-arg |
-|   [3]   | **`${1:-val}`**   | Default if missing    | None            | Optional parameters  |
-|   [4]   | **`@path`**       | Include file contents | `Read`          | File analysis        |
-|   [5]   | **`!command`**    | Shell execution       | `Bash`          | Dynamic context      |
+| [INDEX] | [SYNTAX]               | [CAPTURES]             | [REQUIRED_TOOL] | [USE_WHEN]           |
+| :-----: | ---------------------- | ---------------------- | --------------- | -------------------- |
+|   [1]   | **`$ARGUMENTS`**       | All args as string     | None            | Free-form input      |
+|   [2]   | **`$1`, `$2`...**      | Positional (1-based)   | None            | Structured multi-arg |
+|   [3]   | **`$ARGUMENTS[N]`**    | Positional (0-based)   | None            | Indexed access       |
+|   [4]   | **`$N`**               | Shorthand for `$ARGUMENTS[N]` (0-based) | None | Indexed shorthand |
+|   [5]   | **`${1:-val}`**        | Default if missing     | None            | Optional parameters  |
+|   [6]   | **`${CLAUDE_SESSION_ID}`** | Current session ID | None            | Session-specific     |
+|   [7]   | **`@path`**            | Include file contents  | `Read`          | File analysis        |
+|   [8]   | **`` !`command` ``**   | Shell preprocessing    | `Bash`          | Dynamic context      |
 
 [CRITICAL]:
-- [NEVER] Mix `$ARGUMENTS` and `$1-$N` in same command.
+- [NEVER] Mix `$ARGUMENTS` and positional `$1-$N` in same command.
 - [ALWAYS] Declare required tools for `@path` and `!command`.
 
 [→references/variables.md](./references/variables.md): Complete reference—examples, skill loading, anti-patterns.
@@ -124,10 +127,10 @@ Identify security, performance, and code quality issues.
 ---
 description: Process files matching pattern
 argument-hint: [glob-pattern]
-allowed-tools: Read, Edit, Glob, TodoWrite
+allowed-tools: Read, Edit, Glob, TaskCreate
 ---
 ## Task
-Match files via $1. Analyze content. Apply fixes. Track progress via TodoWrite.
+Match files via $1. Analyze content. Apply fixes. Track progress via TaskCreate.
 ```
 
 ---
@@ -137,12 +140,12 @@ Match files via $1. Analyze content. Apply fixes. Track progress via TodoWrite.
 ---
 description: Multi-agent analysis
 argument-hint: [target-folder]
-allowed-tools: Task, Read, Glob, TodoWrite
+allowed-tools: Task, Read, Glob, TaskCreate
 ---
 ## Task
 1. Match files in $1 via Glob
 2. Spawn analysis agents via Task
-3. Synthesize findings, track via TodoWrite
+3. Synthesize findings, track via TaskCreate
 ```
 
 ---
@@ -152,7 +155,7 @@ allowed-tools: Task, Read, Glob, TodoWrite
 ---
 description: Validate target against skill standards
 argument-hint: [target] [focus?]
-allowed-tools: Read, Task, Glob, Edit, TodoWrite
+allowed-tools: Read, Task, Glob, Edit, TaskCreate
 ---
 ## Skill Context
 @.claude/skills/[skill-name]/SKILL.md
@@ -199,7 +202,7 @@ Load context above. Spawn Task agents. Verify findings against loaded context. A
 [VERIFY] Completion:
 - [ ] Workflow: All 5 phases executed (UNDERSTAND → VALIDATE).
 - [ ] Frontmatter: Valid YAML, description present, tools declared.
-- [ ] Variables: No `$ARGUMENTS` + `$1-$N` mixing.
+- [ ] Variables: No `$ARGUMENTS` + positional mixing.
 - [ ] Tools: All `@path` have `Read`, all `!command` have `Bash`.
 - [ ] Quality: LOC < 125, verb-first naming.
 

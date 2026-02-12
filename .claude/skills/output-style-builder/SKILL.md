@@ -7,7 +7,8 @@ description: >-
   configurations for Claude. Use when: (1) defining agent output schemas (.json, .yaml, .xml),
   (2) configuring response style scope hierarchy, (3) embedding formats in agents/commands,
   (4) building CLAUDE.md output sections, (5) creating format definitions in .claude/styles/,
-  or (6) standardizing structured data serialization.
+  (6) standardizing structured data serialization, or (7) applying scope-hierarchy
+  style overrides.
 ---
 
 # [H1][OUTPUT-STYLE-BUILDER]

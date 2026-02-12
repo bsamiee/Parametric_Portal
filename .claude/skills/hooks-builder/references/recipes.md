@@ -143,10 +143,24 @@ if __name__ == "__main__": sys.exit(main())
 ## [6][STOP_EVALUATOR]
 >**Dictum:** *Prompt hooks evaluate task completion.*
 
-**Events:** Stop, SubagentStop (prompt type only)
+**Events:** Stop, SubagentStop (prompt type)
+
+**Eligible Events:** Prompt hooks work with PreToolUse, PostToolUse, PostToolUseFailure, PermissionRequest, UserPromptSubmit, Stop, SubagentStop, TaskCompleted. NOT TeammateIdle.
+
+**Response Schema:** `{"ok": true}` allows action; `{"ok": false, "reason": "..."}` blocks.
 
 ```json
-{"hooks": {"Stop": [{"hooks": [{"type": "prompt", "prompt": "Evaluate: tests pass, types check. Return {\"decision\": \"approve\"} or {\"decision\": \"block\", \"reason\": \"...\"}", "timeout": 30000}]}]}}
+{
+  "hooks": {
+    "Stop": [{
+      "hooks": [{
+        "type": "prompt",
+        "prompt": "Evaluate whether the task is complete: tests pass, types check, all requirements met. Return {\"ok\": true} if complete. Return {\"ok\": false, \"reason\": \"what is missing\"} if incomplete.",
+        "timeout": 30
+      }]
+    }]
+  }
+}
 ```
 
-[REFERENCE] Validation checklist: [→validation.md§5](./validation.md#5recipes_gate)
+[REFERENCE] Validation checklist: [->validation.md§5](./validation.md#5recipes_gate)

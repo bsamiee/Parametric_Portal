@@ -1,0 +1,98 @@
+# Kubernetes PromQL Patterns
+# Sources: kube-state-metrics (KSM), cAdvisor, node-exporter
+# Prometheus 3.10+ (native histograms stable, info() experimental, limitk/limit_ratio experimental)
+
+## ===== POD STATUS =====
+kube_pod_status_phase{phase!="Running", phase!="Succeeded"} == 1                                    # Not running
+kube_pod_container_status_waiting_reason{reason="CrashLoopBackOff"} == 1                            # CrashLoop
+kube_pod_container_status_waiting_reason{reason="ImagePullBackOff"} == 1                            # ImagePull fail
+sum by (namespace, pod, container) (increase(kube_pod_container_status_restarts_total[1h]))          # Restarts/1h
+count by (namespace, phase) (kube_pod_status_phase == 1)                                            # Pods by phase
+
+## ===== CONTAINER RESOURCES (cAdvisor) =====
+sum by (namespace, pod, container) (rate(container_cpu_usage_seconds_total{container!="", container!="POD"}[5m]))  # CPU cores
+# CPU % of request
+(sum by (namespace, pod, container) (rate(container_cpu_usage_seconds_total{container!="", container!="POD"}[5m])) / sum by (namespace, pod, container) (kube_pod_container_resource_requests{resource="cpu"})) * 100
+# CPU % of limit
+(sum by (namespace, pod, container) (rate(container_cpu_usage_seconds_total{container!="", container!="POD"}[5m])) / sum by (namespace, pod, container) (kube_pod_container_resource_limits{resource="cpu"})) * 100
+sum by (namespace, pod, container) (container_memory_working_set_bytes{container!="", container!="POD"})           # Memory bytes
+# Memory % of limit
+(sum by (namespace, pod, container) (container_memory_working_set_bytes{container!="", container!="POD"}) / sum by (namespace, pod, container) (kube_pod_container_resource_limits{resource="memory"})) * 100
+# CPU throttling ratio
+sum by (namespace, pod, container) (increase(container_cpu_cfs_throttled_periods_total[5m])) / sum by (namespace, pod, container) (increase(container_cpu_cfs_periods_total[5m]))
+
+## ===== NAMESPACE RESOURCES =====
+sum by (namespace) (rate(container_cpu_usage_seconds_total{container!="", container!="POD"}[5m]))                   # CPU by namespace
+sum by (namespace) (container_memory_working_set_bytes{container!="", container!="POD"}) / 1024^3                   # Memory GB by namespace
+topk(5, sum by (namespace) (rate(container_cpu_usage_seconds_total{container!="", container!="POD"}[5m])))          # Top 5 CPU
+topk(5, sum by (namespace) (container_memory_working_set_bytes{container!="", container!="POD"}))                   # Top 5 memory
+
+## ===== DEPLOYMENT / STATEFULSET / DAEMONSET =====
+kube_deployment_status_replicas_unavailable > 0                                                     # Unavailable replicas
+kube_deployment_spec_replicas - kube_deployment_status_replicas_available                            # Replica mismatch
+kube_deployment_status_observed_generation != kube_deployment_metadata_generation                    # Rollout stuck
+kube_statefulset_status_replicas - kube_statefulset_status_replicas_ready                            # StatefulSet not ready
+kube_daemonset_status_desired_number_scheduled - kube_daemonset_status_number_ready                  # DaemonSet not ready
+
+## ===== NODE HEALTH =====
+kube_node_status_condition{condition="Ready", status="true"} == 0                                   # Node not ready
+kube_node_status_condition{condition=~"MemoryPressure|DiskPressure|PIDPressure", status="true"} == 1  # Node pressure
+sum by (node) (kube_pod_container_resource_requests{resource="cpu"}) / sum by (node) (kube_node_status_allocatable{resource="cpu"})      # CPU requested/allocatable
+sum by (node) (kube_pod_container_resource_requests{resource="memory"}) / sum by (node) (kube_node_status_allocatable{resource="memory"})  # Memory requested/allocatable
+
+## ===== PV / JOBS / HPA =====
+kube_persistentvolumeclaim_status_phase{phase!="Bound"} == 1                                        # PVC not bound
+(kubelet_volume_stats_used_bytes / kubelet_volume_stats_capacity_bytes) > 0.8                        # PV > 80%
+kube_job_status_failed > 0                                                                           # Failed jobs
+(time() - kube_cronjob_status_last_successful_time) > 86400                                          # CronJob stale 24h
+kube_horizontalpodautoscaler_status_current_replicas == kube_horizontalpodautoscaler_spec_max_replicas  # HPA at max
+
+## ===== VECTOR JOINS (manual group_left) =====
+# CPU with pod owner
+sum by (namespace, pod) (rate(container_cpu_usage_seconds_total{container!="", container!="POD"}[5m])) * on (namespace, pod) group_left (owner_name, owner_kind) kube_pod_owner
+# Memory with node zone
+sum by (namespace, pod, node) (container_memory_working_set_bytes{container!="", container!="POD"}) * on (node) group_left (label_topology_kubernetes_io_zone) kube_node_labels
+# Extract deployment from ReplicaSet owner
+label_replace(kube_pod_owner{owner_kind="ReplicaSet"}, "deployment", "$1", "owner_name", "(.+)-[^-]+")
+
+## ===== INFO() JOINS (3.0+ experimental, replaces manual group_left for info metrics) =====
+# Automatic metadata enrichment -- no need to specify join labels or group_left
+# Requires --enable-feature=promql-experimental-functions
+info(sum by (namespace, pod) (rate(container_cpu_usage_seconds_total{container!="", container!="POD"}[5m])))
+# Selective enrichment -- only K8s cluster labels
+info(rate(container_cpu_usage_seconds_total{container!="", namespace="production"}[5m]), {k8s_cluster=~".+"})
+# Enrich node metrics with node info labels
+info(kube_node_status_condition{condition="Ready", status="true"} == 0)
+
+## ===== CARDINALITY CONTROL (3.0+ experimental, promql-experimental-functions) =====
+# Explore high-cardinality K8s metrics without scanning all series
+limitk(10, kube_pod_info{namespace="production"})                                                   # Sample 10 pod info series
+limit_ratio(0.1, rate(container_cpu_usage_seconds_total{container!=""}[5m]))                        # ~10% of container CPU series
+# Complement sampling: get remaining 90% (hash-based, deterministic across evaluations)
+limit_ratio(-0.9, rate(container_cpu_usage_seconds_total{container!=""}[5m]))                       # Complement ~90%
+
+## ===== ANOMALY DETECTION (3.5+ experimental, promql-experimental-functions) =====
+# MAD-based z-score: flags CPU usage > 3 MADs from 1h median (robust to outliers, unlike stddev)
+sum by (namespace, pod) (rate(container_cpu_usage_seconds_total{container!=""}[5m])) > avg_over_time(sum by (namespace, pod) (rate(container_cpu_usage_seconds_total{container!=""}[5m]))[1h:5m]) + 3 * mad_over_time(sum by (namespace, pod) (rate(container_cpu_usage_seconds_total{container!=""}[5m]))[1h:5m])
+# Memory drift detection: first vs last value in 1h window (3.7+)
+last_over_time(container_memory_working_set_bytes{namespace="production"}[1h]) - first_over_time(container_memory_working_set_bytes{namespace="production"}[1h])
+
+## ===== STALENESS DETECTION (3.5+ experimental) =====
+# Pod metric staleness: time since last scrape > 120s
+time() - ts_of_last_over_time(container_cpu_usage_seconds_total{namespace="production"}[5m]) > 120
+# Timestamp of maximum memory usage in last hour
+ts_of_max_over_time(container_memory_working_set_bytes{namespace="production"}[1h])
+
+## ===== CAPACITY PLANNING =====
+sum(rate(container_cpu_usage_seconds_total{container!="", container!="POD"}[5m])) / sum(kube_node_status_allocatable{resource="cpu"})      # Cluster CPU util
+sum(container_memory_working_set_bytes{container!="", container!="POD"}) / sum(kube_node_status_allocatable{resource="memory"})             # Cluster memory util
+count by (node) (kube_pod_info) / sum by (node) (kube_node_status_allocatable{resource="pods"})                                            # Pods/node capacity
+# Disk fill prediction: predict when node disk will be full (4h forecast from 6h trend)
+predict_linear(node_filesystem_avail_bytes{mountpoint="/"}[6h], 4 * 3600) < 0
+# Smoothed CPU forecast (experimental, double_exponential_smoothing replaces holt_winters in 3.0)
+double_exponential_smoothing(sum(rate(container_cpu_usage_seconds_total{container!=""}[5m]))[1h:5m], 0.3, 0.7)
+
+## ===== UTF-8 / OTEL METRIC NAMES (3.0+) =====
+# OTEL SDK emits metrics with dot-separated names -- Prometheus 3.0+ preserves them
+sum by (namespace) (rate({"k8s.pod.cpu.time", namespace="production"}[5m]))                         # OTEL pod CPU metric
+histogram_quantile(0.95, sum by (namespace) (rate({"k8s.pod.network.io", namespace="production"}[5m])))  # OTEL network P95

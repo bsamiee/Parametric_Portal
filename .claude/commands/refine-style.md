@@ -37,7 +37,7 @@ Focus: `${2:-none}`
 
 1. **Glob** `$1` for `**/*.md`, `**/*.ts`, `**/*.tsx`.
 2. **Execute** `/learn-skill style-standards`—load style context once.
-3. **Create** TodoWrite list—all files pending.
+3. **Create** TaskCreate list—all files pending.
 4. **Partition** files into batches of 10.
 5. **Loop** batches:
    - **Wave 1:** Dispatch `style-analyzer` agents (parallel, 1 per file).
