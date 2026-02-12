@@ -156,7 +156,7 @@ class JobState extends S.Class<JobState>('JobState')({
 	get errorHistory(): readonly { error: string; timestamp: number }[] {return this.history.flatMap((entry) => entry.error ? [{ error: entry.error, timestamp: entry.timestamp }] : []);}
 	static readonly fromRecord = (job: S.Schema.Type<typeof Job>) =>
 			new JobState({
-				attempts: job.retry.current,
+				attempts: job.retryCurrent,
 				completedAt: Option.getOrUndefined(Option.map(job.completedAt, (d: Date) => d.getTime())),
 				createdAt: Snowflake.timestamp(Snowflake.Snowflake(job.jobId)),
 				history: S.is(S.Array(_HistoryEntry))(job.history) ? job.history : [],
@@ -222,7 +222,7 @@ const JobEntityLive = JobEntity.toLayer(Effect.gen(function* () {
 		})),
 	);
 	const _writeState = (jobId: string, tenantId: string, state: JobState) =>
-		_dbRun(tenantId, database.jobs.set(jobId, { completedAt: Option.fromNullable(state.completedAt).pipe(Option.map((timestamp) => new Date(timestamp))), history: state.history, output: Option.fromNullable(state.result).pipe(Option.map((result) => ({ result }))), retry: { current: state.attempts, max: 0 }, status: state.status })).pipe(
+		_dbRun(tenantId, database.jobs.set(jobId, { completedAt: Option.fromNullable(state.completedAt).pipe(Option.map((timestamp) => new Date(timestamp))), history: state.history, output: Option.fromNullable(state.result).pipe(Option.map((result) => ({ result }))), retryCurrent: state.attempts, status: state.status })).pipe(
 			Effect.tapError((error) => Effect.logError('Job state DB write failed', { error: String(error), jobId })),
 			Effect.tap(() => cache.kv.set(_stateCacheKey(jobId), state, _CONFIG.cache.ttl).pipe(Effect.ignore)));
 	const _readProgress = (jobId: string, tenantId: string) => cache.kv.get(_progressCacheKey(jobId), _Progress).pipe(
@@ -338,7 +338,8 @@ const JobEntityLive = JobEntity.toLayer(Effect.gen(function* () {
 									extra: (state) => _runtime.db.run(envelope.tenantId, database.jobDlq.insert({
 										appId: envelope.tenantId,
 										attempts: state.attempts,
-										context: Option.fromNullable(envelope.requestId).pipe(Option.map((request) => ({ request }))),
+										contextRequestId: Option.fromNullable(envelope.requestId).pipe(Option.filter(S.is(S.UUID))),
+										contextUserId: Option.none(),
 										errorReason,
 										errors: state.errorHistory,
 										payload: envelope.payload,
@@ -422,7 +423,7 @@ const JobEntityLive = JobEntity.toLayer(Effect.gen(function* () {
 							appId: envelope.payload.tenantId, completedAt: Option.none(),
 							correlation: Option.some({ batch: envelope.payload.batchId, dedupe: envelope.payload.dedupeKey }), history: state.history, jobId,
 							output: Option.none(), payload: envelope.payload.payload, priority: envelope.payload.priority,
-							retry: { current: state.attempts, max: envelope.payload.maxAttempts }, scheduledAt: Option.fromNullable(envelope.payload.scheduledAt).pipe(Option.map((timestamp) => new Date(timestamp))), status: state.status, type: envelope.payload.type, updatedAt: undefined,
+							retryCurrent: state.attempts, retryMax: envelope.payload.maxAttempts, scheduledAt: Option.fromNullable(envelope.payload.scheduledAt).pipe(Option.map((timestamp) => new Date(timestamp))), status: state.status, type: envelope.payload.type, updatedAt: undefined,
 						})).pipe(
 							Effect.as({ duplicate: false as const, jobId }),
 								Effect.catchAll((error) => dedupeKey.pipe(
