@@ -210,7 +210,7 @@ class SearchService extends Effect.Service<SearchService>()('ai/Search', {
         return { query, refresh, refreshEmbeddings, suggest };
     }),
 }) {
-	static readonly EmbeddingCron = ClusterService.Schedule.cron({
+    static readonly EmbeddingCron = ClusterService.Schedule.cron({
         cron: Cron.unsafeParse(_CONFIG.cron.embeddings.schedule),
         execute: Effect.gen(function* () {
             const [database, search] = yield* Effect.all([DatabaseService, SearchService]);

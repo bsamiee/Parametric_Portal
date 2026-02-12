@@ -11,12 +11,12 @@ import { Effect } from 'effect';
 // --- [LAYERS] ----------------------------------------------------------------
 
 const TransferLive = HttpApiBuilder.group(ParametricApi, 'transfer', (handlers) =>
-	Effect.gen(function* () {
-		const transfer = yield* TransferService;
-		return handlers
-			.handleRaw('export', ({ urlParams }) => transfer.exportAssets(urlParams).pipe(Telemetry.span('transfer.export')))
-			.handle('import', ({ urlParams }) => transfer.importAssets(urlParams).pipe(Telemetry.span('transfer.import')));
-	}),
+    Effect.gen(function* () {
+        const transfer = yield* TransferService;
+        return handlers
+            .handleRaw('export', ({ urlParams }) => transfer.exportAssets(urlParams).pipe(Telemetry.span('transfer.export')))
+            .handle('import', ({ urlParams }) => transfer.importAssets(urlParams).pipe(Telemetry.span('transfer.import')));
+    }),
 );
 
 // --- [EXPORT] ----------------------------------------------------------------

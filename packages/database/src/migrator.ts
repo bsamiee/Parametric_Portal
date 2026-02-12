@@ -11,8 +11,8 @@ import { Client } from './client.ts';
 // --- [LAYERS] ----------------------------------------------------------------
 
 const MigratorLive = PgMigrator.layer({ loader: PgMigrator.fromFileSystem(fileURLToPath(new URL(/* @vite-ignore */ '../migrations', import.meta.url))) }).pipe(
-	Layer.provide(Client.layer),
-	Layer.provide(NodeContext.layer),
+    Layer.provide(Client.layer),
+    Layer.provide(NodeContext.layer),
 );
 
 // --- [EXPORT] ----------------------------------------------------------------

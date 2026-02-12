@@ -17,65 +17,65 @@ import { CssIdentifierSchema, ThemeError, type ThemeErrorType } from './colors.t
 // --- [SCHEMA] ----------------------------------------------------------------
 
 const ColorSlotRefSchema = S.Union(
-	...TW.colorStep.map((n) => S.Literal(String(n))),
-	S.Literal('text-on'),
-	S.Literal('hovered'),
-	S.Literal('pressed'),
-	S.Literal('focused'),
-	S.Literal('selected'),
-	S.Literal('disabled'),
+    ...TW.colorStep.map((n) => S.Literal(String(n))),
+    S.Literal('text-on'),
+    S.Literal('hovered'),
+    S.Literal('pressed'),
+    S.Literal('focused'),
+    S.Literal('selected'),
+    S.Literal('disabled'),
 );
 const AsyncStyleKeySchema = S.Union(S.Literal('idle'), S.Literal('loading'), S.Literal('success'), S.Literal('failure'));
 const FocusRingOverrideSchema = S.Struct({color: S.optional(S.String), offset: S.optional(S.String), width: S.optional(S.String), z: S.optional(S.String),});
 const TooltipStyleSpecSchema = S.Struct({
-	arrow: S.optional(S.Struct({
-		color: S.String, height: S.String, path: S.optional(S.String), staticOffset: S.optional(S.String), stroke: S.optional(S.String),
-		strokeWidth: S.optional(S.String), tipRadius: S.optional(S.String), width: S.String,
-	})),
-	base: S.Record({ key: S.String, value: S.String }),
-	name: CssIdentifierSchema,
-	positioning: S.optional(S.Struct({ arrowPadding: S.optional(S.String), offset: S.optional(S.String), shiftPadding: S.optional(S.String), })),
-	transition: S.Struct({ duration: S.String, easing: S.String, initialOpacity: S.String, initialTransform: S.String, }),
+    arrow: S.optional(S.Struct({
+        color: S.String, height: S.String, path: S.optional(S.String), staticOffset: S.optional(S.String), stroke: S.optional(S.String),
+        strokeWidth: S.optional(S.String), tipRadius: S.optional(S.String), width: S.String,
+    })),
+    base: S.Record({ key: S.String, value: S.String }),
+    name: CssIdentifierSchema,
+    positioning: S.optional(S.Struct({ arrowPadding: S.optional(S.String), offset: S.optional(S.String), shiftPadding: S.optional(S.String), })),
+    transition: S.Struct({ duration: S.String, easing: S.String, initialOpacity: S.String, initialTransform: S.String, }),
 });
 const ToastStyleSpecSchema = S.Struct({
-	base: S.Record({ key: S.String, value: S.String }),
-	name: CssIdentifierSchema,
-	progress: S.optional(S.Struct({
-		bg: S.String,
-		height: S.String,
-		position: S.optional(S.Union(S.Literal('bottom'), S.Literal('top'))),
-		radius: S.optional(S.String),
-	})),
-	stacked: S.optional(S.Struct({ offset: S.String, scale: S.String })),
-	transition: S.Struct({ duration: S.String, easing: S.String }),
-	types: S.optional(S.Record({
-		key: S.Union(S.Literal('info'), S.Literal('success'), S.Literal('warning'), S.Literal('error')),
-		value: S.Record({ key: S.String, value: S.String }),
-	})),
+    base: S.Record({ key: S.String, value: S.String }),
+    name: CssIdentifierSchema,
+    progress: S.optional(S.Struct({
+        bg: S.String,
+        height: S.String,
+        position: S.optional(S.Union(S.Literal('bottom'), S.Literal('top'))),
+        radius: S.optional(S.String),
+    })),
+    stacked: S.optional(S.Struct({ offset: S.String, scale: S.String })),
+    transition: S.Struct({ duration: S.String, easing: S.String }),
+    types: S.optional(S.Record({
+        key: S.Union(S.Literal('info'), S.Literal('success'), S.Literal('warning'), S.Literal('error')),
+        value: S.Record({ key: S.String, value: S.String }),
+    })),
 });
 const ComponentSpecSchema = S.Struct({
-	asyncStyles: S.optional(S.Record({ key: AsyncStyleKeySchema, value: S.Record({ key: S.String, value: S.String }) })),
-	base: S.Record({ key: S.String, value: S.String }),
-	colorInherit: S.optional(S.String),
-	colorSlots: S.Record({ key: S.String, value: ColorSlotRefSchema }),
-	focusRing: S.optional(FocusRingOverrideSchema),
-	longpress: S.optional(S.Record({ key: S.String, value: S.String })),
-	name: CssIdentifierSchema,
-	sizes: S.Record({ key: S.String, value: S.Record({ key: S.String, value: S.String }) }),
-	variants: S.optional(S.Record({ key: S.String, value: S.Record({ key: S.String, value: S.String }) })),
+    asyncStyles: S.optional(S.Record({ key: AsyncStyleKeySchema, value: S.Record({ key: S.String, value: S.String }) })),
+    base: S.Record({ key: S.String, value: S.String }),
+    colorInherit: S.optional(S.String),
+    colorSlots: S.Record({ key: S.String, value: ColorSlotRefSchema }),
+    focusRing: S.optional(FocusRingOverrideSchema),
+    longpress: S.optional(S.Record({ key: S.String, value: S.String })),
+    name: CssIdentifierSchema,
+    sizes: S.Record({ key: S.String, value: S.Record({ key: S.String, value: S.String }) }),
+    variants: S.optional(S.Record({ key: S.String, value: S.Record({ key: S.String, value: S.String }) })),
 });
 
 // --- [TYPES] -----------------------------------------------------------------
 
 type RuleInput =
-	| { readonly kind: 'async'; readonly name: string; readonly state: string; readonly values: Record<string, string> }
-	| { readonly kind: 'base'; readonly name: string; readonly values: Record<string, string> }
-	| { readonly kind: 'color'; readonly color: string; readonly name: string; readonly values: Record<string, string> }
-	| { readonly kind: 'color-inherit'; readonly ancestor: string; readonly color: string; readonly name: string; readonly values: Record<string, string> }
-	| { readonly kind: 'focus-ring'; readonly name: string; readonly overrides: FocusRingOverride }
-	| { readonly kind: 'longpress'; readonly name: string; readonly values: Record<string, string> }
-	| { readonly kind: 'size'; readonly name: string; readonly size: string; readonly values: Record<string, string> }
-	| { readonly kind: 'variant'; readonly name: string; readonly values: Record<string, string>; readonly variant: string };
+    | { readonly kind: 'async'; readonly name: string; readonly state: string; readonly values: Record<string, string> }
+    | { readonly kind: 'base'; readonly name: string; readonly values: Record<string, string> }
+    | { readonly kind: 'color'; readonly color: string; readonly name: string; readonly values: Record<string, string> }
+    | { readonly kind: 'color-inherit'; readonly ancestor: string; readonly color: string; readonly name: string; readonly values: Record<string, string> }
+    | { readonly kind: 'focus-ring'; readonly name: string; readonly overrides: FocusRingOverride }
+    | { readonly kind: 'longpress'; readonly name: string; readonly values: Record<string, string> }
+    | { readonly kind: 'size'; readonly name: string; readonly size: string; readonly values: Record<string, string> }
+    | { readonly kind: 'variant'; readonly name: string; readonly values: Record<string, string>; readonly variant: string };
 type RuleContext<K extends RuleInput['kind']> = Extract<RuleInput, { kind: K }>;
 type RuleResult = { readonly selector: string; readonly entries: readonly (readonly [string, string])[] } | undefined;
 type FocusRingOverride = S.Schema.Type<typeof FocusRingOverrideSchema>;
@@ -87,191 +87,191 @@ type ToastPosition = 'bottom-center' | 'bottom-left' | 'bottom-right' | 'top-cen
 // --- [CONSTANTS] -------------------------------------------------------------
 
 const B = Object.freeze({
-	focusRingKeys: ['width', 'color', 'offset', 'z'] as const,
-	toastPosition: Object.freeze({
-		'bottom-center': 'bottom: 0; left: 50%; transform: translateX(-50%); align-items: center;',
-		'bottom-left': 'bottom: 0; left: 0; align-items: flex-start;',
-		'bottom-right': 'bottom: 0; right: 0; align-items: flex-end;',
-		'top-center': 'top: 0; left: 50%; transform: translateX(-50%); align-items: center;',
-		'top-left': 'top: 0; left: 0; align-items: flex-start;',
-		'top-right': 'top: 0; right: 0; align-items: flex-end;',
-	}),
+    focusRingKeys: ['width', 'color', 'offset', 'z'] as const,
+    toastPosition: Object.freeze({
+        'bottom-center': 'bottom: 0; left: 50%; transform: translateX(-50%); align-items: center;',
+        'bottom-left': 'bottom: 0; left: 0; align-items: flex-start;',
+        'bottom-right': 'bottom: 0; right: 0; align-items: flex-end;',
+        'top-center': 'top: 0; left: 50%; transform: translateX(-50%); align-items: center;',
+        'top-left': 'top: 0; left: 0; align-items: flex-start;',
+        'top-right': 'top: 0; right: 0; align-items: flex-end;',
+    }),
 }) satisfies DeepReadonly<{ focusRingKeys: readonly string[]; toastPosition: Record<ToastPosition, string> }>;
 
 // --- [DISPATCH_TABLES] -------------------------------------------------------
 
 const slotSelector = (n: string): string => `:is([data-slot="${n}"], [data-theme="${n}"])`;
 const selectorFor = Object.freeze({
-	async: (n: string, state: string) =>
-		state === 'loading'
-			? `${slotSelector(n)}:is([data-async-state="loading"], [data-pending])`
-			: `${slotSelector(n)}[data-async-state="${state}"]`,
-	base: (n: string) => slotSelector(n),
-	color: (n: string, color: string) => `${slotSelector(n)}[data-color="${color}"]`,
-	'color-inherit': (n: string, color: string, ancestor: string) => `${slotSelector(ancestor)}[data-color="${color}"] ${slotSelector(n)}:not([data-color])`,
-	'focus-ring': (n: string) => slotSelector(n),
-	longpress: (n: string) => `${slotSelector(n)}[data-longpress-progress]::before`,
-	size: (n: string, size: string) => `${slotSelector(n)}[data-size="${size}"]`,
-	variant: (n: string, variant: string) => `${slotSelector(n)}[data-variant="${variant}"]`,
+    async: (n: string, state: string) =>
+        state === 'loading'
+            ? `${slotSelector(n)}:is([data-async-state="loading"], [data-pending])`
+            : `${slotSelector(n)}[data-async-state="${state}"]`,
+    base: (n: string) => slotSelector(n),
+    color: (n: string, color: string) => `${slotSelector(n)}[data-color="${color}"]`,
+    'color-inherit': (n: string, color: string, ancestor: string) => `${slotSelector(ancestor)}[data-color="${color}"] ${slotSelector(n)}:not([data-color])`,
+    'focus-ring': (n: string) => slotSelector(n),
+    longpress: (n: string) => `${slotSelector(n)}[data-longpress-progress]::before`,
+    size: (n: string, size: string) => `${slotSelector(n)}[data-size="${size}"]`,
+    variant: (n: string, variant: string) => `${slotSelector(n)}[data-variant="${variant}"]`,
 });
 const resolveColorValue = (value: string, color: string): string => value.startsWith('var(') ? value : value === 'text-on' ? `var(--color-text-on-${color})` : `var(--color-${color}-${value})`;
 const ruleHandlers: { readonly [K in RuleInput['kind']]: (input: RuleContext<K>) => RuleResult } = Object.freeze({
-	async: (i) => ({ entries: R.toEntries(i.values), selector: selectorFor.async(i.name, i.state) }),
-	base: (i) => ({ entries: R.toEntries(i.values), selector: selectorFor.base(i.name) }),
-	color: (i) => ({ entries: A.map(R.toEntries(i.values), ([k, v]) => [k, resolveColorValue(v, i.color)] as const), selector: selectorFor.color(i.name, i.color) }),
-	'color-inherit': (i) => ({ entries: A.map(R.toEntries(i.values), ([k, v]) => [k, resolveColorValue(v, i.color)] as const), selector: selectorFor['color-inherit'](i.name, i.color, i.ancestor) }),
-	'focus-ring': (i) => {
-		const entries = A.filterMap(B.focusRingKeys, (key) => pipe(Option.fromNullable(i.overrides[key]), Option.map((v) => [`focus-ring-${key}`, v] as const)));
-		return A.isNonEmptyArray(entries) ? { entries, selector: selectorFor['focus-ring'](i.name) } : undefined;
-	},
-	longpress: (i) => ({ entries: R.toEntries(i.values), selector: selectorFor.longpress(i.name) }),
-	size: (i) => ({ entries: R.toEntries(i.values), selector: selectorFor.size(i.name, i.size) }),
-	variant: (i) => ({ entries: R.toEntries(i.values), selector: selectorFor.variant(i.name, i.variant) }),
+    async: (i) => ({ entries: R.toEntries(i.values), selector: selectorFor.async(i.name, i.state) }),
+    base: (i) => ({ entries: R.toEntries(i.values), selector: selectorFor.base(i.name) }),
+    color: (i) => ({ entries: A.map(R.toEntries(i.values), ([k, v]) => [k, resolveColorValue(v, i.color)] as const), selector: selectorFor.color(i.name, i.color) }),
+    'color-inherit': (i) => ({ entries: A.map(R.toEntries(i.values), ([k, v]) => [k, resolveColorValue(v, i.color)] as const), selector: selectorFor['color-inherit'](i.name, i.color, i.ancestor) }),
+    'focus-ring': (i) => {
+        const entries = A.filterMap(B.focusRingKeys, (key) => pipe(Option.fromNullable(i.overrides[key]), Option.map((v) => [`focus-ring-${key}`, v] as const)));
+        return A.isNonEmptyArray(entries) ? { entries, selector: selectorFor['focus-ring'](i.name) } : undefined;
+    },
+    longpress: (i) => ({ entries: R.toEntries(i.values), selector: selectorFor.longpress(i.name) }),
+    size: (i) => ({ entries: R.toEntries(i.values), selector: selectorFor.size(i.name, i.size) }),
+    variant: (i) => ({ entries: R.toEntries(i.values), selector: selectorFor.variant(i.name, i.variant) }),
 });
 
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 
 const optionalArray = <T, U>(value: T | undefined, transform: (v: T) => readonly U[]): readonly U[] => pipe(Option.fromNullable(value), Option.map(transform), Option.getOrElse(() => [] as U[]));
 const optionalMappedVars = <T extends Record<string, unknown>>(
-	value: T | undefined,
-	prefix: string,
-	mappings: ReadonlyArray<readonly [key: string, selector: (v: T) => unknown]>,
+    value: T | undefined,
+    prefix: string,
+    mappings: ReadonlyArray<readonly [key: string, selector: (v: T) => unknown]>,
 ): readonly string[] =>
-	pipe(
-		Option.fromNullable(value),
-		Option.map((obj) => A.filterMap(mappings, ([key, select]) => pipe(Option.fromNullable(select(obj)), Option.map((v) => `  --${prefix}-${key}: ${v};`)))),
-		Option.getOrElse(() => [] as string[]),
-	);
+    pipe(
+        Option.fromNullable(value),
+        Option.map((obj) => A.filterMap(mappings, ([key, select]) => pipe(Option.fromNullable(select(obj)), Option.map((v) => `  --${prefix}-${key}: ${v};`)))),
+        Option.getOrElse(() => [] as string[]),
+    );
 const formatDeclaration = (name: string, key: string, value: string): string => `  --${name}-${key}: ${value};`;
 const generateRule = (input: RuleInput): string | undefined => {
-	const result = ruleHandlers[input.kind](input as never);
-	return result === undefined
-		? undefined
-		: pipe(
-				result.entries,
-				A.map(([k, v]) => input.kind === 'focus-ring' ? `  --${k}: ${v};` : formatDeclaration(input.name, k, v)),
-				A.join('\n'),
-				(body) => `${result.selector} {\n${body}\n}`,
-			);
+    const result = ruleHandlers[input.kind](input as never);
+    return result === undefined
+        ? undefined
+        : pipe(
+                result.entries,
+                A.map(([k, v]) => input.kind === 'focus-ring' ? `  --${k}: ${v};` : formatDeclaration(input.name, k, v)),
+                A.join('\n'),
+                (body) => `${result.selector} {\n${body}\n}`,
+            );
 };
 const generateSingleComponentWiring = (spec: ComponentSpec, colorNames: readonly string[]): string =>
-	pipe(
-		[
-			[{ kind: 'base' as const, name: spec.name, values: spec.base }],
-			A.map(colorNames, (color) => ({ color, kind: 'color' as const, name: spec.name, values: spec.colorSlots })),
-			optionalArray(spec.colorInherit, (ancestor) => A.map(colorNames, (color) => ({ ancestor, color, kind: 'color-inherit' as const, name: spec.name, values: spec.colorSlots }))),
-			A.map(R.toEntries(spec.sizes), ([size, values]) => ({ kind: 'size' as const, name: spec.name, size, values })),
-			optionalArray(spec.variants, (variants) => A.map(R.toEntries(variants), ([variant, values]) => ({ kind: 'variant' as const, name: spec.name, values, variant }))),
-			optionalArray(spec.asyncStyles, (asyncStyles) => A.map(R.toEntries(asyncStyles), ([state, values]) => ({ kind: 'async' as const, name: spec.name, state, values }))),
-			optionalArray(spec.longpress, (values) => [{ kind: 'longpress' as const, name: spec.name, values }]),
-			optionalArray(spec.focusRing, (overrides) => [{ kind: 'focus-ring' as const, name: spec.name, overrides }]),
-		],
-		A.flatten,
-		A.filterMap((input) => Option.fromNullable(generateRule(input))),
-		A.join('\n\n'),
-	);
+    pipe(
+        [
+            [{ kind: 'base' as const, name: spec.name, values: spec.base }],
+            A.map(colorNames, (color) => ({ color, kind: 'color' as const, name: spec.name, values: spec.colorSlots })),
+            optionalArray(spec.colorInherit, (ancestor) => A.map(colorNames, (color) => ({ ancestor, color, kind: 'color-inherit' as const, name: spec.name, values: spec.colorSlots }))),
+            A.map(R.toEntries(spec.sizes), ([size, values]) => ({ kind: 'size' as const, name: spec.name, size, values })),
+            optionalArray(spec.variants, (variants) => A.map(R.toEntries(variants), ([variant, values]) => ({ kind: 'variant' as const, name: spec.name, values, variant }))),
+            optionalArray(spec.asyncStyles, (asyncStyles) => A.map(R.toEntries(asyncStyles), ([state, values]) => ({ kind: 'async' as const, name: spec.name, state, values }))),
+            optionalArray(spec.longpress, (values) => [{ kind: 'longpress' as const, name: spec.name, values }]),
+            optionalArray(spec.focusRing, (overrides) => [{ kind: 'focus-ring' as const, name: spec.name, overrides }]),
+        ],
+        A.flatten,
+        A.filterMap((input) => Option.fromNullable(generateRule(input))),
+        A.join('\n\n'),
+    );
 const generateSingleTooltipWiring = (spec: TooltipStyleSpec): string => {
-	const selector = `[data-slot="tooltip"][data-style="${spec.name}"]`;
-	const baseVars = A.map(R.toEntries(spec.base), ([k, v]) => `  --tooltip-${k}: ${v};`);
-	const arrowVars = optionalMappedVars(spec.arrow, 'tooltip', [
-		['arrow-color', (a) => a.color],
-		['arrow-height', (a) => a.height],
-		['arrow-width', (a) => a.width],
-		['arrow-path', (a) => a.path],
-		['arrow-stroke', (a) => a.stroke],
-		['arrow-stroke-width', (a) => a.strokeWidth],
-		['arrow-tip-radius', (a) => a.tipRadius],
-	]);
-	const positionVars = optionalMappedVars(spec.positioning, 'tooltip', [
-		['offset', (p) => p.offset],
-		['arrow-padding', (p) => p.arrowPadding],
-		['shift-padding', (p) => p.shiftPadding],
-	]);
-	const transitionVars = [
-		`  --tooltip-transition-duration: ${spec.transition.duration};`,
-		`  --tooltip-transition-easing: ${spec.transition.easing};`,
-	];
-	const allVars = A.join([...baseVars, ...arrowVars, ...positionVars, ...transitionVars], '\n');
-	return A.join(
-		[
-			`${selector} {\n${allVars}\n}`,
-			`${selector}[data-status="initial"],\n${selector}[data-status="close"] {\n  opacity: ${spec.transition.initialOpacity};\n  transform: ${spec.transition.initialTransform};\n}`,
-			`${selector}[data-status="open"] {\n  opacity: 1;\n  transform: none;\n}`,
-		],
-		'\n\n',
-	);
+    const selector = `[data-slot="tooltip"][data-style="${spec.name}"]`;
+    const baseVars = A.map(R.toEntries(spec.base), ([k, v]) => `  --tooltip-${k}: ${v};`);
+    const arrowVars = optionalMappedVars(spec.arrow, 'tooltip', [
+        ['arrow-color', (a) => a.color],
+        ['arrow-height', (a) => a.height],
+        ['arrow-width', (a) => a.width],
+        ['arrow-path', (a) => a.path],
+        ['arrow-stroke', (a) => a.stroke],
+        ['arrow-stroke-width', (a) => a.strokeWidth],
+        ['arrow-tip-radius', (a) => a.tipRadius],
+    ]);
+    const positionVars = optionalMappedVars(spec.positioning, 'tooltip', [
+        ['offset', (p) => p.offset],
+        ['arrow-padding', (p) => p.arrowPadding],
+        ['shift-padding', (p) => p.shiftPadding],
+    ]);
+    const transitionVars = [
+        `  --tooltip-transition-duration: ${spec.transition.duration};`,
+        `  --tooltip-transition-easing: ${spec.transition.easing};`,
+    ];
+    const allVars = A.join([...baseVars, ...arrowVars, ...positionVars, ...transitionVars], '\n');
+    return A.join(
+        [
+            `${selector} {\n${allVars}\n}`,
+            `${selector}[data-status="initial"],\n${selector}[data-status="close"] {\n  opacity: ${spec.transition.initialOpacity};\n  transform: ${spec.transition.initialTransform};\n}`,
+            `${selector}[data-status="open"] {\n  opacity: 1;\n  transform: none;\n}`,
+        ],
+        '\n\n',
+    );
 };
 const generateSingleToastWiring = (spec: ToastStyleSpec): string => {
-	const selector = `[data-slot="toast"][data-style="${spec.name}"]`;
-	const allVars = [
-		...A.map(R.toEntries(spec.base), ([k, v]) => `  --toast-${k}: ${v};`),
-		`  --toast-transition-duration: ${spec.transition.duration};`,
-		`  --toast-transition-easing: ${spec.transition.easing};`,
-		...optionalMappedVars(spec.progress, 'toast', [['progress-bg', (p) => p.bg], ['progress-height', (p) => p.height], ['progress-radius', (p) => p.radius], ['progress-position', (p) => p.position ?? 'bottom']]),
-		...optionalMappedVars(spec.stacked, 'toast', [['stack-offset', (s) => s.offset], ['stack-scale', (s) => s.scale]]),
-	];
-	const baseRule = `${selector} {\n${A.join(allVars, '\n')}\n}`;
-	const typeRules = optionalArray(spec.types, (types) =>
-		A.map(R.toEntries(types), ([type, values]) => `${selector}[data-toast-type="${type}"] {\n${A.join(A.map(R.toEntries(values), ([k, v]) => `  --toast-${k}: ${v};`), '\n')}\n}`),
-	);
-	return A.join([baseRule, ...typeRules], '\n\n');
+    const selector = `[data-slot="toast"][data-style="${spec.name}"]`;
+    const allVars = [
+        ...A.map(R.toEntries(spec.base), ([k, v]) => `  --toast-${k}: ${v};`),
+        `  --toast-transition-duration: ${spec.transition.duration};`,
+        `  --toast-transition-easing: ${spec.transition.easing};`,
+        ...optionalMappedVars(spec.progress, 'toast', [['progress-bg', (p) => p.bg], ['progress-height', (p) => p.height], ['progress-radius', (p) => p.radius], ['progress-position', (p) => p.position ?? 'bottom']]),
+        ...optionalMappedVars(spec.stacked, 'toast', [['stack-offset', (s) => s.offset], ['stack-scale', (s) => s.scale]]),
+    ];
+    const baseRule = `${selector} {\n${A.join(allVars, '\n')}\n}`;
+    const typeRules = optionalArray(spec.types, (types) =>
+        A.map(R.toEntries(types), ([type, values]) => `${selector}[data-toast-type="${type}"] {\n${A.join(A.map(R.toEntries(values), ([k, v]) => `  --toast-${k}: ${v};`), '\n')}\n}`),
+    );
+    return A.join([baseRule, ...typeRules], '\n\n');
 };
 const generatePositionWiring = (): string =>
-	pipe(
-		R.toEntries(B.toastPosition) as [ToastPosition, string][],
-		A.map(([pos, css]) => `[data-slot="toast-region"][data-position="${pos}"] {\n  ${css}\n}`),
-		A.join('\n\n'),
-	);
+    pipe(
+        R.toEntries(B.toastPosition) as [ToastPosition, string][],
+        A.map(([pos, css]) => `[data-slot="toast-region"][data-position="${pos}"] {\n  ${css}\n}`),
+        A.join('\n\n'),
+    );
 
 // --- [ENTRY_POINT] -----------------------------------------------------------
 
 const generateComponentWiring = (
-	specs: readonly unknown[],
-	colorNames: readonly string[],
+    specs: readonly unknown[],
+    colorNames: readonly string[],
 ): Effect.Effect<string, ThemeErrorType> =>
-	pipe(
-		Effect.forEach(specs, (raw, idx) =>
-			pipe(
-				S.decodeUnknown(ComponentSpecSchema)(raw),
-				Effect.mapError((e) =>
-					ThemeError.Validation({
-						cause: e,
-						field: `components[${idx}]`,
-						message: `Invalid component spec at index ${idx}`,
-						received: raw,
-					}),
-				),
-			),
-		),
-		Effect.map((validated) => pipe(validated, A.map((s) => generateSingleComponentWiring(s, colorNames)), A.join('\n\n'))),
-	);
+    pipe(
+        Effect.forEach(specs, (raw, idx) =>
+            pipe(
+                S.decodeUnknown(ComponentSpecSchema)(raw),
+                Effect.mapError((e) =>
+                    ThemeError.Validation({
+                        cause: e,
+                        field: `components[${idx}]`,
+                        message: `Invalid component spec at index ${idx}`,
+                        received: raw,
+                    }),
+                ),
+            ),
+        ),
+        Effect.map((validated) => pipe(validated, A.map((s) => generateSingleComponentWiring(s, colorNames)), A.join('\n\n'))),
+    );
 const generateTooltipWiring = (specs: readonly unknown[]): Effect.Effect<string, ThemeErrorType> =>
-	pipe(
-		Effect.forEach(specs, (raw, idx) =>
-			pipe(
-				S.decodeUnknown(TooltipStyleSpecSchema)(raw),
-				Effect.mapError((e) =>
-					ThemeError.Validation({
-						cause: e,
-						field: `tooltipStyles[${idx}]`,
-						message: `Invalid tooltip style spec at index ${idx}`,
-						received: raw,
-					}),
-				),
-			),
-		),
-		Effect.map((validated) => pipe(validated, A.map(generateSingleTooltipWiring), A.join('\n\n'))),
-	);
+    pipe(
+        Effect.forEach(specs, (raw, idx) =>
+            pipe(
+                S.decodeUnknown(TooltipStyleSpecSchema)(raw),
+                Effect.mapError((e) =>
+                    ThemeError.Validation({
+                        cause: e,
+                        field: `tooltipStyles[${idx}]`,
+                        message: `Invalid tooltip style spec at index ${idx}`,
+                        received: raw,
+                    }),
+                ),
+            ),
+        ),
+        Effect.map((validated) => pipe(validated, A.map(generateSingleTooltipWiring), A.join('\n\n'))),
+    );
 const generateToastWiring = (specs: readonly unknown[]): Effect.Effect<string, ThemeErrorType> =>
-	pipe(
-		Effect.forEach(specs, (raw, idx) =>
-			pipe(
-				S.decodeUnknown(ToastStyleSpecSchema)(raw),
-				Effect.mapError((e) => ThemeError.Validation({ cause: e, field: `toastStyles[${idx}]`, message: `Invalid toast style spec at index ${idx}`, received: raw })),
-			),
-		),
-		Effect.map((validated) => A.join([generatePositionWiring(), ...A.map(validated, generateSingleToastWiring)], '\n\n')),
-	);
+    pipe(
+        Effect.forEach(specs, (raw, idx) =>
+            pipe(
+                S.decodeUnknown(ToastStyleSpecSchema)(raw),
+                Effect.mapError((e) => ThemeError.Validation({ cause: e, field: `toastStyles[${idx}]`, message: `Invalid toast style spec at index ${idx}`, received: raw })),
+            ),
+        ),
+        Effect.map((validated) => A.join([generatePositionWiring(), ...A.map(validated, generateSingleToastWiring)], '\n\n')),
+    );
 
 // --- [EXPORT] ----------------------------------------------------------------
 

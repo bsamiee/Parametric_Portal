@@ -437,7 +437,7 @@ export default Effect.gen(function* () {
                 ('maintenance-purge-api-keys','20 3 * * 0','SELECT purge_api_keys(365)'),
                 ('maintenance-purge-oauth-accounts','20 5 * * 0','SELECT purge_oauth_accounts(90)'),
                 ('maintenance-purge-mfa-secrets','20 4 * * 0','SELECT purge_mfa_secrets(90)'),
-                ('maintenance-purge-kv-store','20 0 * * 0','SELECT purge_kv_store(30)'),
+                ('maintenance-purge-kv-store','20 0 * * 0','SELECT purge_kv_store(90)'),
                 ('maintenance-purge-event-journal','20 2 * * *','SELECT purge_event_journal(30)'),
                 ('maintenance-purge-job-dlq','25 2 * * *','SELECT purge_job_dlq(30)')
             ) AS t(name, schedule, command) LOOP BEGIN

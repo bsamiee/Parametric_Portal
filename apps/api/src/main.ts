@@ -52,8 +52,8 @@ import { WebSocketLive } from './routes/websocket.ts';
 // --- [CONSTANTS] -------------------------------------------------------------
 
 const ServerConfig = Config.all({
-	corsOrigins: Config.string('CORS_ORIGINS').pipe(Config.withDefault('*'), Config.map((origins) => origins.split(',').map((origin) => origin.trim()).filter(Boolean) as ReadonlyArray<string>)),
-	port: Config.number('PORT').pipe(Config.withDefault(4000)),
+    corsOrigins: Config.string('CORS_ORIGINS').pipe(Config.withDefault('*'), Config.map((origins) => origins.split(',').map((origin) => origin.trim()).filter(Boolean) as ReadonlyArray<string>)),
+    port: Config.number('PORT').pipe(Config.withDefault(4000)),
 });
 
 // --- [PLATFORM_LAYER] --------------------------------------------------------
@@ -66,15 +66,15 @@ const PlatformLayer = Layer.mergeAll(Client.layer, StorageAdapter.S3ClientLayer,
 // Crons: domain services own their schedules (PollingService.Crons, PurgeService.Crons, SearchService.EmbeddingCron)
 
 const ServicesLayer = Layer.mergeAll(Auth.Service.Default, EmailAdapter.Default, FeatureService.Default, NotificationService.Default, StorageService.Default, TransferService.Default, AiRuntime.Default, SearchService.Default, JobService.Default, PollingService.Default, EventBus.Default, WebhookService.Default, WebSocketService.Default, PolicyService.Default).pipe(
-	Layer.provideMerge(Layer.mergeAll(PollingService.Crons, PurgeService.Crons, PurgeService.SweepCron, SearchService.EmbeddingCron)),
-	Layer.provideMerge(ProvisioningService.Layer),
-	Layer.provideMerge(PurgeService.Handlers),
-	Layer.provideMerge(Layer.mergeAll(StorageAdapter.Default, AuditService.Default)),
-	Layer.provideMerge(ReplayGuardService.Default),
-	Layer.provideMerge(CacheService.Layer),
-	Layer.provideMerge(Resilience.Layer),
-	Layer.provideMerge(Layer.mergeAll(DatabaseService.Default, MetricsService.Default, Crypto.Service.Default, StreamingService.Default, ClusterService.Default)),
-	Layer.provideMerge(PlatformLayer),
+    Layer.provideMerge(Layer.mergeAll(PollingService.Crons, PurgeService.Crons, PurgeService.SweepCron, SearchService.EmbeddingCron)),
+    Layer.provideMerge(ProvisioningService.Layer),
+    Layer.provideMerge(PurgeService.Handlers),
+    Layer.provideMerge(Layer.mergeAll(StorageAdapter.Default, AuditService.Default)),
+    Layer.provideMerge(ReplayGuardService.Default),
+    Layer.provideMerge(CacheService.Layer),
+    Layer.provideMerge(Resilience.Layer),
+    Layer.provideMerge(Layer.mergeAll(DatabaseService.Default, MetricsService.Default, Crypto.Service.Default, StreamingService.Default, ClusterService.Default)),
+    Layer.provideMerge(PlatformLayer),
 );
 
 // --- [HTTP_LAYER] ------------------------------------------------------------
@@ -87,45 +87,45 @@ const ApiLayer = HttpApiBuilder.api(ParametricApi).pipe(Layer.provide(RouteLayer
 // HTTP server with middleware pipeline + auth + CORS in single MiddlewareLayer.
 
 const ServerLayer = Layer.unwrapEffect(Effect.gen(function* () {
-	const [database, auth, serverConfig] = yield* Effect.all([Effect.orDie(DatabaseService), Effect.orDie(Auth.Service), Effect.orDie(ServerConfig)]);
-		const MiddlewareLayer = Middleware.layer({
-				apiKeyLookup: (hash) => {
-					const now = new Date();
-					return database.apiKeys.byHash(hash).pipe(
-						Effect.map(Option.filter((key) => Option.isNone(key.deletedAt) && Option.match(key.expiresAt, { onNone: () => true, onSome: (expiresAt) => expiresAt >= now }))),
-						Effect.tap(Option.match({
-							onNone: () => Effect.void,
-							onSome: (key) => database.apiKeys.touch(key.id).pipe(Effect.ignore),
-						})),
-						Effect.map(Option.map((key) => ({ id: key.id, userId: key.userId }))),
-						Effect.catchAll((error) =>
-							Effect.logError('API key lookup failed', { error: String(error) }).pipe(
-								Effect.andThen(Effect.succeed(Option.none())),
-							),
-						),
-					);
-				},
-			cors: serverConfig.corsOrigins,
-			sessionLookup: (hash) => auth.session.lookup(hash),
-			});
-	return HttpApiBuilder.serve((application) => Middleware.pipeline(database)(application).pipe(
-		CacheService.headers,
-		HttpMiddleware.logger,
-		Effect.catchAllDefect((defect) => Effect.logError('Unhandled request defect', { defect: String(defect) }).pipe(
-			Effect.andThen(HttpServerResponse.unsafeJson({ details: 'Unhandled request defect', error: 'InternalServerError' }, { status: 500 })),
-		)),
-	)).pipe(
-		Layer.provide(HttpApiSwagger.layer({ path: '/docs' })),
-		Layer.provide(ApiLayer),
-		Layer.provide(MiddlewareLayer),
-		HttpServer.withLogAddress,
-		Layer.provide(NodeHttpServer.layer(createServer, { port: serverConfig.port })),
-	);
+    const [database, auth, serverConfig] = yield* Effect.all([Effect.orDie(DatabaseService), Effect.orDie(Auth.Service), Effect.orDie(ServerConfig)]);
+        const MiddlewareLayer = Middleware.layer({
+                apiKeyLookup: (hash) => {
+                    const now = new Date();
+                    return database.apiKeys.byHash(hash).pipe(
+                        Effect.map(Option.filter((key) => Option.isNone(key.deletedAt) && Option.match(key.expiresAt, { onNone: () => true, onSome: (expiresAt) => expiresAt >= now }))),
+                        Effect.tap(Option.match({
+                            onNone: () => Effect.void,
+                            onSome: (key) => database.apiKeys.touch(key.id).pipe(Effect.ignore),
+                        })),
+                        Effect.map(Option.map((key) => ({ id: key.id, userId: key.userId }))),
+                        Effect.catchAll((error) =>
+                            Effect.logError('API key lookup failed', { error: String(error) }).pipe(
+                                Effect.andThen(Effect.succeed(Option.none())),
+                            ),
+                        ),
+                    );
+                },
+            cors: serverConfig.corsOrigins,
+            sessionLookup: (hash) => auth.session.lookup(hash),
+            });
+    return HttpApiBuilder.serve((application) => Middleware.pipeline(database)(application).pipe(
+        CacheService.headers,
+        HttpMiddleware.logger,
+        Effect.catchAllDefect((defect) => Effect.logError('Unhandled request defect', { defect: String(defect) }).pipe(
+            Effect.andThen(HttpServerResponse.unsafeJson({ details: 'Unhandled request defect', error: 'InternalServerError' }, { status: 500 })),
+        )),
+    )).pipe(
+        Layer.provide(HttpApiSwagger.layer({ path: '/docs' })),
+        Layer.provide(ApiLayer),
+        Layer.provide(MiddlewareLayer),
+        HttpServer.withLogAddress,
+        Layer.provide(NodeHttpServer.layer(createServer, { port: serverConfig.port })),
+    );
 })).pipe(Layer.provide(ServicesLayer));
 
 // --- [ENTRY_POINT] -----------------------------------------------------------
 
 NodeRuntime.runMain((Effect.scoped(Layer.launch(ServerLayer)).pipe(
-	Effect.onInterrupt(() => Effect.logInfo('Graceful shutdown initiated')),
-	Effect.ensuring(Effect.logInfo('Server shutdown complete')),
+    Effect.onInterrupt(() => Effect.logInfo('Graceful shutdown initiated')),
+    Effect.ensuring(Effect.logInfo('Server shutdown complete')),
 ) as Effect.Effect<never>));
