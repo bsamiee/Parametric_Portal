@@ -23,7 +23,7 @@ class AuditService extends Effect.Service<AuditService>()('server/Audit', {
 		const metrics = yield* MetricsService;
 		yield* Effect.annotateLogsScoped({ 'service.name': 'audit' });
 		const writeDeadLetter = (entry: Record<string, unknown>, error: string, timestampMs: number, context: { readonly tenantId: string; readonly requestId: string; readonly userId: Option.Option<string> }) =>
-			database.jobDlq.insert({ appId: context.tenantId, attempts: 1, contextRequestId: Option.some(context.requestId), contextUserId: context.userId, errorReason: 'AuditPersistFailed', errors: [{ error, timestamp: timestampMs }], payload: entry, replayedAt: Option.none(), source: 'event', sourceId: context.requestId, type: `audit.${entry['subject']}.${entry['operation']}` }).pipe(Effect.ignore);
+			database.jobDlq.insert({ appId: context.tenantId, attempts: 1, contextRequestId: Option.some(context.requestId).pipe(Option.filter(S.is(S.UUID))), contextUserId: context.userId, errorReason: 'AuditPersistFailed', errors: [{ error, timestamp: timestampMs }], payload: entry, replayedAt: Option.none(), source: 'event', sourceId: context.requestId, type: `audit.${entry['subject']}.${entry['operation']}` }).pipe(Effect.ignore);
 		const log = (
 			operationName: string,
 			config?: { readonly subjectId?: string; readonly before?: unknown; readonly after?: unknown; readonly details?: unknown; readonly silent?: boolean },

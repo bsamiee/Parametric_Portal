@@ -999,7 +999,7 @@ export default Effect.gen(function* () {
             SELECT COUNT(*)::int FROM revoked
         $$
     `;
-    yield* sql`COMMENT ON FUNCTION revoke_sessions_by_ip IS 'Tenant-safe session revocation by IP: soft-deletes only current app rows and updates updated_at.'`;
+    yield* sql`COMMENT ON FUNCTION revoke_sessions_by_ip IS 'Tenant-safe session revocation by IP: soft-deletes only current app rows via deleted_at.'`;
     yield* sql`
         CREATE OR REPLACE FUNCTION count_audit_by_ip(p_app_id UUID, p_ip INET, p_window_minutes INT DEFAULT 60)
         RETURNS INT

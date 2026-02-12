@@ -222,7 +222,7 @@ const JobEntityLive = JobEntity.toLayer(Effect.gen(function* () {
 		})),
 	);
 	const _writeState = (jobId: string, tenantId: string, state: JobState) =>
-		_dbRun(tenantId, database.jobs.set(jobId, { completedAt: Option.fromNullable(state.completedAt).pipe(Option.map((timestamp) => new Date(timestamp))), history: state.history, output: Option.fromNullable(state.result).pipe(Option.map((result) => ({ result }))), retryCurrent: state.attempts, retryMax: 0, status: state.status })).pipe(
+		_dbRun(tenantId, database.jobs.set(jobId, { completedAt: Option.fromNullable(state.completedAt).pipe(Option.map((timestamp) => new Date(timestamp))), history: state.history, output: Option.fromNullable(state.result).pipe(Option.map((result) => ({ result }))), retryCurrent: state.attempts, status: state.status })).pipe(
 			Effect.tapError((error) => Effect.logError('Job state DB write failed', { error: String(error), jobId })),
 			Effect.tap(() => cache.kv.set(_stateCacheKey(jobId), state, _CONFIG.cache.ttl).pipe(Effect.ignore)));
 	const _readProgress = (jobId: string, tenantId: string) => cache.kv.get(_progressCacheKey(jobId), _Progress).pipe(
@@ -338,7 +338,7 @@ const JobEntityLive = JobEntity.toLayer(Effect.gen(function* () {
 									extra: (state) => _runtime.db.run(envelope.tenantId, database.jobDlq.insert({
 										appId: envelope.tenantId,
 										attempts: state.attempts,
-										contextRequestId: Option.fromNullable(envelope.requestId),
+										contextRequestId: Option.fromNullable(envelope.requestId).pipe(Option.filter(S.is(S.UUID))),
 										contextUserId: Option.none(),
 										errorReason,
 										errors: state.errorHistory,
