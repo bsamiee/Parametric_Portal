@@ -18,30 +18,30 @@ const _Handled = Symbol.for('@effect/platform/HttpApp/handled');
 // --- [FUNCTIONS] -------------------------------------------------------------
 
 const handleConnect = (webSocket: typeof WebSocketService.Service) =>
-	Effect.gen(function* () {
-		yield* Middleware.feature('enableRealtime');
-		yield* Middleware.permission('websocket', 'connect');
-		const [request, socket, session, tenantId] = yield* Effect.all([
-			HttpServerRequest.HttpServerRequest,
-			HttpServerRequest.upgrade,
-			Context.Request.sessionOrFail,
-			Context.Request.currentTenantId,
-		]);
-		yield* Effect.sync(() => {(request as unknown as Record<PropertyKey, unknown>)[_Handled] = true;});
-		yield* webSocket.accept(socket, session.userId, tenantId);
-		return HttpServerResponse.empty();
-	}).pipe(
-		Effect.mapError((error) => HttpError.is(error) ? error : HttpError.Internal.of('WebSocket failed', error)),
-		Telemetry.span('websocket.connect'),
-	);
+    Effect.gen(function* () {
+        yield* Middleware.feature('enableRealtime');
+        yield* Middleware.permission('websocket', 'connect');
+        const [request, socket, session, tenantId] = yield* Effect.all([
+            HttpServerRequest.HttpServerRequest,
+            HttpServerRequest.upgrade,
+            Context.Request.sessionOrFail,
+            Context.Request.currentTenantId,
+        ]);
+        yield* Effect.sync(() => {(request as unknown as Record<PropertyKey, unknown>)[_Handled] = true;});
+        yield* webSocket.accept(socket, session.userId, tenantId);
+        return HttpServerResponse.empty();
+    }).pipe(
+        Effect.mapError((error) => HttpError.is(error) ? error : HttpError.Internal.of('WebSocket failed', error)),
+        Telemetry.span('websocket.connect'),
+    );
 
 // --- [LAYERS] ----------------------------------------------------------------
 
 const WebSocketLive = HttpApiBuilder.group(ParametricApi, 'websocket', (handlers) =>
-	Effect.gen(function* () {
-		const webSocket = yield* WebSocketService;
-		return handlers.handleRaw('connect', () =>CacheService.rateLimit('realtime', handleConnect(webSocket)),);
-	}),
+    Effect.gen(function* () {
+        const webSocket = yield* WebSocketService;
+        return handlers.handleRaw('connect', () =>CacheService.rateLimit('realtime', handleConnect(webSocket)),);
+    }),
 );
 
 // --- [EXPORT] ----------------------------------------------------------------

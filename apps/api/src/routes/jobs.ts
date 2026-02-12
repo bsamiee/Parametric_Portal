@@ -16,28 +16,28 @@ import { Effect } from 'effect';
 // --- [FUNCTIONS] -------------------------------------------------------------
 
 const handleSubscribe = (jobs: typeof JobService.Service) =>
-	Effect.gen(function* () {
-		yield* Middleware.permission('jobs', 'subscribe');
-		const ctx = yield* Context.Request.current;
-		const appId = ctx.tenantId;
-	return yield* StreamingService.sse({
-			filter: (event) => event.tenantId === appId,
-			name: 'jobs.status',
-			serialize: (event) => ({ data: JSON.stringify(event), event: 'status', id: event.jobId }),
-			source: jobs.onStatusChange(),
-		});
-	}).pipe(
-		Effect.mapError((error) => HttpError.is(error) ? error : HttpError.Internal.of('SSE failed', error)),
-		Telemetry.span('jobs.subscribe'),
-	);
+    Effect.gen(function* () {
+        yield* Middleware.permission('jobs', 'subscribe');
+        const ctx = yield* Context.Request.current;
+        const appId = ctx.tenantId;
+    return yield* StreamingService.sse({
+            filter: (event) => event.tenantId === appId,
+            name: 'jobs.status',
+            serialize: (event) => ({ data: JSON.stringify(event), event: 'status', id: event.jobId }),
+            source: jobs.onStatusChange(),
+        });
+    }).pipe(
+        Effect.mapError((error) => HttpError.is(error) ? error : HttpError.Internal.of('SSE failed', error)),
+        Telemetry.span('jobs.subscribe'),
+    );
 
 // --- [LAYERS] ----------------------------------------------------------------
 
 const JobsLive = HttpApiBuilder.group(ParametricApi, 'jobs', (handlers) =>
-	Effect.gen(function* () {
-		const jobs = yield* JobService;
-		return handlers.handleRaw('subscribe', () => CacheService.rateLimit('realtime', handleSubscribe(jobs)),);
-	}),
+    Effect.gen(function* () {
+        const jobs = yield* JobService;
+        return handlers.handleRaw('subscribe', () => CacheService.rateLimit('realtime', handleSubscribe(jobs)),);
+    }),
 );
 
 // --- [EXPORT] ----------------------------------------------------------------
