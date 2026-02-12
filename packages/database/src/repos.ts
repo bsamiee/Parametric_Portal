@@ -62,16 +62,15 @@ const makeAppRepo = Effect.gen(function* () {
 	};
 });
 const makeSessionRepo = Effect.gen(function* () {
-	const sql = yield* SqlClient.SqlClient;
 	const repository = yield* repo(Session, 'sessions', {
 		fn: { revoke_sessions_by_ip: { args: [{ cast: 'uuid', field: 'appId' }, { cast: 'inet', field: 'ip' }], params: S.Struct({ appId: S.UUID, ip: S.String }) } },
 		purge: 'purge_sessions',
 		scoped: 'appId',
 	});
 	return { ...repository,
-		byAccessToken: (hash: string) => repository.one([{ raw: sql`tokens->>'access' = ${hash}` }]),
-		byRefreshToken: (hash: string) => repository.one([{ raw: sql`tokens->>'refresh' = ${hash}` }]),
-		byRefreshTokenForUpdate: (hash: string) => repository.one([{ raw: sql`tokens->>'refresh' = ${hash}` }], 'update'),
+		byAccessToken: (hash: string) => repository.one([{ field: 'token_access', value: hash }]),
+		byRefreshToken: (hash: string) => repository.one([{ field: 'token_refresh', value: hash }]),
+		byRefreshTokenForUpdate: (hash: string) => repository.one([{ field: 'token_refresh', value: hash }], 'update'),
 		byUser: (userId: string) => repository.find([{ field: 'user_id', value: userId }]),
 		softDelete: (id: string) => repository.drop(id),
 		softDeleteByIp: (appId: string, ip: string) => repository.fn('revoke_sessions_by_ip', { appId, ip }),
@@ -129,14 +128,13 @@ const makeAssetRepo = Effect.gen(function* () {
 	};
 });
 const makeAuditRepo = Effect.gen(function* () {
-	const sql = yield* SqlClient.SqlClient;
 	const repository = yield* repo(AuditLog, 'audit_logs', {
 		fn: { count_audit_by_ip: { args: [{ cast: 'uuid', field: 'appId' }, { cast: 'inet', field: 'ip' }, 'windowMinutes'], params: S.Struct({ appId: S.UUID, ip: S.String, windowMinutes: S.Number }) } },
 		scoped: 'appId',
 	});
 	return { ...repository,
-		byIp: (ip: string, limit: number, cursor?: string) => repository.page([{ raw: sql`context->>'ip' = ${ip}` }], { cursor, limit }),
-		bySubject: (type: string, id: string, limit: number, cursor?: string, { after, before, operation }: { after?: Date; before?: Date; operation?: S.Schema.Type<typeof AuditOperationSchema> } = {}) => repository.page([{ raw: sql`target->>'type' = ${type}` }, { raw: sql`target->>'id' = ${id}` }, ...repository.preds({ after, before, operation })], { cursor, limit }),
+		byIp: (ip: string, limit: number, cursor?: string) => repository.page([{ field: 'context_ip', value: ip }], { cursor, limit }),
+		bySubject: (type: string, id: string, limit: number, cursor?: string, { after, before, operation }: { after?: Date; before?: Date; operation?: S.Schema.Type<typeof AuditOperationSchema> } = {}) => repository.page([{ field: 'target_type', value: type }, { field: 'target_id', value: id }, ...repository.preds({ after, before, operation })], { cursor, limit }),
 		byUser: (userId: string, limit: number, cursor?: string, { after, before, operation }: { after?: Date; before?: Date; operation?: S.Schema.Type<typeof AuditOperationSchema> } = {}) => repository.page(repository.preds({ after, before, operation, user_id: userId }), { cursor, limit }),
 		countByIp: (appId: string, ip: string, windowMinutes = 60) => repository.fn('count_audit_by_ip', { appId, ip, windowMinutes }),
 		log: repository.insert,
@@ -177,14 +175,13 @@ const makeJobRepo = Effect.gen(function* () {
 	};
 });
 const makeJobDlqRepo = Effect.gen(function* () {
-	const sql = yield* SqlClient.SqlClient;
 	const repository = yield* repo(JobDlq, 'job_dlq', { purge: 'purge_job_dlq', resolve: { bySource: 'sourceId' }, scoped: 'appId' });
 	const _typePred = (type?: string) => type === undefined
 		? []
 		: [{ field: 'type', op: type.includes('*') ? 'like' : 'eq', value: type.replaceAll('*', '%') } as const];
 	return { ...repository,
 		byErrorReason: (errorReason: string, options?: { limit?: number; cursor?: string }) => repository.page([{ field: 'error_reason', value: errorReason }], { cursor: options?.cursor, limit: options?.limit ?? 100 }),
-		byRequest: (requestId: string) => repository.find([{ raw: sql`context->>'request' = ${requestId}` }]),
+		byRequest: (requestId: string) => repository.find([{ field: 'context_request_id', value: requestId }]),
 		bySource: (sourceId: string) => repository.by('bySource', sourceId),
 		countPending: (type?: string) => repository.count(_typePred(type)),
 		listPending: (options?: { type?: string; limit?: number; cursor?: string }) => repository.page(_typePred(options?.type), { cursor: options?.cursor, limit: options?.limit ?? 100 }),
@@ -195,11 +192,11 @@ const makeJobDlqRepo = Effect.gen(function* () {
 const makeNotificationRepo = Effect.gen(function* () {
 	const repository = yield* repo(Notification, 'notifications', { scoped: 'appId' });
 	return { ...repository,
-		transition: (id: string, updates: { status: S.Schema.Type<typeof Notification.fields.status>; delivery?: S.Schema.Type<typeof Notification.fields.delivery>; correlation?: S.Schema.Type<typeof Notification.fields.correlation>; retry?: S.Schema.Type<typeof Notification.fields.retry> }, whenStatus?: S.Schema.Type<typeof Notification.fields.status>) =>
+		transition: (id: string, updates: { status: S.Schema.Type<typeof Notification.fields.status>; delivery?: S.Schema.Type<typeof Notification.fields.delivery>; correlation?: S.Schema.Type<typeof Notification.fields.correlation>; retryCurrent?: S.Schema.Type<typeof Notification.fields.retryCurrent>; retryMax?: S.Schema.Type<typeof Notification.fields.retryMax> }, whenStatus?: S.Schema.Type<typeof Notification.fields.status>) =>
 			repository.set(
 				id,
 				R.filter(
-					{ correlation: updates.correlation, delivery: updates.delivery, retry: updates.retry, status: updates.status } as Record<string, unknown>,
+					{ correlation: updates.correlation, delivery: updates.delivery, retryCurrent: updates.retryCurrent, retryMax: updates.retryMax, status: updates.status } as Record<string, unknown>,
 					(value) => value !== undefined,
 				),
 				undefined,

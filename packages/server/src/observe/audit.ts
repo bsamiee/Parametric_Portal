@@ -23,7 +23,7 @@ class AuditService extends Effect.Service<AuditService>()('server/Audit', {
 		const metrics = yield* MetricsService;
 		yield* Effect.annotateLogsScoped({ 'service.name': 'audit' });
 		const writeDeadLetter = (entry: Record<string, unknown>, error: string, timestampMs: number, context: { readonly tenantId: string; readonly requestId: string; readonly userId: Option.Option<string> }) =>
-			database.jobDlq.insert({ appId: context.tenantId, attempts: 1, context: Option.some({ request: context.requestId, user: Option.getOrUndefined(context.userId) }), errorReason: 'AuditPersistFailed', errors: [{ error, timestamp: timestampMs }], payload: entry, replayedAt: Option.none(), source: 'event', sourceId: context.requestId, type: `audit.${entry['subject']}.${entry['operation']}` }).pipe(Effect.ignore);
+			database.jobDlq.insert({ appId: context.tenantId, attempts: 1, contextRequestId: Option.some(context.requestId), contextUserId: context.userId, errorReason: 'AuditPersistFailed', errors: [{ error, timestamp: timestampMs }], payload: entry, replayedAt: Option.none(), source: 'event', sourceId: context.requestId, type: `audit.${entry['subject']}.${entry['operation']}` }).pipe(Effect.ignore);
 		const log = (
 			operationName: string,
 			config?: { readonly subjectId?: string; readonly before?: unknown; readonly after?: unknown; readonly details?: unknown; readonly silent?: boolean },
@@ -43,10 +43,12 @@ class AuditService extends Effect.Service<AuditService>()('server/Audit', {
 				const dlqContext = { requestId: context.requestId, tenantId: context.tenantId, userId };
 				const entry = {
 					appId: context.tenantId,
-					context: Option.some({ agent: Option.getOrUndefined(context.userAgent), ip: Option.getOrUndefined(context.ipAddress) }),
+					contextAgent: context.userAgent,
+					contextIp: context.ipAddress,
 					delta: pipe(Option.fromNullable(config?.before ?? config?.details), Option.map((old) => ({ new: config?.after, old }))),
 					operation, requestId: Option.some(context.requestId),
-					target: { id: subjectId, type: subject },
+					targetId: subjectId,
+					targetType: subject,
 					userId,
 				};
 				yield* Effect.all([Effect.annotateCurrentSpan('audit.operation', operation), Effect.annotateCurrentSpan('audit.subject', subject), Effect.annotateCurrentSpan('audit.subjectId', subjectId)], { discard: true });

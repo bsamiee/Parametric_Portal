@@ -220,7 +220,8 @@ class EventBus extends Effect.Service<EventBus>()('server/EventBus', {
 											Match.orElse(constant(
 												Context.Request.withinSync(envelope.event.tenantId, database.jobDlq.insert({
 													appId: envelope.event.tenantId, attempts: 1,
-													context: Option.fromNullable(envelope.event.correlationId).pipe(Option.map((request) => ({ request }))),
+													contextRequestId: Option.fromNullable(envelope.event.correlationId),
+													contextUserId: Option.none(),
 													errorReason: error.reason, errors: [{ error: String(error.cause ?? error.message), timestamp: Date.now() }],
 												payload: envelope.event.payload, replayedAt: Option.none(),
 												source: 'event', sourceId: envelope.event.eventId, type: eventType,
