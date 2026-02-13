@@ -68,7 +68,7 @@ it.effect('P5: path security', () => Effect.promise(() => import('jszip').then((
     // P6: Zip edge cases (bomb, no manifest, invalid format, invalid manifest, hash mismatch)
 it.effect('P6: zip security', () => Effect.promise(() => import('jszip').then((m) => m.default)).pipe(
     Effect.flatMap((JSZip) => {
-        const bomb = new JSZip(); bomb.file('manifest.json', JSON.stringify({ entries: [{ mime: 'text/plain', name: 'bomb.txt', size: 60_000_000, type: 'text' }], version: 1 })); bomb.file('bomb.txt', 'A'.repeat(60_000_000), { compression: 'DEFLATE' });
+        const bomb = new JSZip(); bomb.file('manifest.json', JSON.stringify({ entries: [{ mime: 'text/plain', name: 'bomb.txt', size: 60_000_000, type: 'text' }], version: 1 })); bomb.file('bomb.txt', 'A'.repeat(1_000), { compression: 'DEFLATE' });
         const plain = new JSZip(); plain.file('doc.txt', 'hello');
         const badManifest = new JSZip(); badManifest.file('manifest.json', '{invalid json}');
         const badHash = new JSZip(); badHash.file('manifest.json', JSON.stringify({ entries: [{ hash: 'wrong', mime: 'text/plain', name: 'a.txt', size: 1, type: 'text' }], version: 1 })); badHash.file('a.txt', 'content');

@@ -86,7 +86,7 @@ const _callFn = (sql: SqlClient.SqlClient, specs: Record<string, FnCallSpec> | u
                     return Match.value(spec.mode ?? 'scalar' as const).pipe(
                         Match.when('set', () => SqlSchema.findAll({ execute: () => sql`SELECT * FROM ${sql.literal(name)}(${args})`, Request: request, Result: modelSchema ?? spec.schema ?? S.Unknown })(params)),
                         Match.when('typed', () => SqlSchema.single({ execute: () => sql`SELECT ${sql.literal(name)}(${args}) AS value`, Request: request, Result: S.Struct({ value: spec.schema ?? S.Unknown }) })(params).pipe(Effect.map(row => row.value))),
-                        Match.when('scalar', () => SqlSchema.single({ execute: () => sql`SELECT ${sql.literal(name)}(${args}) AS value`, Request: request, Result: S.Struct({ value: S.Int }) })(params).pipe(Effect.map(row => row.value))),
+                        Match.when('scalar', () => SqlSchema.single({ execute: () => sql`SELECT ${sql.literal(name)}(${args}) AS value`, Request: request, Result: S.Struct({ value: spec.schema ?? S.Int }) })(params).pipe(Effect.map(row => row.value))),
                         Match.exhaustive,
                     );
                 },
@@ -477,18 +477,21 @@ const repo = <M extends Model.AnyNoContext, const C extends Config<M>>(model: M,
             restore: (id: string, scopeVal?: string) => ReturnType<typeof lift>;
             softDelete: (id: string, scopeVal?: string) => ReturnType<typeof drop>;
         };
+        // [WHY] Outer `as _SoftDelegates` is a type-level compromise — repos without softEntry get phantom
+        // signatures that are absent at runtime. Per-branch casts verify each branch constructs the full shape.
+        // Making this generic over config would require a factory-wide type parameter refactor.
         const _softDelegates = (softEntry
             ? Option.match(_scopeOpt, {
                 onNone: () => ({
                     restore: (id: string) => lift(id),
                     softDelete: (id: string) => drop(id),
-                }),
+                } as _SoftDelegates),
                 onSome: (scopeCol) => ({
                     restore: (id: string, scopeVal?: string) => lift(id, scopeVal !== undefined ? { [scopeCol]: scopeVal } : undefined),
                     softDelete: (id: string, scopeVal?: string) => drop(id, scopeVal !== undefined ? { [scopeCol]: scopeVal } : undefined),
-                }),
+                } as _SoftDelegates),
             })
-            : {}) as _SoftDelegates;
+            : {} as _SoftDelegates);
         return { ...base, ..._resolverDelegates, ..._softDelegates, agg, by, count, drop, exists, find, fn, json, lift, merge, one, page, pageOffset, pg, preds, purge, put, set, stream, upsert, withTransaction };
         });
 const routine = <const C extends RoutineConfig>(table: string, config: C) =>

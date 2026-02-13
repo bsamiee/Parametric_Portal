@@ -187,30 +187,60 @@ class NotificationService extends Effect.Service<NotificationService>()('server/
                     );
                     yield* Effect.filterOrFail(Effect.void, constant(request.channel !== 'email' || recipient !== undefined), constant(NotificationError.from('MissingRecipient')));
                     const dedupeKey = Option.fromNullable(request.dedupeKey);
-                    const row = yield* database.notifications.put({
-                        appId: tenantId,
-                        channel: request.channel,
-                        correlation: Option.map(dedupeKey, (dedupe) => ({ dedupe })),
-                        payload: request.data,
-                        recipient: Option.fromNullable(recipient),
-                        retryCurrent: 0,
-                        retryMax: request.maxAttempts,
-                        status: 'queued' as const,
-                        template: request.template,
-                        userId: Option.fromNullable(request.userId),
+                    const existing = yield* Option.match(dedupeKey, {
+                        onNone: () => Effect.succeed(Option.none()),
+                        onSome: (dk) => database.notifications.one([
+                            { field: 'correlation', op: 'contains', value: JSON.stringify({ dedupe: dk }) },
+                            { field: 'status', op: 'in', values: ['queued', 'sending'] },
+                        ]),
                     });
-                    const dedupeKeyStr = Option.match(dedupeKey, { onNone: constant(`${tenantId}:${row.id}`), onSome: (dk) => `${tenantId}:${dk}` });
-                    yield* jobs.submit('notification.send', { notificationId: row.id }, { dedupeKey: dedupeKeyStr, maxAttempts: 1 }).pipe(
-                        Effect.catchAll(Effect.fn(function* (error) {
-                            const encodedError = JSON.stringify({ message: String(error), tag: MetricsService.errorTag(error) });
-                            yield* database.notifications.transition(row.id, { delivery: Option.some({ error: encodedError }), status: 'failed' });
-                            return yield* Effect.fail(error);
-                        })),
-                        Effect.flatMap((jobId) => database.notifications.transition(row.id, { correlation: Option.some({ job: jobId }), delivery: Option.some({ error: undefined }), status: 'queued' }, 'queued')),
-                        Effect.asVoid,
+                    const staged = yield* Option.match(existing, {
+                        onNone: () => database.notifications.put({
+                            appId: tenantId,
+                            channel: request.channel,
+                            correlation: Option.map(dedupeKey, (dedupe) => ({ dedupe })),
+                            payload: request.data,
+                            recipient: Option.fromNullable(recipient),
+                            retryCurrent: 0,
+                            retryMax: request.maxAttempts,
+                            status: 'queued' as const,
+                            template: request.template,
+                            userId: Option.fromNullable(request.userId),
+                        }).pipe(
+                            Effect.map((row) => ({ duplicate: false, row })),
+                            Effect.catchIf(
+                                (error) => typeof error === 'object' && error !== null && 'code' in error && (error as { code: unknown }).code === '23505',
+                                () => Option.match(dedupeKey, {
+                                    onNone: () => Effect.dieMessage('Unique violation without dedupe key'),
+                                    onSome: (dk) => database.notifications.one([
+                                        { field: 'correlation', op: 'contains', value: JSON.stringify({ dedupe: dk }) },
+                                        { field: 'status', op: 'in', values: ['queued', 'sending'] },
+                                    ]).pipe(
+                                        Effect.flatMap(Option.match({
+                                            onNone: () => Effect.dieMessage('Race condition: unique violation but no existing row'),
+                                            onSome: (row) => Effect.succeed({ duplicate: true, row }),
+                                        })),
+                                    ),
+                                }),
+                            ),
+                        ),
+                        onSome: (row) => Effect.succeed({ duplicate: true, row }),
+                    });
+                    const dedupeKeyStr = Option.match(dedupeKey, { onNone: constant(`${tenantId}:${staged.row.id}`), onSome: (dk) => `${tenantId}:${dk}` });
+                    yield* pipe(
+                        jobs.submit('notification.send', { notificationId: staged.row.id }, { dedupeKey: dedupeKeyStr, maxAttempts: 1 }).pipe(
+                            Effect.catchAll(Effect.fn(function* (error) {
+                                const encodedError = JSON.stringify({ message: String(error), tag: MetricsService.errorTag(error) });
+                                yield* database.notifications.transition(staged.row.id, { delivery: Option.some({ error: encodedError }), status: 'failed' });
+                                return yield* Effect.fail(error);
+                            })),
+                            Effect.flatMap((jobId) => database.notifications.transition(staged.row.id, { correlation: Option.some({ job: jobId }), delivery: Option.some({ error: undefined }), status: 'queued' }, 'queued')),
+                            Effect.asVoid,
+                        ),
+                        Effect.when(constant(!staged.duplicate)),
                     );
                     yield* MetricsService.inc(metrics.notification.queued, MetricsService.label({ channel: request.channel, template: request.template }));
-                    return { id: row.id, status: 'queued' as const };
+                    return { id: staged.row.id, status: 'queued' as const };
                 }, (effect, raw) => effect.pipe(
                     Effect.catchIf(
                         (error): error is NotificationError => error instanceof NotificationError,

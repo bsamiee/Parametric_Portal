@@ -158,8 +158,10 @@ const AdminLive = HttpApiBuilder.group(ParametricApi, 'admin', (handlers) =>
                 Telemetry.span('admin.listTenants'),
             )))
             .handle('createTenant', ({ payload }) => Middleware.guarded('admin', 'createTenant', 'mutation', lifecycle.transition({ _tag: 'provision', ...payload }).pipe(
-                // Why: transition() returns union (App | {success}) — provision always yields App but TS cannot narrow polymorphic Match.exhaustive
-                Effect.map((result) => result as typeof App.Type),
+                Effect.filterOrFail(
+                    (result): result is typeof App.Type => 'id' in result,
+                    constant(HttpError.Internal.of('Provision did not return tenant')),
+                ),
                 HttpError.mapTo('Tenant creation failed'),
                 Telemetry.span('admin.createTenant'),
             )))

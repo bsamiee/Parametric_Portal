@@ -7,7 +7,7 @@ import { Headers, HttpApiBuilder, HttpApiMiddleware, HttpApiSecurity, type HttpA
 import { SqlClient } from '@effect/sql';
 import type { Hex64 } from '@parametric-portal/types/types';
 import { isIP } from 'node:net';
-import { Array as A, Data, Duration, Effect, FiberRef, Layer, Match, Metric, Option, pipe, Redacted, Schema as S } from 'effect';
+import { Array as A, Config, Data, Duration, Effect, FiberRef, Layer, Match, Metric, Option, pipe, Redacted, Schema as S } from 'effect';
 import { constant } from 'effect/Function';
 import { Context } from './context.ts';
 import { AuditService } from './observe/audit.ts';
@@ -64,11 +64,16 @@ const _IDEMPOTENCY = {
     completedTtl: Duration.hours(24),
     pendingTtl: Duration.minutes(2),
 } as const;
-const _proxyConfig = (() => {
-    const enabledRaw = process.env['TRUST_PROXY'] ?? 'false';
-    const hopsRaw = Number(process.env['PROXY_HOPS'] ?? '1');
-    return { enabled: enabledRaw === 'true' || enabledRaw === '1', hops: Number.isFinite(hopsRaw) && hopsRaw > 0 ? Math.floor(hopsRaw) : 1 } as const;
-})();
+const _proxyConfig = Config.all({
+    enabled: Config.map(
+        Config.string('TRUST_PROXY').pipe(Config.withDefault('false')),
+        (raw) => raw === 'true' || raw === '1',
+    ),
+    hops: Config.map(
+        Config.integer('PROXY_HOPS').pipe(Config.withDefault(1)),
+        (raw) => Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : 1,
+    ),
+});
 class TenantResolution extends Data.TaggedError('TenantResolution')<{ readonly details: string; readonly error: string; readonly status: number; readonly tenantId?: string }> {}
 
 // --- [GLOBAL_MIDDLEWARE] -----------------------------------------------------
@@ -95,15 +100,16 @@ const _security = (hsts: typeof _CONFIG.security.hsts | false = _CONFIG.security
 const _makeRequestContext = (database: { readonly apps: { readonly byNamespace: (namespace: string) => Effect.Effect<Option.Option<{ readonly id: string; readonly namespace: string; readonly status: 'active' | 'suspended' | 'archived' | 'purging' }>, unknown> } }) =>
     HttpMiddleware.make((app) => pipe(Effect.gen(function* () {
         const request = yield* HttpServerRequest.HttpServerRequest;
+        const proxyConfig = yield* _proxyConfig;
         const req = pipe(
-            _proxyConfig.enabled
+            proxyConfig.enabled
                 ? Option.firstSomeOf([
                 pipe(
                     Headers.get(request.headers, Context.Request.Headers.forwardedFor),
                     Option.map((raw) => raw.split(',')),
                     Option.map(A.map((s: string) => s.trim())),
                     Option.map(A.filter((s): s is string => s !== '' && isIP(s) !== 0)),
-                    Option.flatMap((segments) => A.get(segments, Math.max(0, segments.length - _proxyConfig.hops - 1))),
+                    Option.flatMap((segments) => A.get(segments, Math.max(0, segments.length - proxyConfig.hops - 1))),
                 ),
                 Option.filter(Headers.get(request.headers, Context.Request.Headers.cfConnectingIp), (value) => isIP(value) !== 0),
                 Option.filter(Headers.get(request.headers, Context.Request.Headers.realIp), (value) => isIP(value) !== 0),
@@ -165,6 +171,7 @@ const _idempotent = <R extends string, A extends string, B, E, Deps>(
     const tenantId = yield* Context.Request.currentTenantId;
     const operationKey = `${resource}:${action}`;
     const cacheKey = `idem:${tenantId}:${resource}:${action}:${key}`;
+    // [WHY] `request.text` is safe here — @effect/platform memoizes body via Effect.cached per-instance
     const bodyText = yield* request.text.pipe(Effect.catchAll(() => Effect.succeed('')));
     const bodyHash = yield* Crypto.hash(`${operationKey}:${bodyText}`);
     const pendingJson = JSON.stringify({ bodyHash, completedAt: 0, key, operationKey, result: null, status: 'pending' as const, tenantId } satisfies typeof _IdempotencyRecord.Type);
@@ -185,6 +192,7 @@ const _idempotent = <R extends string, A extends string, B, E, Deps>(
                     Match.when({ bodyHash: (h: string) => h === bodyHash }, (matched) => pipe(
                         FiberRef.set(_idempotencyOutcome, Option.some('replayed')),
                         Effect.as(matched.result as B),
+                        Effect.provideService(HttpServerRequest.HttpServerRequest, request),
                     )),
                     Match.orElse(() => pipe(
                         FiberRef.set(_idempotencyOutcome, Option.some('conflict')),

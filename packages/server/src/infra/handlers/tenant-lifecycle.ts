@@ -62,12 +62,14 @@ class TenantLifecycleService extends Effect.Service<TenantLifecycleService>()('s
         // Why: CAS guard ensures the DB write fails atomically when status changed between read and write (TOCTOU).
         // The `when` predicate adds `WHERE status = $current` so a concurrent transition causes a no-op update instead of silently overwriting the other transition's result.
         const _statusGuard = (currentStatus: typeof App.Type.status) => ({ field: 'status', value: currentStatus }) as const;
-        const _applyTransition = (tenantId: string, target: typeof App.Type.status, fromGuard: typeof App.Type.status, action: string, errorLabel: string) =>
+        const _applyTransition = (tenantId: string, target: typeof App.Type.status, action: string, errorLabel: string) =>
             _lookupTenant(tenantId).pipe(
-                Effect.flatMap((app) => _validateTransition(app, target)),
-                Effect.zipLeft(database.apps.set(tenantId, { status: target }, undefined, _statusGuard(fromGuard)).pipe(
-                    Effect.filterOrFail(Option.isSome, () => HttpError.Conflict.of('tenant', 'Status changed concurrently')),
-                    HttpError.mapTo(errorLabel),
+                Effect.flatMap((app) => _validateTransition(app, target).pipe(
+                    Effect.flatMap(() => database.apps.set(tenantId, { status: target }, undefined, _statusGuard(app.status)).pipe(
+                        Effect.filterOrFail(Option.isSome, () => HttpError.Conflict.of('tenant', 'Status changed concurrently')),
+                        HttpError.mapTo(errorLabel),
+                        Effect.as(app),
+                    )),
                 )),
                 Effect.tap((app) => _emitAndAudit(tenantId, action, app.status, target)),
                 Effect.as({ success: true as const }),
@@ -104,11 +106,27 @@ class TenantLifecycleService extends Effect.Service<TenantLifecycleService>()('s
             transition: Effect.fn('TenantLifecycleService.transition')((command: typeof _TransitionCommand.Type) =>
                 Match.type<typeof _TransitionCommand.Type>().pipe(
                     Match.tag('provision', (payload) => _provision(payload)),
-                    Match.tag('suspend', ({ tenantId }) => _applyTransition(tenantId, 'suspended', 'active', 'suspended', 'Tenant suspension failed')),
-                    Match.tag('resume', ({ tenantId }) => _applyTransition(tenantId, 'active', 'suspended', 'resumed', 'Tenant resume failed')),
-                    Match.tag('archive', ({ tenantId }) => _applyTransition(tenantId, 'archived', 'suspended', 'archived', 'Tenant archive failed')),
-                    Match.tag('purge', ({ tenantId }) => _applyTransition(tenantId, 'purging', 'archived', 'purging', 'Tenant purge status update failed').pipe(
-                        Effect.zipLeft(Context.Request.withinSync(tenantId, jobs.submit('purge-tenant-data', null)).pipe(HttpError.mapTo('Tenant purge job submission failed'))),
+                    Match.tag('suspend', ({ tenantId }) => _applyTransition(tenantId, 'suspended', 'suspended', 'Tenant suspension failed')),
+                    Match.tag('resume', ({ tenantId }) => _applyTransition(tenantId, 'active', 'resumed', 'Tenant resume failed')),
+                    Match.tag('archive', ({ tenantId }) => _applyTransition(tenantId, 'archived', 'archived', 'Tenant archive failed')),
+                    Match.tag('purge', ({ tenantId }) => _lookupTenant(tenantId).pipe(
+                        Effect.flatMap((app) => _validateTransition(app, 'purging').pipe(
+                            Effect.flatMap(() => database.apps.set(tenantId, { status: 'purging' }, undefined, _statusGuard(app.status)).pipe(
+                                Effect.filterOrFail(Option.isSome, () => HttpError.Conflict.of('tenant', 'Status changed concurrently')),
+                                HttpError.mapTo('Tenant purge status update failed'),
+                                Effect.as(app),
+                            )),
+                        )),
+                        Effect.flatMap((app) => Context.Request.withinSync(tenantId, jobs.submit('purge-tenant-data', null)).pipe(
+                            HttpError.mapTo('Tenant purge job submission failed'),
+                            Effect.catchAll((jobError) => database.apps.set(tenantId, { status: app.status }, undefined, _statusGuard('purging')).pipe(
+                                Effect.ignore,
+                                Effect.andThen(Effect.fail(jobError)),
+                            )),
+                            Effect.as(app),
+                        )),
+                        Effect.tap((app) => _emitAndAudit(tenantId, 'purging', app.status, 'purging')),
+                        Effect.as({ success: true as const }),
                     )),
                     Match.exhaustive,
                 )(command).pipe(Effect.provideService(SqlClient.SqlClient, sql)),

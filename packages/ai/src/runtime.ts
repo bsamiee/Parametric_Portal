@@ -174,7 +174,12 @@ class AiRuntime extends Effect.Service<AiRuntime>()('ai/Runtime', {
                         }).pipe(Effect.provide(layers.embedding)),
                     ).pipe(
                         Effect.tap((result) => MetricsService.inc(metrics.ai.embeddings, labels, Array.isArray(input) ? (result as readonly (readonly number[])[]).length : 1)),
-                        Effect.tap(() => incrementBudgetCounters(requestContext.tenantId, 0)),
+                        Effect.tap(() => {
+                            const estimatedTokens = Array.isArray(input)
+                                ? Math.ceil((input as ReadonlyArray<string>).reduce((accumulator, text) => accumulator + text.length, 0) / 4)
+                                : Math.ceil((input as string).length / 4);
+                            return incrementBudgetCounters(requestContext.tenantId, estimatedTokens);
+                        }),
                         Effect.ensuring(ann),
                         Telemetry.span(_CONFIG.labels.operations.embed, { kind: 'client', metrics: false }),
                     );
