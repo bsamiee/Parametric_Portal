@@ -55,7 +55,6 @@ const _B = {
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 
 const walkDirectory = async (dir: DirectoryDropItem, basePath = ''): Promise<ReadonlyArray<File>> => {
-    // biome-ignore lint/nursery/useAwaitThenable: AsyncIterable requires Array.fromAsync which returns Promise
     const entries = await Array.fromAsync(dir.getEntries());
     const makePath = (name: string) => (basePath ? `${basePath}/${name}` : name);
     const handlers = {

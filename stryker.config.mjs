@@ -1,5 +1,3 @@
-// @ts-check
-/** @type {import('@stryker-mutator/api/core').PartialStrykerOptions} */
 const config = {
     // --- [CHECKERS] ----------------------------------------------------------
     checkers: ['typescript'],
@@ -52,7 +50,7 @@ const config = {
         high: 80,
         low: 60,
     },
-    timeoutFactor: 2.0,
+    timeoutFactor: 2,
     timeoutMS: 30_000,
     tsconfigFile: 'tsconfig.base.json',
     typescriptChecker: {
