@@ -17,7 +17,7 @@ import { CacheService } from '../platform/cache.ts';
 
 const _CONFIG = {
     catalog: {
-        admin:          ['listUsers', 'listSessions', 'deleteSession', 'revokeSessionsByIp', 'listJobs', 'cancelJob', 'listDlq', 'replayDlq', 'listNotifications', 'replayNotification', 'events', 'dbIoStats', 'dbIoConfig', 'dbStatements', 'dbCacheHitRatio', 'dbWalInspect', 'dbStatKcache', 'dbCronJobs', 'dbPartitionHealth', 'dbReconcileMaintenance', 'listTenants', 'createTenant', 'getTenant', 'updateTenant', 'deactivateTenant', 'resumeTenant', 'archiveTenant', 'purgeTenant', 'getTenantOAuth', 'updateTenantOAuth', 'listPermissions', 'grantPermission', 'revokePermission', 'getFeatureFlags', 'setFeatureFlag'],
+        admin:          ['listUsers', 'listSessions', 'deleteSession', 'revokeSessionsByIp', 'listJobs', 'cancelJob', 'listDlq', 'replayDlq', 'listNotifications', 'replayNotification', 'events', 'ioDetail', 'ioConfig', 'statements', 'cacheRatio', 'walInspect', 'kcache', 'qualstats', 'waitSampling', 'cronJobs', 'partitionHealth', 'syncCronJobs', 'listTenants', 'createTenant', 'getTenant', 'updateTenant', 'deactivateTenant', 'resumeTenant', 'archiveTenant', 'purgeTenant', 'getTenantOAuth', 'updateTenantOAuth', 'listPermissions', 'grantPermission', 'revokePermission', 'getFeatureFlags', 'setFeatureFlag'],
         audit:          ['getByEntity', 'getByUser', 'getMine'],
         auth:           ['logout', 'me', 'mfaStatus', 'mfaEnroll', 'mfaVerify', 'mfaDisable', 'mfaRecover', 'listApiKeys', 'createApiKey', 'deleteApiKey', 'rotateApiKey', 'linkProvider', 'unlinkProvider'],
         jobs:           ['subscribe'],
@@ -48,11 +48,11 @@ class PolicyService extends Effect.Service<PolicyService>()('server/Policy', {
         const cache = yield* CacheService.cache<CacheKey, never, SqlClient.SqlClient>({
             lookup: (key) => Context.Request.withinSync(key.tenantId, database.permissions.byRole(key.role)).pipe(
                 Effect.map((permissions) => permissions.filter((p) => Option.isNone(p.deletedAt))),
-                Effect.mapError((error) => HttpError.Internal.of('Permission lookup failed', error)),
+                HttpError.mapTo('Permission lookup failed'),
             ),
             storeId: 'policy',
         });
-        yield* Effect.forkScoped(eventBus.subscribe('policy.changed', S.Struct({ _tag: S.Literal('policy'), action: S.Literal('changed'), role: RoleSchema }),
+        yield* Effect.forkScoped(eventBus.subscribe('policy.changed', { 1: S.Struct({ _tag: S.Literal('policy'), action: S.Literal('changed'), role: RoleSchema }) },
             (event, payload) => cache.invalidate(new CacheKey({ role: payload.role, tenantId: event.tenantId })).pipe(Effect.ignore),
         ).pipe(Stream.runDrain, Effect.ignore));
         const require = Effect.fn('PolicyService.require')(function* (resource: string, action: string) {
@@ -63,7 +63,7 @@ class PolicyService extends Effect.Service<PolicyService>()('server/Policy', {
             yield* Effect.filterOrFail(Effect.succeed(session), () => !(matches(rules.interactive) && session.kind !== 'session'), () => HttpError.Forbidden.of('Interactive session required'));
             yield* Effect.when(Effect.fail(HttpError.Forbidden.of('MFA enrollment required')), () => matches(rules.mfa) && !session.mfaEnabled);
             yield* Effect.when(Effect.fail(HttpError.Forbidden.of('MFA verification required')), () => matches(rules.mfa) && session.mfaEnabled && Option.isNone(session.verifiedAt));
-            const user = yield* Context.Request.withinSync(ctx.tenantId, database.users.one([{ field: 'id', value: session.userId }])).pipe(
+            const user = yield* database.users.one([{ field: 'id', value: session.userId }]).pipe(
                 Effect.flatMap(Option.match({ onNone: () => Effect.fail(HttpError.Forbidden.of('User not found')), onSome: Effect.succeed })),
             );
             yield* Effect.filterOrFail(
@@ -79,24 +79,23 @@ class PolicyService extends Effect.Service<PolicyService>()('server/Policy', {
                 ], { discard: true })),
             );
         });
-        const list = Effect.fn('PolicyService.list')((role?: typeof RoleSchema.Type) => Context.Request.currentTenantId.pipe(
-            Effect.flatMap((tenantId) => Context.Request.withinSync(tenantId, role === undefined ? database.permissions.find([]) : database.permissions.byRole(role))),
+        const list = Effect.fn('PolicyService.list')((role?: typeof RoleSchema.Type) => (role === undefined ? database.permissions.find([]) : database.permissions.byRole(role)).pipe(
             Effect.map((ps) => ps.filter((p) => Option.isNone(p.deletedAt))),
-            Effect.mapError((error) => HttpError.Internal.of('Permission list failed', error)),
+            HttpError.mapTo('Permission list failed'),
         ));
         const grant = Effect.fn('PolicyService.grant')((input: { role: typeof RoleSchema.Type; resource: string; action: string }) => Effect.gen(function* () {
             const tenantId = yield* Context.Request.currentTenantId;
-            const granted = yield* Context.Request.withinSync(tenantId, database.permissions.grant({ action: input.action, appId: tenantId, resource: input.resource, role: input.role }));
+            const granted = yield* database.permissions.grant({ action: input.action, appId: tenantId, resource: input.resource, role: input.role });
             yield* cache.invalidate(new CacheKey({ role: input.role, tenantId })).pipe(Effect.ignore);
             yield* eventBus.publish({ aggregateId: tenantId, payload: { _tag: 'policy', action: 'changed', role: input.role }, tenantId }).pipe(Effect.ignore);
             return granted;
-        }).pipe(Effect.mapError((error) => error instanceof HttpError.Internal ? error : HttpError.Internal.of('Permission grant failed', error))));
+        }).pipe(HttpError.mapTo('Permission grant failed')));
         const revoke = Effect.fn('PolicyService.revoke')((input: { role: typeof RoleSchema.Type; resource: string; action: string }) => Effect.gen(function* () {
             const tenantId = yield* Context.Request.currentTenantId;
-            yield* Context.Request.withinSync(tenantId, database.permissions.revoke(input.role, input.resource, input.action));
+            yield* database.permissions.revoke(input.role, input.resource, input.action);
             yield* cache.invalidate(new CacheKey({ role: input.role, tenantId })).pipe(Effect.ignore);
             yield* eventBus.publish({ aggregateId: tenantId, payload: { _tag: 'policy', action: 'changed', role: input.role }, tenantId }).pipe(Effect.ignore);
-        }).pipe(Effect.mapError((error) => HttpError.Internal.of('Permission revoke failed', error))));
+        }).pipe(HttpError.mapTo('Permission revoke failed')));
         const seedEntries = Object.entries(_CONFIG.catalog).flatMap(([resource, actions]) => {
             const priv = _CONFIG.rules.privileged[resource];
             const isPrivileged = (a: string) => priv?.includes('*') || priv?.includes(a);
@@ -106,7 +105,7 @@ class PolicyService extends Effect.Service<PolicyService>()('server/Policy', {
             Effect.forEach(seedEntries, (e) => database.permissions.grant({ action: e.action, appId: tenantId, resource: e.resource, role: e.role }), { discard: true }),
         ).pipe(
             Effect.andThen(Effect.forEach(_CONFIG.rules.roles.all, (role) => cache.invalidate(new CacheKey({ role, tenantId })), { discard: true })),
-            Effect.mapError((error) => HttpError.Internal.of('Permission seed failed', error)),
+            HttpError.mapTo('Permission seed failed'),
         ));
         return { grant, list, require, revoke, seedTenantDefaults };
     }),

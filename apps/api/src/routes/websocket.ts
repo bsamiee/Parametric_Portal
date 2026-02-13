@@ -31,7 +31,7 @@ const handleConnect = (webSocket: typeof WebSocketService.Service) =>
         yield* webSocket.accept(socket, session.userId, tenantId);
         return HttpServerResponse.empty();
     }).pipe(
-        Effect.mapError((error) => HttpError.is(error) ? error : HttpError.Internal.of('WebSocket failed', error)),
+        HttpError.mapTo('WebSocket failed'),
         Telemetry.span('websocket.connect'),
     );
 

@@ -3,7 +3,8 @@
  * Alerts persisted to kvStore for durability across restarts.
  */
 import { DatabaseService } from '@parametric-portal/database/repos';
-import { Clock, Cron, Duration, Effect, Layer, Match, Metric, Option, Schema as S, STM, TRef } from 'effect';
+import { Clock, Cron, Duration, Effect, Layer, Match, Metric, Number as Num, Option, Schema as S, STM, TRef } from 'effect';
+import { constant } from 'effect/Function';
 import { Context } from '../context.ts';
 import { ClusterService } from '../infra/cluster.ts';
 import { EventBus } from '../infra/events.ts';
@@ -39,10 +40,10 @@ class PollingService extends Effect.Service<PollingService>()('server/Polling', 
             Effect.flatMap((tenantIds) => Effect.forEach(tenantIds, (tenantId) =>
                 Context.Request.withinSync(tenantId, metricForTenant(tenantId), Context.Request.system()).pipe(
                     Effect.timeout(_CONFIG.refresh.tenantMetric.timeout),
-                    Effect.catchAll((error) => Effect.logWarning('Tenant polling metric failed', { error: String(error), tenantId }).pipe(Effect.as(_CONFIG.fallback.metric))),
+                    Effect.orElseSucceed(constant(_CONFIG.fallback.metric)),
                 ),
             { concurrency: _CONFIG.refresh.tenantMetric.concurrency })),
-            Effect.map((values) => values.reduce((sum, value) => sum + value, _CONFIG.fallback.metric)),
+            Effect.map(Num.sumAll),
         );
         const _loadAlerts = database.kvStore.getJson(_CONFIG.kvKey, S.Array(_AlertSchema)).pipe(
             Effect.map(Option.getOrElse(() => [] as const)),
@@ -76,15 +77,20 @@ class PollingService extends Effect.Service<PollingService>()('server/Polling', 
         }) => Effect.gen(function* () {
             const value = yield* config.fetch;
             yield* Metric.set(config.gauge, value);
-            const { current, updated } = yield* STM.commit(TRef.modify(alerts, (current) => {
-                const filtered = current.filter((alert) => alert.metric !== config.metric);
-                const updated = Match.value(value).pipe(
-                    Match.when((v) => v >= config.thresholds.critical, () => [...filtered, { current: value, metric: config.metric, severity: 'critical' as const, threshold: config.thresholds.critical }]),
-                    Match.when((v) => v >= config.thresholds.warning, () => [...filtered, { current: value, metric: config.metric, severity: 'warning' as const, threshold: config.thresholds.warning }]),
-                    Match.orElse(() => filtered),
-                );
-                return [{ current, updated } as const, updated] as const;
-            }));
+            const severity = Match.value(value).pipe(
+                Match.when((v) => v >= config.thresholds.critical, constant('critical' as const)),
+                Match.when((v) => v >= config.thresholds.warning, constant('warning' as const)),
+                Match.option,
+            );
+            const current = yield* STM.commit(TRef.get(alerts));
+            const filtered = current.filter((alert) => alert.metric !== config.metric);
+            const severityStr = Option.getOrElse(severity, constant('warning' as const));
+            const threshold = config.thresholds[severityStr];
+            const updated = Option.match(severity, {
+                onNone: constant(filtered),
+                onSome: constant([...filtered, { current: value, metric: config.metric, severity: severityStr, threshold }]),
+            });
+            yield* STM.commit(TRef.set(alerts, updated));
             yield* persistAlerts(updated);
             const wasCritical = _isCritical(current, config.metric);
             const isCriticalNow = _isCritical(updated, config.metric);
@@ -100,9 +106,9 @@ class PollingService extends Effect.Service<PollingService>()('server/Polling', 
         );
         const pollDlqSize = pollMetric({ fetch: _sumTenantMetric(() => database.jobDlq.countPending()), gauge: metrics.jobs.dlqSize, metric: 'jobs_dlq_size', spanName: 'polling.dlqSize', thresholds: _CONFIG.thresholds.dlqSize, warningMessage: 'DLQ size critical' });
         const pollJobQueueDepth = pollMetric({ fetch: _sumTenantMetric(() => database.jobs.countByStatuses('queued', 'processing')), gauge: metrics.jobs.queueDepth, metric: 'jobs_queue_depth', spanName: 'polling.jobQueueDepth', thresholds: _CONFIG.thresholds.jobQueueDepth, warningMessage: 'Job queue depth critical' });
-        const pollEventOutboxDepth = pollMetric({ fetch: database.eventOutbox.count, gauge: metrics.events.outboxDepth, metric: 'events_outbox_depth', spanName: 'polling.eventOutboxDepth', thresholds: _CONFIG.thresholds.eventOutboxDepth, warningMessage: 'Event outbox depth critical' });
+        const pollEventOutboxDepth = pollMetric({ fetch: database.outbox.count, gauge: metrics.events.outboxDepth, metric: 'events_outbox_depth', spanName: 'polling.eventOutboxDepth', thresholds: _CONFIG.thresholds.eventOutboxDepth, warningMessage: 'Event outbox depth critical' });
         const pollIoStats = Effect.gen(function* () {
-            const rows = yield* database.monitoring.cacheHitRatio();
+            const rows = yield* database.monitoring.cacheRatio();
             const zero = Number(_CONFIG.fallback.metric);
             const totalReads = rows.reduce<number>((sum, row) => sum + row.reads, zero);
             const totalHits = rows.reduce<number>((sum, row) => sum + row.hits, zero);

@@ -7,7 +7,7 @@ import { Headers, HttpApiBuilder, HttpApiMiddleware, HttpApiSecurity, type HttpA
 import { SqlClient } from '@effect/sql';
 import type { Hex64 } from '@parametric-portal/types/types';
 import { isIP } from 'node:net';
-import { Array as A, Data, Duration, Effect, Layer, Metric, Option, pipe, Redacted, Schema as S } from 'effect';
+import { Array as A, Data, Duration, Effect, FiberRef, Layer, Match, Metric, Option, pipe, Redacted, Schema as S } from 'effect';
 import { constant } from 'effect/Function';
 import { Context } from './context.ts';
 import { AuditService } from './observe/audit.ts';
@@ -19,15 +19,28 @@ import { Crypto } from './security/crypto.ts';
 import { PolicyService } from './security/policy.ts';
 import { FeatureService } from './domain/features.ts';
 
+// --- [SCHEMA] ----------------------------------------------------------------
+
+const _IdempotencyRecord = S.Struct({
+    bodyHash:     S.String,
+    completedAt:  S.Number,
+    key:          S.String,
+    operationKey: S.String,
+    result:       S.Unknown,
+    status:       S.Literal('completed', 'pending'),
+    tenantId:     S.String,
+});
+
 // --- [CONSTANTS] -------------------------------------------------------------
 
 const _CONFIG = {
     cors: {
-        allowedHeaders: ['content-type', 'authorization', 'x-api-key', Context.Request.Headers.appId, Context.Request.Headers.requestId, Context.Request.Headers.requestedWith, ...Context.Request.Headers.trace],
+        allowedHeaders: ['content-type', 'authorization', 'x-api-key', Context.Request.Headers.appId, Context.Request.Headers.idempotencyKey, Context.Request.Headers.requestId, Context.Request.Headers.requestedWith, ...Context.Request.Headers.trace],
         allowedMethods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS', 'HEAD'],
         allowedOrigins: ['*'],
-        credentials: false,
+        credentials:    false,
         exposedHeaders: [
+            Context.Request.Headers.idempotencyOutcome,
             Context.Request.Headers.requestId,
             Context.Request.Headers.circuitState,
             Context.Request.Headers.rateLimit.limit,
@@ -44,14 +57,19 @@ const _CONFIG = {
         base: {'cache-control': 'no-store', 'content-security-policy': "default-src 'none'; frame-ancestors 'none'", 'cross-origin-opener-policy': 'same-origin', 'cross-origin-resource-policy': 'same-origin', 'permissions-policy': 'accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()', 'referrer-policy': 'strict-origin-when-cross-origin', 'x-content-type-options': 'nosniff', 'x-frame-options': 'DENY'} satisfies Record<string, string>,
         hsts: { includeSubDomains: true, maxAge: 31536000 }
     },
-    tenantAsyncContextPrefixes: ['/api/admin/events', '/api/jobs/subscribe', '/api/users/me/notifications/subscribe', '/api/ws'] as ReadonlyArray<string>,
+    tenantAsyncContextPrefixes: ['/api/v1/admin/events', '/api/v1/jobs/subscribe', '/api/v1/users/me/notifications/subscribe', '/api/v1/ws'] as ReadonlyArray<string>,
     tenantExemptPrefixes:       ['/api/health', '/api/v1/traces', '/api/v1/metrics', '/api/v1/logs', '/docs'] as ReadonlyArray<string>,
+} as const;
+const _IDEMPOTENCY = {
+    completedTtl: Duration.hours(24),
+    pendingTtl: Duration.minutes(2),
 } as const;
 const _proxyConfig = (() => {
     const enabledRaw = process.env['TRUST_PROXY'] ?? 'false';
     const hopsRaw = Number(process.env['PROXY_HOPS'] ?? '1');
     return { enabled: enabledRaw === 'true' || enabledRaw === '1', hops: Number.isFinite(hopsRaw) && hopsRaw > 0 ? Math.floor(hopsRaw) : 1 } as const;
 })();
+class TenantResolution extends Data.TaggedError('TenantResolution')<{ readonly details: string; readonly error: string; readonly status: number; readonly tenantId?: string }> {}
 
 // --- [GLOBAL_MIDDLEWARE] -----------------------------------------------------
 
@@ -74,7 +92,7 @@ const _security = (hsts: typeof _CONFIG.security.hsts | false = _CONFIG.security
             ? { ..._CONFIG.security.base, 'strict-transport-security': `max-age=${hsts.maxAge}${hsts.includeSubDomains ? '; includeSubDomains' : ''}` }
             : _CONFIG.security.base))));
 // --- [CONTEXT_MIDDLEWARE] ----------------------------------------------------
-const _makeRequestContext = (database: { readonly apps: { readonly byNamespace: (namespace: string) => Effect.Effect<Option.Option<{ readonly id: string; readonly namespace: string; readonly status: 'active' | 'suspended' | 'archived' }>, unknown> } }) =>
+const _makeRequestContext = (database: { readonly apps: { readonly byNamespace: (namespace: string) => Effect.Effect<Option.Option<{ readonly id: string; readonly namespace: string; readonly status: 'active' | 'suspended' | 'archived' | 'purging' }>, unknown> } }) =>
     HttpMiddleware.make((app) => pipe(Effect.gen(function* () {
         const request = yield* HttpServerRequest.HttpServerRequest;
         const req = pipe(
@@ -99,24 +117,22 @@ const _makeRequestContext = (database: { readonly apps: { readonly byNamespace: 
         });
         const namespaceOpt = Headers.get(req.headers, Context.Request.Headers.appId);
         const path = req.url.split('?', 2)[0] ?? '/';
-        const tenantId = yield* pipe(
+        const tenant = yield* pipe(
             Option.match<string, ReturnType<typeof database.apps.byNamespace>>(namespaceOpt, {
-                onNone: constant(Effect.if(A.some(_CONFIG.tenantExemptPrefixes, (prefix) => path === prefix || path.startsWith(`${prefix}/`)), { onTrue: constant(Effect.succeed(Option.some({ id: Context.Request.Id.system, namespace: '', status: 'active' as const }))), onFalse: constant(Effect.fail(new (class extends Data.TaggedError('MissingTenantHeader')<Record<string, never>> {})({}))) })),
+                onNone: constant(Effect.if(A.some(_CONFIG.tenantExemptPrefixes, (prefix) => path === prefix || path.startsWith(`${prefix}/`)), { onTrue: constant(Effect.succeed(Option.some({ id: Context.Request.Id.system, namespace: '', status: 'active' as const }))), onFalse: constant(Effect.fail(new TenantResolution({ details: 'X-App-Id header is required', error: 'MissingTenantHeader', status: 400 }))) })),
                 onSome: (namespace) => database.apps.byNamespace(namespace),
             }),
             Effect.flatMap(Option.match({
-                onNone: constant(Effect.fail(new (class extends Data.TaggedError('UnknownTenantHeader')<{ readonly namespace: string }> {})({ namespace: Option.getOrElse(namespaceOpt, constant('')) }))),
+                onNone: constant(Effect.fail(new TenantResolution({ details: `Unknown X-App-Id: ${Option.getOrElse(namespaceOpt, constant(''))}`, error: 'UnknownTenantHeader', status: 400 }))),
                 onSome: Effect.succeed,
             })),
-            Effect.filterOrFail(
-                (tenant) => tenant.status !== 'suspended',
-                (tenant) => new (class extends Data.TaggedError('TenantSuspended')<{ readonly tenantId: string }> {})({ tenantId: tenant.id }),
-            ),
-            Effect.filterOrFail(
-                (tenant) => tenant.status !== 'archived',
-                (tenant) => new (class extends Data.TaggedError('TenantArchived')<{ readonly tenantId: string }> {})({ tenantId: tenant.id }),
-            ),
-            Effect.map((tenant) => tenant.id),
+        );
+        const tenantId = yield* Match.value(tenant.status).pipe(
+            Match.when('active', () => Effect.succeed(tenant.id)),
+            Match.when('archived', () => Effect.fail(new TenantResolution({ details: 'Tenant is archived', error: 'TenantArchived', status: 410, tenantId: tenant.id }))),
+            Match.when('suspended', () => Effect.fail(new TenantResolution({ details: 'Tenant is suspended', error: 'TenantSuspended', status: 503, tenantId: tenant.id }))),
+            Match.when('purging', () => Effect.fail(new TenantResolution({ details: 'Tenant is being purged', error: 'TenantPurging', status: 503, tenantId: tenant.id }))),
+            Match.exhaustive,
         );
         const { circuit, response } = yield* (A.some(_CONFIG.tenantAsyncContextPrefixes, (prefix) => path === prefix || path.startsWith(`${prefix}/`)) ? Context.Request.within : Context.Request.withinSync)(
             tenantId,
@@ -125,18 +141,70 @@ const _makeRequestContext = (database: { readonly apps: { readonly byNamespace: 
                 Effect.annotateSpans('tenant.id', tenantId),
                 Effect.annotateSpans('request.id', requestId),
             ),
-            { appNamespace: namespaceOpt, circuit: Option.none(), cluster: Option.none(), ipAddress: req.remoteAddress, rateLimit: Option.none(), requestId, session: Option.none(), tenantId, userAgent: Headers.get(req.headers, 'user-agent') } as Context.Request.Data,
+            { appNamespace: namespaceOpt, circuit: Option.none(), cluster: Option.none(), ipAddress: req.remoteAddress, rateLimit: Option.none(), requestId, session: Option.none(), tenantId, userAgent: Headers.get(req.headers, 'user-agent') },
         );
-        return HttpServerResponse.setHeaders(response, { [Context.Request.Headers.requestId]: requestId, ...pipe(circuit, Option.map((c) => ({ [Context.Request.Headers.circuitState]: c.state })), Option.getOrElse(constant({}))) });
-    }), Effect.catchTags({
-        MissingTenantHeader: () => Effect.succeed(HttpServerResponse.unsafeJson({ details: 'X-App-Id header is required', error: 'MissingTenantHeader' }, { status: 400 })),
-        TenantArchived: ({ tenantId }: { readonly tenantId: string }) => Effect.succeed(HttpServerResponse.unsafeJson({ details: 'Tenant is archived', error: 'TenantArchived', tenantId }, { status: 410 })),
-        TenantSuspended: ({ tenantId }: { readonly tenantId: string }) => Effect.succeed(HttpServerResponse.unsafeJson({ details: 'Tenant is suspended', error: 'TenantSuspended', tenantId }, { status: 503 })),
-        UnknownTenantHeader: ({ namespace }: { readonly namespace: string }) =>
-            Effect.succeed(HttpServerResponse.unsafeJson({ details: `Unknown X-App-Id: ${namespace}`, error: 'UnknownTenantHeader' }, { status: 400 })),
-        }), Effect.catchAll((error) =>
-            Effect.logError('Request context middleware failed', { error: String(error) }).pipe(Effect.andThen(Effect.succeed(HttpServerResponse.unsafeJson({ details: 'Internal server error', error: 'RequestContextFailed' }, { status: 500 }))),)
-        )));
+        const outcome = yield* FiberRef.get(_idempotencyOutcome);
+        return HttpServerResponse.setHeaders(response, { [Context.Request.Headers.requestId]: requestId, ...pipe(circuit, Option.map((c) => ({ [Context.Request.Headers.circuitState]: c.state })), Option.getOrElse(constant({}))), ...pipe(outcome, Option.map((value) => ({ [Context.Request.Headers.idempotencyOutcome]: value })), Option.getOrElse(constant({}))) });
+    }), Effect.catchAll((error) =>
+        error instanceof TenantResolution
+            ? Effect.succeed(HttpServerResponse.unsafeJson({ details: error.details, error: error.error, ...(error.tenantId ? { tenantId: error.tenantId } : {}) }, { status: error.status }))
+            : Effect.logError('Request context middleware failed', { error: String(error) }).pipe(
+                Effect.andThen(Effect.succeed(HttpServerResponse.unsafeJson({ details: 'Internal server error', error: 'RequestContextFailed' }, { status: 500 }))),
+            ),
+    )));
+const _idempotencyOutcome = FiberRef.unsafeMake<Option.Option<string>>(Option.none());
+
+// --- [FUNCTIONS] -------------------------------------------------------------
+const _idempotent = <R extends string, A extends string, B, E, Deps>(
+    key: string,
+    resource: R,
+    action: A,
+    effect: Effect.Effect<B, E, Deps>,
+) => Effect.gen(function* () {
+    const request = yield* HttpServerRequest.HttpServerRequest;
+    const tenantId = yield* Context.Request.currentTenantId;
+    const operationKey = `${resource}:${action}`;
+    const cacheKey = `idem:${tenantId}:${resource}:${action}:${key}`;
+    const bodyText = yield* request.text.pipe(Effect.catchAll(() => Effect.succeed('')));
+    const bodyHash = yield* Crypto.hash(`${operationKey}:${bodyText}`);
+    const pendingJson = JSON.stringify({ bodyHash, completedAt: 0, key, operationKey, result: null, status: 'pending' as const, tenantId } satisfies typeof _IdempotencyRecord.Type);
+    const { alreadyExists } = yield* CacheService.setNX(cacheKey, pendingJson, _IDEMPOTENCY.pendingTtl);
+    return yield* alreadyExists
+        ? CacheService.kv.get(cacheKey, _IdempotencyRecord).pipe(
+            Effect.flatMap(Option.match({
+                onNone: () => pipe(
+                    FiberRef.set(_idempotencyOutcome, Option.some('expired')),
+                    Effect.andThen(Effect.fail(HttpError.Conflict.of('idempotency', `expired: ${key}`))),
+                ),
+                onSome: (record) => Match.value(record).pipe(
+                    Match.when({ status: 'pending' }, () => pipe(
+                        FiberRef.set(_idempotencyOutcome, Option.some('conflict')),
+                        Effect.andThen(Effect.fail(HttpError.Conflict.of('idempotency', `in-flight: ${key} [retry-after: ${Duration.toSeconds(_IDEMPOTENCY.pendingTtl)}]`))),
+                    )),
+                    // [WHY] Cast to B: no response schema available in generic middleware. TTL bounds staleness; callers version idempotency keys across schema changes.
+                    Match.when({ bodyHash: (h: string) => h === bodyHash }, (matched) => pipe(
+                        FiberRef.set(_idempotencyOutcome, Option.some('replayed')),
+                        Effect.as(matched.result as B),
+                    )),
+                    Match.orElse(() => pipe(
+                        FiberRef.set(_idempotencyOutcome, Option.some('conflict')),
+                        Effect.andThen(Effect.fail(HttpError.Conflict.of('idempotency', `conflict: ${key}`))),
+                    )),
+                ),
+            })),
+        )
+        : pipe(
+            Effect.sync(() => Date.now()),
+            Effect.flatMap((startedAt) => effect.pipe(
+                Effect.tap((result) => CacheService.kv.set(cacheKey, {
+                    bodyHash, completedAt: startedAt, key, operationKey, result, status: 'completed' as const, tenantId,
+                } satisfies typeof _IdempotencyRecord.Type, _IDEMPOTENCY.completedTtl)),
+                Effect.tap(() => FiberRef.set(_idempotencyOutcome, Option.some('new'))),
+                Effect.onError(() => CacheService.kv.del(cacheKey).pipe(Effect.ignore)),
+            )),
+        );
+}).pipe(Effect.annotateLogs({ operation: 'Middleware.idempotency' }));
+
 // --- [SERVICES] --------------------------------------------------------------
 
 class Middleware extends HttpApiMiddleware.Tag<Middleware>()('server/Middleware', {
@@ -166,7 +234,20 @@ class Middleware extends HttpApiMiddleware.Tag<Middleware>()('server/Middleware'
         );
     static readonly guarded = <R extends keyof typeof PolicyService.Catalog, A extends (typeof PolicyService.Catalog)[R][number], B, E, Deps>(
         resource: R, action: A, preset: 'api' | 'mutation' | 'realtime', effect: Effect.Effect<B, E, Deps>,
-    ) => CacheService.rateLimit(preset, Middleware.permission(resource, action).pipe(Effect.andThen(effect)));
+    ) => CacheService.rateLimit(preset, Middleware.permission(resource, action).pipe(
+        Effect.andThen(preset === 'mutation'
+            ? HttpServerRequest.HttpServerRequest.pipe(
+                Effect.flatMap((req) => pipe(
+                    Headers.get(req.headers, Context.Request.Headers.idempotencyKey),
+                    Option.match({
+                        onNone: () => effect,
+                        onSome: (key) => _idempotent(key, resource, action, effect),
+                    }),
+                )),
+            )
+            : effect
+        ),
+    ));
     static readonly _makeAuthLayer = (
         sessionLookup: (hash: Hex64) => Effect.Effect<Option.Option<Context.Request.Session>, unknown>,
         apiKeyLookup: (hash: Hex64) => Effect.Effect<Option.Option<{ readonly id: string; readonly userId: string }>, unknown>,) =>

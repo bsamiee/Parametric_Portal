@@ -2,8 +2,13 @@
  * PostgreSQL 18.1 Migration — Multi-tenant auth/search/jobs platform
  * PG18.1: uuidv7(), uuid_extract_timestamp(), casefold(), VIRTUAL generated,
  * jsonb_strip_nulls(,t), NOT ENFORCED, B-tree skip scan, async I/O.
+ * pg_trgm search ops in use: %, <% , <<%, <->, <<->, <<<-> (GiST KNN).
  * Extensions: pg_trgm, btree_gin, fuzzystrmatch, unaccent, vector (0.8+),
- * pg_stat_statements, pgaudit, pg_stat_kcache, pg_walinspect, pg_cron, pg_partman.
+ * pg_stat_statements, pgaudit, pg_stat_kcache, pg_walinspect, pg_cron, pg_partman,
+ * hypopg, pg_qualstats, pg_wait_sampling, pg_squeeze.
+ * Partitions: sessions (created_at), audit_logs (uuid_extract_timestamp(id)),
+ * notifications (uuid_extract_timestamp(id)) — monthly, 4 premake, pg_partman managed.
+ * FK relaxation: notifications app_id/user_id NOT ENFORCED (write perf, app-layer integrity).
  * Well-known: System=00000000-0000-7000-8000-000000000000, Default=...-000000000001
  */
 import { SqlClient } from '@effect/sql';
@@ -25,6 +30,18 @@ export default Effect.gen(function* () {
         BEGIN CREATE EXTENSION IF NOT EXISTS pg_walinspect; EXCEPTION WHEN OTHERS THEN RAISE WARNING 'pg_walinspect unavailable: %', SQLERRM; END;
         BEGIN CREATE EXTENSION IF NOT EXISTS pg_cron; EXCEPTION WHEN OTHERS THEN RAISE WARNING 'pg_cron unavailable: %', SQLERRM; END;
         BEGIN CREATE EXTENSION IF NOT EXISTS pg_partman; EXCEPTION WHEN OTHERS THEN RAISE WARNING 'pg_partman unavailable: %', SQLERRM; END;
+        BEGIN CREATE EXTENSION IF NOT EXISTS hypopg; EXCEPTION WHEN OTHERS THEN RAISE WARNING 'hypopg unavailable: %', SQLERRM; END;
+        BEGIN CREATE EXTENSION IF NOT EXISTS pg_qualstats; EXCEPTION WHEN OTHERS THEN RAISE WARNING 'pg_qualstats unavailable: %', SQLERRM; END;
+        BEGIN CREATE EXTENSION IF NOT EXISTS pg_wait_sampling; EXCEPTION WHEN OTHERS THEN RAISE WARNING 'pg_wait_sampling unavailable: %', SQLERRM; END;
+        BEGIN CREATE EXTENSION IF NOT EXISTS pg_squeeze; EXCEPTION WHEN OTHERS THEN RAISE WARNING 'pg_squeeze unavailable: %', SQLERRM; END;
+    END $$`);
+    yield* sql.unsafe(String.raw`DO $$ BEGIN
+        IF EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'pgaudit') THEN
+            EXECUTE 'ALTER SYSTEM SET pgaudit.log = ''ddl, role''';
+            EXECUTE 'SELECT pg_reload_conf()';
+        END IF;
+    EXCEPTION WHEN OTHERS THEN
+        RAISE WARNING 'pgaudit configuration skipped: %', SQLERRM;
     END $$`);
     yield* sql`CREATE COLLATION IF NOT EXISTS case_insensitive (provider = icu, locale = 'und-u-ks-level2', deterministic = false)`;
 
@@ -45,7 +62,7 @@ export default Effect.gen(function* () {
 
     yield* sql.unsafe(String.raw`
         CREATE TYPE app_role AS ENUM ('owner', 'admin', 'member', 'viewer', 'guest');
-        CREATE TYPE app_status AS ENUM ('active', 'suspended', 'archived');
+        CREATE TYPE app_status AS ENUM ('active', 'suspended', 'archived', 'purging');
         CREATE TYPE user_status AS ENUM ('active', 'inactive', 'suspended');
         CREATE TYPE asset_status AS ENUM ('active', 'processing', 'failed', 'deleted');
         CREATE TYPE job_status AS ENUM ('queued', 'processing', 'complete', 'failed', 'cancelled');
@@ -192,7 +209,18 @@ export default Effect.gen(function* () {
             user_id UUID REFERENCES users(id) ON DELETE RESTRICT NOT ENFORCED,
             request_id UUID, operation audit_operation NOT NULL,
             target_type TEXT NOT NULL, target_id UUID NOT NULL,
-            delta JSONB, context_ip INET, context_agent TEXT)`;
+            delta JSONB, context_ip INET, context_agent TEXT
+        ) PARTITION BY RANGE (uuid_extract_timestamp(id))`;
+    yield* sql`CREATE TABLE audit_logs_default PARTITION OF audit_logs DEFAULT`;
+    yield* sql.unsafe(String.raw`DO $$ BEGIN
+        IF EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'pg_partman') THEN BEGIN
+            PERFORM partman.create_parent(
+                p_parent_table := 'public.audit_logs', p_control := 'uuid_extract_timestamp(id)',
+                p_type := 'native', p_interval := 'monthly', p_premake := 4, p_default_table := false);
+            UPDATE partman.part_config SET infinite_time_partitions = true, retention = '90 days', retention_keep_table = false
+                WHERE parent_table = 'public.audit_logs';
+        EXCEPTION WHEN OTHERS THEN RAISE WARNING 'pg_partman audit_logs registration skipped: %', SQLERRM; END; END IF;
+    END $$`);
     yield* sql.unsafe(String.raw`
         CREATE INDEX idx_audit_id_brin ON audit_logs USING BRIN (id);
         CREATE INDEX idx_audit_app_target ON audit_logs(app_id, target_type, target_id, id DESC) INCLUDE (user_id, operation);
@@ -247,15 +275,28 @@ export default Effect.gen(function* () {
 
     yield* sql.unsafe(String.raw`
         CREATE TABLE notifications (
-            id UUID PRIMARY KEY DEFAULT uuidv7(), app_id UUID NOT NULL REFERENCES apps(id) ON DELETE RESTRICT,
-            user_id UUID REFERENCES users(id) ON DELETE RESTRICT,
+            id UUID PRIMARY KEY DEFAULT uuidv7(),
+            app_id UUID NOT NULL REFERENCES apps(id) ON DELETE RESTRICT NOT ENFORCED,
+            user_id UUID REFERENCES users(id) ON DELETE RESTRICT NOT ENFORCED,
             channel notification_channel NOT NULL, template TEXT NOT NULL,
             status notification_status NOT NULL, recipient TEXT,
             payload JSONB NOT NULL, delivery JSONB,
             retry_current INTEGER NOT NULL DEFAULT 0 CHECK (retry_current >= 0),
             retry_max INTEGER NOT NULL DEFAULT 5 CHECK (retry_max > 0),
             correlation JSONB, updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-            CONSTRAINT notifications_template_not_empty CHECK (length(trim(template)) > 0));
+            CONSTRAINT notifications_template_not_empty CHECK (length(trim(template)) > 0))
+        PARTITION BY RANGE (uuid_extract_timestamp(id))`);
+    yield* sql`CREATE TABLE notifications_default PARTITION OF notifications DEFAULT`;
+    yield* sql.unsafe(String.raw`DO $$ BEGIN
+        IF EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'pg_partman') THEN BEGIN
+            PERFORM partman.create_parent(
+                p_parent_table := 'public.notifications', p_control := 'uuid_extract_timestamp(id)',
+                p_type := 'native', p_interval := 'monthly', p_premake := 4, p_default_table := false);
+            UPDATE partman.part_config SET infinite_time_partitions = true, retention = '90 days', retention_keep_table = false
+                WHERE parent_table = 'public.notifications';
+        EXCEPTION WHEN OTHERS THEN RAISE WARNING 'pg_partman notifications registration skipped: %', SQLERRM; END; END IF;
+    END $$`);
+    yield* sql.unsafe(String.raw`
         CREATE INDEX idx_notifications_app_status ON notifications(app_id, status, id DESC) INCLUDE (channel, template, retry_current, retry_max);
         CREATE INDEX idx_notifications_app_user ON notifications(app_id, user_id, id DESC) INCLUDE (channel, status, template) WHERE user_id IS NOT NULL;
         CREATE INDEX idx_notifications_app_updated ON notifications(app_id, updated_at DESC) INCLUDE (channel, status, user_id);
@@ -346,10 +387,10 @@ export default Effect.gen(function* () {
         END LOOP;
     END $$`);
     yield* sql.unsafe(String.raw`
-        CREATE OR REPLACE FUNCTION purge_event_journal(p_older_than_days INT DEFAULT 30) RETURNS INT LANGUAGE sql VOLATILE AS $$
+        CREATE OR REPLACE FUNCTION purge_journal(p_older_than_days INT DEFAULT 30) RETURNS INT LANGUAGE sql VOLATILE AS $$
             WITH purged AS (DELETE FROM effect_event_journal WHERE timestamp < (EXTRACT(EPOCH FROM NOW()) * 1000 - p_older_than_days::bigint * 86400000)::bigint RETURNING 1)
             SELECT COUNT(*)::int FROM purged $$;
-        CREATE OR REPLACE FUNCTION purge_tenant_cascade(p_app_id UUID) RETURNS INT LANGUAGE plpgsql VOLATILE AS $$
+        CREATE OR REPLACE FUNCTION purge_tenant(p_app_id UUID) RETURNS INT LANGUAGE plpgsql VOLATILE AS $$
         DECLARE _total bigint := 0; _count bigint; _user_ids uuid[]; _tbl text;
         BEGIN
             SELECT array_agg(id) INTO _user_ids FROM users WHERE app_id = p_app_id;
@@ -376,11 +417,11 @@ export default Effect.gen(function* () {
         END $$`);
 
     yield* sql.unsafe(String.raw`
-        CREATE OR REPLACE FUNCTION count_event_outbox() RETURNS INT LANGUAGE sql STABLE PARALLEL SAFE
+        CREATE OR REPLACE FUNCTION count_outbox() RETURNS INT LANGUAGE sql STABLE PARALLEL SAFE
             AS $$ SELECT COUNT(*)::int FROM effect_event_remotes $$;
-        CREATE OR REPLACE FUNCTION get_event_journal_entry_by_primary_key(p_primary_key TEXT) RETURNS TABLE(payload TEXT)
+        CREATE OR REPLACE FUNCTION get_journal_entry(p_primary_key TEXT) RETURNS TABLE(payload TEXT)
             LANGUAGE sql STABLE PARALLEL SAFE AS $$ SELECT convert_from(payload, 'UTF8') FROM effect_event_journal WHERE primary_key = p_primary_key LIMIT 1 $$;
-        CREATE OR REPLACE FUNCTION list_event_journal_entries(p_since_sequence_id TEXT DEFAULT '0', p_since_timestamp BIGINT DEFAULT NULL, p_event_type TEXT DEFAULT NULL, p_limit INT DEFAULT 500)
+        CREATE OR REPLACE FUNCTION list_journal_entries(p_since_sequence_id TEXT DEFAULT '0', p_since_timestamp BIGINT DEFAULT NULL, p_event_type TEXT DEFAULT NULL, p_limit INT DEFAULT 500)
             RETURNS TABLE(payload TEXT, primary_key TEXT) LANGUAGE sql STABLE PARALLEL SAFE AS $$
             SELECT convert_from(e.payload, 'UTF8'), e.primary_key FROM effect_event_journal e
             WHERE e.primary_key ~ '^[0-9]+$' AND e.primary_key::bigint > p_since_sequence_id::bigint
@@ -396,15 +437,15 @@ export default Effect.gen(function* () {
             WHERE app_id = p_app_id AND context_ip = p_ip AND uuid_extract_timestamp(id) > NOW() - make_interval(mins => p_window_minutes) $$`);
 
     yield* sql.unsafe(String.raw`
-        CREATE OR REPLACE FUNCTION get_db_io_config() RETURNS TABLE(name TEXT, setting TEXT)
+        CREATE OR REPLACE FUNCTION stat_io_config() RETURNS TABLE(name TEXT, setting TEXT)
             LANGUAGE sql STABLE PARALLEL SAFE AS $$ SELECT name, setting FROM pg_settings WHERE name IN ('io_method','io_workers','effective_io_concurrency','io_combine_limit') $$;
-        CREATE OR REPLACE FUNCTION get_db_cache_hit_ratio() RETURNS TABLE(
+        CREATE OR REPLACE FUNCTION stat_cache_ratio() RETURNS TABLE(
             backend_type TEXT, io_object TEXT, io_context TEXT, hits DOUBLE PRECISION, reads DOUBLE PRECISION, writes DOUBLE PRECISION, cache_hit_ratio DOUBLE PRECISION)
             LANGUAGE sql STABLE PARALLEL SAFE AS $$ SELECT backend_type, object, context,
             SUM(hits)::double precision, SUM(reads)::double precision, SUM(writes)::double precision,
             CASE WHEN SUM(hits)+SUM(reads)>0 THEN SUM(hits)::double precision/(SUM(hits)::double precision+SUM(reads)::double precision)*100 ELSE 0 END
             FROM pg_stat_io WHERE object='relation' AND context='normal' GROUP BY backend_type, object, context $$;
-        CREATE OR REPLACE FUNCTION get_db_io_stats() RETURNS TABLE(
+        CREATE OR REPLACE FUNCTION stat_io_detail() RETURNS TABLE(
             backend_type TEXT, io_object TEXT, io_context TEXT, reads BIGINT, read_time DOUBLE PRECISION,
             writes BIGINT, write_time DOUBLE PRECISION, writebacks BIGINT, writeback_time DOUBLE PRECISION,
             extends BIGINT, extend_time DOUBLE PRECISION, hits BIGINT, evictions BIGINT, reuses BIGINT,
@@ -418,16 +459,18 @@ export default Effect.gen(function* () {
             EXECUTE format('SELECT COALESCE(jsonb_agg(to_jsonb(r)),''[]''::jsonb) FROM (%s) r',
                 CASE WHEN p_limit IS NOT NULL THEN p_query||' LIMIT '||GREATEST(1,LEAST(p_limit,500)) ELSE p_query END) INTO _result;
             RETURN _result; EXCEPTION WHEN OTHERS THEN RETURN '[]'::jsonb; END $$;
-        CREATE OR REPLACE FUNCTION list_stat_statements_json(p_limit INT DEFAULT 100) RETURNS JSONB LANGUAGE sql STABLE AS $$ SELECT _query_extension_json('pg_stat_statements','SELECT * FROM pg_stat_statements ORDER BY total_exec_time DESC',p_limit) $$;
-        CREATE OR REPLACE FUNCTION list_walinspect_json(p_limit INT DEFAULT 100) RETURNS JSONB LANGUAGE sql STABLE AS $$ SELECT _query_extension_json('pg_walinspect','SELECT * FROM pg_get_wal_record_info(pg_current_wal_lsn())',p_limit) $$;
-        CREATE OR REPLACE FUNCTION list_stat_kcache_json(p_limit INT DEFAULT 100) RETURNS JSONB LANGUAGE sql STABLE AS $$ SELECT _query_extension_json('pg_stat_kcache','SELECT * FROM pg_stat_kcache_detail ORDER BY exec_reads DESC NULLS LAST',p_limit) $$;
-        CREATE OR REPLACE FUNCTION list_cron_jobs_json() RETURNS JSONB LANGUAGE sql STABLE AS $$ SELECT _query_extension_json('pg_cron','SELECT * FROM cron.job ORDER BY jobid') $$;
-        CREATE OR REPLACE FUNCTION list_partition_health_json(p_parent_table TEXT) RETURNS JSONB LANGUAGE plpgsql STABLE AS $$
+        CREATE OR REPLACE FUNCTION stat_statements(p_limit INT DEFAULT 100) RETURNS JSONB LANGUAGE sql STABLE AS $$ SELECT _query_extension_json('pg_stat_statements','SELECT * FROM pg_stat_statements ORDER BY total_exec_time DESC',p_limit) $$;
+        CREATE OR REPLACE FUNCTION stat_wal_inspect(p_limit INT DEFAULT 100) RETURNS JSONB LANGUAGE sql STABLE AS $$ SELECT _query_extension_json('pg_walinspect','SELECT * FROM pg_get_wal_record_info(pg_current_wal_lsn())',p_limit) $$;
+        CREATE OR REPLACE FUNCTION stat_kcache(p_limit INT DEFAULT 100) RETURNS JSONB LANGUAGE sql STABLE AS $$ SELECT _query_extension_json('pg_stat_kcache','SELECT * FROM pg_stat_kcache_detail ORDER BY exec_reads DESC NULLS LAST',p_limit) $$;
+        CREATE OR REPLACE FUNCTION stat_qualstats(p_limit INT DEFAULT 100) RETURNS JSONB LANGUAGE sql STABLE AS $$ SELECT _query_extension_json('pg_qualstats','SELECT * FROM pg_qualstats_statements ORDER BY execution_count DESC NULLS LAST',p_limit) $$;
+        CREATE OR REPLACE FUNCTION stat_wait_sampling(p_limit INT DEFAULT 100) RETURNS JSONB LANGUAGE sql STABLE AS $$ SELECT _query_extension_json('pg_wait_sampling','SELECT event_type, event, SUM(count)::bigint AS total_count FROM pg_wait_sampling_profile GROUP BY event_type, event ORDER BY total_count DESC NULLS LAST',p_limit) $$;
+        CREATE OR REPLACE FUNCTION list_cron_jobs() RETURNS JSONB LANGUAGE sql STABLE AS $$ SELECT _query_extension_json('pg_cron','SELECT * FROM cron.job ORDER BY jobid') $$;
+        CREATE OR REPLACE FUNCTION list_partition_health(p_parent_table TEXT) RETURNS JSONB LANGUAGE plpgsql STABLE AS $$
         BEGIN RETURN COALESCE((SELECT jsonb_agg(jsonb_build_object('partition', (tree.relid::regclass)::text, 'level', tree.level,
             'isLeaf', tree.isleaf, 'bound', pg_get_expr(cls.relpartbound, cls.oid)) ORDER BY tree.level, (tree.relid::regclass)::text)
             FROM pg_partition_tree(p_parent_table::regclass) tree JOIN pg_class cls ON cls.oid = tree.relid), '[]'::jsonb);
         EXCEPTION WHEN OTHERS THEN RETURN '[]'::jsonb; END $$;
-        CREATE OR REPLACE FUNCTION reconcile_maintenance_cron_jobs() RETURNS JSONB LANGUAGE plpgsql VOLATILE AS $$
+        CREATE OR REPLACE FUNCTION sync_cron_jobs() RETURNS JSONB LANGUAGE plpgsql VOLATILE AS $$
         DECLARE _job record; _existing_command TEXT; _existing_jobid BIGINT; _existing_schedule TEXT; _result JSONB := '[]'::jsonb;
         BEGIN
             IF NOT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'pg_cron') THEN RETURN _result; END IF;
@@ -438,7 +481,7 @@ export default Effect.gen(function* () {
                 ('maintenance-purge-oauth-accounts','20 5 * * 0','SELECT purge_oauth_accounts(90)'),
                 ('maintenance-purge-mfa-secrets','20 4 * * 0','SELECT purge_mfa_secrets(90)'),
                 ('maintenance-purge-kv-store','20 0 * * 0','SELECT purge_kv_store(90)'),
-                ('maintenance-purge-event-journal','20 2 * * *','SELECT purge_event_journal(30)'),
+                ('maintenance-purge-event-journal','20 2 * * *','SELECT purge_journal(30)'),
                 ('maintenance-purge-job-dlq','25 2 * * *','SELECT purge_job_dlq(30)')
             ) AS t(name, schedule, command) LOOP BEGIN
                 SELECT j.jobid, j.schedule, j.command INTO _existing_jobid, _existing_schedule, _existing_command FROM cron.job j WHERE j.jobname = _job.name ORDER BY j.jobid DESC LIMIT 1;
@@ -473,7 +516,9 @@ export default Effect.gen(function* () {
                 setweight(to_tsvector('parametric_search', coalesce(display_text, '')), 'A') ||
                 setweight(to_tsvector('parametric_search', coalesce(content_text, '')), 'C') ||
                 setweight(jsonb_to_tsvector('parametric_search', coalesce(metadata, '{}'::jsonb), '["string","numeric","boolean"]'), 'D')
-            ) STORED, CONSTRAINT search_documents_pk PRIMARY KEY (entity_type, entity_id))`;
+            ) STORED,
+            phonetic_code TEXT GENERATED ALWAYS AS (dmetaphone(left(normalized_text, 255))) STORED,
+            CONSTRAINT search_documents_pk PRIMARY KEY (entity_type, entity_id))`;
     yield* sql`
         CREATE TABLE search_embeddings (
             entity_type TEXT NOT NULL, entity_id UUID NOT NULL, scope_id UUID,
@@ -484,15 +529,70 @@ export default Effect.gen(function* () {
             CONSTRAINT search_embeddings_dimensions_positive CHECK (dimensions > 0),
             CONSTRAINT search_embeddings_fk FOREIGN KEY (entity_type, entity_id) REFERENCES search_documents(entity_type, entity_id) ON DELETE CASCADE)`;
     yield* sql.unsafe(String.raw`
-        CREATE INDEX idx_search_documents_vector ON search_documents USING GIN (search_vector) WITH (parallel_workers = 4);
         CREATE INDEX idx_search_documents_scope ON search_documents (scope_id, entity_type);
+        CREATE INDEX idx_search_documents_scope_entity_vector ON search_documents USING GIN (scope_id uuid_ops, entity_type text_ops, search_vector) WITH (parallel_workers = 4);
         CREATE INDEX idx_search_documents_scope_entity_trgm ON search_documents USING GIN (scope_id uuid_ops, entity_type text_ops, normalized_text gin_trgm_ops) WITH (parallel_workers = 4);
+        CREATE INDEX idx_search_documents_trgm_knn ON search_documents USING GIST (normalized_text gist_trgm_ops(siglen=32));
+        CREATE INDEX idx_search_documents_phonetic ON search_documents (phonetic_code) WHERE phonetic_code IS NOT NULL;
+        CREATE TABLE search_terms (
+            scope_id UUID, term TEXT NOT NULL,
+            frequency INTEGER NOT NULL CHECK (frequency > 0),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            CONSTRAINT search_terms_scope_term_unique UNIQUE NULLS NOT DISTINCT (scope_id, term)
+        );
+        CREATE INDEX idx_search_terms_scope_term_trgm ON search_terms USING GIN (scope_id uuid_ops, term gin_trgm_ops) WITH (parallel_workers = 4);
+        CREATE INDEX idx_search_terms_trgm_knn ON search_terms USING GIST (term gist_trgm_ops(siglen=32));
         CREATE INDEX idx_search_embeddings_scope ON search_embeddings (scope_id, entity_type, model, dimensions);
         CREATE INDEX idx_search_embeddings_embedding ON search_embeddings USING hnsw (embedding vector_cosine_ops) WITH (m = 24, ef_construction = 200);
         DO $$ DECLARE _tbl text; BEGIN
             FOR _tbl IN SELECT unnest(ARRAY['search_documents', 'search_embeddings']) LOOP
                 EXECUTE format('CREATE TRIGGER %I BEFORE UPDATE ON %I FOR EACH ROW WHEN (OLD.* IS DISTINCT FROM NEW.*) EXECUTE FUNCTION set_updated_at()', _tbl || '_updated_at', _tbl);
             END LOOP; END $$`);
+
+    yield* sql.unsafe(String.raw`
+        CREATE OR REPLACE FUNCTION _search_terms_array(p_text text) RETURNS text[] LANGUAGE sql IMMUTABLE PARALLEL SAFE AS $$
+            SELECT COALESCE(
+                ARRAY(
+                    SELECT lexeme
+                    FROM unnest(tsvector_to_array(to_tsvector('simple', coalesce(p_text, '')))) AS t(lexeme)
+                    WHERE char_length(lexeme) BETWEEN 2 AND 255
+                ),
+                ARRAY[]::text[]
+            ) $$;
+        CREATE OR REPLACE FUNCTION _merge_search_terms(p_scope_id uuid, p_terms text[], p_delta int) RETURNS void LANGUAGE plpgsql VOLATILE AS $$
+        BEGIN
+            IF p_terms IS NULL OR cardinality(p_terms) = 0 THEN RETURN; END IF;
+            IF p_delta > 0 THEN
+                INSERT INTO search_terms (scope_id, term, frequency)
+                SELECT p_scope_id, term, COUNT(*)::int
+                FROM unnest(p_terms) term
+                GROUP BY term
+                ON CONFLICT (scope_id, term) DO UPDATE SET frequency = search_terms.frequency + EXCLUDED.frequency, updated_at = now();
+            ELSE
+                UPDATE search_terms st SET frequency = st.frequency - t.cnt, updated_at = now()
+                FROM (SELECT term, COUNT(*)::int AS cnt FROM unnest(p_terms) term GROUP BY term) t
+                WHERE st.scope_id IS NOT DISTINCT FROM p_scope_id AND st.term = t.term;
+                DELETE FROM search_terms st WHERE st.scope_id IS NOT DISTINCT FROM p_scope_id AND st.frequency <= 0;
+            END IF;
+        END $$;
+        CREATE OR REPLACE FUNCTION sync_search_terms() RETURNS TRIGGER AS $$
+        BEGIN
+            IF TG_OP IN ('UPDATE', 'DELETE') THEN
+                PERFORM _merge_search_terms(OLD.scope_id, _search_terms_array(OLD.normalized_text), -1);
+            END IF;
+            IF TG_OP IN ('INSERT', 'UPDATE') THEN
+                PERFORM _merge_search_terms(NEW.scope_id, _search_terms_array(NEW.normalized_text), 1);
+            END IF;
+            RETURN COALESCE(NEW, OLD);
+        END $$ LANGUAGE plpgsql;
+        CREATE TRIGGER search_documents_terms_sync_insert
+            AFTER INSERT ON search_documents FOR EACH ROW EXECUTE FUNCTION sync_search_terms();
+        CREATE TRIGGER search_documents_terms_sync_delete
+            AFTER DELETE ON search_documents FOR EACH ROW EXECUTE FUNCTION sync_search_terms();
+        CREATE TRIGGER search_documents_terms_sync_update
+            AFTER UPDATE ON search_documents FOR EACH ROW
+            WHEN (OLD.scope_id IS DISTINCT FROM NEW.scope_id OR OLD.normalized_text IS DISTINCT FROM NEW.normalized_text)
+            EXECUTE FUNCTION sync_search_terms()`);
 
     yield* sql.unsafe(String.raw`
         CREATE OR REPLACE FUNCTION _upsert_search_doc(p_et TEXT, p_eid UUID, p_sid UUID, p_d TEXT, p_c TEXT, p_m JSONB) RETURNS void LANGUAGE sql AS $$
@@ -551,17 +651,58 @@ export default Effect.gen(function* () {
                     jsonb_strip_nulls(jsonb_build_object('targetType',s.target_type,'operation',s.operation,'userId',s.user_id,'hasDelta',s.delta IS NOT NULL),true))
             FROM audit_logs s WHERE p_scope_id IS NULL OR s.app_id = p_scope_id;
             ANALYZE search_documents;
+            ANALYZE search_terms;
         END $$;
         CREATE OR REPLACE FUNCTION notify_search_refresh() RETURNS void LANGUAGE sql SECURITY INVOKER AS $$
             SELECT pg_notify('search_refresh', json_build_object('timestamp', extract(epoch from now()), 'event', 'refresh_complete')::text) $$;
         CREATE OR REPLACE FUNCTION get_search_suggestions(p_prefix text, p_scope_id uuid, p_include_global boolean, p_limit int DEFAULT 20)
             RETURNS TABLE(term text, frequency bigint) LANGUAGE sql STABLE SECURITY INVOKER AS $$
-            SELECT word, ndoc FROM ts_stat(
-                CASE WHEN p_scope_id IS NULL THEN 'SELECT search_vector FROM search_documents WHERE scope_id IS NULL'
-                    WHEN p_include_global THEN format('SELECT search_vector FROM search_documents WHERE scope_id = %L OR scope_id IS NULL', p_scope_id)
-                    ELSE format('SELECT search_vector FROM search_documents WHERE scope_id = %L', p_scope_id) END)
-            WHERE word LIKE (regexp_replace(unaccent(casefold(p_prefix)), '([%_\\])', '\\\\\1', 'g') || '%') ESCAPE '\'
-            ORDER BY ndoc DESC LIMIT LEAST(COALESCE(p_limit, 20), 100) $$`);
+            WITH normalized AS (
+                SELECT source.prefix, regexp_replace(source.prefix, '([%_\\])', '\\\\\1', 'g') AS escaped_prefix,
+                    LEAST(COALESCE(p_limit, 20), 100) AS max_limit
+                FROM (SELECT left(normalize_search_text(p_prefix, NULL, NULL), 255) AS prefix) source
+            ),
+            scoped_terms AS (
+                SELECT st.term, st.frequency, n.prefix, n.escaped_prefix
+                FROM search_terms st CROSS JOIN normalized n
+                WHERE CASE
+                    WHEN p_scope_id IS NULL THEN st.scope_id IS NULL
+                    WHEN p_include_global THEN st.scope_id = p_scope_id OR st.scope_id IS NULL
+                    ELSE st.scope_id = p_scope_id
+                END
+            ),
+            prefix_hits AS (
+                SELECT term, SUM(frequency)::bigint AS frequency
+                FROM scoped_terms
+                WHERE term LIKE (escaped_prefix || '%') ESCAPE '\'
+                GROUP BY term
+                ORDER BY frequency DESC, term ASC
+                LIMIT (SELECT max_limit FROM normalized)
+            ),
+            fuzzy_candidates AS (
+                SELECT term, frequency,
+                    term <-> prefix AS similarity_distance,
+                    prefix <<-> term AS word_distance,
+                    prefix <<<-> term AS strict_word_distance,
+                    GREATEST(similarity(term, prefix), word_similarity(prefix, term), strict_word_similarity(prefix, term)) AS score
+                FROM scoped_terms
+                WHERE char_length(prefix) >= 2
+                    AND (term % prefix OR prefix <% term OR prefix <<% term)
+                ORDER BY similarity_distance ASC, word_distance ASC, strict_word_distance ASC, frequency DESC, term ASC
+                LIMIT (SELECT max_limit * 4 FROM normalized)
+            ),
+            fuzzy_hits AS (
+                SELECT term, SUM(frequency)::bigint AS frequency
+                FROM fuzzy_candidates
+                WHERE NOT EXISTS (SELECT 1 FROM prefix_hits)
+                GROUP BY term
+                ORDER BY MIN(similarity_distance) ASC, MIN(word_distance) ASC, MIN(strict_word_distance) ASC, MAX(score) DESC, SUM(frequency) DESC, term ASC
+                LIMIT (SELECT max_limit FROM normalized)
+            )
+            SELECT term, frequency FROM prefix_hits
+            UNION ALL
+            SELECT term, frequency FROM fuzzy_hits
+            LIMIT (SELECT max_limit FROM normalized) $$`);
     yield* sql`SELECT refresh_search_documents()`;
 
     yield* sql.unsafe(String.raw`
@@ -575,18 +716,18 @@ export default Effect.gen(function* () {
         privileged_actions(resource, action) AS (VALUES ('users','updateRole'),('audit','getByEntity'),('audit','getByUser'),('search','refresh'),('search','refreshEmbeddings'),
             ('webhooks','list'),('webhooks','register'),('webhooks','remove'),('webhooks','test'),('webhooks','retry'),('webhooks','status'),
             ('admin','listUsers'),('admin','listSessions'),('admin','deleteSession'),('admin','revokeSessionsByIp'),('admin','listJobs'),('admin','cancelJob'),('admin','listDlq'),('admin','replayDlq'),('admin','listNotifications'),('admin','replayNotification'),('admin','events'),
-            ('admin','dbIoStats'),('admin','dbIoConfig'),('admin','dbStatements'),('admin','dbCacheHitRatio'),('admin','dbWalInspect'),('admin','dbStatKcache'),('admin','dbCronJobs'),('admin','dbPartitionHealth'),('admin','dbReconcileMaintenance'),
+            ('admin','ioDetail'),('admin','ioConfig'),('admin','statements'),('admin','cacheRatio'),('admin','walInspect'),('admin','kcache'),('admin','qualstats'),('admin','waitSampling'),('admin','cronJobs'),('admin','partitionHealth'),('admin','syncCronJobs'),
             ('admin','listTenants'),('admin','createTenant'),('admin','getTenant'),('admin','updateTenant'),('admin','deactivateTenant'),('admin','resumeTenant'),('admin','getTenantOAuth'),('admin','updateTenantOAuth'),
             ('admin','listPermissions'),('admin','grantPermission'),('admin','revokePermission'),('admin','getFeatureFlags'),('admin','setFeatureFlag')),
         seed AS (SELECT t.app_id, r.role, a.resource, a.action FROM tenants t CROSS JOIN all_roles r CROSS JOIN all_actions a
             UNION ALL SELECT t.app_id, r.role, a.resource, a.action FROM tenants t CROSS JOIN privileged_roles r CROSS JOIN privileged_actions a)
         INSERT INTO permissions (app_id, role, resource, action) SELECT * FROM seed ON CONFLICT (app_id, role, resource, action) DO NOTHING`);
-    yield* sql`SELECT reconcile_maintenance_cron_jobs()`;
+    yield* sql`SELECT sync_cron_jobs()`;
 
     yield* sql`SELECT set_config('app.current_tenant', '00000000-0000-7000-8000-000000000001', false)`;
     yield* sql.unsafe(String.raw`DO $$ DECLARE _tbl text; BEGIN
         FOR _tbl IN SELECT unnest(ARRAY['users','permissions','sessions','session_tokens','api_keys','oauth_accounts',
-            'mfa_secrets','webauthn_credentials','assets','audit_logs','jobs','notifications','job_dlq','search_documents','search_embeddings']) LOOP
+            'mfa_secrets','webauthn_credentials','assets','audit_logs','jobs','notifications','job_dlq','search_documents','search_embeddings','search_terms']) LOOP
             EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', _tbl);
             EXECUTE format('ALTER TABLE %I FORCE ROW LEVEL SECURITY', _tbl);
         END LOOP;
@@ -603,4 +744,5 @@ export default Effect.gen(function* () {
         WITH CHECK (EXISTS (SELECT 1 FROM sessions s WHERE s.id = session_tokens.session_id AND s.app_id = get_current_tenant_id()))`;
     yield* sql`CREATE POLICY search_documents_tenant_isolation ON search_documents USING (scope_id IS NULL OR scope_id = get_current_tenant_id()) WITH CHECK (scope_id IS NULL OR scope_id = get_current_tenant_id())`;
     yield* sql`CREATE POLICY search_embeddings_tenant_isolation ON search_embeddings USING (scope_id IS NULL OR scope_id = get_current_tenant_id()) WITH CHECK (scope_id IS NULL OR scope_id = get_current_tenant_id())`;
+    yield* sql`CREATE POLICY search_terms_tenant_isolation ON search_terms USING (scope_id IS NULL OR scope_id = get_current_tenant_id()) WITH CHECK (scope_id IS NULL OR scope_id = get_current_tenant_id())`;
 });

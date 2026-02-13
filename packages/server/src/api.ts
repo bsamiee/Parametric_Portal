@@ -72,7 +72,8 @@ const _TenantOAuthProviderRead = S.Struct({ clientId: S.NonEmptyTrimmedString, c
 
 // Auth: mixed public/protected endpoints — per-endpoint middleware
 const _AuthGroup = HttpApiGroup.make('auth')
-    .prefix('/auth')
+    .prefix('/v1/auth')
+    .addError(HttpError.Conflict)
     .addError(HttpError.RateLimit)
     .add(
         HttpApiEndpoint.get('oauthStart', '/oauth/:provider')
@@ -304,8 +305,9 @@ const _TelemetryGroup = HttpApiGroup.make('telemetry')
 
 // Users: group-level auth + common errors
 const _UsersGroup = HttpApiGroup.make('users')
-    .prefix('/users')
+    .prefix('/v1/users')
     .middleware(Middleware)
+    .addError(HttpError.Conflict)
     .addError(HttpError.Forbidden)
     .addError(HttpError.Internal)
     .addError(HttpError.RateLimit)
@@ -367,8 +369,9 @@ const _UsersGroup = HttpApiGroup.make('users')
 
 // Audit: group-level auth + common errors
 const _AuditGroup = HttpApiGroup.make('audit')
-    .prefix('/audit')
+    .prefix('/v1/audit')
     .middleware(Middleware)
+    .addError(HttpError.Conflict)
     .addError(HttpError.Forbidden)
     .addError(HttpError.Internal)
     .addError(HttpError.RateLimit)
@@ -392,7 +395,7 @@ const _AuditGroup = HttpApiGroup.make('audit')
 
 // Transfer: group-level auth + common errors
 const _TransferGroup = HttpApiGroup.make('transfer')
-    .prefix('/transfer')
+    .prefix('/v1/transfer')
     .middleware(Middleware)
     .addError(HttpError.Forbidden)
     .addError(HttpError.Internal)
@@ -414,8 +417,9 @@ const _TransferGroup = HttpApiGroup.make('transfer')
 
 // Search: group-level auth + common errors
 const _SearchGroup = HttpApiGroup.make('search')
-    .prefix('/search')
+    .prefix('/v1/search')
     .middleware(Middleware)
+    .addError(HttpError.Conflict)
     .addError(HttpError.Forbidden)
     .addError(HttpError.Internal)
     .addError(HttpError.RateLimit)
@@ -439,7 +443,7 @@ const _SearchGroup = HttpApiGroup.make('search')
                 })),
                 S.Struct({ facets: S.NullOr(S.Record({ key: SearchEntityType, value: S.Int })) }),
             ))
-            .annotate(OpenApi.Description, 'Full-text search with semantic ranking'),
+            .annotate(OpenApi.Description, 'Full-text + pg_trgm multi-channel + semantic ranking'),
     )
     .add(
         HttpApiEndpoint.get('suggest', '/suggest')
@@ -449,7 +453,7 @@ const _SearchGroup = HttpApiGroup.make('search')
                 prefix: HttpApiSchema.param('prefix', S.String.pipe(S.minLength(2), S.maxLength(256))),
             }))
             .addSuccess(S.Array(S.Struct({ frequency: S.Int, term: S.String })))
-            .annotate(OpenApi.Description, 'Search term suggestions'),
+            .annotate(OpenApi.Description, 'Prefix suggestions with pg_trgm typo fallback'),
     )
     .add(
         HttpApiEndpoint.post('refresh', '/refresh')
@@ -466,7 +470,7 @@ const _SearchGroup = HttpApiGroup.make('search')
 
 // Jobs: group-level auth + common errors
 const _JobsGroup = HttpApiGroup.make('jobs')
-    .prefix('/jobs')
+    .prefix('/v1/jobs')
     .middleware(Middleware)
     .addError(HttpError.Forbidden)
     .addError(HttpError.Internal)
@@ -479,7 +483,7 @@ const _JobsGroup = HttpApiGroup.make('jobs')
 
 // WebSocket: group-level auth + common errors
 const _WebSocketGroup = HttpApiGroup.make('websocket')
-    .prefix('/ws')
+    .prefix('/v1/ws')
     .middleware(Middleware)
     .addError(HttpError.Auth)
     .addError(HttpError.Forbidden)
@@ -493,8 +497,9 @@ const _WebSocketGroup = HttpApiGroup.make('websocket')
 
 // Storage: group-level auth + common errors
 const _StorageGroup = HttpApiGroup.make('storage')
-    .prefix('/storage')
+    .prefix('/v1/storage')
     .middleware(Middleware)
+    .addError(HttpError.Conflict)
     .addError(HttpError.Forbidden)
     .addError(HttpError.Internal)
     .addError(HttpError.RateLimit)
@@ -602,8 +607,9 @@ const _StorageGroup = HttpApiGroup.make('storage')
 
 // Webhooks: group-level auth + common errors
 const _WebhooksGroup = HttpApiGroup.make('webhooks')
-    .prefix('/webhooks')
+    .prefix('/v1/webhooks')
     .middleware(Middleware)
+    .addError(HttpError.Conflict)
     .addError(HttpError.Forbidden)
     .addError(HttpError.Internal)
     .addError(HttpError.NotFound)
@@ -665,12 +671,13 @@ const _WebhooksGroup = HttpApiGroup.make('webhooks')
 
 // Admin: group-level auth + common errors — excluded from OpenAPI
 const _AdminGroup = HttpApiGroup.make('admin')
-    .prefix('/admin')
+    .prefix('/v1/admin')
     .middleware(Middleware)
+    .addError(HttpError.Conflict)
     .addError(HttpError.Forbidden)
     .addError(HttpError.Internal)
-    .addError(HttpError.Validation)
     .addError(HttpError.RateLimit)
+    .addError(HttpError.Validation)
     .add(
         HttpApiEndpoint.get('listUsers', '/users')
             .setUrlParams(_PaginationBase)
@@ -750,17 +757,17 @@ const _AdminGroup = HttpApiGroup.make('admin')
             .annotate(OpenApi.Summary, 'SSE event stream'),
     )
     .add(
-        HttpApiEndpoint.get('dbIoStats', '/db/io-stats')
+        HttpApiEndpoint.get('ioDetail', '/db/io-stats')
             .addSuccess(S.Array(S.Unknown))
             .annotate(OpenApi.Summary, 'Database IO statistics'),
     )
     .add(
-        HttpApiEndpoint.get('dbIoConfig', '/db/io-config')
+        HttpApiEndpoint.get('ioConfig', '/db/io-config')
             .addSuccess(S.Array(S.Struct({ name: S.String, setting: S.String })))
             .annotate(OpenApi.Summary, 'Database IO configuration'),
     )
     .add(
-        HttpApiEndpoint.get('dbStatements', '/db/statements')
+        HttpApiEndpoint.get('statements', '/db/statements')
             .setUrlParams(S.Struct({
                 limit: S.optionalWith(HttpApiSchema.param('limit', S.NumberFromString.pipe(S.int(), S.between(1, 500))), { default: () => 100 }),
             }))
@@ -768,12 +775,12 @@ const _AdminGroup = HttpApiGroup.make('admin')
             .annotate(OpenApi.Summary, 'Database statement statistics'),
     )
     .add(
-        HttpApiEndpoint.get('dbCacheHitRatio', '/db/cache-hit-ratio')
+        HttpApiEndpoint.get('cacheRatio', '/db/cache-hit-ratio')
             .addSuccess(S.Array(S.Unknown))
             .annotate(OpenApi.Summary, 'Database cache hit ratio'),
     )
     .add(
-        HttpApiEndpoint.get('dbWalInspect', '/db/walinspect')
+        HttpApiEndpoint.get('walInspect', '/db/walinspect')
             .setUrlParams(S.Struct({
                 limit: S.optionalWith(HttpApiSchema.param('limit', S.NumberFromString.pipe(S.int(), S.between(1, 500))), { default: () => 100 }),
             }))
@@ -781,7 +788,7 @@ const _AdminGroup = HttpApiGroup.make('admin')
             .annotate(OpenApi.Summary, 'WAL inspection snapshot'),
     )
     .add(
-        HttpApiEndpoint.get('dbStatKcache', '/db/stat-kcache')
+        HttpApiEndpoint.get('kcache', '/db/stat-kcache')
             .setUrlParams(S.Struct({
                 limit: S.optionalWith(HttpApiSchema.param('limit', S.NumberFromString.pipe(S.int(), S.between(1, 500))), { default: () => 100 }),
             }))
@@ -789,12 +796,28 @@ const _AdminGroup = HttpApiGroup.make('admin')
             .annotate(OpenApi.Summary, 'Per-query filesystem IO attribution'),
     )
     .add(
-        HttpApiEndpoint.get('dbCronJobs', '/db/cron-jobs')
+        HttpApiEndpoint.get('qualstats', '/db/qualstats')
+            .setUrlParams(S.Struct({
+                limit: S.optionalWith(HttpApiSchema.param('limit', S.NumberFromString.pipe(S.int(), S.between(1, 500))), { default: () => 100 }),
+            }))
+            .addSuccess(S.Array(S.Unknown))
+            .annotate(OpenApi.Summary, 'Qualifying query statistics (pg_qualstats)'),
+    )
+    .add(
+        HttpApiEndpoint.get('waitSampling', '/db/wait-sampling')
+            .setUrlParams(S.Struct({
+                limit: S.optionalWith(HttpApiSchema.param('limit', S.NumberFromString.pipe(S.int(), S.between(1, 500))), { default: () => 100 }),
+            }))
+            .addSuccess(S.Array(S.Unknown))
+            .annotate(OpenApi.Summary, 'Wait event distribution (pg_wait_sampling)'),
+    )
+    .add(
+        HttpApiEndpoint.get('cronJobs', '/db/cron-jobs')
             .addSuccess(S.Array(S.Unknown))
             .annotate(OpenApi.Summary, 'Database cron jobs'),
     )
     .add(
-        HttpApiEndpoint.get('dbPartitionHealth', '/db/partition-health')
+        HttpApiEndpoint.get('partitionHealth', '/db/partition-health')
             .setUrlParams(S.Struct({
                 parentTable: S.optionalWith(HttpApiSchema.param('parentTable', S.Literal('public.sessions')), { default: () => 'public.sessions' as const }),
             }))
@@ -802,7 +825,7 @@ const _AdminGroup = HttpApiGroup.make('admin')
             .annotate(OpenApi.Summary, 'Partition metadata and bounds'),
     )
     .add(
-        HttpApiEndpoint.post('dbReconcileMaintenance', '/db/reconcile-maintenance')
+        HttpApiEndpoint.post('syncCronJobs', '/db/reconcile-maintenance')
             .addSuccess(S.Array(S.Unknown))
             .annotate(OpenApi.Summary, 'Reconcile database maintenance cron jobs'),
     )
@@ -837,6 +860,7 @@ const _AdminGroup = HttpApiGroup.make('admin')
             }))
             .addSuccess(App.json)
             .addError(HttpError.Conflict)
+            .addError(HttpError.NotFound)
             .addError(HttpError.Validation)
             .annotate(OpenApi.Summary, 'Create tenant'),
     )
@@ -937,7 +961,7 @@ const ParametricApi = HttpApi.make('ParametricApi')
     .prefix('/api')
     .annotate(OpenApi.Identifier, 'parametric-portal-api')
     .annotate(OpenApi.Title, 'Parametric Portal API')
-    .annotate(OpenApi.Version, '1.0.0')
+    .annotate(OpenApi.Version, '1.1.0')
     .annotate(OpenApi.License, { name: 'MIT', url: 'https://opensource.org/licenses/MIT' })
     .annotate(OpenApi.ExternalDocs, { description: 'Developer Documentation', url: 'https://docs.parametric.dev' });
 

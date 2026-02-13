@@ -16,7 +16,7 @@ const _safe = fc.string({ maxLength: 32, minLength: 1 }).filter((v) => /^[a-zA-Z
 const _item = fc.record({ content: _safe, id: fc.uuid(), type: _safe, updatedAt: fc.integer({ max: 1_700_604_800_000, min: 1_700_000_000_000 }) });
 const _parseError = Arbitrary.make(S.Struct(TransferError.Parse.fields));
 const _fatalError = Arbitrary.make(S.Struct(TransferError.Fatal.fields));
-const _serialize: Record<Fmt, (items: readonly { content: string; type: string }[]) => string> = { csv: (items) => `type,content\n${items.map((i) => `${i.type},${i.content}`).join('\n')}`, ndjson: (items) => items.map((i) => JSON.stringify(i)).join('\n'), yaml: (items) => items.map((i) => `---\ntype: ${i.type}\ncontent: ${i.content}`).join('\n') } as const;
+const _serialize: Record<Fmt, (items: readonly { content: string; type: string }[]) => string> = { csv: (items) => `type,content\n${items.map((i) => `${i.type},${i.content}`).join('\n')}`, ndjson: (items) => items.map((i) => JSON.stringify(i)).join('\n'), yaml: (items) => items.map((i) => `---\ntype: ${i.type}\ncontent: ${i.content}`).join('\n') } as const; // NOSONAR S3358
 
 // --- [ALGEBRAIC: CODEC ROUNDTRIPS] -------------------------------------------
 

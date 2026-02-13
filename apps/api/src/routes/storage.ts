@@ -27,21 +27,21 @@ const StorageLive = HttpApiBuilder.group(ParametricApi, 'storage', (handlers) =>
                 const expires = Duration.seconds(payload.expiresInSeconds);
                 const expiresAt = DateTime.addDuration(DateTime.unsafeNow(), expires);
                 const input: StorageAdapter.SignInputGetPut = { expires, key: payload.key, op: payload.op };
-                const url = yield* Resilience.run('storage.sign', adapter.sign(input), { circuit: 'storage', timeout: Duration.seconds(10) }).pipe(Effect.mapError(HttpError.Internal.of.bind(undefined, 'Failed to generate presigned URL')));
+                const url = yield* Resilience.run('storage.sign', adapter.sign(input), { circuit: 'storage', timeout: Duration.seconds(10) }).pipe(HttpError.mapTo('Failed to generate presigned URL'));
                 yield* audit.log('Storage.sign', { details: { expiresInSeconds: payload.expiresInSeconds, key: payload.key, op: payload.op }, subjectId: payload.key });
                 return { expiresAt, key: payload.key, op: payload.op, url: url as Url };
             }).pipe(Telemetry.span('storage.sign'))))
             .handle('exists', ({ path }) => Middleware.guarded('storage', 'exists', 'api',
                 Resilience.run('storage.exists', adapter.exists(path.key), { circuit: 'storage', timeout: Duration.seconds(10) }).pipe(
                     Effect.map((exists) => ({ exists, key: path.key })),
-                    Effect.mapError((error) => HttpError.Internal.of('Failed to check object existence', error)),
+                    HttpError.mapTo('Failed to check object existence'),
                     Telemetry.span('storage.exists'),
                 ),
             ))
             .handle('remove', ({ path }) => Middleware.guarded('storage', 'remove', 'mutation',
                 Resilience.run('storage.remove', storage.remove(path.key), { circuit: 'storage', timeout: Duration.seconds(10) }).pipe(
                     Effect.map(() => ({ key: path.key, success: true as const })),
-                    Effect.mapError((error) => HttpError.Internal.of('Failed to delete object', error)),
+                    HttpError.mapTo('Failed to delete object'),
                     Telemetry.span('storage.remove'),
                 ),
             ))
@@ -49,13 +49,13 @@ const StorageLive = HttpApiBuilder.group(ParametricApi, 'storage', (handlers) =>
                 const fileSystem = yield* FileSystem.FileSystem;
                 const key = payload.key ?? payload.file.name;
                 const contentType = payload.contentType ?? payload.file.contentType;
-                const body = yield* fileSystem.readFile(payload.file.path).pipe(Effect.mapError(HttpError.Internal.of.bind(undefined, 'Failed to read uploaded file')));
-                const result = yield* Resilience.run('storage.upload', storage.put({ body, contentType, key }), { circuit: 'storage', timeout: Duration.seconds(30) }).pipe(Effect.mapError(HttpError.Internal.of.bind(undefined, 'Failed to store object')));
+                const body = yield* fileSystem.readFile(payload.file.path).pipe(HttpError.mapTo('Failed to read uploaded file'));
+                const result = yield* Resilience.run('storage.upload', storage.put({ body, contentType, key }), { circuit: 'storage', timeout: Duration.seconds(30) }).pipe(HttpError.mapTo('Failed to store object'));
                 return { etag: result.etag, key: result.key, size: result.size };
             }).pipe(Telemetry.span('storage.upload'))))
             .handle('getAsset', ({ path }) => Middleware.guarded('storage', 'getAsset', 'api',
                 database.assets.one([{ field: 'id', value: path.id }]).pipe(
-                    Effect.mapError((error) => HttpError.Internal.of('Asset lookup failed', error)),
+                    HttpError.mapTo('Asset lookup failed'),
                     Effect.flatMap(Option.match({
                         onNone: () => Effect.fail(HttpError.NotFound.of('asset', path.id)),
                         onSome: Effect.succeed,
@@ -76,7 +76,7 @@ const StorageLive = HttpApiBuilder.group(ParametricApi, 'storage', (handlers) =>
                     type: payload.type,
                     updatedAt: undefined,
                     userId: Option.some(session.userId),
-                }).pipe(Effect.mapError(HttpError.Internal.of.bind(undefined, 'Asset creation failed')));
+                }).pipe(HttpError.mapTo('Asset creation failed'));
                 yield* audit.log('Asset.create', { details: { name: payload.name, type: payload.type }, subjectId: asset.id });
                 return asset;
             }).pipe(Telemetry.span('storage.createAsset'))))
@@ -88,9 +88,9 @@ const StorageLive = HttpApiBuilder.group(ParametricApi, 'storage', (handlers) =>
                     status: Option.fromNullable(payload.status),
                     type: Option.fromNullable(payload.type),
                 });
-                yield* database.assets.set(path.id, updates, { app_id: tenantId }).pipe(Effect.mapError(HttpError.Internal.of.bind(undefined, 'Asset update failed')));
+                yield* database.assets.set(path.id, updates, { app_id: tenantId }).pipe(HttpError.mapTo('Asset update failed'));
                 const updated = yield* database.assets.one([{ field: 'id', value: path.id }]).pipe(
-                    Effect.mapError(HttpError.Internal.of.bind(undefined, 'Asset reload failed')),
+                    HttpError.mapTo('Asset reload failed'),
                     Effect.flatMap(Option.match({
                         onNone: constant(Effect.fail(HttpError.Internal.of('Asset reload failed', new Error('Asset not found after update')))),
                         onSome: Effect.succeed,
@@ -103,7 +103,7 @@ const StorageLive = HttpApiBuilder.group(ParametricApi, 'storage', (handlers) =>
                 const tenantId = yield* Context.Request.currentTenantId;
                 yield* database.assets.softDelete(path.id, tenantId).pipe(
                     Effect.catchIf(Cause.isNoSuchElementException, constant(Effect.fail(HttpError.NotFound.of('asset', path.id)))),
-                    Effect.mapError(HttpError.Internal.of.bind(undefined, 'Asset archive failed')),
+                    HttpError.mapTo('Asset archive failed'),
                 );
                 yield* audit.log('Asset.delete', { details: { assetId: path.id }, subjectId: path.id });
                 return { id: path.id, success: true as const };
@@ -120,7 +120,7 @@ const StorageLive = HttpApiBuilder.group(ParametricApi, 'storage', (handlers) =>
                     asc: urlParams.sort === 'asc',
                     cursor: urlParams.cursor,
                     limit: urlParams.limit,
-                }).pipe(Effect.mapError(HttpError.Internal.of.bind(undefined, 'Asset listing failed')));
+                }).pipe(HttpError.mapTo('Asset listing failed'));
             }).pipe(Telemetry.span('storage.listAssets'))));
     }),
 );

@@ -21,6 +21,11 @@ const _CONFIG = {
             ['idle_in_transaction_session_timeout', 'idleInTransactionMs'],
             ['transaction_timeout', 'transactionMs'],
         ] as const,
+        trigramThresholds: [
+            ['POSTGRES_TRGM_SIMILARITY_THRESHOLD', 'pg_trgm.similarity_threshold', 0.3],
+            ['POSTGRES_TRGM_WORD_SIMILARITY_THRESHOLD', 'pg_trgm.word_similarity_threshold', 0.6],
+            ['POSTGRES_TRGM_STRICT_WORD_SIMILARITY_THRESHOLD', 'pg_trgm.strict_word_similarity_threshold', 0.5],
+        ] as const,
     },
     tenant: {id: {system: '00000000-0000-7000-8000-000000000000', unspecified: '00000000-0000-7000-8000-ffffffffffff',} as const,},
 } as const;
@@ -53,6 +58,13 @@ const _layer = Layer.unwrapEffect(Effect.gen(function* () {
         transactionMs:          Config.integer('POSTGRES_TRANSACTION_TIMEOUT_MS').pipe(Config.withDefault(120_000)),
     });
     const timeoutPgOptions = _CONFIG.pgOptions.timeouts.map(([key, timeoutKey]) => [key, String(timeouts[timeoutKey])] as const);
+    const trigramPgOptions = yield* Effect.forEach(_CONFIG.pgOptions.trigramThresholds, ([envName, optionName, defaultValue]) =>
+        Config.number(envName).pipe(
+            Config.withDefault(defaultValue),
+            Config.validate({ message: `${envName} must be between 0 and 1`, validation: (value) => value >= 0 && value <= 1 }),
+            Config.map((value) => [optionName, String(value)] as const),
+        )
+    );
     const connectionUrl = yield* Config.redacted('DATABASE_URL').pipe(
         Config.mapAttempt((databaseUrl) => {
             const parsedUrl = new URL(Redacted.value(databaseUrl));
@@ -66,7 +78,7 @@ const _layer = Layer.unwrapEffect(Effect.gen(function* () {
             parsedUrl.searchParams.set(
                 'options',
                 Array.from(
-                    new Map<string, string>([...normalizedPgOptions, ...timeoutPgOptions]),
+                    new Map<string, string>([...normalizedPgOptions, ...timeoutPgOptions, ...trigramPgOptions]),
                     ([key, value]) => `-c ${key}=${value}`,
                 ).join(' '),
             );
@@ -136,7 +148,7 @@ const Client = (() => {
         tenant: (() => {
             const Id = _CONFIG.tenant.id;
             const ref = FiberRef.unsafeMake<string>(Id.unspecified);
-            const sqlContextRef = FiberRef.unsafeMake(false);
+            const sqlContextRef = FiberRef.unsafeMake(false, { fork: () => false });
             const tenant = {
                 current: FiberRef.get(ref),
                 Id,

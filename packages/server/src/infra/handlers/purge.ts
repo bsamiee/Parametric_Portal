@@ -18,7 +18,7 @@ import { ClusterService } from '../cluster.ts';
 const _JOBS = {
     'purge-api-keys':       { cron: '0 3 * * 0',    days: 365,  repo: 'apiKeys' as const,       scope: 'tenant' as const, strategy: 'db-only' as const },
     'purge-assets':         { cron: '0 */6 * * *',  days: 30,   repo: 'assets' as const,        scope: 'tenant' as const, strategy: 'db-and-s3' as const },
-    'purge-event-journal':  { cron: '0 2 * * *',    days: 30,   repo: 'eventJournal' as const,  scope: 'global' as const, strategy: 'db-only' as const },
+    'purge-event-journal':  { cron: '0 2 * * *',    days: 30,   repo: 'journal' as const,  scope: 'global' as const, strategy: 'db-only' as const },
     'purge-job-dlq':        { cron: '0 2 * * *',    days: 30,   repo: 'jobDlq' as const,        scope: 'tenant' as const, strategy: 'db-only' as const },
     'purge-kv-store':       { cron: '0 0 * * 0',    days: 90,   repo: 'kvStore' as const,       scope: 'global' as const, strategy: 'db-only' as const },
     'purge-mfa-secrets':    { cron: '0 4 * * 0',    days: 90,   repo: 'mfaSecrets' as const,    scope: 'tenant' as const, strategy: 'db-only' as const },
@@ -34,12 +34,23 @@ const _config = Config.all({
     }).pipe(Config.withDefault({ cron: defaults.cron, days: defaults.days })))),
     s3: Config.all({ batchSize: Config.integer('PURGE_S3_BATCH_SIZE').pipe(Config.withDefault(100)), concurrency: Config.integer('PURGE_S3_CONCURRENCY').pipe(Config.withDefault(2)) }),
 });
+const _batchRemoveS3 = (assets: ReadonlyArray<{ storageRef: string | null }>, storage: typeof StorageService.Service, s3Config: { readonly batchSize: number; readonly concurrency: number }, label: string) =>
+    Effect.gen(function* () {
+        const chunks = A.chunksOf(A.filterMap(assets, (asset) => Option.fromNullable(asset.storageRef)), s3Config.batchSize);
+        const batchRemove = (batch: ReadonlyArray<string>) => storage.remove(batch).pipe(
+            Effect.as({ deleted: batch.length, failed: 0 }),
+            Effect.tapError((error) => Effect.logWarning(`S3 batch delete failed (${label})`, { error: String(error), keys: batch.length })),
+            Effect.orElseSucceed(() => ({ deleted: 0, failed: batch.length })),
+        );
+        const results = yield* Effect.forEach(chunks, batchRemove, { concurrency: s3Config.concurrency });
+        return A.reduce(results, { deleted: 0, failed: 0 }, (accumulator, result) => ({ deleted: accumulator.deleted + result.deleted, failed: accumulator.failed + result.failed }));
+    });
 const _purgeDbOnly = (database: DatabaseService.Type, repo: typeof _JOBS[keyof typeof _JOBS]['repo'], days: number) =>
     Match.value(repo).pipe(
         Match.when('apiKeys', () => database.apiKeys.purge(days)),
         Match.when('apps', () => Effect.succeed(0)),
         Match.when('assets', () => database.assets.purge(days)),
-        Match.when('eventJournal', () => database.eventJournal.purge(days)),
+        Match.when('journal', () => database.journal.purge(days)),
         Match.when('jobDlq', () => database.jobDlq.purge(days)),
         Match.when('kvStore', () => database.kvStore.purge(days)),
         Match.when('mfaSecrets', () => database.mfaSecrets.purge(days)),
@@ -60,27 +71,13 @@ class PurgeService extends Effect.Service<PurgeService>()('server/Purge', {
         'cascade-tenant': (database: DatabaseService.Type, storage: typeof StorageService.Service, _days: number, _repo: PurgeService.PurgeableRepo, s3Config: { readonly batchSize: number; readonly concurrency: number }) => Effect.gen(function* () {
             const tenantId = yield* Context.Request.currentTenantId;
             const assets = yield* database.assets.find([]);
-            const chunks = A.chunksOf(A.filterMap(assets, (asset) => Option.fromNullable(asset.storageRef)), s3Config.batchSize);
-            const batchRemove = (batch: ReadonlyArray<string>) => storage.remove(batch).pipe(
-                Effect.as({ deleted: batch.length, failed: 0 }),
-                Effect.tapError((error) => Effect.logWarning('S3 batch delete failed (cascade)', { error: String(error), keys: batch.length })),
-                Effect.orElseSucceed(() => ({ deleted: 0, failed: batch.length })),
-            );
-            const results = yield* Effect.forEach(chunks, batchRemove, { concurrency: s3Config.concurrency });
-            const s3 = A.reduce(results, { deleted: 0, failed: 0 }, (accumulator, result) => ({ deleted: accumulator.deleted + result.deleted, failed: accumulator.failed + result.failed }));
-            const dbPurged = yield* database.system.purgeTenantCascade(tenantId).pipe(Effect.orElseSucceed(() => 0));
+            const s3 = yield* _batchRemoveS3(assets, storage, s3Config, 'cascade');
+            const dbPurged = yield* database.system.tenantPurge(tenantId).pipe(Effect.orElseSucceed(() => 0));
             return { dbPurged, s3Deleted: s3.deleted, s3Failed: s3.failed };
         }),
         'db-and-s3': (database: DatabaseService.Type, storage: typeof StorageService.Service, days: number, _repo: PurgeService.PurgeableRepo, s3Config: { readonly batchSize: number; readonly concurrency: number }) => Effect.gen(function* () {
             const assets = yield* database.assets.findStaleForPurge(days);
-            const chunks = A.chunksOf(A.filterMap(assets, (asset) => Option.fromNullable(asset.storageRef)), s3Config.batchSize);
-            const batchRemove = (batch: ReadonlyArray<string>) => storage.remove(batch).pipe(
-                Effect.as({ deleted: batch.length, failed: 0 }),
-                Effect.tapError((error) => Effect.logWarning('S3 batch delete failed', { error: String(error), keys: batch.length })),
-                Effect.orElseSucceed(() => ({ deleted: 0, failed: batch.length }))
-            );
-            const results = yield* Effect.forEach(chunks, batchRemove, { concurrency: s3Config.concurrency });
-            const s3 = A.reduce(results, { deleted: 0, failed: 0 }, (accumulator, result) => ({ deleted: accumulator.deleted + result.deleted, failed: accumulator.failed + result.failed }));
+            const s3 = yield* _batchRemoveS3(assets, storage, s3Config, 'purge');
             const dbPurged = yield* database.assets.purge(days).pipe(Effect.orElseSucceed(() => 0));
             return { dbPurged, s3Deleted: s3.deleted, s3Failed: s3.failed };
         }),
@@ -136,7 +133,7 @@ class PurgeService extends Effect.Service<PurgeService>()('server/Purge', {
             const archived = A.filter(apps, (app) => app.status === 'archived' && app.updatedAt < thirtyDaysAgo);
             yield* Effect.forEach(archived, (app) => Context.Request.withinSync(
                 app.id,
-                jobs.submit('purge-tenant-data', null),
+                jobs.submit('tenant-lifecycle', { _tag: 'purge' as const, tenantId: app.id }),
                 Context.Request.system(),
             ).pipe(Effect.asVoid), { discard: true });
         }),

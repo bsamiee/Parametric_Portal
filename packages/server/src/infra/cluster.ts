@@ -35,6 +35,7 @@ const _shardingLayer = ShardingConfig.layer({
     sendRetryInterval:  _CONFIG.send.retryInterval,
     shardsPerGroup:     _CONFIG.sharding.shardsPerGroup,
 });
+const _CONTRACT_VERSION = '1';
 
 // --- [SCHEMA] ----------------------------------------------------------------
 
@@ -263,7 +264,7 @@ const _ClusterEntityLive = _ClusterEntity.toLayer(Effect.gen(function* () {
 }), {
     concurrency: _CONFIG.entity.concurrency,
     defectRetryPolicy: _retrySchedule(_CONFIG.retry.maxAttempts.defect),
-    spanAttributes: { 'entity.service': 'cluster-infrastructure', 'entity.version': 'v2' },
+    spanAttributes: { 'entity.service': 'cluster-infrastructure', 'entity.version': 'v2', 'rpc.contract_version': _CONTRACT_VERSION },
 });
 
 // --- [SERVICES] --------------------------------------------------------------

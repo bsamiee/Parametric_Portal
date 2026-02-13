@@ -50,7 +50,7 @@ const SearchLive = HttpApiBuilder.group(ParametricApi, 'search', (handlers) =>
                         total: result.total,
                     })),
                     Telemetry.span('search.query'),
-                    Effect.mapError((error) => HttpError.is(error) ? error : HttpError.Internal.of('Search failed', error)),
+                    HttpError.mapTo('Search failed'),
                 )))),
             )
             .handle('suggest', ({ urlParams }) =>
@@ -60,21 +60,21 @@ const SearchLive = HttpApiBuilder.group(ParametricApi, 'search', (handlers) =>
                     prefix: urlParams.prefix,
                 }).pipe(
                     Telemetry.span('search.suggest'),
-                    Effect.mapError((error) => HttpError.is(error) ? error : HttpError.Internal.of('Suggest failed', error)),
+                    HttpError.mapTo('Suggest failed'),
                 )))),
             )
             .handle('refresh', ({ payload }) =>
                 Middleware.guarded('search', 'refresh', 'api', search.refresh(payload.includeGlobal).pipe(
                     Effect.as({ status: 'ok' as const }),
                     Telemetry.span('search.refresh'),
-                    Effect.mapError((error) => HttpError.is(error) ? error : HttpError.Internal.of('Refresh failed', error)),
+                    HttpError.mapTo('Refresh failed'),
                 )),
             )
             .handle('refreshEmbeddings', ({ payload }) =>
                 Middleware.guarded('search', 'refreshEmbeddings', 'api', Middleware.feature('enableAiSearch').pipe(Effect.andThen(search.refreshEmbeddings({ includeGlobal: payload.includeGlobal }).pipe(
                     Effect.map((result) => ({ count: result.count })),
                     Telemetry.span('search.refreshEmbeddings'),
-                    Effect.mapError((error) => HttpError.is(error) ? error : HttpError.Internal.of('Embedding refresh failed', error)),
+                    HttpError.mapTo('Embedding refresh failed'),
                 )))),
             );
     }),

@@ -13,11 +13,8 @@ import { SearchRepo } from './search.ts';
 const makeUserRepo = Effect.gen(function* () {
     const repository = yield* repo(User, 'users', { resolve: { byEmail: 'email' }, scoped: 'appId' });
     return { ...repository,
-        byEmail: (email: string) => repository.by('byEmail', email),
         byRole: (role: string) => repository.find([{ field: 'role', value: role }]),
-        restore: (id: string, appId: string) => repository.lift(id, { app_id: appId }),
         setPreferences: (id: string, preferences: S.Schema.Type<typeof User.fields.preferences>) => repository.set(id, { preferences }),
-        softDelete: (id: string, appId: string) => repository.drop(id, { app_id: appId }),
     };
 });
 const makePermissionRepo = Effect.gen(function* () {
@@ -48,22 +45,18 @@ const makeAppRepo = Effect.gen(function* () {
     const repository = yield* repo(App, 'apps', { resolve: { byNamespace: 'namespace' } });
     const _decodeSettings = (rawValue: unknown) => S.decodeUnknown(AppSettingsSchema)(rawValue, { errors: 'all', onExcessProperty: 'ignore' });
     return { ...repository,
-        archive: (id: string) => repository.set(id, { status: 'archived' }),
-        byNamespace: (namespace: string) => repository.by('byNamespace', namespace),
         readSettings: (id: string, lock: false | 'update' = false) => repository.one([{ field: 'id', value: id }], lock).pipe(
             Effect.flatMap(Option.match({
                 onNone: () => Effect.succeed(Option.none()),
                 onSome: (app) => _decodeSettings(Option.getOrElse(app.settings, () => AppSettingsDefaults)).pipe(Effect.map((settings) => Option.some({ app, settings }))),
             })),
         ),
-        resume: (id: string) => repository.set(id, { status: 'active' }),
-        suspend: (id: string) => repository.set(id, { status: 'suspended' }),
         updateSettings: (id: string, settings: S.Schema.Type<typeof AppSettingsSchema>) => repository.set(id, { settings }),
     };
 });
 const makeSessionRepo = Effect.gen(function* () {
     const repository = yield* repo(Session, 'sessions', {
-        fn: { revoke_sessions_by_ip: { args: [{ cast: 'uuid', field: 'appId' }, { cast: 'inet', field: 'ip' }], params: S.Struct({ appId: S.UUID, ip: S.String }) } },
+        functions: { revoke_sessions_by_ip: { args: [{ cast: 'uuid', field: 'appId' }, { cast: 'inet', field: 'ip' }], params: S.Struct({ appId: S.UUID, ip: S.String }) } },
         purge: 'purge_sessions',
         resolve: {
             byAccessToken: { through: { source: 'token_access', table: 'session_tokens', target: 'session_id' } },
@@ -72,12 +65,10 @@ const makeSessionRepo = Effect.gen(function* () {
         scoped: 'appId',
     });
     return { ...repository,
-        byAccessToken: (hash: string) => repository.by('byAccessToken', hash),
-        byRefreshToken: (hash: string) => repository.by('byRefreshToken', hash),
         byRefreshTokenForUpdate: (hash: string) => repository.by('byRefreshToken', hash, 'update'),
         byUser: (userId: string) => repository.find([{ field: 'user_id', value: userId }]),
         softDelete: (id: string) => repository.drop(id),
-        softDeleteByIp: (appId: string, ip: string) => repository.fn('revoke_sessions_by_ip', { appId, ip }),
+        softDeleteByIp: (appId: string, ip: string) => repository.fn<number>('revoke_sessions_by_ip', { appId, ip }),
         touch: (id: string) => repository.set(id, { updated_at: Update.now }),
         verify: (id: string) => repository.set(id, { verified_at: Update.now }, undefined, { field: 'verified_at', op: 'null' }),
     };
@@ -85,10 +76,6 @@ const makeSessionRepo = Effect.gen(function* () {
 const makeApiKeyRepo = Effect.gen(function* () {
     const repository = yield* repo(ApiKey, 'api_keys', { purge: 'purge_api_keys', resolve: { byHash: 'hash', byUser: 'many:userId' } });
     return { ...repository,
-        byHash: (hash: string) => repository.by('byHash', hash),
-        byUser: (userId: string) => repository.by('byUser', userId),
-        restore: (id: string) => repository.lift(id),
-        softDelete: (id: string) => repository.drop(id),
         touch: (id: string) => repository.set(id, { last_used_at: Update.now }),
     };
 });
@@ -98,10 +85,7 @@ const makeOauthAccountRepo = Effect.gen(function* () {
         purge: 'purge_oauth_accounts', resolve: { byExternal: ['provider', 'externalId'], byUser: 'many:userId' },
     });
     return { ...repository,
-        byExternal: (provider: S.Schema.Type<typeof OauthAccount.fields.provider>, externalId: string) => repository.by('byExternal', { externalId, provider }),
-        byUser: (userId: string) => repository.by('byUser', userId),
-        restore: (id: string) => repository.lift(id),
-        softDelete: (id: string) => repository.drop(id),
+        byExternal: (provider: string, externalId: string) => repository.by('byExternal', { externalId, provider }),
     };
 });
 const makeAssetRepo = Effect.gen(function* () {
@@ -120,20 +104,18 @@ const makeAssetRepo = Effect.gen(function* () {
             ])),
         ),
         insertMany: (items: readonly S.Schema.Type<typeof Asset.insert>[]) => repository.put([...items]),
-        restore: (id: string, appId: string) => repository.lift(id, { app_id: appId }),
-        softDelete: (id: string, appId: string) => repository.drop(id, { app_id: appId }),
     };
 });
 const makeAuditRepo = Effect.gen(function* () {
     const repository = yield* repo(AuditLog, 'audit_logs', {
-        fn: { count_audit_by_ip: { args: [{ cast: 'uuid', field: 'appId' }, { cast: 'inet', field: 'ip' }, 'windowMinutes'], params: S.Struct({ appId: S.UUID, ip: S.String, windowMinutes: S.Number }) } },
+        functions: { count_audit_by_ip: { args: [{ cast: 'uuid', field: 'appId' }, { cast: 'inet', field: 'ip' }, 'windowMinutes'], params: S.Struct({ appId: S.UUID, ip: S.String, windowMinutes: S.Number }) } },
         scoped: 'appId',
     });
     return { ...repository,
         byIp: (ip: string, limit: number, cursor?: string) => repository.page([{ field: 'context_ip', value: ip }], { cursor, limit }),
         bySubject: (type: string, id: string, limit: number, cursor?: string, { after, before, operation }: { after?: Date; before?: Date; operation?: S.Schema.Type<typeof AuditOperationSchema> } = {}) => repository.page([{ field: 'target_type', value: type }, { field: 'target_id', value: id }, ...repository.preds({ after, before, operation })], { cursor, limit }),
         byUser: (userId: string, limit: number, cursor?: string, { after, before, operation }: { after?: Date; before?: Date; operation?: S.Schema.Type<typeof AuditOperationSchema> } = {}) => repository.page(repository.preds({ after, before, operation, user_id: userId }), { cursor, limit }),
-        countByIp: (appId: string, ip: string, windowMinutes = 60) => repository.fn('count_audit_by_ip', { appId, ip, windowMinutes }),
+        countByIp: (appId: string, ip: string, windowMinutes = 60) => repository.fn<number>('count_audit_by_ip', { appId, ip, windowMinutes }),
         log: repository.insert,
     };
 });
@@ -143,16 +125,12 @@ const makeMfaSecretRepo = Effect.gen(function* () {
         purge: 'purge_mfa_secrets', resolve: { byUser: 'userId' },
     });
     return { ...repository,
-        byUser: (userId: string) => repository.by('byUser', userId),
         softDelete: (userId: string) => repository.drop([{ field: 'user_id', value: userId }]),
     };
 });
 const makeWebauthnCredentialRepo = Effect.gen(function* () {
     const repository = yield* repo(WebauthnCredential, 'webauthn_credentials', { resolve: { byCredentialId: 'credentialId', byUser: 'many:userId' } });
     return { ...repository,
-        byCredentialId: (credentialId: string) => repository.by('byCredentialId', credentialId),
-        byUser: (userId: string) => repository.by('byUser', userId),
-        softDelete: (id: string) => repository.drop(id),
         touch: (id: string) => repository.set(id, { last_used_at: Update.now }),
         updateCounter: (id: string, counter: number) => repository.set(id, { counter, last_used_at: Update.now }),
     };
@@ -172,7 +150,6 @@ const makeJobDlqRepo = Effect.gen(function* () {
     return { ...repository,
         byErrorReason: (errorReason: string, options?: { limit?: number; cursor?: string }) => repository.page([{ field: 'error_reason', value: errorReason }], { cursor: options?.cursor, limit: options?.limit ?? 100 }),
         byRequest: (requestId: string) => repository.find([{ field: 'context_request_id', value: requestId }]),
-        bySource: (sourceId: string) => repository.by('bySource', sourceId),
         countPending: (type?: string) => repository.count(type === undefined ? [] : [{ field: 'type', op: type.includes('*') ? 'like' as const : 'eq' as const, value: type.replaceAll('*', '%') }]),
         listPending: (options?: { type?: string; limit?: number; cursor?: string }) => repository.page(options?.type === undefined ? [] : [{ field: 'type', op: options.type.includes('*') ? 'like' as const : 'eq' as const, value: options.type.replaceAll('*', '%') }], { cursor: options?.cursor, limit: options?.limit ?? 100 }),
         markReplayed: (id: string) => repository.drop(id),
@@ -200,63 +177,58 @@ const makeNotificationRepo = Effect.gen(function* () {
 const makeKvStoreRepo = Effect.gen(function* () {
     const repository = yield* repo(KvStore, 'kv_store', {
         conflict: { keys: ['key'], only: ['value', 'expiresAt'] },
-        fn: { delete_kv_by_prefix: { args: ['prefix'], params: S.Struct({ prefix: S.String }) } },
+        functions: { delete_kv_by_prefix: { args: ['prefix'], params: S.Struct({ prefix: S.String }) } },
         purge: 'purge_kv_store', resolve: { byKey: 'key' },
     });
     return { ...repository,
-        byKey: (key: string) => repository.by('byKey', key),
-        deleteByPrefix: (prefix: string) => repository.fn('delete_kv_by_prefix', { prefix }),
+        deleteByPrefix: (prefix: string) => repository.fn<number>('delete_kv_by_prefix', { prefix }),
         getJson: <A, I, R>(key: string, schema: S.Schema<A, I, R>) => repository.by('byKey', key).pipe(Effect.flatMap(repository.json.decode('value', schema))),
         setJson: <A, I, R>(key: string, jsonValue: A, schema: S.Schema<A, I, R>, expiresAt?: Date) => repository.json.encode(schema)(jsonValue).pipe(Effect.flatMap((encoded) => repository.upsert({ expiresAt, key, value: encoded }))),
     };
 });
 const makeSystemRepo = Effect.gen(function* () {
     const repository = yield* routine('database/system', {
-        fn: { count_event_outbox: {}, purge_event_journal: { args: ['days'], params: S.Struct({ days: S.Number }) }, purge_tenant_cascade: { args: ['appId'], params: S.Struct({ appId: S.UUID }) } },
-        fnSet: {
-            get_db_cache_hit_ratio: { schema: S.Struct({ backendType: S.String, cacheHitRatio: S.Number, hits: S.Number, ioContext: S.String, ioObject: S.String, reads: S.Number, writes: S.Number }) },
-            get_db_io_config: { schema: S.Struct({ name: S.String, setting: S.String }) },
-            get_db_io_stats: { schema: S.Unknown },
-            get_event_journal_entry_by_primary_key: {
-                args: ['primaryKey'],
-                params: S.Struct({ primaryKey: S.String }),
-                schema: S.Struct({ payload: S.String }),
-            },
-            list_event_journal_entries: {
-                args: ['sinceSequenceId', 'sinceTimestamp', 'eventType', 'batchSize'],
-                params: S.Struct({ batchSize: S.Number, eventType: S.NullOr(S.String), sinceSequenceId: S.String, sinceTimestamp: S.NullOr(S.Number) }),
-                schema: S.Struct({ payload: S.String, primaryKey: S.String }),
-                },
-        },
-        fnTyped: {
-            list_cron_jobs_json: { schema: S.Array(S.Unknown) },
-            list_partition_health_json: { args: ['parentTable'], params: S.Struct({ parentTable: S.String }), schema: S.Array(S.Unknown) },
-            list_stat_kcache_json: { args: ['limit'], params: S.Struct({ limit: S.Number }), schema: S.Array(S.Unknown) },
-            list_stat_statements_json: { args: ['limit'], params: S.Struct({ limit: S.Number }), schema: S.Array(S.Unknown) },
-            list_walinspect_json: { args: ['limit'], params: S.Struct({ limit: S.Number }), schema: S.Array(S.Unknown) },
-            reconcile_maintenance_cron_jobs: { schema: S.Array(S.Unknown) },
+        functions: {
+            count_outbox: {},
+            get_journal_entry:     { args: ['primaryKey'], mode: 'set', params: S.Struct({ primaryKey: S.String }), schema: S.Struct({ payload: S.String }) },
+            list_cron_jobs:        { mode: 'typed', schema: S.Array(S.Unknown) },
+            list_journal_entries:  { args: ['sinceSequenceId', 'sinceTimestamp', 'eventType', 'batchSize'], mode: 'set', params: S.Struct({ batchSize: S.Number, eventType: S.NullOr(S.String), sinceSequenceId: S.String, sinceTimestamp: S.NullOr(S.Number) }), schema: S.Struct({ payload: S.String, primaryKey: S.String }) },
+            list_partition_health: { args: ['parentTable'], mode: 'typed', params: S.Struct({ parentTable: S.String }), schema: S.Array(S.Unknown) },
+            purge_journal:         { args: ['days'], params: S.Struct({ days: S.Number }) },
+            purge_tenant:          { args: ['appId'], params: S.Struct({ appId: S.UUID }) },
+            stat_cache_ratio:      { mode: 'set', schema: S.Struct({ backendType: S.String, cacheHitRatio: S.Number, hits: S.Number, ioContext: S.String, ioObject: S.String, reads: S.Number, writes: S.Number }) },
+            stat_io_config:        { mode: 'set', schema: S.Struct({ name: S.String, setting: S.String }) },
+            stat_io_detail:        { mode: 'set', schema: S.Unknown },
+            stat_kcache:           { args: ['limit'], mode: 'typed', params: S.Struct({ limit: S.Number }), schema: S.Array(S.Unknown) },
+            stat_qualstats:        { args: ['limit'], mode: 'typed', params: S.Struct({ limit: S.Number }), schema: S.Array(S.Unknown) },
+            stat_statements:       { args: ['limit'], mode: 'typed', params: S.Struct({ limit: S.Number }), schema: S.Array(S.Unknown) },
+            stat_wait_sampling:    { args: ['limit'], mode: 'typed', params: S.Struct({ limit: S.Number }), schema: S.Array(S.Unknown) },
+            stat_wal_inspect:      { args: ['limit'], mode: 'typed', params: S.Struct({ limit: S.Number }), schema: S.Array(S.Unknown) },
+            sync_cron_jobs:        { mode: 'typed', schema: S.Array(S.Unknown) },
         },
     });
     return {
-        dbCacheHitRatio: () => repository.fnSet('get_db_cache_hit_ratio', {}),
-        dbIoConfig: () => repository.fnSet('get_db_io_config', {}),
-        dbIoStats: () => repository.fnSet('get_db_io_stats', {}),
-        eventJournalByPrimaryKey: (primaryKey: string) => repository.fnSet('get_event_journal_entry_by_primary_key', { primaryKey }).pipe(Effect.map((rows) => Option.fromNullable(rows[0]))),
-        eventJournalPurge: (days: number) => repository.fn('purge_event_journal', { days }),
-        eventJournalReplay: (input: { batchSize: number; eventType?: string; sinceSequenceId: string; sinceTimestamp?: number }) => repository.fnSet('list_event_journal_entries', {
+        cacheRatio: () => repository.fn<readonly { backendType: string; cacheHitRatio: number; hits: number; ioContext: string; ioObject: string; reads: number; writes: number }[]>('stat_cache_ratio', {}),
+        cronJobs: () => repository.fn<readonly unknown[]>('list_cron_jobs', {}),
+        ioConfig: () => repository.fn<readonly { name: string; setting: string }[]>('stat_io_config', {}),
+        ioDetail: () => repository.fn<readonly unknown[]>('stat_io_detail', {}),
+        journalEntry: (primaryKey: string) => repository.fn<readonly { payload: string }[]>('get_journal_entry', { primaryKey }).pipe(Effect.map((rows) => Option.fromNullable(rows[0]))),
+        journalPurge: (days: number) => repository.fn<number>('purge_journal', { days }),
+        journalReplay: (input: { batchSize: number; eventType?: string; sinceSequenceId: string; sinceTimestamp?: number }) => repository.fn<readonly { payload: string; primaryKey: string }[]>('list_journal_entries', {
             batchSize: input.batchSize,
             eventType: Option.getOrNull(Option.fromNullable(input.eventType)),
             sinceSequenceId: input.sinceSequenceId,
             sinceTimestamp: Option.getOrNull(Option.fromNullable(input.sinceTimestamp)),
         }),
-        eventOutboxCount: () => repository.fn('count_event_outbox', {}),
-        listCronJobs: () => repository.fnTyped('list_cron_jobs_json', {}),
-        listPartitionHealth: (parentTable = 'public.sessions') => repository.fnTyped('list_partition_health_json', { parentTable }),
-        listStatKcache: (limit = 100) => repository.fnTyped('list_stat_kcache_json', { limit }),
-        listStatStatements: (limit = 100) => repository.fnTyped('list_stat_statements_json', { limit }),
-        listWalInspect: (limit = 100) => repository.fnTyped('list_walinspect_json', { limit }),
-        purgeTenantCascade: (appId: string) => repository.fn('purge_tenant_cascade', { appId }),
-        reconcileMaintenanceCronJobs: () => repository.fnTyped('reconcile_maintenance_cron_jobs', {}),
+        kcache: (limit = 100) => repository.fn<readonly unknown[]>('stat_kcache', { limit }),
+        outboxCount: () => repository.fn<number>('count_outbox', {}),
+        partitionHealth: (parentTable = 'public.sessions') => repository.fn<readonly unknown[]>('list_partition_health', { parentTable }),
+        qualstats: (limit = 100) => repository.fn<readonly unknown[]>('stat_qualstats', { limit }),
+        statements: (limit = 100) => repository.fn<readonly unknown[]>('stat_statements', { limit }),
+        syncCronJobs: () => repository.fn<readonly unknown[]>('sync_cron_jobs', {}),
+        tenantPurge: (appId: string) => repository.fn<number>('purge_tenant', { appId }),
+        waitSampling: (limit = 100) => repository.fn<readonly unknown[]>('stat_wait_sampling', { limit }),
+        walInspect: (limit = 100) => repository.fn<readonly unknown[]>('stat_wal_inspect', { limit }),
     };
 });
 
@@ -271,28 +243,30 @@ class DatabaseService extends Effect.Service<DatabaseService>()('database/Databa
             makeOauthAccountRepo, makeAssetRepo, makeAuditRepo, makeMfaSecretRepo, makeWebauthnCredentialRepo, makeJobRepo, makeJobDlqRepo, makeNotificationRepo, makeKvStoreRepo, makeSystemRepo,
         ]);
         const monitoring = {
-            cacheHitRatio: Effect.fn('db.cacheHitRatio')(system.dbCacheHitRatio),
-            ioConfig: Effect.fn('db.ioConfig')(system.dbIoConfig),
-            ioStats: Effect.fn('db.ioStats')(system.dbIoStats),
+            cacheRatio: Effect.fn('db.cacheRatio')(system.cacheRatio),
+            ioConfig: Effect.fn('db.ioConfig')(system.ioConfig),
+            ioDetail: Effect.fn('db.ioDetail')(system.ioDetail),
         } as const;
         return {
-            apiKeys, apps, assets, audit, eventJournal: {
-                byPrimaryKey: (primaryKey: string) => system.eventJournalByPrimaryKey(primaryKey),
-                purge: (olderThanDays: number) => system.eventJournalPurge(olderThanDays),
-                replay: (input: { batchSize: number; eventType?: string; sinceSequenceId: string; sinceTimestamp?: number }) => system.eventJournalReplay(input),
-            }, eventOutbox: { count: system.eventOutboxCount() },
-            jobDlq, jobs, kvStore,
-            listCronJobs: Effect.fn('db.listCronJobs')(() => system.listCronJobs()),
-            listPartitionHealth: Effect.fn('db.listPartitionHealth')((parentTable = 'public.sessions') => system.listPartitionHealth(parentTable)),
-            listStatKcache: Effect.fn('db.listStatKcache')((limit = 100) => system.listStatKcache(limit)),
-            listStatStatements: Effect.fn('db.listStatStatements')((limit = 100) => system.listStatStatements(limit)),
-            listWalInspect: Effect.fn('db.listWalInspect')((limit = 100) => system.listWalInspect(limit)),
+            apiKeys, apps, assets, audit,
+            cronJobs: Effect.fn('db.cronJobs')(() => system.cronJobs()),
+            jobDlq, jobs, journal: {
+                entry: (primaryKey: string) => system.journalEntry(primaryKey),
+                purge: (olderThanDays: number) => system.journalPurge(olderThanDays),
+                replay: (input: { batchSize: number; eventType?: string; sinceSequenceId: string; sinceTimestamp?: number }) => system.journalReplay(input),
+            },
+            kcache: Effect.fn('db.kcache')((limit = 100) => system.kcache(limit)),kvStore,
             mfaSecrets,
-            monitoring, notifications, oauthAccounts, permissions,
-            reconcileMaintenanceCronJobs: Effect.fn('db.reconcileMaintenanceCronJobs')(() => system.reconcileMaintenanceCronJobs()),
+            monitoring, notifications, oauthAccounts, outbox: { count: system.outboxCount() },
+            partitionHealth: Effect.fn('db.partitionHealth')((parentTable = 'public.sessions') => system.partitionHealth(parentTable)),permissions,
+            qualstats: Effect.fn('db.qualstats')((limit = 100) => system.qualstats(limit)),
             search: searchRepo, sessions,
-            system: { purgeTenantCascade: (appId: string) => system.purgeTenantCascade(appId) },
-            users, webauthnCredentials, withTransaction: sqlClient.withTransaction,
+            statements: Effect.fn('db.statements')((limit = 100) => system.statements(limit)),
+            syncCronJobs: Effect.fn('db.syncCronJobs')(() => system.syncCronJobs()),
+            system: { tenantPurge: (appId: string) => system.tenantPurge(appId) },
+            users,
+            waitSampling: Effect.fn('db.waitSampling')((limit = 100) => system.waitSampling(limit)),
+            walInspect: Effect.fn('db.walInspect')((limit = 100) => system.walInspect(limit)),webauthnCredentials, withTransaction: sqlClient.withTransaction,
         };
     }),
 }) {}

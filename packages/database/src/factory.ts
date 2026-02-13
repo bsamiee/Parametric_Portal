@@ -7,7 +7,7 @@ import { Model, SqlClient, SqlSchema, type Statement } from '@effect/sql';
 import { PgClient } from '@effect/sql-pg';
 import type { SqlError } from '@effect/sql/SqlError';
 import type { ParseError } from 'effect/ParseResult';
-import { Array as A, type Cause, Data, Effect, Option, Record as R, Schema as S, Stream } from 'effect';
+import { Array as A, type Cause, Data, Effect, Match, Option, Record as R, Schema as S, Stream } from 'effect';
 import { Client } from './client.ts';
 import { Field } from './field.ts';
 import { Page } from './page.ts';
@@ -25,7 +25,7 @@ type AggResult<T extends AggSpec> = { [K in keyof T]: T[K] extends true ? number
 type AggSpec = { sum?: string; avg?: string; min?: string; max?: string; count?: true };
 type MergeResult<T> = T & { readonly _action: 'insert' | 'update' };
 type SqlCast = typeof Field.sqlCast[keyof typeof Field.sqlCast];
-type FnConfig = { args?: readonly (string | { field: string; cast: SqlCast })[]; params?: S.Schema.AnyNoContext };
+type FnCallSpec = { args?: readonly (string | { field: string; cast: SqlCast })[]; params?: S.Schema.AnyNoContext; mode?: 'scalar' | 'set' | 'typed'; schema?: S.Schema.AnyNoContext };
 type ResolveDirectSpec<M extends Model.AnyNoContext> =
     | keyof M['fields'] & string
     | readonly (keyof M['fields'] & string)[]
@@ -46,14 +46,17 @@ type Config<M extends Model.AnyNoContext> = {
     resolve?: Record<string, ResolveSpec<M>>;
     conflict?: { keys: (keyof M['fields'] & string)[]; only?: (keyof M['fields'] & string)[] };
     purge?: string;
-    fn?: Record<string, FnConfig>;
-    fnSet?: Record<string, FnConfig>;
-    fnTyped?: Record<string, FnConfig & { schema: S.Schema.AnyNoContext }>;
+    functions?: Record<string, FnCallSpec>;
 };
 type RoutineConfig = {
-    fn?: Record<string, FnConfig>;
-    fnSet?: Record<string, FnConfig & { schema: S.Schema.AnyNoContext }>;
-    fnTyped?: Record<string, FnConfig & { schema: S.Schema.AnyNoContext }>;
+    functions?: Record<string, FnCallSpec>;
+};
+type _ResolverSurface<M extends Model.AnyNoContext, C extends Config<M>> = {
+    [K in string & keyof NonNullable<C['resolve']> as NonNullable<C['resolve']>[K] extends readonly string[] ? never : K]: (value: unknown) => (
+        ResolveMany<NonNullable<C['resolve']>[K]> extends true
+            ? Effect.Effect<readonly S.Schema.Type<M>[], SqlError | ParseError | RepoScopeError | RepoConfigError>
+            : Effect.Effect<Option.Option<S.Schema.Type<M>>, SqlError | ParseError | RepoScopeError | RepoConfigError>
+    );
 };
 type Pred =
     | [string, unknown]
@@ -71,9 +74,24 @@ const Update = {
     jsonb: { del: (path: readonly string[]) => new JsonbDelOp({ path }), set: (path: readonly string[], value: unknown) => new JsonbSetOp({ path, value }) },
     now: NowOp,
 };
-const _EMPTY_FN_PARAMS = S.Struct({});
-const _fnArgs = (sql: SqlClient.SqlClient, spec: { args?: FnConfig['args'] }, params: Record<string, unknown>) =>
-    sql.csv((spec.args ?? []).map(arg => typeof arg === 'string' ? sql`${params[arg]}` : sql`${params[arg.field]}::${sql.literal(arg.cast)}`));
+// Why: Unified SQL function dispatcher — repo() wraps with tenant context, routine() calls directly.
+const _callFn = (sql: SqlClient.SqlClient, specs: Record<string, FnCallSpec> | undefined, modelSchema: S.Schema.AnyNoContext | undefined, table: string) =>
+    (name: string, params: Record<string, unknown>): Effect.Effect<unknown, RepoConfigError | RepoUnknownFnError | SqlError | ParseError | Cause.NoSuchElementException> =>
+        Option.fromNullable(specs?.[name]).pipe(
+            Option.match({
+                onNone: () => Effect.fail(specs ? new RepoUnknownFnError({ fn: name, table }) : new RepoConfigError({ message: 'no functions configured', operation: 'fn', table })),
+                onSome: (spec) => {
+                    const args = sql.csv((spec.args ?? []).map(arg => typeof arg === 'string' ? sql`${params[arg]}` : sql`${params[arg.field]}::${sql.literal(arg.cast)}`));
+                    const request = spec.params ?? S.Struct({});
+                    return Match.value(spec.mode ?? 'scalar' as const).pipe(
+                        Match.when('set', () => SqlSchema.findAll({ execute: () => sql`SELECT * FROM ${sql.literal(name)}(${args})`, Request: request, Result: modelSchema ?? spec.schema ?? S.Unknown })(params)),
+                        Match.when('typed', () => SqlSchema.single({ execute: () => sql`SELECT ${sql.literal(name)}(${args}) AS value`, Request: request, Result: S.Struct({ value: spec.schema ?? S.Unknown }) })(params).pipe(Effect.map(row => row.value))),
+                        Match.when('scalar', () => SqlSchema.single({ execute: () => sql`SELECT ${sql.literal(name)}(${args}) AS value`, Request: request, Result: S.Struct({ value: S.Int }) })(params).pipe(Effect.map(row => row.value))),
+                        Match.exhaustive,
+                    );
+                },
+            }),
+        );
 const _isJoinResolve = (spec: ResolveSpec<Model.AnyNoContext>): spec is ResolveJoinSpec =>
     typeof spec === 'object' && !Array.isArray(spec) && 'through' in spec;
 const _extractResolveFields = (source: string | readonly string[]) => {
@@ -438,27 +456,9 @@ const repo = <M extends Model.AnyNoContext, const C extends Config<M>>(model: M,
                     Effect.map(($autoScope) => Stream.mapEffect(sql`SELECT * FROM ${sql(table)} WHERE ${$where(predicate)}${$active}${$fresh}${$autoScope} ${$order(options.asc ?? false)}`.stream, S.decodeUnknown(model))),
                 ),
             );
-        const fn = (name: string, params: Record<string, unknown>): Effect.Effect<number, RepoConfigError | RepoScopeError | RepoUnknownFnError | SqlError | ParseError | Cause.NoSuchElementException> => { // NOSONAR S3358
-            const effect: Effect.Effect<number, RepoConfigError | RepoUnknownFnError | SqlError | ParseError | Cause.NoSuchElementException> = ((spec) => spec
-                ? SqlSchema.single({ execute: () => sql`SELECT ${sql.literal(name)}(${_fnArgs(sql, spec, params)}) AS count`, Request: spec.params ?? _EMPTY_FN_PARAMS, Result: S.Struct({ count: S.Int }) })(params).pipe(Effect.map(row => row.count))
-                : Effect.fail(config.fn ? new RepoUnknownFnError({ fn: name, table }) : new RepoConfigError({ message: 'no scalar functions configured', operation: 'fn', table }))
-            )(config.fn?.[name]);
-            return _withTenantContext('fn', effect);
-        };
-        const fnSet = (name: string, params: Record<string, unknown>): Effect.Effect<readonly S.Schema.Type<M>[], RepoConfigError | RepoScopeError | RepoUnknownFnError | SqlError | ParseError> => {
-            const effect: Effect.Effect<readonly S.Schema.Type<M>[], RepoConfigError | RepoUnknownFnError | SqlError | ParseError> = ((spec) => spec
-                ? SqlSchema.findAll({ execute: () => sql`SELECT * FROM ${sql.literal(name)}(${_fnArgs(sql, spec, params)})`, Request: spec.params ?? _EMPTY_FN_PARAMS, Result: model })(params)
-                : Effect.fail(config.fnSet ? new RepoUnknownFnError({ fn: name, table }) : new RepoConfigError({ message: 'no set functions configured', operation: 'fnSet', table }))
-            )(config.fnSet?.[name]);
-            return _withTenantContext('fnSet', effect);
-        };
-        const fnTyped = (name: string, params: Record<string, unknown>): Effect.Effect<unknown, RepoConfigError | RepoScopeError | RepoUnknownFnError | SqlError | ParseError | Cause.NoSuchElementException> => {
-            const effect: Effect.Effect<unknown, RepoConfigError | RepoUnknownFnError | SqlError | ParseError | Cause.NoSuchElementException> = ((spec) => spec
-                ? SqlSchema.single({ execute: () => sql`SELECT ${sql.literal(name)}(${_fnArgs(sql, spec, params)}) AS result`, Request: spec.params ?? _EMPTY_FN_PARAMS, Result: S.Struct({ result: spec.schema }) })(params).pipe(Effect.map(row => row.result))
-                : Effect.fail(config.fnTyped ? new RepoUnknownFnError({ fn: name, table }) : new RepoConfigError({ message: 'no typed functions configured', operation: 'fnTyped', table }))
-            )(config.fnTyped?.[name]);
-            return _withTenantContext('fnTyped', effect);
-        };
+        // Why: _callFn returns Effect<unknown> — generic <T> lets callers narrow the return type per function name
+        const fn = <T = unknown>(name: string, params: Record<string, unknown>) =>
+            _withTenantContext('fn', _callFn(sql, config.functions, model, table)(name, params) as Effect.Effect<T, RepoConfigError | RepoUnknownFnError | SqlError | ParseError | Cause.NoSuchElementException>);
         const withTransaction = sql.withTransaction;
         const json = {
             decode: <A, I, R>(field: string, schema: S.Schema<A, I, R>) =>
@@ -466,27 +466,38 @@ const repo = <M extends Model.AnyNoContext, const C extends Config<M>>(model: M,
                     opt._tag === 'None' ? Effect.succeed(Option.none<A>()) : S.decodeUnknown(S.parseJson(schema))((opt.value as Record<string, unknown>)[field]).pipe(Effect.option),
             encode: <A, I, R>(schema: S.Schema<A, I, R>) => (value: A): Effect.Effect<string, ParseError, R> => S.encode(S.parseJson(schema))(value),
         };
-        return { ...base, agg, by, count, drop, exists, find, fn, fnSet, fnTyped, json, lift, merge, one, page, pageOffset, pg, preds, purge, put, set, stream, upsert, withTransaction };
+        // Why: compound (array) resolve specs need named-param delegates — kept manual in repos.ts
+        const _resolverDelegates = Object.fromEntries(
+            Object.entries(config.resolve ?? {}).filter(([, spec]) => !Array.isArray(spec)).map(([name]) => [
+                name, (value: unknown) => by(name as string & keyof NonNullable<C['resolve']>, value),
+            ]),
+        ) as _ResolverSurface<M, C>;
+        // Why: Option.match returns union ({} | {restore,softDelete}) — TS spread collapses to {}; cast preserves delegate signatures
+        type _SoftDelegates = {
+            restore: (id: string, scopeVal?: string) => ReturnType<typeof lift>;
+            softDelete: (id: string, scopeVal?: string) => ReturnType<typeof drop>;
+        };
+        const _softDelegates = (softEntry
+            ? Option.match(_scopeOpt, {
+                onNone: () => ({
+                    restore: (id: string) => lift(id),
+                    softDelete: (id: string) => drop(id),
+                }),
+                onSome: (scopeCol) => ({
+                    restore: (id: string, scopeVal?: string) => lift(id, scopeVal !== undefined ? { [scopeCol]: scopeVal } : undefined),
+                    softDelete: (id: string, scopeVal?: string) => drop(id, scopeVal !== undefined ? { [scopeCol]: scopeVal } : undefined),
+                }),
+            })
+            : {}) as _SoftDelegates;
+        return { ...base, ..._resolverDelegates, ..._softDelegates, agg, by, count, drop, exists, find, fn, json, lift, merge, one, page, pageOffset, pg, preds, purge, put, set, stream, upsert, withTransaction };
         });
 const routine = <const C extends RoutineConfig>(table: string, config: C) =>
     Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient;
-        const fn = (name: string, params: Record<string, unknown>): Effect.Effect<number, RepoConfigError | RepoUnknownFnError | SqlError | ParseError | Cause.NoSuchElementException> =>
-            ((spec) => spec
-                ? SqlSchema.single({ execute: () => sql`SELECT ${sql.literal(name)}(${_fnArgs(sql, spec, params)}) AS count`, Request: spec.params ?? _EMPTY_FN_PARAMS, Result: S.Struct({ count: S.Int }) })(params).pipe(Effect.map(row => row.count))
-                : Effect.fail(config.fn ? new RepoUnknownFnError({ fn: name, table }) : new RepoConfigError({ message: 'no scalar functions configured', operation: 'fn', table }))
-            )(config.fn?.[name]);
-        const fnSet = <K extends string & keyof NonNullable<C['fnSet']>>(name: K, params: Record<string, unknown>) =>
-            ((spec) => spec
-                ? SqlSchema.findAll({ execute: () => sql`SELECT * FROM ${sql.literal(name)}(${_fnArgs(sql, spec, params)})`, Request: spec.params ?? _EMPTY_FN_PARAMS, Result: spec.schema })(params)
-                : Effect.fail(config.fnSet ? new RepoUnknownFnError({ fn: name, table }) : new RepoConfigError({ message: 'no set functions configured', operation: 'fnSet', table }))
-            )(config.fnSet?.[name]) as Effect.Effect<readonly S.Schema.Type<NonNullable<C['fnSet']>[K]['schema']>[], RepoConfigError | RepoUnknownFnError | SqlError | ParseError>;
-        const fnTyped = <K extends string & keyof NonNullable<C['fnTyped']>>(name: K, params: Record<string, unknown>) =>
-            ((spec) => spec
-                ? SqlSchema.single({ execute: () => sql`SELECT ${sql.literal(name)}(${_fnArgs(sql, spec, params)}) AS result`, Request: spec.params ?? _EMPTY_FN_PARAMS, Result: S.Struct({ result: spec.schema }) })(params).pipe(Effect.map(row => row.result))
-                : Effect.fail(config.fnTyped ? new RepoUnknownFnError({ fn: name, table }) : new RepoConfigError({ message: 'no typed functions configured', operation: 'fnTyped', table }))
-            )(config.fnTyped?.[name]) as Effect.Effect<S.Schema.Type<NonNullable<C['fnTyped']>[K]['schema']>, RepoConfigError | RepoUnknownFnError | SqlError | ParseError | Cause.NoSuchElementException>;
-        return { fn, fnSet, fnTyped };
+        // Why: _callFn returns Effect<unknown> — generic <T> lets callers narrow the return type per function name
+        const fn = <T = unknown>(name: string, params: Record<string, unknown>) =>
+            _callFn(sql, config.functions, undefined, table)(name, params) as Effect.Effect<T, RepoConfigError | RepoUnknownFnError | SqlError | ParseError | Cause.NoSuchElementException>;
+        return { fn };
     });
 
 // --- [EXPORT] ----------------------------------------------------------------

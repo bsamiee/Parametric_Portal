@@ -3,7 +3,7 @@
  * Single export per error type; use HttpError.Auth.of('reason').
  */
 import { HttpApiSchema } from '@effect/platform';
-import { Schema as S } from 'effect';
+import { Effect, Schema as S } from 'effect';
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
@@ -63,13 +63,16 @@ const _isHttpError = <E>(error: E): error is Extract<E, { readonly _tag: keyof t
     error !== null && typeof error === 'object' && '_tag' in error &&
     typeof (error as { readonly _tag: unknown })._tag === 'string' &&
     (error as { readonly _tag: string })._tag in _errors;
+const _mapToHttpError = (label: string) =>
+    Effect.mapError((error: unknown) => _isHttpError(error) ? error : Internal.of(label, error));
 
 // --- [ENTRY_POINT] -----------------------------------------------------------
 
 // biome-ignore lint/correctness/noUnusedVariables: const+namespace merge pattern
 const HttpError = {
     ..._errors,
-    is: _isHttpError
+    is: _isHttpError,
+    mapTo: _mapToHttpError,
 } as const;
 
 // --- [NAMESPACE] -------------------------------------------------------------
