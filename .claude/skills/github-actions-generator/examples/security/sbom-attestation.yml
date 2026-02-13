@@ -1,21 +1,34 @@
-# SBOM Attestation -- Build, scan (Trivy), SBOM (Syft), attest provenance, harden-runner
-name: Build and Attest Container Image
+# Container Supply Chain -- Build, Trivy severity gating, SBOM attestation, Cosign, verify
+# SLSA L3: wrap as workflow_call — job_workflow_ref binds provenance to reusable workflow.
+# Demonstrates: 4-job pipeline, weekly cron re-scan, VEX-aware Trivy, keyless Cosign,
+# gh attestation verify, cosign verify with certificate-identity-regexp.
+name: Container Supply Chain
 on:
   push: { branches: [main], tags: ['v*'] }
+  schedule:
+    - cron: '0 6 * * 1'  # Weekly Monday 06:00 UTC — re-scan for new CVEs
   workflow_dispatch:
+    inputs:
+      image-tag: { description: 'Image tag to re-scan', required: false, type: string }
 
-permissions: { contents: read, packages: write, id-token: write, attestations: write, security-events: write }
-concurrency:
-  group: sbom-attest-${{ github.ref }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
-env: { REGISTRY: ghcr.io, IMAGE_NAME: '${{ github.repository }}' }
+permissions: {}
+concurrency: { group: 'supply-chain-${{ github.ref }}', cancel-in-progress: false }
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
 
 jobs:
-  build-and-attest:
+  # --- [JOB 1] Build + push container image ---
+  build:
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    permissions: { contents: read, packages: write, id-token: write, attestations: write }
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+      image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
     steps:
-      - uses: step-security/harden-runner@002fdce3c6a235733a90a27c80493a3241e56863 # v2.12.0
+      - uses: step-security/harden-runner@5ef0c079ce82195b2a36a210272d6b661572d83e # v2.14.2
         with: { egress-policy: audit }
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
@@ -42,14 +55,93 @@ jobs:
           cache-to: type=gha,mode=max
           provenance: true
           sbom: true
-      - uses: anchore/sbom-action@28d71544de8eaf1b958d335707167c5f783590ad # v0.22.2
-        with: { image: '${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}', format: spdx-json, output-file: sbom.spdx.json, upload-artifact: true }
-      - uses: actions/attest-sbom@4651f806c01d8637787e274ac3bdf724ef169f34 # v3.0.0
-        with: { subject-name: '${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}', subject-digest: '${{ steps.build.outputs.digest }}', sbom-path: sbom.spdx.json, push-to-registry: true }
-      - uses: aquasecurity/trivy-action@b6643a29fecd7f34b3597bc6acb0a98b03d33ff8 # 0.33.1
-        with: { image-ref: '${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}', format: sarif, output: trivy-results.sarif, severity: 'CRITICAL,HIGH' }
+
+  # --- [JOB 2] Trivy vulnerability scan with severity gating ---
+  scan:
+    needs: build
+    if: always() && (needs.build.result == 'success' || github.event_name == 'schedule')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions: { contents: read, security-events: write }
+    env:
+      SCAN_REF: ${{ needs.build.outputs.digest && format('{0}/{1}@{2}', 'ghcr.io', github.repository, needs.build.outputs.digest) || format('{0}/{1}:{2}', 'ghcr.io', github.repository, inputs.image-tag || 'main') }}
+    steps:
+      - uses: step-security/harden-runner@5ef0c079ce82195b2a36a210272d6b661572d83e # v2.14.2
+        with: { egress-policy: audit }
+      # CRITICAL gate: fail workflow on CRITICAL vulnerabilities
+      - uses: aquasecurity/trivy-action@c1824fd6edce30d7ab345a9989de00bbd46ef284 # 0.34.0
+        with:
+          image-ref: ${{ env.SCAN_REF }}
+          format: table
+          severity: CRITICAL
+          exit-code: '1'
+          # trivy-config: trivy.yaml  # VEX Hub filtering via vex.sources
+      # HIGH advisory: SARIF to Security tab, non-blocking
       - if: always()
-        uses: github/codeql-action/upload-sarif@46a5d05688af3c0b623936fd3365ef1ae945c1cd # v3.32.2
+        uses: aquasecurity/trivy-action@c1824fd6edce30d7ab345a9989de00bbd46ef284 # 0.34.0
+        with:
+          image-ref: ${{ env.SCAN_REF }}
+          format: sarif
+          output: trivy-results.sarif
+          severity: CRITICAL,HIGH
+          exit-code: '0'
+      - if: always()
+        uses: github/codeql-action/upload-sarif@45cbd0c69e560cd9e7cd7f8c32362050c9b7ded2 # v4.32.2
         with: { sarif_file: trivy-results.sarif, category: container-scan }
-      - uses: actions/attest-build-provenance@62fc1d596301d0ab9914e1fec14dc5c8d93f65cd # v3.2.0
-        with: { subject-name: '${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}', subject-digest: '${{ steps.build.outputs.digest }}', push-to-registry: true }
+
+  # --- [JOB 3] SBOM generation + attestation + Cosign keyless signing ---
+  attest:
+    needs: build
+    if: needs.build.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions: { contents: read, packages: write, id-token: write, attestations: write }
+    steps:
+      - uses: step-security/harden-runner@5ef0c079ce82195b2a36a210272d6b661572d83e # v2.14.2
+        with: { egress-policy: audit }
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        with: { registry: '${{ env.REGISTRY }}', username: '${{ github.actor }}', password: '${{ secrets.GITHUB_TOKEN }}' }
+      # SBOM generation (SPDX-JSON via Syft)
+      - uses: anchore/sbom-action@28d71544de8eaf1b958d335707167c5f783590ad # v0.22.2
+        with:
+          image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ needs.build.outputs.digest }}
+          format: spdx-json
+          output-file: sbom.spdx.json
+      # Attest SBOM to OCI registry (Sigstore bundle)
+      - uses: actions/attest-sbom@4651f806c01d8637787e274ac3bdf724ef169f34 # v3.0.0
+        with:
+          subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          subject-digest: ${{ needs.build.outputs.digest }}
+          sbom-path: sbom.spdx.json
+          push-to-registry: true
+      # Build provenance (SLSA L2; L3 when invoked via workflow_call)
+      - uses: actions/attest-build-provenance@96278af6caaf10aea03fd8d33a09a777ca52d62f # v3.2.0
+        with:
+          subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          subject-digest: ${{ needs.build.outputs.digest }}
+          push-to-registry: true
+      # Cosign keyless signing (Fulcio cert + Rekor transparency log via OIDC)
+      - uses: sigstore/cosign-installer@faadad0cce49287aee09b3a48701e75088a2c6ad # v4.0.0
+      - run: cosign sign --yes "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ needs.build.outputs.digest }}"
+
+  # --- [JOB 4] Consumer-side verification (Cosign + gh attestation) ---
+  verify:
+    needs: [build, attest]
+    if: needs.attest.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions: { contents: read, packages: read, id-token: write }
+    steps:
+      - uses: step-security/harden-runner@5ef0c079ce82195b2a36a210272d6b661572d83e # v2.14.2
+        with: { egress-policy: audit }
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        with: { registry: '${{ env.REGISTRY }}', username: '${{ github.actor }}', password: '${{ secrets.GITHUB_TOKEN }}' }
+      - uses: sigstore/cosign-installer@faadad0cce49287aee09b3a48701e75088a2c6ad # v4.0.0
+      - name: Verify Cosign signature  # Keyless: Fulcio cert + Rekor transparency log
+        run: |
+          cosign verify --certificate-oidc-issuer="https://token.actions.githubusercontent.com" \
+            --certificate-identity-regexp="^https://github.com/${{ github.repository }}/" \
+            "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ needs.build.outputs.digest }}"
+      - name: Verify GitHub attestations  # SBOM + provenance via gh CLI
+        env: { GH_TOKEN: '${{ secrets.GITHUB_TOKEN }}' }
+        run: gh attestation verify "oci://${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ needs.build.outputs.digest }}" --repo "${{ github.repository }}"

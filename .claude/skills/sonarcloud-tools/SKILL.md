@@ -4,10 +4,7 @@ type: complex
 depth: base
 user-invocable: false
 description: >-
-  Executes SonarCloud API queries via unified Python CLI. Use when checking
-  quality gate status, searching issues (bugs, vulnerabilities, code smells),
-  retrieving metrics (coverage, complexity), viewing analysis history, or
-  inspecting security hotspots.
+  Executes SonarCloud API operations for quality gates, issues, metrics, analysis history, and security hotspots. Use when checking code quality, inspecting bugs/vulnerabilities, retrieving coverage/complexity metrics, or viewing project security status.
 ---
 
 # [H1][SONARCLOUD-TOOLS]
@@ -39,14 +36,14 @@ pnpm sonar
 ---
 ## [1][COMMANDS]
 
-| [CMD]        | [ARGS]                    | [PURPOSE]                          |
-| ------------ | ------------------------- | ---------------------------------- |
-| quality-gate | `[branch]` or `pr <num>`  | Quality gate pass/fail status      |
-| issues       | `[severities] [types]`    | Search code issues                 |
-| measures     | `[metrics]`               | Project metrics                    |
-| analyses     | `[page_size]`             | Analysis history                   |
-| projects     | `[page_size]`             | List organization projects         |
-| hotspots     | `[status]`                | Security hotspots                  |
+| [CMD]        | [ARGS]                   | [PURPOSE]                     |
+| ------------ | ------------------------ | ----------------------------- |
+| quality-gate | `[branch]` or `pr <num>` | Quality gate pass/fail status |
+| issues       | `[severities] [types]`   | Search code issues            |
+| measures     | `[metrics]`              | Project metrics               |
+| analyses     | `[page_size]`            | Analysis history              |
+| projects     | `[page_size]`            | List organization projects    |
+| hotspots     | `[status]`               | Security hotspots             |
 
 ---
 ## [2][USAGE]
@@ -113,9 +110,9 @@ Commands return: `{"status": "success|error", ...}`.
 ---
 ## [5][ENVIRONMENT]
 
-| [VAR]         | [REQUIRED] | [DESCRIPTION]                         |
-| ------------- | ---------- | ------------------------------------- |
-| `SONAR_TOKEN` | Yes        | SonarCloud API token (1Password)      |
+| [VAR]         | [REQUIRED] | [DESCRIPTION]                    |
+| ------------- | ---------- | -------------------------------- |
+| `SONAR_TOKEN` | Yes        | SonarCloud API token (1Password) |
 
 ---
 ## [6][ERROR_HANDLING]

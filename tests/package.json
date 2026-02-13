@@ -10,7 +10,6 @@
     "devDependencies": {
         "@types/node": "catalog:",
         "@effect/vitest": "catalog:",
-        "@fast-check/vitest": "catalog:",
         "@parametric-portal/server": "workspace:*",
         "@parametric-portal/types": "workspace:*",
         "@playwright/test": "catalog:",
@@ -20,6 +19,7 @@
         "effect": "catalog:",
         "fast-check": "catalog:",
         "jszip": "catalog:",
+        "rfc6902": "catalog:",
         "vitest": "catalog:"
     }
 }

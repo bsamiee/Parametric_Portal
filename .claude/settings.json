@@ -45,6 +45,18 @@
         ]
       }
     ],
+    "Setup": [
+      {
+        "matcher": "init",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$CLAUDE_PROJECT_DIR\"/.claude/scripts/bootstrap-cli-tools.sh",
+            "timeout": 300
+          }
+        ]
+      }
+    ],
     "PostToolUse": [
       {
         "matcher": "*",

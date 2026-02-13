@@ -1,5 +1,4 @@
 """Shared constants, dispatch, and utilities for PromQL validation scripts."""
-
 import json
 import re
 import sys
@@ -9,46 +8,26 @@ from functools import reduce
 from typing import Final
 
 # --- [CONSTANTS] --------------------------------------------------------------
-
 METRIC_NAME: Final = r'[a-zA-Z_:][a-zA-Z0-9_:]*'
 DURATION: Final = r'\d+(?:ms|s|m|h|d|w|y)'
 
 FUNCTIONS: Final = frozenset({
-    # Aggregation
-    'sum', 'min', 'max', 'avg', 'group', 'stddev', 'stdvar', 'count',
-    'count_values', 'bottomk', 'topk', 'quantile', 'limitk', 'limit_ratio',
-    # Rate/increase
-    'rate', 'irate', 'increase', 'delta', 'idelta', 'deriv', 'resets',
-    # Time
-    'timestamp', 'time', 'minute', 'hour', 'day_of_month', 'day_of_week',
-    'days_in_month', 'month', 'year',
-    # Math
-    'abs', 'ceil', 'floor', 'round', 'sqrt', 'exp', 'ln', 'log2', 'log10',
-    'sin', 'cos', 'tan', 'asin', 'acos', 'atan', 'sinh', 'cosh', 'tanh',
-    'asinh', 'acosh', 'atanh', 'deg', 'rad', 'sgn', 'clamp', 'clamp_max', 'clamp_min',
-    # Histogram
-    'histogram_quantile', 'histogram_count', 'histogram_sum', 'histogram_fraction',
-    'histogram_avg', 'histogram_stddev', 'histogram_stdvar',
-    # Label
-    'label_replace', 'label_join',
-    # Over-time
-    'changes', 'avg_over_time', 'min_over_time', 'max_over_time',
-    'sum_over_time', 'count_over_time', 'quantile_over_time', 'stddev_over_time',
-    'stdvar_over_time', 'last_over_time', 'present_over_time', 'mad_over_time',
-    'first_over_time',
-    # Timestamp experimental (3.5+/3.7+)
-    'ts_of_max_over_time', 'ts_of_min_over_time', 'ts_of_last_over_time',
-    'ts_of_first_over_time',
-    # Prediction
-    'predict_linear', 'holt_winters', 'double_exponential_smoothing',
-    # Sort
-    'sort', 'sort_desc', 'sort_by_label', 'sort_by_label_desc',
-    # Duration (3.6+, promql-duration-expr)
-    'step',
-    # Other
-    'absent', 'absent_over_time', 'scalar', 'vector', 'info', 'pi',
-    # Timestamp modifiers (@ start() / @ end())
-    'start', 'end',
+    'sum', 'min', 'max', 'avg', 'group', 'stddev', 'stdvar', 'count', 'count_values',
+    'bottomk', 'topk', 'quantile', 'limitk', 'limit_ratio', 'rate', 'irate', 'increase',
+    'delta', 'idelta', 'deriv', 'resets', 'timestamp', 'time', 'minute', 'hour',
+    'day_of_month', 'day_of_week', 'days_in_month', 'month', 'year', 'abs', 'ceil',
+    'floor', 'round', 'sqrt', 'exp', 'ln', 'log2', 'log10', 'sin', 'cos', 'tan',
+    'asin', 'acos', 'atan', 'sinh', 'cosh', 'tanh', 'asinh', 'acosh', 'atanh',
+    'deg', 'rad', 'sgn', 'clamp', 'clamp_max', 'clamp_min', 'histogram_quantile',
+    'histogram_count', 'histogram_sum', 'histogram_fraction', 'histogram_avg',
+    'histogram_stddev', 'histogram_stdvar', 'label_replace', 'label_join', 'changes',
+    'avg_over_time', 'min_over_time', 'max_over_time', 'sum_over_time', 'count_over_time',
+    'quantile_over_time', 'stddev_over_time', 'stdvar_over_time', 'last_over_time',
+    'present_over_time', 'mad_over_time', 'first_over_time', 'ts_of_max_over_time',
+    'ts_of_min_over_time', 'ts_of_last_over_time', 'ts_of_first_over_time',
+    'predict_linear', 'holt_winters', 'double_exponential_smoothing', 'sort', 'sort_desc',
+    'sort_by_label', 'sort_by_label_desc', 'step', 'absent', 'absent_over_time',
+    'scalar', 'vector', 'info', 'pi', 'start', 'end',
 })
 
 KEYWORDS: Final = frozenset({
@@ -59,19 +38,11 @@ KEYWORDS: Final = frozenset({
 RESERVED: Final = FUNCTIONS | KEYWORDS
 
 COUNTER_SUFFIXES: Final = ('_total', '_count', '_sum', '_bucket')
-GAUGE_PATTERNS: Final = (
-    '_bytes', '_ratio', '_usage', '_percent', '_gauge', '_celsius', '_fahrenheit',
-    '_temperature', '_info', '_size', '_current', '_limit', '_available', '_free',
-    '_used', '_utilization', '_capacity', '_level',
-)
+GAUGE_PATTERNS: Final = ('_bytes', '_ratio', '_usage', '_percent', '_gauge', '_celsius', '_fahrenheit', '_temperature', '_info', '_size', '_current', '_limit', '_available', '_free', '_used', '_utilization', '_capacity', '_level')
 
-DURATION_MULTIPLIERS: Final[dict[str, float]] = {
-    'ms': 0.001, 's': 1, 'm': 60, 'h': 3600,
-    'd': 86400, 'w': 604800, 'y': 31536000,
-}
+DURATION_MULTIPLIERS: Final[dict[str, float]] = {'ms': 0.001, 's': 1, 'm': 60, 'h': 3600, 'd': 86400, 'w': 604800, 'y': 31536000}
 
 # --- [PRECOMPILED_REGEX] -----------------------------------------------------
-
 RE_METRIC_NAME: Final = re.compile(METRIC_NAME)
 RE_DURATION: Final = re.compile(DURATION)
 RE_STRING_LITERAL: Final = re.compile(r'"(?:[^"\\]|\\.)*"')
@@ -79,56 +50,32 @@ RE_FUNC_CALL: Final = re.compile(r'([a-z_][a-z0-9_]*)\s*\(', re.IGNORECASE)
 RE_GROUPING_CLAUSE: Final = re.compile(r'\b(by|without|on|ignoring|group_left|group_right)\s*\([^)]*\)')
 
 # --- [TYPES] -----------------------------------------------------------------
-
 type CommandFn = Callable[..., str]
 type CommandRegistry = dict[str, tuple[CommandFn, int]]
 type Finding = dict[str, str]
 type CheckFn = Callable[[str], list[Finding]]
 
-
 @dataclass(frozen=True, slots=True, kw_only=True)
 class CheckSpec:
-    """Data-driven validation check specification.
-
-    Defines a single validation rule as a pure data record. A generic runner
-    applies the pattern to the query and produces findings -- no per-check
-    imperative logic needed.
-    """
+    """Data-driven validation check specification. Defines a single validation rule as a pure data record.
+    A generic runner applies the pattern to the query and produces findings -- no per-check imperative logic needed."""
     name: str
     pattern: re.Pattern[str]
     severity: str
     message_fn: Callable[[re.Match[str]], str]
     recommendation: str = ''
 
-
 # --- [FUNCTIONS] --------------------------------------------------------------
 
 
 def to_seconds(value: int, unit: str) -> float:
-    """Convert duration value + unit to seconds.
-
-    Args:
-        value: Numeric duration magnitude.
-        unit: Duration unit string (ms, s, m, h, d, w, y).
-
-    Returns:
-        Duration in seconds as float.
-    """
+    """Convert duration value + unit to seconds."""
     return value * DURATION_MULTIPLIERS.get(unit, 1.0)
 
 
 def strip_strings_and_selectors(query: str) -> str:
     """Remove {...} blocks, quoted strings, and grouping clauses to isolate metric names.
-
-    Uses a single-pass fold over characters, tracking brace depth and string
-    context immutably via accumulator tuple.
-
-    Args:
-        query: Raw PromQL query string.
-
-    Returns:
-        Cleaned query with selectors, strings, and grouping clauses removed.
-    """
+    Uses a single-pass fold over characters, tracking brace depth and string context immutably via accumulator tuple."""
     query = RE_GROUPING_CLAUSE.sub(r'\1 ( )', query)
 
     def _fold(state: tuple[list[str], int, bool, bool], character: str) -> tuple[list[str], int, bool, bool]:
@@ -157,15 +104,7 @@ def strip_strings_and_selectors(query: str) -> str:
 
 
 def levenshtein(first: str, second: str) -> int:
-    """Levenshtein distance between two strings via dynamic programming.
-
-    Args:
-        first: Source string.
-        second: Target string.
-
-    Returns:
-        Minimum edit distance as integer.
-    """
+    """Levenshtein distance between two strings via dynamic programming."""
     match (first, second):
         case (_, '') :
             return len(first)
@@ -176,44 +115,22 @@ def levenshtein(first: str, second: str) -> int:
 
     prev = list(range(len(second) + 1))
     return reduce(
-        lambda row, indexed_character: _levenshtein_row(row, indexed_character[1], second),
+        lambda row, indexed_character: reduce(
+            lambda curr, indexed: curr + [min(
+                row[indexed[0] + 1] + 1,
+                curr[-1] + 1,
+                row[indexed[0]] + (indexed_character[1] != indexed[1]),
+            )],
+            enumerate(second),
+            [row[0] + 1],
+        ),
         enumerate(first),
         prev,
     )[-1]
 
 
-def _levenshtein_row(prev: list[int], character: str, second: str) -> list[int]:
-    """Compute one row of the Levenshtein matrix (pure function).
-
-    Args:
-        prev: Previous row of the distance matrix.
-        character: Current character from first string.
-        second: Target string being compared against.
-
-    Returns:
-        New row of the distance matrix.
-    """
-    return reduce(
-        lambda curr, indexed: curr + [min(
-            prev[indexed[0] + 1] + 1,
-            curr[-1] + 1,
-            prev[indexed[0]] + (character != indexed[1]),
-        )],
-        enumerate(second),
-        [prev[0] + 1],
-    )
-
-
 def run_check_specs(query: str, specs: tuple[CheckSpec, ...]) -> list[Finding]:
-    """Apply data-driven check specs to a query. Pure function: specs in, findings out.
-
-    Args:
-        query: PromQL query string to validate.
-        specs: Tuple of frozen CheckSpec rules to apply.
-
-    Returns:
-        List of finding dicts for all pattern matches.
-    """
+    """Apply data-driven check specs to a query. Pure function: specs in, findings out."""
     return [
         {
             'type': spec.name,
@@ -225,20 +142,9 @@ def run_check_specs(query: str, specs: tuple[CheckSpec, ...]) -> list[Finding]:
         for match in spec.pattern.finditer(query)
     ]
 
-
 # --- [DISPATCH] ---------------------------------------------------------------
-
-
 def cmd(registry: CommandRegistry, argc: int) -> Callable[[CommandFn], CommandFn]:
-    """Register command with argument count into given registry.
-
-    Args:
-        registry: Mutable command registry dict to register into.
-        argc: Required argument count for the command.
-
-    Returns:
-        Decorator that registers the function and returns it unchanged.
-    """
+    """Register command with argument count into given registry."""
     def register(fn: CommandFn) -> CommandFn:
         registry[fn.__name__] = (fn, argc)
         return fn
@@ -246,26 +152,10 @@ def cmd(registry: CommandRegistry, argc: int) -> Callable[[CommandFn], CommandFn
 
 
 def dispatch(registry: CommandRegistry, script_name: str, *, exit_key: str = 'valid') -> int:
-    """Dispatch CLI command from sys.argv. Returns exit code.
-
-    Args:
-        registry: Command registry mapping names to (fn, argc) tuples.
-        script_name: Script filename for usage messages.
-        exit_key: JSON key to check for success. 'valid' for validate_syntax,
-            'summary.errors' for check_best_practices.
-
-    Returns:
-        Exit code: 0 for success, 1 for failure.
-    """
+    """Dispatch CLI command from sys.argv. Returns exit code."""
     def _exit_code(result: str) -> int:
-        """Derive exit code from JSON result string."""
         parsed = json.loads(result)
-        match exit_key:
-            case 'valid':
-                return 0 if parsed.get('valid', True) else 1
-            case nested:
-                node = reduce(lambda accumulator, part: accumulator.get(part, {}), nested.split('.'), parsed)
-                return 0 if node == 0 else 1
+        return 0 if (parsed.get('valid', True) if exit_key == 'valid' else reduce(lambda acc, part: acc.get(part, {}), exit_key.split('.'), parsed) == 0) else 1
 
     match sys.argv[1:]:
         case [cmd_name, *cmd_args] if (entry := registry.get(cmd_name)):
@@ -276,16 +166,12 @@ def dispatch(registry: CommandRegistry, script_name: str, *, exit_key: str = 'va
             result = fn(*cmd_args[:argc + 1])
             sys.stdout.write(result + "\n")
             return _exit_code(result)
-        case [query] if not query.startswith('-'):
-            # Backward compat: bare query without subcommand
-            if not registry:
-                return 1
+        case [query] if not query.startswith('-') and registry:
             fn, _ = next(iter(registry.values()))
             result = fn(query)
             sys.stdout.write(result + "\n")
             return _exit_code(result)
         case _:
             return 1
-
 
 # --- [EXPORT] -----------------------------------------------------------------

@@ -1,49 +1,138 @@
+# Setup Node.js with Smart Caching — PM auto-detection, corepack pinning,
+# container-aware cache bypass, bun.lock + bun.lockb dual support.
+# NOTE: harden-runner is CALLER responsibility — actions are steps, not jobs.
 name: 'Setup Node.js with Smart Caching'
-description: 'Setup Node.js with intelligent dependency caching and installation'
+description: 'Detect package manager from lockfile, pin via corepack, resolve cache dir, install with prefer-offline on hit'
 author: 'Example Author'
 
 inputs:
-  node-version: { description: 'Node.js version', required: true }
-  package-manager: { description: 'npm | yarn | pnpm', required: false, default: 'npm' }
-  cache-dependency-path: { description: 'Path to lock file(s)', required: false, default: '**/package-lock.json' }
+  node-version:
+    description: 'Node.js semver (e.g., 22, 24). Falls back to .node-version / .nvmrc if omitted'
+    required: false
+  package-manager:
+    description: 'Override: npm | yarn | pnpm | bun (auto-detected from lockfile when empty)'
+    required: false
+    default: ''
+  working-directory:
+    description: 'Directory containing lockfile and package.json'
+    required: false
+    default: '.'
 
 outputs:
-  cache-hit: { description: 'Whether cache was hit', value: '${{ steps.cache.outputs.cache-hit }}' }
-  node-version: { description: 'Installed version', value: '${{ steps.setup.outputs.node-version }}' }
+  cache-hit:
+    description: 'Whether dependency cache was restored (true/false)'
+    value: ${{ steps.cache.outputs.cache-hit }}
+  node-version:
+    description: 'Exact Node.js version installed (e.g., 22.14.0)'
+    value: ${{ steps.setup.outputs.node-version }}
+  package-manager-version:
+    description: 'Resolved PM identity (e.g., pnpm@10.4.1)'
+    value: ${{ steps.detect.outputs.pm-version }}
 
 branding: { icon: package, color: green }
 
 runs:
   using: 'composite'
   steps:
-    - shell: bash
+    # --- Detect PM from lockfile, resolve install command + lockfile path ---
+    - id: detect
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        INPUT_PM: ${{ inputs.package-manager }}
       run: |
-        [[ "${{ inputs.package-manager }}" =~ ^(npm|yarn|pnpm)$ ]] || { echo "::error::Invalid package manager: ${{ inputs.package-manager }}"; exit 1; }
+        PM="$INPUT_PM"
+        if [[ -z "$PM" ]]; then
+          # Priority: bun > pnpm > yarn > npm (bun.lock is text-based v1.2+; bun.lockb is legacy binary)
+          if   [[ -f bun.lock || -f bun.lockb ]];  then PM=bun
+          elif [[ -f pnpm-lock.yaml ]];             then PM=pnpm
+          elif [[ -f yarn.lock ]];                  then PM=yarn
+          elif [[ -f package-lock.json ]];          then PM=npm
+          else echo "::error::No lockfile found — set package-manager input explicitly"; exit 1; fi
+          echo "::notice::Auto-detected package manager: $PM"
+        fi
+        if [[ ! "$PM" =~ ^(npm|yarn|pnpm|bun)$ ]]; then
+          echo "::error::Invalid package manager '$PM'. Must be npm | yarn | pnpm | bun"; exit 1
+        fi
+        declare -A LOCKS=([npm]="package-lock.json" [yarn]="yarn.lock" [pnpm]="pnpm-lock.yaml")
+        # Bun: prefer text-based bun.lock (v1.2+), fall back to binary bun.lockb
+        if [[ "$PM" == "bun" ]]; then
+          LOCK=$([[ -f bun.lock ]] && echo "bun.lock" || echo "bun.lockb")
+        else
+          LOCK="${LOCKS[$PM]}"
+        fi
+        declare -A CMDS=([npm]="npm ci" [yarn]="yarn install --immutable" [pnpm]="pnpm install --frozen-lockfile" [bun]="bun install --frozen-lockfile")
+        # Container detection — skip corepack/cache when no runner tool_cache
+        IN_CONTAINER="false"
+        [[ -f /.dockerenv || -n "${GITHUB_CONTAINER:-}" ]] && IN_CONTAINER="true"
+        {
+          echo "pm=$PM"
+          echo "lock-file=${{ inputs.working-directory }}/$LOCK"
+          echo "install-cmd=${CMDS[$PM]}"
+          echo "in-container=$IN_CONTAINER"
+          echo "pm-version=$PM@unknown"
+        } >> "$GITHUB_OUTPUT"
+
+    # --- Setup Node.js (reads .node-version / .nvmrc when input is empty) ---
     - id: setup
       uses: actions/setup-node@6044e13b5dc448c55e2357c09f80417699197238 # v6.2.0
-      with: { node-version: '${{ inputs.node-version }}' }
-    - if: inputs.package-manager != 'npm'
+      with:
+        node-version: ${{ inputs.node-version || '' }}
+        node-version-file: ${{ inputs.node-version == '' && '.node-version' || '' }}
+
+    # --- Corepack: enable + activate version from packageManager field ---
+    # Reads "packageManager" from package.json (e.g., "pnpm@10.4.1+sha512.abc...")
+    # corepack prepare without explicit version uses the packageManager field
+    - if: |
+        steps.detect.outputs.in-container != 'true' &&
+        (steps.detect.outputs.pm == 'pnpm' || steps.detect.outputs.pm == 'yarn')
+      id: corepack
       shell: bash
-      run: corepack enable
-    - id: cache-dir
-      shell: bash
+      working-directory: ${{ inputs.working-directory }}
       run: |
-        case "${{ inputs.package-manager }}" in
-          npm)  echo "dir=$(npm config get cache)" >> $GITHUB_OUTPUT ;;
-          yarn) echo "dir=$(yarn cache dir)" >> $GITHUB_OUTPUT ;;
-          pnpm) echo "dir=$(pnpm store path)" >> $GITHUB_OUTPUT ;;
+        corepack enable
+        # If packageManager field exists, corepack prepare uses it; otherwise pin latest
+        if grep -q '"packageManager"' package.json 2>/dev/null; then
+          corepack prepare --activate
+        else
+          corepack prepare "${{ steps.detect.outputs.pm }}@latest" --activate
+        fi
+        VERSION=$(${{ steps.detect.outputs.pm }} --version)
+        echo "pm-version=${{ steps.detect.outputs.pm }}@$VERSION" >> "$GITHUB_OUTPUT"
+
+    # --- Resolve cache directory per PM ---
+    - if: steps.detect.outputs.in-container != 'true'
+      id: cache-dir
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        case "${{ steps.detect.outputs.pm }}" in
+          npm)  DIR=$(npm config get cache) ;;
+          yarn) DIR=$(yarn config get cacheFolder 2>/dev/null || yarn cache dir) ;;
+          pnpm) DIR=$(pnpm store path) ;;
+          bun)  DIR="${BUN_INSTALL:-$HOME/.bun}/install/cache" ;;
         esac
-    - id: cache
+        echo "path=$DIR" >> "$GITHUB_OUTPUT"
+
+    # --- Cache PM store (not node_modules — install still required to link) ---
+    - if: steps.detect.outputs.in-container != 'true'
+      id: cache
       uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
       with:
-        path: ${{ steps.cache-dir.outputs.dir }}
-        key: ${{ runner.os }}-${{ inputs.package-manager }}-${{ hashFiles(inputs.cache-dependency-path) }}
-        restore-keys: ${{ runner.os }}-${{ inputs.package-manager }}-
-    - if: steps.cache.outputs.cache-hit != 'true'
-      shell: bash
+        path: ${{ steps.cache-dir.outputs.path }}
+        key: ${{ runner.os }}-${{ steps.detect.outputs.pm }}-${{ hashFiles(steps.detect.outputs.lock-file) }}
+        restore-keys: ${{ runner.os }}-${{ steps.detect.outputs.pm }}-
+
+    # --- Install: prefer-offline on cache hit, full fetch on miss ---
+    - shell: bash
+      working-directory: ${{ inputs.working-directory }}
       run: |
-        case "${{ inputs.package-manager }}" in
-          npm)  npm ci ;;
-          yarn) yarn install --frozen-lockfile ;;
-          pnpm) pnpm install --frozen-lockfile ;;
-        esac
+        CMD="${{ steps.detect.outputs.install-cmd }}"
+        if [[ "${{ steps.cache.outputs.cache-hit }}" == "true" ]]; then
+          case "${{ steps.detect.outputs.pm }}" in
+            npm|pnpm) CMD="$CMD --prefer-offline" ;;
+            *)        ;; # yarn/bun handle offline resolution internally
+          esac
+          echo "::notice::Cache hit — installing with prefer-offline"
+        fi
+        $CMD

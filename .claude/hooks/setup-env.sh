@@ -1,25 +1,29 @@
 #!/usr/bin/env bash
 # SessionStart hook: Persist environment variables for sub-agents via CLAUDE_ENV_FILE.
 set -Eeuo pipefail
+shopt -s inherit_errexit
+IFS=$'\n\t'
 
-# Source token cache if exists (populated by home-manager activation)
+# --- [CONSTANTS] --------------------------------------------------------------
+
 readonly TOKEN_CACHE="${HOME}/.config/hm-op-session.sh"
-# shellcheck source=/dev/null
-[[ -f "${TOKEN_CACHE}" ]] && source "${TOKEN_CACHE}"
+declare -ra _ENV_KEYS=(EXA_API_KEY PERPLEXITY_API_KEY TAVILY_API_KEY SONAR_TOKEN
+    GH_TOKEN GITHUB_TOKEN GH_PROJECTS_TOKEN
+    HOSTINGER_TOKEN GREPTILE_TOKEN CONTEXT7_API_KEY)
 
-# NOTE: ANTHROPIC_API_KEY intentionally excluded -- Claude Code uses OAuth
-# Set membership via associative array -- O(1) key existence check via [[ -v ]]
-declare -Ar _ENV_KEYS=(
-    [EXA_API_KEY]=1 [PERPLEXITY_API_KEY]=1 [TAVILY_API_KEY]=1 [SONAR_TOKEN]=1
-    [GH_TOKEN]=1 [GITHUB_TOKEN]=1 [GH_PROJECTS_TOKEN]=1
-    [HOSTINGER_TOKEN]=1 [GREPTILE_TOKEN]=1 [CONTEXT7_API_KEY]=1
-)
+# --- [EXPORT] -----------------------------------------------------------------
 
-# Persist non-empty keys to CLAUDE_ENV_FILE for sub-agent inheritance
-[[ -n "${CLAUDE_ENV_FILE:-}" ]] && {
-    for key in "${!_ENV_KEYS[@]}"; do
-        [[ -n "${!key:-}" ]] && printf 'export %s="%s"\n' "${key}" "${!key}"
-    done >> "${CLAUDE_ENV_FILE}"
-}
-
-exit 0
+[[ -f "${TOKEN_CACHE}" && "${TOKEN_CACHE}" == "${HOME}/.config/"* ]] \
+    || { printf '[ERROR] Invalid token cache path\n' >&2; exit 2; }
+# shellcheck source=/dev/null  # Path validated above via glob guard
+source "${TOKEN_CACHE}"
+[[ -n "${CLAUDE_ENV_FILE:-}" ]] || exit 0
+readonly _ENV_TMP="${CLAUDE_ENV_FILE}.tmp$$"
+trap 'rm -f "${_ENV_TMP}"' EXIT
+{
+    for key in "${_ENV_KEYS[@]}"; do
+        [[ -n "${!key:-}" ]] && printf 'export %s=%q\n' "${key}" "${!key}"
+    done
+    # shellcheck disable=SC2016  # Single quotes intentional -- expand at runtime
+    printf 'export PATH="%s:${PATH}"\n' "${HOME}/.cargo/bin"
+} > "${_ENV_TMP}" && mv "${_ENV_TMP}" "${CLAUDE_ENV_FILE}"

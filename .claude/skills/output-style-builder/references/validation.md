@@ -71,15 +71,15 @@ Consolidated checklist for output-style-builder. SKILL.md §VALIDATION contains 
 
 <br>
 
-| [SYMPTOM]                    | [CAUSE]                      | [FIX]                                  |
-| ---------------------------- | ---------------------------- | -------------------------------------- |
-| Format not parsed            | Invalid JSON/YAML/XML syntax | Validate with parser before deployment |
-| Score below 80               | Missing required sections    | Add all `required: true` sections      |
-| Delimiter inconsistency      | Mixed fence/separator styles | Standardize throughout output          |
-| Variable unresolved          | Missing default for optional | Add `${var:-default}` syntax           |
-| Style duplication            | Voice rules not delegated    | Reference `style-standards` skill      |
-| Scope conflict               | Precedence not respected     | Higher scope (command > global) wins   |
-| Reference file not found     | Invalid `@` path             | Verify file exists in `.claude/styles/`|
+| [SYMPTOM]                | [CAUSE]                      | [FIX]                                   |
+| ------------------------ | ---------------------------- | --------------------------------------- |
+| Format not parsed        | Invalid JSON/YAML/XML syntax | Validate with parser before deployment  |
+| Score below 80           | Missing required sections    | Add all `required: true` sections       |
+| Delimiter inconsistency  | Mixed fence/separator styles | Standardize throughout output           |
+| Variable unresolved      | Missing default for optional | Add `${var:-default}` syntax            |
+| Style duplication        | Voice rules not delegated    | Reference `style-standards` skill       |
+| Scope conflict           | Precedence not respected     | Higher scope (command > global) wins    |
+| Reference file not found | Invalid `@` path             | Verify file exists in `.claude/styles/` |
 
 ---
 ## [6][OPERATIONAL_COMMANDS]
@@ -97,10 +97,10 @@ wc -l SKILL.md                        # Must be < 400 (full depth)
 wc -l references/*.md                 # Each must be < 200
 
 # Reference path verification
-ls .claude/styles/                    # Verify format files exist
-ls .claude/output-styles/             # Verify style files exist
+eza .claude/styles/                    # Verify format files exist
+eza .claude/output-styles/             # Verify style files exist
 
 # Anti-bloat check
-grep -iE "Sourced from|Confirmed with|might|could" output.md
+rg -iE "Sourced from|Confirmed with|might|could" output.md
 # Should return no matches
 ```

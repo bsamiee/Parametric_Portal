@@ -105,7 +105,7 @@ Standard/Complex types require validation.md in references/.
 - Located at `references/validation.md`.
 - Sections map to domain concerns (frontmatter, structure, depth, scripting).
 - Includes error symptoms table for diagnosis.
-- Operational commands for verification (`wc -l`, `grep`, etc.).
+- Operational commands for verification (`wc -l`, `rg`, etc.).
 
 **Simple type exception:** Validation remains in SKILL.md §VALIDATION (no references/ folder).
 

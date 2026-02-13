@@ -4,9 +4,7 @@ type: simple
 depth: extended
 user-invocable: false
 description: >-
-  Orchestrates two-round parallel agent research for comprehensive topic exploration.
-  Use when conducting research, exploring complex topics, gathering multi-faceted
-  information, or synthesizing findings from parallel investigation streams.
+  Orchestrates two-round parallel agent research with Exa orientation, breadth-first discovery, and depth-focused synthesis. Use when conducting comprehensive research, exploring complex topics requiring multi-source validation, or synthesizing findings from distributed investigation streams.
 ---
 
 # [H1][DEEP-RESEARCH]
@@ -45,10 +43,9 @@ Conduct comprehensive topic research via parallel agent dispatch.
 
 <br>
 
-Main agent executes exactly 3 Exa searches via `exa-tools` skill; these map topic structure.
+Main agent executes exactly 3 Exa searches via `exa-tools` skill before dispatch.
 
-Map domain landscape; identify facets for agent assignment.<br>
-Produce facet list (6-10 independent research areas) for Round 1.
+Map domain landscape; identify facets for agent assignment. Produce facet list (6-10 independent research areas) for Round 1.
 
 [IMPORTANT]:
 - [ALWAYS] Execute 3 Exa searches via `exa-tools` skill before dispatch.
@@ -89,12 +86,12 @@ Constraint: DO NOT write files—return text only
 
 Main agent (NOT sub-agent) processes Round 1 outputs.
 
-| [INDEX] | [ACTION] | [CRITERIA]                                                                  |
-| :-----: | -------- | --------------------------------------------------------------------------- |
-|   [1]   | Remove   | Lacks focus, duplicates content, missing sources, pre-2025, fails quality   |
-|   [2]   | Retain   | Addresses topic, includes sources, dates 2025-2026, converges across agents |
+| [INDEX] | [ACTION] | [CRITERIA]                                                        |
+| :-----: | -------- | ----------------------------------------------------------------- |
+|   [1]   | Remove   | Lacks focus, duplicates, no sources, pre-2025, fails quality      |
+|   [2]   | Retain   | Addresses topic, sources, dates 2025-2026, converges across range |
 
-**Skeleton:** Build from retained → `[Domain N]: [findings]` + `Gaps:` + `Depth-Targets:`
+Build skeleton from retained findings: `[Domain N]: [findings]` + `Gaps:` + `Depth-Targets:`
 
 [CRITICAL] Skeleton is first corpus—Round 2 fleshes it out.
 
@@ -136,11 +133,11 @@ Constraint: DO NOT write files—return text only
 
 Main agent (NOT sub-agent) compiles final research output and writes to `OutputPath`.
 
-**Integrate:** Merge Round 2 → skeleton. Cross-reference rounds. Resolve conflicts (prioritize sourced, current, convergent).
-**Filter:** Remove duplicates, out-of-scope content, superseded items, unresolved conflicts.
-**Write:** Single file to `OutputPath` with structure:
+**Integrate:** Merge Round 2 → skeleton. Cross-reference rounds. Resolve conflicts (prioritize sourced, current, convergent).<br>
+**Filter:** Remove duplicates, out-of-scope content, superseded items, unresolved conflicts.<br>
+**Write:** Single file to `OutputPath`:
 - `## [1][FINDINGS]` — Synthesized research by domain
-- `## [2][CONFIDENCE]` — High (convergent) | Medium (single-source) | Low (gaps)
+- `## [2][CONFIDENCE]` — High (convergent), Medium (single-source), Low (gaps)
 - `## [3][SOURCES]` — All sources with attribution
 
 ---

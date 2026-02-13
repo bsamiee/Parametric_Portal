@@ -1,22 +1,29 @@
-# Docker Build+Push -- Multi-platform, GHCR, BuildKit caching, provenance, harden-runner
-name: Build and Push Docker Image
+# Docker Build+Push -- Multi-platform, GHCR, BuildKit cache, Trivy scan, Cosign verify
+name: Build and Push Container
 on:
   push: { branches: [main], tags: ['v*'] }
   pull_request: { branches: [main] }
+  release: { types: [published] }
   workflow_dispatch:
 
-permissions: { contents: read, packages: write, id-token: write, attestations: write }
+permissions: {}
 concurrency:
   group: docker-${{ github.ref }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
-env: { REGISTRY: ghcr.io, IMAGE_NAME: '${{ github.repository }}' }
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
 
 jobs:
   build-and-push:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    permissions: { contents: read, packages: write, id-token: write, attestations: write }
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+      tags: ${{ steps.meta.outputs.tags }}
     steps:
-      - uses: step-security/harden-runner@002fdce3c6a235733a90a27c80493a3241e56863 # v2.12.0
+      - uses: step-security/harden-runner@5ef0c079ce82195b2a36a210272d6b661572d83e # v2.14.2
         with: { egress-policy: audit }
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
@@ -32,13 +39,12 @@ jobs:
             type=ref,event=pr
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
-            type=semver,pattern={{major}}
             type=sha,prefix={{branch}}-
       - id: build
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
         with:
           context: .
-          platforms: linux/amd64,linux/arm64
+          platforms: ${{ github.event_name == 'pull_request' && 'linux/amd64' || 'linux/amd64,linux/arm64' }}
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
@@ -47,8 +53,46 @@ jobs:
           provenance: true
           sbom: true
           build-args: |
-            VERSION=${{ github.sha }}
-            BUILD_DATE=${{ github.event.head_commit.timestamp }}
+            VERSION=${{ github.ref_name }}
+            COMMIT=${{ github.sha }}
+          annotations: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+      - name: Trivy vulnerability scan
+        uses: aquasecurity/trivy-action@c1824fd6edce30d7ab345a9989de00bbd46ef284 # 0.34.0
+        with:
+          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}
+          format: table
+          exit-code: '1'
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
       - if: github.event_name != 'pull_request'
-        uses: actions/attest-build-provenance@62fc1d596301d0ab9914e1fec14dc5c8d93f65cd # v3.2.0
-        with: { subject-name: '${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}', subject-digest: '${{ steps.build.outputs.digest }}', push-to-registry: true }
+        uses: actions/attest-build-provenance@96278af6caaf10aea03fd8d33a09a777ca52d62f # v3.2.0
+        with:
+          subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
+
+  verify:
+    needs: build-and-push
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions: { contents: read, packages: read, id-token: write }
+    steps:
+      - uses: step-security/harden-runner@5ef0c079ce82195b2a36a210272d6b661572d83e # v2.14.2
+        with: { egress-policy: audit }
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        with: { registry: '${{ env.REGISTRY }}', username: '${{ github.actor }}', password: '${{ secrets.GITHUB_TOKEN }}' }
+      - name: Verify attestation (gh)
+        env: { GH_TOKEN: '${{ secrets.GITHUB_TOKEN }}' }
+        run: gh attestation verify "oci://${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ needs.build-and-push.outputs.digest }}" --repo "${{ github.repository }}"
+      - uses: sigstore/cosign-installer@faadad0cce49287aee09b3a48701e75088a2c6ad # v4.0.0
+      - name: Verify signature (cosign)
+        run: cosign verify --certificate-oidc-issuer="https://token.actions.githubusercontent.com" --certificate-identity-regexp="^https://github.com/${{ github.repository }}/" "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ needs.build-and-push.outputs.digest }}"
+      - run: |
+          echo "## Container Verification" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Image**: \`${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Digest**: \`${{ needs.build-and-push.outputs.digest }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Attestation**: Verified" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Signature**: Verified (keyless Sigstore)" >> "$GITHUB_STEP_SUMMARY"

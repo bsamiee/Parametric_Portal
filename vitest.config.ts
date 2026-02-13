@@ -53,7 +53,7 @@ const _CONFIG = {
         shouldClearNativeTimers: true,
         toFake: ['setTimeout', 'setInterval', 'Date', 'performance'] as const,
     },
-    optimizeDeps: ['@effect/vitest', '@fast-check/vitest', 'effect', 'fast-check'],
+    optimizeDeps: ['@effect/vitest', 'rfc6902', 'effect', 'fast-check'],
     output: {
         chaiConfig: { includeStack: true, showDiff: true, truncateThreshold: 0 },
         diff: { expand: true, truncateThreshold: 0 },
@@ -116,7 +116,13 @@ export default defineConfig({
             reportOnFailure: true,
             reportsDirectory: path.resolve(Dirname, 'coverage'),
             skipFull: false,
-            // Thresholds disabled for fast-moving early development - re-enable when stabilized
+            thresholds: {
+                branches: 95,
+                functions: 95,
+                lines: 95,
+                perFile: true,
+                statements: 95,
+            },
         },
         deps: { ..._CONFIG.deps },
         diff: { ..._CONFIG.output.diff },
@@ -189,7 +195,7 @@ export default defineConfig({
         reporters: [..._CONFIG.reporters.test],
         restoreMocks: true,
         retry: process.env.CI ? 2 : 0,
-        sequence: { concurrent: false, hooks: 'stack', shuffle: false },
+        sequence: { concurrent: false, hooks: 'stack', shuffle: process.env.CI === 'true' },
         setupFiles: [],
         slowTestThreshold: _CONFIG.timeouts.slow,
         snapshotFormat: { ..._CONFIG.snapshot.format },

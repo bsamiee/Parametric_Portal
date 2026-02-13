@@ -1,4 +1,7 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S uv run --quiet --script
+# /// script
+# requires-python = ">=3.12"
+# ///
 """SessionStart hook: Inject skill index and nx targets via XML tags."""
 
 # --- [IMPORTS] ----------------------------------------------------------------

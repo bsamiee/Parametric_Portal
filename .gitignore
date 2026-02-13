@@ -62,6 +62,7 @@ playwright/.cache/
 .artifacts/
 .nx/*
 .stryker-tmp/
+test-results/mutation/stryker-incremental.json
 .vite-inspect/
 .vite/
 .scannerwork/

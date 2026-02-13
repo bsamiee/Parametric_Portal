@@ -1,115 +1,162 @@
 ---
 name: github-actions-validator
-description: Validates GitHub Actions workflow files (.github/workflows/*.yml) using actionlint (static analysis), act (local execution), and custom best-practice checks. Detects deprecated commands, missing permissions, unpinned actions, missing timeouts, deprecated runners, and missing concurrency groups.
+type: standard
+depth: full
+description: >-
+  Validates GitHub Actions workflows via actionlint, act dry-run, and 11 security checks.
+  Use when auditing CI/CD security, checking supply chain compliance (SHA pinning, harden-runner,
+  OIDC), or validating workflow output. NOT for generation -- route to github-actions-generator.
 ---
 
-# GitHub Actions Validator
+# [H1][GITHUB-ACTIONS-VALIDATOR]
+>**Dictum:** *Validation gates prevent non-compliant workflow deployment.*
 
-## When to Use
+<br>
 
-- Validating `.github/workflows/*.yml` for syntax errors and best practices
-- Testing workflows locally with `act` before pushing
-- Checking action versions for deprecation or outdated tags
-- Pre-commit validation of workflow files
+Validate GitHub Actions workflows for syntax, security, and best practices. Companion to `github-actions-generator` -- validates what the generator produces.
 
-## Setup
+**Tasks:**
+1. Run validation on target file or directory.
+2. For each error -- consult matching reference, extract fix.
+3. Quote the fix -- error message, cause, applied remediation.
+4. Verify public actions via version discovery protocol.
+5. Provide summary -- fixes, warnings, best practice recommendations.
+
+---
+## [1][VALIDATION_PIPELINE]
+>**Dictum:** *Three-stage pipeline ensures complete coverage.*
+
+<br>
+
+**Setup:** `bash .claude/skills/github-actions-validator/scripts/install_tools.sh`
 
 ```bash
-bash .claude/skills/github-actions-validator/scripts/install_tools.sh
+# Full validation (actionlint + best practices + act dry-run)
+bash .claude/skills/github-actions-validator/scripts/validate_workflow.sh <path>
+
+# Selective validation
+bash .claude/skills/github-actions-validator/scripts/validate_workflow.sh --lint-only <path>
+bash .claude/skills/github-actions-validator/scripts/validate_workflow.sh --check-best-practices <path>
+bash .claude/skills/github-actions-validator/scripts/validate_workflow.sh --test-only <path>
 ```
 
-## Validation Workflow (MUST FOLLOW)
+| [INDEX] | [STAGE]              | [TOOL]                     | [VALIDATES]                                                        |
+| :-----: | -------------------- | -------------------------- | ------------------------------------------------------------------ |
+|   [1]   | **Static Analysis**  | actionlint 1.7.10          | YAML syntax, expressions, runner labels, action inputs, CRON, globs. |
+|   [2]   | **Best Practices**   | `best_practice_checks.sh`  | 11 security/performance checks (see table below).                  |
+|   [3]   | **Local Execution**  | act v0.2.84                | Dry-run validation against Docker images (requires Docker).        |
 
-1. **Run validation** on target file or directory:
-   ```bash
-   bash .claude/skills/github-actions-validator/scripts/validate_workflow.sh <path>
-   ```
-   Flags: `--lint-only`, `--test-only`, `--check-versions`, `--check-best-practices`
+---
+## [2][BEST_PRACTICE_CHECKS]
+>**Dictum:** *Automated checks enforce security and performance baselines aligned with generator standards.*
 
-2. **For EACH error** -- consult the matching reference file, find the error pattern, extract the fix
+<br>
 
-3. **Quote the fix** -- error message, cause from reference, fix code applied to user's workflow
+| [INDEX] | [CHECK]                    | [TAG]              | [DETECTS]                                                    |
+| :-----: | -------------------------- | ------------------ | ------------------------------------------------------------ |
+|   [1]   | **Deprecated commands**    | `[DEPRECATED-CMD]` | `::set-output`, `::save-state`, `::set-env`, `::add-path`.  |
+|   [2]   | **Missing permissions**    | `[PERMISSIONS]`    | No top-level `permissions: {}` deny-all default.             |
+|   [3]   | **Unpinned actions**       | `[UNPINNED]`       | Mutable tags (`@v1`, `@main`), abbreviated SHAs.             |
+|   [4]   | **SHA without comment**    | `[SHA-NO-COMMENT]` | SHA-pinned but missing `# vX.Y.Z` version comment.          |
+|   [5]   | **Missing timeout**        | `[TIMEOUT]`        | Jobs without `timeout-minutes:` (default is 6 hours).        |
+|   [6]   | **Deprecated runners**     | `[RUNNER]`         | `ubuntu-20.04`, `macos-12`, `macos-13`, `windows-2019`.      |
+|   [7]   | **Missing concurrency**    | `[CONCURRENCY]`    | No `concurrency:` group or missing `cancel-in-progress`.     |
+|   [8]   | **PAT usage**              | `[APP-TOKEN]`      | PATs for cross-repo ops (use `create-github-app-token`).     |
+|   [9]   | **No harden-runner**       | `[HARDEN]`         | Missing or not first step in job (CVE-2025-30066 detection). |
+|  [10]   | **Expression injection**   | `[INJECTION]`      | Direct `${{ github.event.* }}` in `run:` blocks.             |
+|  [11]   | **Immutable actions**      | `[IMMUTABLE]`      | Action publishing without immutable OCI (informational).     |
 
-4. **Verify public actions** -- check `references/action_versions.md` first, web search for unknown actions
+---
+## [3][ACTIONLINT_RULES]
+>**Dictum:** *Static analysis rule names enable targeted suppression.*
 
-5. **Provide summary** -- list all fixes, warnings, and best practice recommendations
+<br>
 
-## Best Practice Checks (--check-best-practices)
+| [INDEX] | [RULE]                    | [CHECKS]                                                   |
+| :-----: | ------------------------- | ---------------------------------------------------------- |
+|   [1]   | **`syntax-check`**        | Workflow structure, YAML schema, missing keys.             |
+|   [2]   | **`expression`**          | `${{ }}` type checking, function calls, context access.    |
+|   [3]   | **`action`**              | Action inputs/outputs, required inputs, deprecated inputs. |
+|   [4]   | **`runner-label`**        | Valid runner labels, `-arm` vs `-arm64` suffix.             |
+|   [5]   | **`glob`**                | Glob patterns in paths/branches filters.                   |
+|   [6]   | **`job-needs`**           | Job dependency graph, circular `needs:`.                   |
+|   [7]   | **`workflow-call`**       | Reusable workflow inputs/outputs/secrets.                  |
+|   [8]   | **`events`**              | Trigger event validation, CRON field ranges.               |
+|   [9]   | **`credentials`**         | Hard-coded credentials detection.                          |
+|  [10]   | **`permissions`**         | GITHUB_TOKEN permission scopes, `models`, `artifact-metadata`. |
+|  [11]   | **`deprecated-commands`** | `set-output`, `save-state` usage.                          |
+|  [12]   | **`shellcheck`**          | Shell script linting in `run:` blocks.                     |
+|  [13]   | **`if-cond`**             | Constant `if: true`/`if: false` conditions.                |
 
-| Check | Tag | What It Detects |
-|---|---|---|
-| Deprecated commands | `[DEPRECATED-CMD]` | `::set-output`, `::save-state` usage |
-| Missing permissions | `[PERMISSIONS]` | No top-level `permissions:` block |
-| Unpinned actions | `[UNPINNED]` | Actions using tag instead of SHA |
-| Missing timeout | `[TIMEOUT]` | Jobs without `timeout-minutes` |
-| Deprecated runners | `[RUNNER]` | `ubuntu-20.04`, `macos-13`, `windows-2019` |
-| Missing concurrency | `[CONCURRENCY]` | No `concurrency:` group |
-| Cache v4->v5 | `[CACHE-V5]` | `actions/cache@v4` (v5 available) |
-| PAT usage | `[APP-TOKEN]` | PATs for cross-repo ops (use `create-github-app-token` instead) |
-| No harden-runner | `[HARDEN]` | Missing `step-security/harden-runner` in security-sensitive jobs |
-| Immutable actions | `[IMMUTABLE]` | Consider OCI-published immutable actions via GHCR |
+---
+## [4][ERROR_ROUTING]
+>**Dictum:** *Error patterns map to specific reference files for resolution.*
 
-## Actionlint Rule Names (for targeted suppression)
+<br>
 
-| Rule | Checks |
-|---|---|
-| `syntax-check` | Workflow structure, YAML schema |
-| `expression` | `${{ }}` type checking |
-| `action` | Action inputs/outputs validation |
-| `runner-label` | Valid runner labels |
-| `glob` | Glob patterns in filters |
-| `job-needs` | Job dependency graph |
-| `workflow-call` | Reusable workflow validation |
-| `events` | Trigger event validation |
-| `credentials` | Hard-coded credentials |
-| `permissions` | GITHUB_TOKEN scopes |
-| `deprecated-commands` | `set-output`/`save-state` |
-| `env-var` | Environment variables |
-| `id` | Job/step ID validation |
-| `matrix` | Matrix strategy |
-| `shellcheck` | Shell script linting |
-| `pyflakes` | Python script linting |
+| [INDEX] | [PATTERN]                           | [REFERENCE]                                 |
+| :-----: | ----------------------------------- | ------------------------------------------- |
+|   [1]   | **`runs-on`, runner labels**        | `runners.md`                                |
+|   [2]   | **`cron`, `schedule`**              | `common_errors.md` -- Schedule Errors       |
+|   [3]   | **`${{`, `expression`, `if:`**      | `common_errors.md` -- Expression Errors     |
+|   [4]   | **`needs:`, job dependency**        | `common_errors.md` -- Job Configuration     |
+|   [5]   | **`uses:`, action, input**          | `common_errors.md` -- Action Errors         |
+|   [6]   | **`set-output`, `save-state`**      | `common_errors.md` -- Deprecated Commands   |
+|   [7]   | **`workflow_call`, reusable**       | `modern_features.md` -- Reusable Workflows  |
+|   [8]   | **SLSA, attestation, cosign, SBOM** | `supply_chain.md` -- SBOM/Provenance        |
+|   [9]   | **OIDC, keyless, cloud auth**       | `supply_chain.md` -- OIDC Federation        |
+|  [10]   | **immutable, OCI, GHCR action**     | `supply_chain.md` -- Immutable Actions      |
+|  [11]   | **app token, PAT, cross-repo**      | `supply_chain.md` -- App Tokens             |
+|  [12]   | **harden-runner, egress**           | `supply_chain.md` -- Harden Runner          |
+|  [13]   | **node20, node24, runtime**         | `modern_features.md` -- Node.js Runtime     |
+|  [14]   | **concurrency, cancel-in-progress** | `modern_features.md` -- Concurrency Control |
+|  [15]   | **YAML anchor, alias, `<<:`**       | `modern_features.md` -- YAML Anchors        |
+|  [16]   | **matrix, fail-fast**               | `modern_features.md` -- Matrix Strategy     |
+|  [17]   | **permission scope**                | `common_errors.md` -- Permissions Errors    |
 
-## Error-to-Reference Mapping
+---
+## [5][REFERENCE_FILES]
+>**Dictum:** *Reference files provide authoritative error resolution.*
 
-| Error Pattern | Reference File |
-|---|---|
-| `runs-on`, runner labels | `runners.md` |
-| `cron`, `schedule` | `common_errors.md` - Schedule Errors |
-| `${{`, `expression`, `if:` | `common_errors.md` - Expression Errors |
-| `needs:`, job dependency | `common_errors.md` - Job Configuration |
-| `uses:`, action, input | `common_errors.md` - Action Errors |
-| `set-output`, `save-state` | `common_errors.md` - Deprecated Commands |
-| `untrusted`, injection | `common_errors.md` - Expression Errors |
-| `syntax`, `yaml` | `common_errors.md` - Syntax Errors |
-| `docker`, `container` | `act_usage.md` - Troubleshooting |
-| `@v3`, deprecated, outdated | `action_versions.md` |
-| `workflow_call`, reusable, OIDC | `modern_features.md` |
-| SLSA, attestation, cosign, SBOM | `modern_features.md` - Supply Chain Security |
-| YAML anchors, `&name`, `*name` | `modern_features.md` - YAML Anchors |
-| node20 deprecated, node24 required | `modern_features.md` - Node.js Runtime Migration |
-| OIDC federation, keyless, cloud auth | `modern_features.md` - OIDC Authentication |
-| deployment protection, environment gates | `modern_features.md` - Deployment Environments |
-| immutable action, OCI, GHCR action | `modern_features.md` - Immutable Actions |
-| app token, cross-repo, PAT replacement | `modern_features.md` - GitHub App Token Authentication |
-| harden-runner, egress, supply chain monitoring | `modern_features.md` - Step Security Harden-Runner |
-| `permissions`, `timeout` | `common_errors.md` - Best Practices |
+<br>
 
-## Reference Files
+| [INDEX] | [FILE]                              | [CONTENT]                                                    |
+| :-----: | ----------------------------------- | ------------------------------------------------------------ |
+|   [1]   | **`references/act_usage.md`**       | Actionlint 1.7.10 + act v0.2.84 usage, rules, limitations.  |
+|   [2]   | **`references/common_errors.md`**   | Error catalog: syntax, expression, action, job, deprecated.  |
+|   [3]   | **`references/modern_features.md`** | Reusable workflows, concurrency, YAML anchors, matrix, Node. |
+|   [4]   | **`references/runners.md`**         | Runner labels, deprecations, ARM64, GPU, self-hosted.        |
+|   [5]   | **`references/supply_chain.md`**    | SHA pinning, OIDC, SBOM, harden-runner, tokens, dep review.  |
 
-| File | Content |
-|---|---|
-| `references/act_usage.md` | Act + actionlint usage, rule names, limitations |
-| `references/common_errors.md` | Error catalog with fixes, deprecated commands |
-| `references/action_versions.md` | Current versions, deprecation, SHA pinning |
-| `references/modern_features.md` | Reusable workflows, SBOM, OIDC, concurrency |
-| `references/runners.md` | GitHub-hosted runners, deprecations, ARM64 |
+---
+## [6][EXAMPLES]
+>**Dictum:** *Examples validate the validation pipeline itself.*
 
-## Troubleshooting
+<br>
 
-| Issue | Solution |
-|---|---|
-| Tools not found | `bash scripts/install_tools.sh` |
-| Docker not running | Start Docker or use `--lint-only` |
-| Permission denied | `chmod +x scripts/*.sh` |
-| act fails, GitHub works | See `act_usage.md` Limitations |
+| [INDEX] | [FILE]                  | [PURPOSE]                                       |
+| :-----: | ----------------------- | ----------------------------------------------- |
+|   [1]   | `valid-ci.yml`          | Passes all checks with zero warnings.           |
+|   [2]   | `with-errors.yml`       | Triggers every best practice check (11 hits).   |
+|   [3]   | `outdated-versions.yml` | Stale tags, deprecated commands, legacy Node.    |
+
+---
+## [7][TROUBLESHOOTING]
+>**Dictum:** *Common issues have known resolutions.*
+
+<br>
+
+| [INDEX] | [ISSUE]                     | [SOLUTION]                                   |
+| :-----: | --------------------------- | -------------------------------------------- |
+|   [1]   | **Tools not found**         | `bash scripts/install_tools.sh`              |
+|   [2]   | **Docker not running**      | Start Docker or use `--lint-only`.           |
+|   [3]   | **Permission denied**       | `chmod +x scripts/*.sh`                      |
+|   [4]   | **act fails, GitHub works** | See `act_usage.md` -- Limitations.           |
+|   [5]   | **ARM Mac arch mismatch**   | Add `--container-architecture linux/amd64`.  |
+|   [6]   | **Custom runner labels**    | Declare in `.github/actionlint.yaml`.        |
+
+[VERIFY] Completion:
+- [ ] All errors resolved with reference-backed fixes.
+- [ ] Action versions verified via discovery protocol or generator examples.
+- [ ] Best practice checks pass or warnings documented.
+- [ ] Summary provided with fixes, warnings, and recommendations.

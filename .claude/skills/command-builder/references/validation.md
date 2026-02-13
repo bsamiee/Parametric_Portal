@@ -87,12 +87,12 @@ wc -l .claude/commands/*.md  # Each must be <125
 head -20 .claude/commands/my-command.md  # Check frontmatter
 
 # Tool declaration check
-grep -E "@\$|@\." .claude/commands/*.md  # Find @path references
-grep "Read" .claude/commands/*.md         # Verify Read declared
+rg '@\$|@\.' .claude/commands/*.md  # Find @path references
+rg 'Read' .claude/commands/*.md     # Verify Read declared
 
 # Variable pattern check
-grep -E "\$ARGUMENTS|\$[0-9]" .claude/commands/*.md  # Check for mixing
+rg '\$ARGUMENTS|\$[0-9]' .claude/commands/*.md  # Check for mixing
 
 # Filename convention
-ls .claude/commands/ | grep -v "^[a-z-]*\.md$"  # Find violations
+eza .claude/commands/ | rg -v '^[a-z-]*\.md$'  # Find violations
 ```

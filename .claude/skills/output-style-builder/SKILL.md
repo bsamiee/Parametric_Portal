@@ -3,12 +3,10 @@ name: output-style-builder
 type: standard
 depth: extended
 description: >-
-  Creates structured output formats (JSON, YAML, Markdown-KV, XML) and response style
-  configurations for Claude. Use when: (1) defining agent output schemas (.json, .yaml, .xml),
-  (2) configuring response style scope hierarchy, (3) embedding formats in agents/commands,
-  (4) building CLAUDE.md output sections, (5) creating format definitions in .claude/styles/,
-  (6) standardizing structured data serialization, or (7) applying scope-hierarchy
-  style overrides.
+  Creates structured output formats (JSON/YAML/Markdown-KV/XML) and response style scope
+  configurations via accuracy-token tradeoff analysis. Use when defining agent schemas,
+  building CLAUDE.md output sections, configuring hierarchy overrides, or standardizing
+  serialization patterns across agents/commands.
 ---
 
 # [H1][OUTPUT-STYLE-BUILDER]

@@ -4,9 +4,7 @@ type: complex
 depth: base
 user-invocable: false
 description: >-
-  Executes Perplexity AI queries via Python CLI. Use when conducting web
-  research, asking questions with citations, deep research tasks, reasoning
-  problems, or searching for up-to-date information.
+  Queries Perplexity AI via sonar/sonar-pro/sonar-deep-research/sonar-reasoning-pro models. Use when conducting cited web research, deep technical reports, or complex reasoning problems requiring up-to-date sources.
 ---
 
 # [H1][PERPLEXITY-TOOLS]
@@ -21,13 +19,13 @@ Execute Perplexity AI queries via Python CLI. API key auto-injected via 1Passwor
 ---
 ## [1][COMMANDS]
 
-| [CMD]     | [ARGS]                         | [MODEL]               |
-| --------- | ------------------------------ | --------------------- |
-| ask       | `<query>`                      | sonar                 |
-| pro       | `<query>`                      | sonar-pro             |
-| research  | `<query> [strip]`              | sonar-deep-research   |
-| reason    | `<query> [strip]`              | sonar-reasoning-pro   |
-| search    | `<query> [max] [country]`      | sonar                 |
+| [CMD]    | [ARGS]                    | [MODEL]             |
+| -------- | ------------------------- | ------------------- |
+| ask      | `<query>`                 | sonar               |
+| pro      | `<query>`                 | sonar-pro           |
+| research | `<query> [strip]`         | sonar-deep-research |
+| reason   | `<query> [strip]`         | sonar-reasoning-pro |
+| search   | `<query> [max] [country]` | sonar               |
 
 ---
 ## [2][USAGE]

@@ -2,6 +2,7 @@ import { it, layer } from '@effect/vitest';
 import { Context } from '@parametric-portal/server/context';
 import { Crypto } from '@parametric-portal/server/security/crypto';
 import { Array as A, ConfigProvider, Effect, FastCheck as fc, Layer, Logger, LogLevel, Redacted } from 'effect';
+import { createHash } from 'node:crypto';
 import { expect } from 'vitest';
 
 // --- [CONSTANTS] -------------------------------------------------------------
@@ -9,6 +10,12 @@ import { expect } from 'vitest';
 const CIPHER = { iv: 12, minBytes: 14, tag: 16, version: 1 } as const;
 const _text = fc.string({ maxLength: 64, minLength: 0 });
 const _nonempty = fc.string({ maxLength: 64, minLength: 1 });
+const HMAC_RFC4231 = { data: 'what do ya want for nothing?', expected: '5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843', key: 'Jefe' } as const;
+const SHA256_NIST_VECTORS = [
+    { expected: 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855', input: '' },
+    { expected: 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad', input: 'abc' },
+    { expected: '248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1', input: 'abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq' },
+] as const;
 
 // --- [LAYER] -----------------------------------------------------------------
 
@@ -82,20 +89,32 @@ layer(_testLayer)('Crypto', (it) => {
 });
 
 // --- [ALGEBRAIC: HASH & COMPARE] ---------------------------------------------
-// P7: Hash/Compare Laws - determinism, reflexivity, correctness, symmetry
+// P7: Hash/Compare Laws - determinism, reflexivity, correctness, symmetry, NIST vectors, differential oracle, hex format
 it.effect.prop('P7: hash/compare laws', { x: _nonempty, y: _nonempty }, ({ x, y }) => Effect.gen(function* () {
     const [h1, h2, eqSelf, eqXY, eqYX] = yield* Effect.all([Crypto.hash(x), Crypto.hash(x), Crypto.compare(x, x), Crypto.compare(x, y), Crypto.compare(y, x)]);
     expect(h1).toBe(h2);
+    expect(h1).toMatch(/^[0-9a-f]{64}$/);
+    expect(h1).toBe(createHash('sha256').update(x).digest('hex'));
     expect(eqSelf).toBe(true);
     expect(eqXY).toBe(x === y);
     expect(eqXY).toBe(eqYX);
 }), { fastCheck: { numRuns: 100 } });
-// P8: HMAC Laws - determinism, key sensitivity
+// P7b: NIST FIPS 180-4 SHA-256 known-answer vectors
+it.effect('P7b: SHA-256 NIST vectors', () =>
+    Effect.forEach(SHA256_NIST_VECTORS, (vector) => Crypto.hash(vector.input).pipe(Effect.tap((digest) => {
+        expect(digest).toBe(vector.expected);
+    }))).pipe(Effect.asVoid));
+// P8: HMAC Laws - determinism, key sensitivity, RFC 4231 known-answer
 it.effect.prop('P8: hmac laws', { k1: _nonempty, k2: _nonempty, msg: _nonempty }, ({ k1, k2, msg }) => Effect.gen(function* () {
     const [h1, h2, h3] = yield* Effect.all([Crypto.hmac(k1, msg), Crypto.hmac(k1, msg), Crypto.hmac(k2, msg)]);
     expect(h1).toBe(h2);
     expect(h1 === h3).toBe(k1 === k2);
 }), { fastCheck: { numRuns: 100 } });
+// P8b: RFC 4231 TC2 HMAC-SHA-256 known-answer vector
+it.effect('P8b: HMAC RFC 4231 vector', () =>
+    Crypto.hmac(HMAC_RFC4231.key, HMAC_RFC4231.data).pipe(Effect.tap((tag) => {
+        expect(tag).toBe(HMAC_RFC4231.expected);
+    }), Effect.asVoid));
 // P9: Pair - uniqueness + hash derivation correctness
 it.effect('P9: pair', () => Effect.gen(function* () {
     const pairs = yield* Crypto.pair.pipe(Effect.replicate(100), Effect.all);

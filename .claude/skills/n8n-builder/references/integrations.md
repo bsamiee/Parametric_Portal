@@ -94,11 +94,11 @@ Tool as sub-workflow: `executeWorkflow` with `ai_tool` connection requires `desc
 
 <br>
 
-| [INDEX] | [TYPE]      | [KEY_PARAMETERS]                         |
-| :-----: | ----------- | ---------------------------------------- |
-|   [1]   | `postgres`  | operation, query, schema, table          |
-|   [2]   | `mySql`     | operation, query, table                  |
-|   [3]   | `mongoDb`   | operation, collection, query, options    |
+| [INDEX] | [TYPE]     | [KEY_PARAMETERS]                      |
+| :-----: | ---------- | ------------------------------------- |
+|   [1]   | `postgres` | operation, query, schema, table       |
+|   [2]   | `mySql`    | operation, query, table               |
+|   [3]   | `mongoDb`  | operation, collection, query, options |
 
 ---
 ## [8][STORAGE]
@@ -106,11 +106,11 @@ Tool as sub-workflow: `executeWorkflow` with `ai_tool` connection requires `desc
 
 <br>
 
-| [INDEX] | [TYPE]        | [KEY_PARAMETERS]                    |
-| :-----: | ------------- | ----------------------------------- |
-|   [1]   | `s3`          | operation, bucketName, fileKey      |
-|   [2]   | `googleDrive` | operation, fileId, folderId         |
-|   [3]   | `ftp`         | operation, path, protocol           |
+| [INDEX] | [TYPE]        | [KEY_PARAMETERS]               |
+| :-----: | ------------- | ------------------------------ |
+|   [1]   | `s3`          | operation, bucketName, fileKey |
+|   [2]   | `googleDrive` | operation, fileId, folderId    |
+|   [3]   | `ftp`         | operation, path, protocol      |
 
 ---
 ## [9][ERROR_HANDLING]
@@ -118,10 +118,10 @@ Tool as sub-workflow: `executeWorkflow` with `ai_tool` connection requires `desc
 
 <br>
 
-| [INDEX] | [TYPE]         | [KEY_PARAMETERS]               |
-| :-----: | -------------- | ------------------------------ |
-|   [1]   | `stopAndError` | errorType, message             |
-|   [2]   | `errorTrigger` | —                              |
+| [INDEX] | [TYPE]         | [KEY_PARAMETERS]   |
+| :-----: | -------------- | ------------------ |
+|   [1]   | `stopAndError` | errorType, message |
+|   [2]   | `errorTrigger` | —                  |
 
 stopAndError outputs to error workflow; errorTrigger catches errors from other workflows.
 
@@ -131,15 +131,15 @@ stopAndError outputs to error workflow; errorTrigger catches errors from other w
 
 <br>
 
-| [INDEX] | [TYPE]           | [KEY_PARAMETERS]                          | [ROLE]                                 |
-| :-----: | ---------------- | ----------------------------------------- | -------------------------------------- |
-|   [1]   | `mcpTrigger`     | —                                         | Expose workflow as MCP server          |
-|   [2]   | `toolMcp`        | —                                         | Call MCP server tools (legacy)         |
-|   [3]   | `mcpClient`      | sseEndpoint, credentials                  | Standalone MCP client node (2025)      |
-|   [4]   | `aiEvaluation`   | evaluationType, criteria                  | Evaluate AI output quality             |
-|   [5]   | `modelSelector`  | models, selectionStrategy                 | Dynamic model routing                  |
-|   [6]   | `guardrails`     | rules, action                             | AI output safety enforcement           |
-|   [7]   | `deepseek`       | model, credentials                        | DeepSeek model integration             |
+| [INDEX] | [TYPE]          | [KEY_PARAMETERS]          | [ROLE]                            |
+| :-----: | --------------- | ------------------------- | --------------------------------- |
+|   [1]   | `mcpTrigger`    | —                         | Expose workflow as MCP server     |
+|   [2]   | `toolMcp`       | —                         | Call MCP server tools (legacy)    |
+|   [3]   | `mcpClient`     | sseEndpoint, credentials  | Standalone MCP client node (2025) |
+|   [4]   | `aiEvaluation`  | evaluationType, criteria  | Evaluate AI output quality        |
+|   [5]   | `modelSelector` | models, selectionStrategy | Dynamic model routing             |
+|   [6]   | `guardrails`    | rules, action             | AI output safety enforcement      |
+|   [7]   | `deepseek`      | model, credentials        | DeepSeek model integration        |
 
 **MCP Architecture:**
 - `mcpTrigger` — Exposes n8n workflow as MCP server; external AI agents call workflow tools via MCP protocol.
@@ -157,15 +157,15 @@ stopAndError outputs to error workflow; errorTrigger catches errors from other w
 
 <br>
 
-| [INDEX] | [TYPE]                 | [KEY_PARAMETERS]                            |
-| :-----: | ---------------------- | ------------------------------------------- |
-|   [1]   | `memoryBufferWindow`   | sessionKey, contextWindowLength             |
-|   [2]   | `memoryRedisChat`      | sessionKey, sessionTimeToLive, contextWindowLength |
-|   [3]   | `memoryPostgresChat`   | sessionKey, tableName, contextWindowLength  |
-|   [4]   | `memoryMotorhead`      | sessionId, credentials                      |
-|   [5]   | `memoryXata`           | sessionId, tableName, credentials           |
-|   [6]   | `memoryZep`            | sessionId, credentials                      |
-|   [7]   | `memoryManager`        | mode, sessionIdFieldName                    |
+| [INDEX] | [TYPE]               | [KEY_PARAMETERS]                                   |
+| :-----: | -------------------- | -------------------------------------------------- |
+|   [1]   | `memoryBufferWindow` | sessionKey, contextWindowLength                    |
+|   [2]   | `memoryRedisChat`    | sessionKey, sessionTimeToLive, contextWindowLength |
+|   [3]   | `memoryPostgresChat` | sessionKey, tableName, contextWindowLength         |
+|   [4]   | `memoryMotorhead`    | sessionId, credentials                             |
+|   [5]   | `memoryXata`         | sessionId, tableName, credentials                  |
+|   [6]   | `memoryZep`          | sessionId, credentials                             |
+|   [7]   | `memoryManager`      | mode, sessionIdFieldName                           |
 
 Connection type: `ai_memory`. Only agents support memory; chains do not.
 
@@ -175,13 +175,13 @@ Connection type: `ai_memory`. Only agents support memory; chains do not.
 
 <br>
 
-| [INDEX] | [TYPE]                 | [KEY_PARAMETERS]                            |
-| :-----: | ---------------------- | ------------------------------------------- |
-|   [1]   | `chainLlm`             | prompt, requireSpecificOutputFormat         |
-|   [2]   | `chainRetrievalQa`     | query                                       |
-|   [3]   | `chainSummarization`   | dataToSummarize, summarizationMethod        |
-|   [4]   | `sentimentAnalysis`    | text                                        |
-|   [5]   | `textClassifier`       | text, categories                            |
+| [INDEX] | [TYPE]               | [KEY_PARAMETERS]                     |
+| :-----: | -------------------- | ------------------------------------ |
+|   [1]   | `chainLlm`           | prompt, requireSpecificOutputFormat  |
+|   [2]   | `chainRetrievalQa`   | query                                |
+|   [3]   | `chainSummarization` | dataToSummarize, summarizationMethod |
+|   [4]   | `sentimentAnalysis`  | text                                 |
+|   [5]   | `textClassifier`     | text, categories                     |
 
 Summarization methods: `"mapReduce"`, `"refine"`, `"stuff"`.
 Chains cannot use memory; use Agent for conversational workflows.

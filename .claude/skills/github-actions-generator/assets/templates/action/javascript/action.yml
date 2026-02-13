@@ -1,55 +1,122 @@
+# [ACTION_NAME] -- [DESCRIPTION]
+# NOTE: harden-runner is caller's responsibility — actions are steps, not jobs.
+# ┌─────────────────────────────────────────────────────────────────────────────┐
+# │ Placeholders: [UPPER_SNAKE_CASE] — replace before use.                      │
+# │  Identity:    [ACTION_NAME], [DESCRIPTION], [AUTHOR_NAME]                   │
+# │  Branding:    [ICON_NAME], [COLOR]                                          │
+# │                                                                             │
+# │  Runtime:     node24 (forced March 4, 2026 — node20 removal summer 2026)    │
+# │  Toolkit:     @actions/core@3.x (ESM-only), @actions/github@9.x             │
+# │  Bundle:      npx @vercel/ncc build src/index.ts -o dist --minify           │
+# │                                                                             │
+# │  pre-if/post-if: default to always() — only JavaScript actions support      │
+# │    pre/post lifecycle. Conditions use runner/github context, NOT steps.     │
+# └─────────────────────────────────────────────────────────────────────────────┘
 name: '[ACTION_NAME]'
-description: '[ACTION_DESCRIPTION]'
+description: '[DESCRIPTION]'
 author: '[AUTHOR_NAME]'
 
 inputs:
-    github-token:
-        description: 'GitHub token for API access'
-        required: false
-        default: ${{ github.token }}
-    [input-name]:
-        description: '[INPUT_DESCRIPTION]'
-        required: [true/false]
-        default: '[DEFAULT_VALUE]'
+  github-token:
+    description: 'GitHub token for API access'
+    required: false
+    default: ${{ github.token }}
+  source-path:
+    description: '[INPUT_DESCRIPTION]'
+    required: true
+  verbose:
+    description: 'Enable verbose output (true|false)'
+    required: false
+    default: 'false'
 
 outputs:
-    [output-name]:
-        description: '[OUTPUT_DESCRIPTION]'
+  result:
+    description: '[OUTPUT_DESCRIPTION]'
+  changed:
+    description: 'Whether changes were detected (true|false)'
 
 branding:
-    icon: '[ICON_NAME]'
-    color: '[COLOR]'
+  icon: '[ICON_NAME]'
+  color: '[COLOR]'
 
 runs:
-    using: 'node24'
-    main: 'dist/index.js'
-    # pre: 'dist/pre.js'
-    # post: 'dist/post.js'
+  using: 'node24'
+  main: 'dist/index.js'
+  pre: 'dist/setup.js'
+  pre-if: runner.os == 'Linux'   # default: always() — skip setup on non-Linux
+  post: 'dist/cleanup.js'
+  post-if: always()              # default: always() — cleanup runs even on failure
 
-# --- Setup --------------------------------------------------------------------
-# Dependencies: @actions/core (^1.10.1), @actions/github (^6.0.0)
-# Build: ncc build index.js -o dist --source-map --license licenses.txt
-# DevDeps: @vercel/ncc (^0.38.1), jest (^29.7.0)
+# --- Build ------------------------------------------------------------------
+# npx @vercel/ncc build src/index.ts -o dist --minify --license licenses.txt
 #
-# --- index.js -----------------------------------------------------------------
-# const core = require('@actions/core');
-# const github = require('@actions/github');
+# --- src/index.ts (ESM — @actions/core@3.x is ESM-only) --------------------
+# import * as core from '@actions/core';
+# import * as github from '@actions/github';
 #
-# async function run() {
-#     try {
-#         const githubToken = core.getInput('github-token');
-#         const inputName = core.getInput('[input-name]', { required: true });
-#         const octokit = github.getOctokit(githubToken);
-#         const { repo, eventName } = github.context;
+# class InputError extends Error {
+#   constructor(field: string, reason: string) {
+#     super(`Input '${field}' ${reason}`);
+#     this.name = 'InputError';
+#   }
+# }
 #
-#         core.startGroup('Running [ACTION_NAME]');
-#         // [ADD YOUR LOGIC HERE]
-#         core.endGroup();
+# async function run(): Promise<void> {
+#   try {
+#     // --- Input validation (fail fast) ---
+#     const token = core.getInput('github-token');
+#     const sourcePath = core.getInput('source-path', { required: true });
+#     const verbose = core.getBooleanInput('verbose');
 #
-#         core.setOutput('[output-name]', '[OUTPUT_VALUE]');
-#     } catch (error) {
-#         core.setFailed(`Action failed: ${error.message}`);
+#     if (!sourcePath.trim()) {
+#       throw new InputError('source-path', 'must be a non-empty string');
 #     }
+#
+#     const octokit = github.getOctokit(token);
+#
+#     // --- Main logic ---
+#     core.startGroup('[ACTION_NAME]');
+#     // [MAIN_LOGIC]
+#     const result = 'processed';
+#     const changed = true;
+#     if (verbose) core.info(`Result: ${result}, changed: ${changed}`);
+#     core.endGroup();
+#
+#     // --- Outputs ---
+#     core.setOutput('result', result);
+#     core.setOutput('changed', String(changed));
+#
+#     // --- Job summary ---
+#     await core.summary
+#       .addHeading('[ACTION_NAME] Results')
+#       .addTable([
+#         [{ data: 'Metric', header: true }, { data: 'Value', header: true }],
+#         ['Source', sourcePath],
+#         ['Changed', String(changed)],
+#       ])
+#       .write();
+#   } catch (error) {
+#     // --- Typed error handling ---
+#     if (error instanceof InputError) {
+#       core.setFailed(`Validation: ${error.message}`);
+#     } else if (error instanceof Error) {
+#       core.setFailed(error.message);
+#     } else {
+#       core.setFailed('An unexpected error occurred');
+#     }
+#   }
 # }
 #
 # run();
+#
+# --- src/setup.ts (pre: lifecycle) ------------------------------------------
+# import * as core from '@actions/core';
+# core.startGroup('Pre: validating environment');
+# // Validate runner prerequisites, restore caches
+# core.endGroup();
+#
+# --- src/cleanup.ts (post: lifecycle) ---------------------------------------
+# import * as core from '@actions/core';
+# core.startGroup('Post: cleanup');
+# // Upload metrics, save caches, revoke tokens
+# core.endGroup();

@@ -1,157 +1,129 @@
 ---
 name: promql-generator
-description: Comprehensive toolkit for generating best practice PromQL (Prometheus Query Language) queries following current standards and conventions. Use this skill when creating new PromQL queries, implementing monitoring and alerting rules, or building observability dashboards.
+depth: full
+description: >-
+    Generates PromQL queries with RED/USE/SLO patterns, native histograms, recording rules, and alerting expressions. Use when creating new queries from requirements; excludes validation (use promql-validator).
 ---
 
-# PromQL Query Generator
+# [H1][PROMQL-GENERATOR]
+>**Dictum:** *Query generation follows metric type, then pattern, then optimization.*
 
-## When to Use
+<br>
 
-- Creating PromQL queries for dashboards, alerting rules, recording rules, or ad-hoc analysis
-- Working with Prometheus metrics (counters, gauges, histograms, summaries, native histograms)
-- Implementing RED (Rate, Errors, Duration) or USE (Utilization, Saturation, Errors) patterns
-- SLO/error budget/burn rate monitoring
+Generate PromQL for Prometheus 3.8-3.10 (native histograms stable, feature flag no-op since 3.9). Cross-references: **promql-validator** for validation, **observability-stack** for deployment.
 
-## Interactive Workflow
+**Tasks:**
+1. Gather goal, use case, metric context via **AskUserQuestion** (skip if provided).
+2. Identify metric names, types, labels -- confirm with user.
+3. Read relevant reference: `references/promql_functions.md`, `references/promql_patterns.md`, `references/best_practices.md`.
+4. Present plain-English plan; confirm via **AskUserQuestion**.
+5. Generate query citing applicable pattern.
+6. Invoke **promql-validator** skill; fix and re-validate until all checks pass.
+7. Deliver: final query + explanation + usage context + customization notes.
 
-### Step 1: Understand the Goal
+---
+## [1][METRIC_IDENTIFICATION]
+>**Dictum:** *Metric type determines function selection.*
 
-Gather via **AskUserQuestion** (skip if already provided):
+<br>
 
-| Dimension | Options |
-|-----------|---------|
-| **Goal** | Request rate, error rate, latency, resource usage, availability, saturation, SLO tracking |
-| **Use case** | Dashboard, alert, recording rule, ad-hoc, capacity planning |
-| **Context** | Service name, team, existing metrics/naming conventions |
+| [INDEX] | [SUFFIX]                        | [TYPE]             | [FUNCTIONS]                                                  |
+| :-----: | ------------------------------- | ------------------ | ------------------------------------------------------------ |
+|   [1]   | **`_total`**                    | Counter.           | `rate()`, `irate()`, `increase()`.                           |
+|   [2]   | **`_bucket`, `_sum`, `_count`** | Classic Histogram. | `histogram_quantile()`, `rate()`.                            |
+|   [3]   | **(none, opaque)**              | Native Histogram.  | `histogram_quantile/count/sum/avg/fraction/stddev/stdvar()`. |
+|   [4]   | **(unit suffix)**               | Gauge.             | direct, `*_over_time()`.                                     |
 
-### Step 2: Identify Metrics
+**Guidance:**
+- Range >= 4x scrape interval. Label filters: exact `=`, negative `!=`, regex `=~`.
+- Aggregation: `sum by (labels)` to keep, `sum without (labels)` to drop.
+- Native histograms eliminate `le` label and `_bucket` suffix -- single opaque series per histogram.
 
-Confirm metric names, types, and labels:
+---
+## [2][VERSION_MATRIX]
+>**Dictum:** *Version awareness prevents deprecated patterns.*
 
-| Suffix | Type | Functions |
-|--------|------|-----------|
-| `_total` | Counter | `rate()`, `irate()`, `increase()` |
-| `_bucket`, `_sum`, `_count` | Classic Histogram | `histogram_quantile()`, `rate()` |
-| (none, opaque) | Native Histogram (3.0+ stable, 3.9+ no feature flag) | `histogram_quantile/count/sum/avg/fraction/stddev/stdvar()` |
-| (unit suffix) | Gauge | direct, `*_over_time()` |
+<br>
 
-### Step 3: Determine Parameters
+| [INDEX] | [VERSION]   | [RELEASE] | [KEY_CHANGES]                                                                    |
+| :-----: | ----------- | --------- | -------------------------------------------------------------------------------- |
+|   [1]   | **3.0**     | Nov 2024  | UTF-8 names, `holt_winters` renamed to `double_exponential_smoothing`, `info()`. |
+|   [2]   | **3.5 LTS** | Jul 2025  | `mad_over_time`, `ts_of_min/max/last_over_time`, `sort_by_label` (experimental). |
+|   [3]   | **3.6**     | Sep 2025  | `step()`, duration expressions (`promql-duration-expr` flag).                    |
+|   [4]   | **3.7**     | Oct 2025  | `first_over_time`, anchored+smoothed rate (`promql-extended-range-selectors`).   |
+|   [5]   | **3.8**     | Nov 2025  | Native histograms **stable** (`scrape_native_histograms` config).                |
+|   [6]   | **3.9**     | Jan 2026  | `native-histogram` flag is **no-op**; `/api/v1/features` endpoint.               |
+|   [7]   | **3.10**    | Feb 2026  | Maintenance release; stability fixes only.                                       |
 
-Pre-fill values from user request. Confirm via **AskUserQuestion**:
-- **Time range**: `[1m]`-`[5m]` real-time, `[1h]`-`[1d]` trends. Range >= 4x scrape interval.
-- **Label filters**: exact `=`, negative `!=`, regex `=~`
-- **Aggregation**: `sum by (labels)`, `sum without (labels)`, `topk`, `bottomk`
-- **Thresholds**: alert conditions, comparison operators
+**Guidance:**
+- Activate native histograms: `scrape_native_histograms: true` in scrape config (not a feature flag).
+- Three experimental gates remain: `promql-experimental-functions`, `promql-duration-expr`, `promql-extended-range-selectors`.
 
-### Step 4: Present Query Plan
+---
+## [3][NATIVE_HISTOGRAMS]
+>**Dictum:** *Native histograms replace classic for all new instrumentation.*
 
-**Before generating code**, present plain-English plan and get confirmation via **AskUserQuestion** with options: "Yes, generate", "Modify [aspect]", "Show alternatives".
+<br>
 
-### Step 5: Generate Query
+No `_bucket` suffix or `le` label. Reduces series cardinality 10-100x. NHCB (3.4+): classic-to-native conversion via `convert_classic_histograms_to_nhcb: true`.
 
-**Before writing any query, read the relevant reference file(s):**
-- Function behavior, metric types -> `references/promql_functions.md`
-- RED/USE/SLO/alerting/join patterns -> `references/promql_patterns.md`
-- Optimization, anti-patterns -> `references/best_practices.md`
-
-Cite the applicable pattern in your response.
-
-### Step 6: Validate
-
-Invoke **promql-validator** skill. Display results:
-- Syntax check (valid/warning/error)
-- Best practices check (optimized/can improve/issues)
-- Query explanation (what it measures, output labels, result structure)
-
-Fix and re-validate until all checks pass.
-
-### Step 7: Usage Instructions
-
-Provide: final query, explanation, usage context (dashboard/alert/recording rule), customization notes, related queries.
-
-## Prometheus Version Matrix
-
-| Version | Release | Key PromQL Changes |
-|---------|---------|-------------------|
-| 3.0 | Nov 2024 | Native histograms (experimental), UTF-8 names, left-open ranges, `holt_winters` -> `double_exponential_smoothing`, `info()` experimental |
-| 3.3 | Apr 2025 | `irate()`/`idelta()` support native histograms |
-| 3.5 LTS | Jul 2025 | `ts_of_min/max/last_over_time()` experimental, type/unit metadata labels (experimental) |
-| 3.6 | Sep 2025 | `step()`, `min()`/`max()` on durations (`promql-duration-expr` flag), `toDuration()`/`now()` template funcs |
-| 3.7 | Oct 2025 | `first_over_time()`, `ts_of_first_over_time()` experimental, anchored+smoothed rate (`promql-extended-range-selectors` flag) |
-| 3.8 | Nov 2025 | Native histograms **stable** (requires `scrape_native_histograms` config), `info()` bug fixes |
-| 3.9 | Jan 2026 | `native-histogram` feature flag is **no-op**, `scrape_native_histograms` required, `/api/v1/features` endpoint |
-| 3.10 | Feb 2026 | Maintenance release; no new PromQL functions. Focus on stability and bug fixes |
-
-## Native Histograms
-
-### Stable since 3.8; no feature flag needed since 3.9
-
-No `_bucket` suffix or `le` label needed. Dramatically reduces series cardinality. Activate via `scrape_native_histograms: true` in scrape config (not a feature flag).
+| [INDEX] | [FUNCTION]                                        | [PURPOSE]                     |
+| :-----: | ------------------------------------------------- | ----------------------------- |
+|   [1]   | **`histogram_quantile(phi, v)`**                  | Percentile (no `le` needed).  |
+|   [2]   | **`histogram_avg(v)`**                            | Average (replaces sum/count). |
+|   [3]   | **`histogram_fraction(lo, hi, v)`**               | Fraction between bounds.      |
+|   [4]   | **`histogram_stddev(v)` / `histogram_stdvar(v)`** | Estimated stddev / variance.  |
+|   [5]   | **`histogram_count(v)` / `histogram_sum(v)`**     | Observation count / sum.      |
 
 ```promql
 # Classic: histogram_quantile(0.95, sum by (job, le) (rate(metric_bucket[5m])))
 # Native:  histogram_quantile(0.95, sum by (job) (rate(metric[5m])))
 ```
 
-| Function | Purpose | Example |
-|----------|---------|---------|
-| `histogram_quantile(phi, v)` | Percentile | `histogram_quantile(0.95, sum by (job) (rate(metric[5m])))` |
-| `histogram_count(v)` | Observation count rate | `histogram_count(rate(metric[5m]))` |
-| `histogram_sum(v)` | Sum of observations | `histogram_sum(rate(metric[5m]))` |
-| `histogram_fraction(lo, hi, v)` | Fraction between bounds | `histogram_fraction(0, 0.1, rate(metric[5m]))` |
-| `histogram_avg(v)` | Average (shorthand sum/count) | `histogram_avg(rate(metric[5m]))` |
-| `histogram_stddev(v)` / `histogram_stdvar(v)` | Estimated stddev / variance | `histogram_stddev(rate(metric[5m]))` |
+**Best-Practices:**
+- Prefer `histogram_avg()` over manual `_sum/_count` division -- single function, single series.
+- Use `histogram_fraction(0, 0.2, rate(m[5m]))` for latency SLOs -- precise without bucket interpolation.
+- `rate()`, `increase()`, `delta()` on native histograms produce gauge histograms (3.9+).
 
-**NHCB** (3.4+): Classic-to-native conversion via `convert_classic_histograms_to_nhcb: true`. Configured in Pulumi (`infrastructure/src/deploy.ts`).
+---
+## [4][EXPERIMENTAL_FUNCTIONS]
+>**Dictum:** *Experimental functions expand analysis under explicit feature flags.*
 
-### Breaking Changes (3.0)
+<br>
 
-| Change | Detail |
-|--------|--------|
-| Left-open range selectors | Sample at lower time boundary excluded |
-| `holt_winters` renamed | Now `double_exponential_smoothing` (experimental flag) |
-| Regex `.` matches all | Including newlines |
-| UTF-8 metric/label names | `{"metric.name" = "value"}` allowed by default |
+| [INDEX] | [FUNCTION]                                     | [FLAG]                          | [SINCE] | [PURPOSE]                               |
+| :-----: | ---------------------------------------------- | ------------------------------- | ------- | --------------------------------------- |
+|   [1]   | **`info(v [, selector])`**                     | `promql-experimental-functions` | 3.0+    | Automatic metadata enrichment.          |
+|   [2]   | **`double_exponential_smoothing(v[r],sf,tf)`** | `promql-experimental-functions` | 3.0+    | Smoothed gauge (replaced holt_winters). |
+|   [3]   | **`mad_over_time(v[r])`**                      | `promql-experimental-functions` | 3.5+    | MAD-based anomaly detection.            |
+|   [4]   | **`first_over_time(v[r])`**                    | `promql-experimental-functions` | 3.7+    | First (oldest) value in range.          |
+|   [5]   | **`limitk(k,v)` / `limit_ratio(r,v)`**         | `promql-experimental-functions` | 3.0+    | Deterministic series sampling.          |
+|   [6]   | **`step()`**                                   | `promql-duration-expr`          | 3.6+    | Current evaluation step size.           |
 
-### Experimental Functions
+**Guidance:**
+- `info()` replaces manual `* on (...) group_left (...)` for metadata joins.
+- `mad_over_time` enables z-score anomaly detection: `m > avg_over_time(m[1h]) + 3 * mad_over_time(m[1h])`.
+- `limitk`/`limit_ratio` use deterministic hash-based sampling -- same series across evaluations.
 
-Three feature flags gate experimental PromQL features:
+---
+## [5][LOOKUP_STRATEGY]
+>**Dictum:** *Lookup strategy prioritizes authoritative sources.*
 
-| Flag | Functions | Since |
-|------|-----------|-------|
-| `promql-experimental-functions` | `info()`, `double_exponential_smoothing()`, `mad_over_time()`, `sort_by_label()`, `ts_of_max/min/last/first_over_time()`, `first_over_time()`, `limitk()`, `limit_ratio()` | 3.0+ |
-| `promql-duration-expr` | `step()`, `min(duration)`, `max(duration)` | 3.6+ |
-| `promql-extended-range-selectors` | Anchored and smoothed rate | 3.7+ |
+<br>
 
-| Function | Version | Purpose |
-|----------|---------|---------|
-| `info(v [, selector])` | 3.0+ | Automatic metadata enrichment (replaces `group_left` joins for info metrics) |
-| `double_exponential_smoothing(v[r], sf, tf)` | 3.0+ | Smoothed gauge values (replaced `holt_winters`) |
-| `mad_over_time(v[r])` | 3.5+ | Median absolute deviation for anomaly detection |
-| `sort_by_label(v, labels...)` / `sort_by_label_desc(v, labels...)` | 3.5+ | Sort vector by label values |
-| `ts_of_max_over_time(v[r])` | 3.5+ | Timestamp of maximum value in range |
-| `ts_of_min_over_time(v[r])` | 3.5+ | Timestamp of minimum value in range |
-| `ts_of_last_over_time(v[r])` | 3.5+ | Timestamp of last sample (staleness detection) |
-| `first_over_time(v[r])` | 3.7+ | First (oldest) value in range |
-| `ts_of_first_over_time(v[r])` | 3.7+ | Timestamp of first sample |
-| `limitk(k, v)` / `limit_ratio(r, v)` | 3.0+ | Random sampling of time series |
-| `step()` | 3.6+ | Current evaluation step size as duration (`promql-duration-expr` flag) |
+**context7 MCP** (preferred): resolve "prometheus" -> get-library-docs with topic.
+**WebSearch** fallback: `"Prometheus PromQL [topic] documentation examples"`.
 
-## Documentation Lookup
+---
+## [6][RESOURCES]
+>**Dictum:** *Reference files provide detailed function, pattern, and optimization guidance.*
 
-1. **context7 MCP** (preferred): resolve "prometheus" -> get-library-docs with topic
-2. **WebSearch** fallback: `"Prometheus PromQL [topic] documentation examples"`
+<br>
 
-## Resources
-
-| File | When to Read |
-|------|-------------|
-| `references/promql_functions.md` | Function behavior, metric types, decision tree, native histograms |
-| `references/promql_patterns.md` | RED/USE/SLO/alerting/join/efficiency patterns |
-| `references/best_practices.md` | Optimization, anti-patterns, pre-deploy checklist |
-| `examples/red_method.promql` | Request rate, error rate, latency queries |
-| `examples/use_method.promql` | CPU, memory, disk, network resource queries |
-| `examples/slo_patterns.promql` | Error budget, burn rate, Apdex queries |
-| `examples/kubernetes_patterns.promql` | K8s pod/node/deployment/HPA queries |
-| `examples/alerting_rules.yaml` | Production alerting rule templates |
-| `examples/recording_rules.yaml` | Pre-computed metric rule templates |
+| [INDEX] | [FILE]                               | [WHEN_TO_READ]                                         |
+| :-----: | ------------------------------------ | ------------------------------------------------------ |
+|   [1]   | **`references/promql_functions.md`** | Function behavior, metric types, decision tree.        |
+|   [2]   | **`references/promql_patterns.md`**  | RED/USE/SLO/alerting/join/efficiency patterns.         |
+|   [3]   | **`references/best_practices.md`**   | Optimization, anti-patterns, pre-deploy checklist.     |
+|   [4]   | **`examples/alerting_rules.yaml`**   | Production alerting rule templates.                    |
+|   [5]   | **`examples/recording_rules.yaml`**  | Pre-computed metric rule templates (classic + native). |

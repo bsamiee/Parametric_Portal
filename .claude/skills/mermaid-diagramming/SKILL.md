@@ -3,11 +3,14 @@ name: mermaid-diagramming
 type: standard
 depth: extended
 description: >-
-  Creates Mermaid v11+ diagrams with ELK layout and YAML frontmatter. Covers 22 diagram types:
-  flowchart, mindmap, block, sequence, journey, state, ER, class, requirement, pie, quadrant,
-  sankey, xy, radar, gantt, treemap, C4, architecture, packet, timeline, gitgraph, kanban. Use
-  when visualizing: logic flow, interactions, state machines, data models, charts, system
-  architecture, or any diagram requiring theming, classDef styling, or accessibility.
+  Generates Mermaid v11+ diagrams with YAML frontmatter, ELK layout, and Dracula theming across 22
+  types: flowcharts, sequence diagrams, state machines, ER diagrams, class diagrams, mindmaps,
+  block diagrams, journey maps, requirement diagrams, pie charts, quadrant charts, sankey diagrams,
+  XY charts, radar charts, gantt charts, treemaps, C4 architecture, architecture-beta,
+  packet-beta, timelines, gitgraph, and kanban boards. Use when visualizing logic flows, system
+  architecture, state transitions, data relationships, temporal sequences, user journeys, project
+  timelines, network protocols, or any structured diagram requiring theming, classDef styling, and
+  WCAG 2.1 accessibility with accTitle and accDescr annotations.
 ---
 
 # [H1][MERMAID-DIAGRAMMING]
@@ -58,8 +61,8 @@ Mermaid v11+ diagram creation with frontmatter YAML, ELK layout, Dracula palette
 
 <br>
 
-| [CATEGORY]   | [TYPES]                                              | [REFERENCE]                                               |
-| :----------- | ---------------------------------------------------- | --------------------------------------------------------- |
+| [CATEGORY]   | [TYPES]                                              | [REFERENCE]                                      |
+| :----------- | ---------------------------------------------------- | ------------------------------------------------ |
 | Graph        | flowchart, mindmap, block                            | [→graph.md](./references/graph.md)               |
 | Interaction  | sequence, journey                                    | [→interaction.md](./references/interaction.md)   |
 | Modeling     | state, ER, class, requirement                        | [→modeling.md](./references/modeling.md)         |

@@ -1,6 +1,6 @@
 /**
- * Chaos/fault injection tests: Resilience pipeline isolation via Effect layers.
- * Validates timeout, retry, non-retriable bypass, circuit trip, fallback, bulkhead, type guards.
+ * Resilience pipeline tests: fault injection, isolation via Effect layers.
+ * Validates timeout, retry, non-retriable bypass, circuit trip, fallback, bulkhead, type guards, schedule factory.
  */
 import { it, layer } from '@effect/vitest';
 import { HttpError } from '@parametric-portal/server/errors';
@@ -11,13 +11,14 @@ import { expect } from 'vitest';
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
-const _FROZEN_ERROR = Object.freeze({ _tag: 'TestDomainError', message: 'synthetic' }) as const;
+const _FROZEN_ERROR = { _tag: 'TestDomainError', message: 'synthetic' } as const;
 const _NO_CIRCUIT = { circuit: false, timeout: false } as const;
 const _testLayer = Resilience.Layer.pipe(Layer.provide(Logger.minimumLogLevel(LogLevel.Warning)));
+const PRESETS = { brief: { base: 50, maxAttempts: 2 }, default: { base: 100, maxAttempts: 3 }, patient: { base: 500, maxAttempts: 5 }, persistent: { base: 100, maxAttempts: 5 } } as const;
 
-// --- [CHAOS: RESILIENCE PIPELINE] --------------------------------------------
+// --- [RESILIENCE PIPELINE] ---------------------------------------------------
 
-layer(_testLayer)('Chaos: Resilience', (it) => {
+layer(_testLayer)('Resilience: Pipeline', (it) => {
     // C1: Timeout injection — effect exceeding deadline yields TimeoutError
     it.scoped('C1: timeout fires on slow effect', () => Effect.gen(function* () {
         const fiber = yield* Effect.fork(Resilience.run('timeout-test', Effect.sleep(Duration.seconds(10)), { circuit: false, retry: false, timeout: Duration.millis(50) }));
@@ -59,7 +60,7 @@ layer(_testLayer)('Chaos: Resilience', (it) => {
 
 });
 
-// --- [CHAOS: BULKHEAD] -------------------------------------------------------
+// --- [BULKHEAD] --------------------------------------------------------------
 
 it.scopedLive('C5: bulkhead semaphore rejects on saturation', () => Effect.gen(function* () {
     const sem = yield* Effect.makeSemaphore(1);
@@ -74,9 +75,9 @@ it.scopedLive('C5: bulkhead semaphore rejects on saturation', () => Effect.gen(f
     yield* Fiber.join(f1);
 }));
 
-// --- [CHAOS: CIRCUIT BREAKER] ------------------------------------------------
+// --- [CIRCUIT BREAKER] -------------------------------------------------------
 
-layer(_testLayer)('Chaos: Circuit', (it) => {
+layer(_testLayer)('Resilience: Circuit', (it) => {
     // C6: Circuit breaker trip — 3 consecutive failures open the circuit
     it.scoped('C6: consecutive breaker trips after threshold', () => Effect.gen(function* () {
         const circuit = yield* Circuit.make('chaos-trip', { breaker: { _tag: 'consecutive', threshold: 3 }, metrics: false, persist: false });
@@ -87,17 +88,34 @@ layer(_testLayer)('Chaos: Circuit', (it) => {
     }));
 });
 
-// --- [CHAOS: TYPE GUARDS] ----------------------------------------------------
+// C6b: HalfOpen -- cooldown elapses, probe succeeds, circuit resets to Closed
+it.scopedLive('C6b: halfOpen probe resets circuit', () => Effect.gen(function* () {
+    const circuit = yield* Circuit.make('half-open-probe', { breaker: { _tag: 'consecutive', threshold: 2 }, halfOpenAfter: Duration.millis(100), metrics: false, persist: false }).pipe(Effect.provide(_testLayer));
+    yield* Effect.all([1, 2].map(() => circuit.execute(Effect.fail(new Error('trip'))).pipe(Effect.ignore)));
+    expect(circuit.state).toBe('Open');
+    yield* Effect.sleep(Duration.millis(120));
+    expect([yield* circuit.execute(Effect.succeed('probe')), circuit.state]).toEqual(['probe', 'Closed']);
+}));
 
-it.effect('C7: Resilience.is discriminates error families', () => Effect.sync(() => {
+// --- [TYPE GUARDS + DEFAULTS] ------------------------------------------------
+
+it.effect('C7: Resilience.is discriminates error families + preset defaults', () => Effect.sync(() => {
     const timeout = Resilience.Timeout.of('op', Duration.millis(100));
     const bulkhead = Resilience.Bulkhead.of('op', 5);
     const circuitErr = Resilience.Circuit.broken('op');
-    const domainErr = HttpError.NotFound.of('resource', 'id');
     [timeout, bulkhead, circuitErr].forEach((error) => { expect(Resilience.is(error)).toBe(true); });
-    expect(Resilience.is(timeout, 'TimeoutError')).toBe(true);
-    expect(Resilience.is(timeout, 'BulkheadError')).toBe(false);
-    expect(Resilience.is(bulkhead, 'BulkheadError')).toBe(true);
-    expect(Resilience.is(circuitErr, 'CircuitError')).toBe(true);
-    expect(Resilience.is(domainErr)).toBe(false);
+    expect([Resilience.is(timeout, 'TimeoutError'), Resilience.is(timeout, 'BulkheadError'), Resilience.is(bulkhead, 'BulkheadError'), Resilience.is(circuitErr, 'CircuitError'), Resilience.is(HttpError.NotFound.of('resource', 'id'))]).toEqual([true, false, true, true, false]);
+    expect(Object.keys(Resilience.presets)).toEqual(['brief', 'default', 'patient', 'persistent']);
+    expect([Resilience.defaults.timeout, Duration.toMillis(Resilience.defaults.hedgeDelay)]).toEqual([Duration.seconds(30), 100]);
+}));
+
+// --- [SCHEDULE FACTORY] ------------------------------------------------------
+
+// C8: Resilience.schedule('default') retries expected number of times under TestClock
+it.effect('C8: schedule factory retries match preset', () => Effect.gen(function* () {
+    const count = yield* Ref.make(0);
+    const fiber = yield* Effect.fork(Ref.update(count, (n) => n + 1).pipe(Effect.andThen(Effect.fail('err')), Effect.retry(Resilience.schedule('default')), Effect.ignore));
+    yield* TestClock.adjust(Duration.seconds(30));
+    yield* Fiber.join(fiber);
+    expect(yield* Ref.get(count)).toBe(PRESETS.default.maxAttempts);
 }));

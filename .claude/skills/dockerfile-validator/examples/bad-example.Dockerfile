@@ -10,7 +10,7 @@
 
 # [1] ANTI-PATTERN: :latest tag — non-reproducible builds.
 #     The same tag can point to different digests on different days.
-#     FIX: Pin to specific version, e.g., FROM node:24-alpine3.22
+#     FIX: Pin to specific version, e.g., FROM node:24-alpine3.23
 FROM ubuntu:latest
 
 # [2] ANTI-PATTERN: No multi-stage build — build tools ship to production.

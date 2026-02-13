@@ -1,100 +1,139 @@
-# [WORKFLOW_NAME] -- [DESCRIPTION], harden-runner, build attestation
+# [WORKFLOW_NAME] -- [DESCRIPTION]
+# ┌─────────────────────────────────────────────────────────────────────────────┐
+# │ Placeholders: [UPPER_SNAKE_CASE] — replace before use.                      │
+# │  Identity:  [WORKFLOW_NAME], [DESCRIPTION]                                  │
+# │  Runtime:   [RUNTIME_VERSION], [RUNTIME_ENV_KEY], [ENABLE_CMD]              │
+# │  Package:   [PACKAGE_MANAGER], [INSTALL_CMD], [LINT_CMD], [TEST_CMD]        │
+# │  Build:     [BUILD_CMD], [BUILD_PATH], [RESULTS_PATH]                       │
+# │  Deploy:    [ENV_NAME], [ENV_URL], [DEPLOY_CMD], [VERIFY_CMD]               │
+# │  Secrets:   [SECRET_KEY], [SECRET_NAME]                                     │
+# │  Matrix:    [VERSION_KEY], [V1], [V2], [V3]                                 │
+# └─────────────────────────────────────────────────────────────────────────────┘
 name: [WORKFLOW_NAME]
 on:
-    push: { branches: [main, develop], paths: ['[PATH]/**', '!**.md'] }
-    pull_request: { branches: [main], types: [opened, synchronize, reopened] }
-    workflow_dispatch:
-        inputs:
-            environment: { description: 'Target environment', required: true, type: choice, options: [dev, staging, production], default: dev }
+  push: { branches: [main, develop], paths-ignore: ['**.md', 'docs/**'] }
+  pull_request: { branches: [main], types: [opened, synchronize, reopened] }
+  merge_group: { types: [checks_requested] }
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target environment'
+        required: true
+        type: choice
+        options: [dev, staging, production]
+        default: dev
+      dry-run:
+        description: 'Skip deployment'
+        required: false
+        type: boolean
+        default: false
 
-permissions: { contents: read }
-concurrency: { group: '${{ github.workflow }}-${{ github.ref }}', cancel-in-progress: true }
-env: { NODE_VERSION: '[VERSION]' }
+permissions: {}
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+env: { '[RUNTIME_ENV_KEY]': '[RUNTIME_VERSION]' }
 
 jobs:
-    lint:
-        runs-on: ubuntu-latest
-        timeout-minutes: 10
-        steps:
-            - uses: step-security/harden-runner@002fdce3c6a235733a90a27c80493a3241e56863 # v2.12.0
-              with: { egress-policy: audit }
-            - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-              with: { fetch-depth: 1 }
-            - uses: actions/setup-node@6044e13b5dc448c55e2357c09f80417699197238 # v6.2.0
-              with: { node-version: '${{ env.NODE_VERSION }}' }
-            - run: corepack enable
-            - run: pnpm install --frozen-lockfile
-            - run: [LINT_CMD]
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions: { contents: read }
+    steps:
+      - uses: step-security/harden-runner@5ef0c079ce82195b2a36a210272d6b661572d83e # v2.14.2
+        with: { egress-policy: audit }
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with: { persist-credentials: false }
+      - uses: actions/setup-node@6044e13b5dc448c55e2357c09f80417699197238 # v6.2.0
+        with: { node-version: '${{ env.[RUNTIME_ENV_KEY] }}', cache: '[PACKAGE_MANAGER]' }
+      - run: '[ENABLE_CMD]'
+      - run: '[INSTALL_CMD]'
+      - run: '[LINT_CMD]'
 
-    test:
-        name: Test ${{ matrix.runner }} ${{ matrix.[VERSION_KEY] }}
-        runs-on: ${{ matrix.runner }}
-        timeout-minutes: 30
-        permissions: { contents: read, checks: write }
-        strategy:
-            matrix:
-                runner: [ubuntu-latest, windows-latest, macos-latest]
-                [VERSION_KEY]: [[V1], [V2], [V3]]
-                exclude: [{ runner: macos-latest, [VERSION_KEY]: [V1] }]
-                include: [{ runner: ubuntu-latest-arm64, [VERSION_KEY]: [MAIN_VERSION] }]
-            fail-fast: false
-        steps:
-            - uses: step-security/harden-runner@002fdce3c6a235733a90a27c80493a3241e56863 # v2.12.0
-              with: { egress-policy: audit }
-            - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-            - uses: actions/setup-node@6044e13b5dc448c55e2357c09f80417699197238 # v6.2.0
-              with: { node-version: '${{ matrix.[VERSION_KEY] }}' }
-            - run: corepack enable
-            - run: pnpm install --frozen-lockfile
-            - run: [TEST_CMD]
-            - if: always()
-              uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
-              with: { name: 'test-${{ matrix.runner }}-${{ matrix.[VERSION_KEY] }}', path: '[RESULTS_PATH]', retention-days: 7 }
-            - if: matrix.runner == 'ubuntu-latest' && matrix.[VERSION_KEY] == [MAIN_VERSION]
-              uses: codecov/codecov-action@0561704f0f02c16a585d4c7555e57fa2e44cf909 # v5.5.2
-              with: { token: '${{ secrets.CODECOV_TOKEN }}', files: '[COVERAGE_PATH]', fail_ci_if_error: true }
+  test:
+    name: Test ${{ matrix.runner }} / ${{ matrix.[VERSION_KEY] }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    permissions: { contents: read, checks: write }
+    strategy:
+      matrix:
+        runner: [ubuntu-latest, ubuntu-24.04-arm, windows-latest, macos-latest]
+        [VERSION_KEY]: ['[V1]', '[V2]', '[V3]']
+        exclude:
+          - { runner: macos-latest, [VERSION_KEY]: '[V1]' }
+          - { runner: ubuntu-24.04-arm, [VERSION_KEY]: '[V1]' }
+        include:
+          - { runner: ubuntu-24.04-arm, [VERSION_KEY]: '[V3]' }
+      fail-fast: false
+    steps:
+      - uses: step-security/harden-runner@5ef0c079ce82195b2a36a210272d6b661572d83e # v2.14.2
+        with: { egress-policy: audit }
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with: { persist-credentials: false }
+      - uses: actions/setup-node@6044e13b5dc448c55e2357c09f80417699197238 # v6.2.0
+        with: { node-version: '${{ matrix.[VERSION_KEY] }}', cache: '[PACKAGE_MANAGER]' }
+      - run: '[ENABLE_CMD]'
+      - run: '[INSTALL_CMD]'
+      - run: '[TEST_CMD]'
+      - if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: test-${{ matrix.runner }}-${{ matrix.[VERSION_KEY] }}
+          path: '[RESULTS_PATH]'
+          retention-days: 7
+      - if: matrix.runner == 'ubuntu-latest' && matrix.[VERSION_KEY] == '[V3]'
+        run: |
+          echo "## Test Results" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Runner | Version | Status |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|---|---|---|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| ${{ matrix.runner }} | ${{ matrix.[VERSION_KEY] }} | ${{ job.status }} |" >> "$GITHUB_STEP_SUMMARY"
 
-    build:
-        needs: [lint, test]
-        runs-on: ubuntu-latest
-        timeout-minutes: 20
-        permissions: { contents: read, id-token: write, attestations: write }
-        outputs: { build-id: '${{ steps.build.outputs.id }}' }
-        steps:
-            - uses: step-security/harden-runner@002fdce3c6a235733a90a27c80493a3241e56863 # v2.12.0
-              with: { egress-policy: audit }
-            - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-            - uses: actions/setup-node@6044e13b5dc448c55e2357c09f80417699197238 # v6.2.0
-              with: { node-version: '${{ env.NODE_VERSION }}' }
-            - run: corepack enable
-            - run: pnpm install --frozen-lockfile
-            - id: build
-              run: |
-                  [BUILD_CMD]
-                  echo "id=build-${{ github.sha }}" >> $GITHUB_OUTPUT
-            - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
-              with: { name: 'build-${{ github.sha }}', path: '[BUILD_PATH]', retention-days: 7, if-no-files-found: error }
-            - if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-              uses: actions/attest-build-provenance@62fc1d596301d0ab9914e1fec14dc5c8d93f65cd # v3.2.0
-              with: { subject-path: '[BUILD_PATH]' }
-            - run: |
-                  echo "## Build Summary" >> $GITHUB_STEP_SUMMARY
-                  echo "Artifact: \`build-${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
+  build:
+    needs: [lint, test]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions: { contents: read, id-token: write, attestations: write }
+    outputs:
+      artifact-id: ${{ steps.upload.outputs.artifact-id }}
+    steps:
+      - uses: step-security/harden-runner@5ef0c079ce82195b2a36a210272d6b661572d83e # v2.14.2
+        with: { egress-policy: audit }
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with: { persist-credentials: false }
+      - uses: actions/setup-node@6044e13b5dc448c55e2357c09f80417699197238 # v6.2.0
+        with: { node-version: '${{ env.[RUNTIME_ENV_KEY] }}', cache: '[PACKAGE_MANAGER]' }
+      - run: '[ENABLE_CMD]'
+      - run: '[INSTALL_CMD]'
+      - run: '[BUILD_CMD]'
+      - id: upload
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: build-${{ github.sha }}
+          path: '[BUILD_PATH]'
+          retention-days: 7
+          if-no-files-found: error
+      - if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/attest-build-provenance@96278af6caaf10aea03fd8d33a09a777ca52d62f # v3.2.0
+        with: { subject-path: '[BUILD_PATH]' }
+      - run: |
+          echo "## Build Summary" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Commit**: \`${{ github.sha }}\` / **Artifact**: \`${{ steps.upload.outputs.artifact-id }}\`" >> "$GITHUB_STEP_SUMMARY"
 
-    deploy:
-        needs: build
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        runs-on: ubuntu-latest
-        timeout-minutes: 15
-        concurrency: { group: 'deploy-[ENV_NAME]', cancel-in-progress: false }
-        environment: { name: '[ENV_NAME]', url: '[ENV_URL]' }
-        permissions: { contents: read, deployments: write }
-        steps:
-            - uses: step-security/harden-runner@002fdce3c6a235733a90a27c80493a3241e56863 # v2.12.0
-              with: { egress-policy: audit }
-            - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-            - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
-              with: { name: 'build-${{ github.sha }}', path: '[BUILD_PATH]' }
-            - env: { [SECRET]: '${{ secrets.[SECRET] }}' }
-              run: [DEPLOY_CMD]
-            - run: [VERIFY_CMD]
+  deploy:
+    needs: build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    concurrency: { group: deploy-[ENV_NAME], cancel-in-progress: false }
+    environment: { name: '[ENV_NAME]', url: '[ENV_URL]' }
+    permissions: { contents: read, deployments: write, id-token: write }
+    steps:
+      - uses: step-security/harden-runner@5ef0c079ce82195b2a36a210272d6b661572d83e # v2.14.2
+        with: { egress-policy: audit }
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with: { persist-credentials: false }
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with: { name: build-${{ github.sha }}, path: '[BUILD_PATH]' }
+      - run: '[DEPLOY_CMD]'
+        env: { '[SECRET_KEY]': '${{ secrets.[SECRET_NAME] }}' }
+      - run: '[VERIFY_CMD]'

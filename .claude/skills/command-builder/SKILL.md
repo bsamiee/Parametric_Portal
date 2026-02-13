@@ -2,7 +2,8 @@
 name: command-builder
 type: standard
 depth: base
-description: Creates and configures Claude Code slash commands with YAML frontmatter, argument handling, and tool permissions. Use when building new commands, adding $ARGUMENTS or positional parameters, configuring allowed-tools, organizing command namespaces, or fixing command failures.
+description: >-
+    Generates slash commands with YAML frontmatter, $ARGUMENTS/positional params, and tool permissions. Use when creating .claude/commands/*.md files or fixing command routing.
 ---
 
 # [H1][COMMAND-BUILDER]
@@ -83,16 +84,16 @@ model: opus
 
 <br>
 
-| [INDEX] | [SYNTAX]               | [CAPTURES]             | [REQUIRED_TOOL] | [USE_WHEN]           |
-| :-----: | ---------------------- | ---------------------- | --------------- | -------------------- |
-|   [1]   | **`$ARGUMENTS`**       | All args as string     | None            | Free-form input      |
-|   [2]   | **`$1`, `$2`...**      | Positional (1-based)   | None            | Structured multi-arg |
-|   [3]   | **`$ARGUMENTS[N]`**    | Positional (0-based)   | None            | Indexed access       |
-|   [4]   | **`$N`**               | Shorthand for `$ARGUMENTS[N]` (0-based) | None | Indexed shorthand |
-|   [5]   | **`${1:-val}`**        | Default if missing     | None            | Optional parameters  |
-|   [6]   | **`${CLAUDE_SESSION_ID}`** | Current session ID | None            | Session-specific     |
-|   [7]   | **`@path`**            | Include file contents  | `Read`          | File analysis        |
-|   [8]   | **`` !`command` ``**   | Shell preprocessing    | `Bash`          | Dynamic context      |
+| [INDEX] | [SYNTAX]                   | [CAPTURES]                              | [REQUIRED_TOOL] | [USE_WHEN]           |
+| :-----: | -------------------------- | --------------------------------------- | --------------- | -------------------- |
+|   [1]   | **`$ARGUMENTS`**           | All args as string                      | None            | Free-form input      |
+|   [2]   | **`$1`, `$2`...**          | Positional (1-based)                    | None            | Structured multi-arg |
+|   [3]   | **`$ARGUMENTS[N]`**        | Positional (0-based)                    | None            | Indexed access       |
+|   [4]   | **`$N`**                   | Shorthand for `$ARGUMENTS[N]` (0-based) | None            | Indexed shorthand    |
+|   [5]   | **`${1:-val}`**            | Default if missing                      | None            | Optional parameters  |
+|   [6]   | **`${CLAUDE_SESSION_ID}`** | Current session ID                      | None            | Session-specific     |
+|   [7]   | **`@path`**                | Include file contents                   | `Read`          | File analysis        |
+|   [8]   | **`` !`command` ``**       | Shell preprocessing                     | `Bash`          | Dynamic context      |
 
 [CRITICAL]:
 - [NEVER] Mix `$ARGUMENTS` and positional `$1-$N` in same command.

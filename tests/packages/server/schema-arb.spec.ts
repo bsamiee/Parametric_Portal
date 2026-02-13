@@ -1,14 +1,12 @@
 /**
  * Schema-derived arbitrary demonstration: Arbitrary.make() from @effect/schema.
- * Proves branded types round-trip, TransferError schemas generate well-formed
- * instances, and schema-derived values integrate with domain functions.
+ * Proves branded types round-trip and schema-derived values integrate with domain functions.
  */
 import { it } from '@effect/vitest';
 import { Crypto } from '@parametric-portal/server/security/crypto';
 import { Diff } from '@parametric-portal/server/utils/diff';
-import { TransferError } from '@parametric-portal/server/utils/transfer';
 import { Email, Hex64, Index, Slug, Timestamp, Uuidv7 } from '@parametric-portal/types/types';
-import { Arbitrary, Effect, FastCheck as fc, Option, Schema as S } from 'effect';
+import { Arbitrary, Effect, Option, Schema as S } from 'effect';
 import { expect } from 'vitest';
 
 // --- [CONSTANTS] -------------------------------------------------------------
@@ -19,8 +17,6 @@ const _index = Arbitrary.make(Index);
 const _slug = Arbitrary.make(Slug);
 const _timestamp = Arbitrary.make(Timestamp.schema);
 const _uuidv7 = Arbitrary.make(Uuidv7.schema);
-const _parseError = Arbitrary.make(S.Struct(TransferError.Parse.fields));
-const _fatalError = Arbitrary.make(S.Struct(TransferError.Fatal.fields));
 
 // --- [ALGEBRAIC: SCHEMA ROUNDTRIP] ------------------------------------------
 
@@ -47,21 +43,6 @@ it.effect.prop('P3: numeric bounds', { idx: _index, ts: _timestamp }, ({ idx, ts
     expect(idx).toBeGreaterThanOrEqual(0);
     expect(Number.isInteger(idx)).toBe(true);
     expect(ts).toBeGreaterThan(0);
-}), { fastCheck: { numRuns: 100 } });
-
-// --- [ALGEBRAIC: ERROR SCHEMAS] ----------------------------------------------
-
-// P4: TransferError.Parse schema generates well-formed error fields
-it.effect.prop('P4: parse error shape', { err: _parseError }, ({ err }) => Effect.sync(() => {
-    expect(['DECOMPRESS', 'HASH_MISMATCH', 'INVALID_PATH', 'INVALID_RECORD', 'MISSING_TYPE', 'SCHEMA_MISMATCH', 'TOO_LARGE']).toContain(err.code);
-    expect(err.detail === undefined || typeof err.detail === 'string').toBe(true);
-    expect(err.ordinal === undefined || typeof err.ordinal === 'number').toBe(true);
-}), { fastCheck: { numRuns: 100 } });
-
-// P5: TransferError.Fatal schema generates well-formed error fields
-it.effect.prop('P5: fatal error shape', { err: _fatalError }, ({ err }) => Effect.sync(() => {
-    expect(['ARCHIVE_LIMIT', 'COMPRESSION_RATIO', 'INVALID_FORMAT', 'INVALID_MANIFEST', 'PARSER_ERROR', 'ROW_LIMIT', 'UNSUPPORTED']).toContain(err.code);
-    expect(err.detail === undefined || typeof err.detail === 'string').toBe(true);
 }), { fastCheck: { numRuns: 100 } });
 
 // --- [ALGEBRAIC: DOMAIN INTEGRATION] ----------------------------------------

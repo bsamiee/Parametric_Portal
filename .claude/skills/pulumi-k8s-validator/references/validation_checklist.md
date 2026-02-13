@@ -1,195 +1,136 @@
-# Validation Checklist
+# [H1][VALIDATION_CHECKLIST]
+>**Dictum:** *Checklists enforce completeness at each validation stage.*
 
-> Validated against K8s 1.32-1.35 APIs and `@pulumi/kubernetes` v4.25+.
-> Canonical: `infrastructure/src/deploy.ts` (207 LOC).
+<br>
 
-## Security
+K8s 1.32-1.35 | current stable `@pulumi/kubernetes` | Canonical: `infrastructure/src/deploy.ts` (207 LOC)
 
-### Pod Security Context
+---
+## [1][SECURITY]
+>**Dictum:** *Security violations are highest-priority findings.*
+
+<br>
+
+### [1.1][POD_SECURITY_CONTEXT]
 
 Applies to: Deployment, StatefulSet, DaemonSet, Job, CronJob pod specs.
 
-| Field | Risk | Severity | WHY | HOW |
-|-------|------|----------|-----|-----|
-| `runAsNonRoot: true` | Container escape | Critical | Root containers can escape to host via kernel exploits (CVE-2024-21626, etc.) | Set in `spec.template.spec.securityContext` |
-| `runAsUser: 1000` | Privilege drift | High | Image default UID may be 0; explicit non-root prevents drift | Pair with `runAsNonRoot` |
-| `runAsGroup: 3000` | File permission | Medium | Controls GID for shared volume file permissions | Set alongside `runAsUser` |
-| `fsGroup: 2000` | Volume access | Medium | Mounted volumes inherit this GID; prevents permission denied on PVC | Required when pods share PVCs (e.g., prometheus-pvc, grafana-pvc) |
-| `seccompProfile.type: "RuntimeDefault"` | Syscall surface | High | Restricts syscall surface to ~300 of 400+ available; blocks container breakout paths | Set at pod level to cover all containers including sidecars |
+| Field                                   | Severity | WHY                                                                 |
+| --------------------------------------- | -------- | ------------------------------------------------------------------- |
+| `runAsNonRoot: true`                    | Critical | Root containers escape to host via kernel exploits                  |
+| `runAsUser: 1000`                       | High     | Image default UID may be 0; explicit non-root prevents drift        |
+| `fsGroup: 2000`                         | Medium   | Mounted volumes inherit this GID; prevents permission denied on PVC |
+| `seccompProfile.type: "RuntimeDefault"` | High     | Restricts syscall surface; blocks container breakout paths          |
 
-**deploy.ts status:** No pod security context set (deploy.ts:171). Known gap.
+**deploy.ts status:** No pod security context (line 171). Known gap.
 
-### Container Security Context
+### [1.2][CONTAINER_SECURITY_CONTEXT]
 
-Applies to: every container (including init containers and K8s 1.33+ sidecar containers with `restartPolicy: Always`).
+Applies to: every container (including init containers and K8s 1.33+ sidecar containers).
 
-| Field | Risk | Severity | WHY | HOW |
-|-------|------|----------|-----|-----|
-| `allowPrivilegeEscalation: false` | Privilege escalation | Critical | Blocks setuid/setgid binaries from gaining root | Set per container in `securityContext` |
-| `readOnlyRootFilesystem: true` | Malware persistence | Critical | Prevents malware from writing to container filesystem | Add `emptyDir` volumes for writable paths (`/tmp`, `/var/cache`) |
-| `capabilities.drop: ["ALL"]` | Capability abuse | Critical | Removes all 41 Linux capabilities; add back only what is needed | Use `capabilities.add: ["NET_BIND_SERVICE"]` if binding port <1024 |
-| `privileged: true` | Full host access | Critical | Full host access; equivalent to root on the node | Remove; use specific capabilities instead |
-| `hostNetwork: true` | Network sniffing | Critical | Container shares host network namespace; can sniff all traffic | Remove; use Service/Ingress for external access |
-| `hostPID: true` | Process visibility | Critical | Container can see and signal all host processes | Remove; only justified for node-level monitoring agents |
-| `hostIPC: true` | Shared memory attack | Critical | Container shares host IPC namespace; shared memory attack surface | Remove; use network for inter-process communication |
+| Field                               | Severity | WHY                                                     |
+| ----------------------------------- | -------- | ------------------------------------------------------- |
+| `allowPrivilegeEscalation: false`   | Critical | Blocks setuid/setgid binaries from gaining root         |
+| `readOnlyRootFilesystem: true`      | Critical | Prevents malware persistence; add `emptyDir` for `/tmp` |
+| `capabilities.drop: ["ALL"]`        | Critical | Removes all 41 Linux capabilities; add back only needed |
+| `privileged: true`                  | Critical | Full host access; remove and use specific capabilities  |
+| `hostNetwork/hostPID/hostIPC: true` | Critical | Shares host namespaces; remove unless node-level agent  |
 
-### Secrets
+### [1.3][SECRETS_AND_RBAC]
 
-| Check | Severity | HOW |
-|-------|----------|-----|
-| No secrets in ConfigMap `data` | Critical | Move to `k8s.core.v1.Secret` with `stringData` |
-| No plain text secrets in `env.value` | Critical | Use `env.valueFrom.secretKeyRef` referencing a Secret |
-| No secrets in Pulumi source | Critical | Wrap with `pulumi.secret()` to encrypt in state (deploy.ts:113) |
-| Secrets provider configured | Medium | `pulumi stack init --secrets-provider=awskms://...` for production |
+| Check                                       | Severity | deploy.ts Status                                   |
+| ------------------------------------------- | -------- | -------------------------------------------------- |
+| No secrets in ConfigMap `data`              | Critical | PASS -- uses `Secret` with `stringData` (line 159) |
+| No plain text secrets in `env.value`        | Critical | PASS -- uses `secretRef`                           |
+| `pulumi.secret()` wraps sensitive values    | Critical | PASS -- `_Ops.secret()` (line 113)                 |
+| ServiceAccount per workload (not `default`) | Medium   | Gap -- uses default SA                             |
+| No wildcard RBAC resources or verbs         | Critical | N/A -- no RBAC defined                             |
 
-**deploy.ts status:** `_Ops.secret()` wraps all sensitive values (line 113). Secrets stored in `k8s.core.v1.Secret` with `stringData` (line 159). PASS.
+---
+## [2][RELIABILITY]
+>**Dictum:** *Reliability gaps cause production incidents.*
 
-### RBAC
+<br>
 
-| Check | Severity | WHY |
-|-------|----------|-----|
-| ServiceAccount per workload (not `default`) | Medium | `default` SA may accumulate permissions from other bindings |
-| Role over ClusterRole | Medium | Namespace-scoped limits blast radius of compromised SA |
-| Minimal verb set | Medium | `get`/`list`/`watch` unless mutation is required |
-| No wildcard resources or verbs (`*`) | Critical | Grants full cluster access; violates least-privilege |
+### [2.1][IMAGE_TAGS]
 
-### Admission Control (K8s 1.30+ GA)
+| Check                        | Severity | deploy.ts Status                                           |
+| ---------------------------- | -------- | ---------------------------------------------------------- |
+| No `:latest` tag             | High     | WARN -- observe images use `:latest` (line 14)             |
+| No untagged images           | High     | PASS                                                       |
+| Pin to full semver or digest | Medium   | PASS for postgres/redis; WARN for alloy/grafana/prometheus |
 
-| Check | Severity | WHY |
-|-------|----------|-----|
-| ValidatingAdmissionPolicy for resource limits | Low | CEL-based policy enforcement without webhook overhead |
-| ValidatingAdmissionPolicy for security context | Low | Enforce non-root, drop capabilities at admission time |
-| Policy binding scope appropriate | Medium | Overly broad bindings can block legitimate operations |
+### [2.2][HEALTH_PROBES]
 
-**deploy.ts status:** No ValidatingAdmissionPolicy defined. Flag as [INFO] for future hardening.
+| Probe     | Severity | Guidelines                                                                | deploy.ts Status    |
+| --------- | -------- | ------------------------------------------------------------------------- | ------------------- |
+| Liveness  | Critical | Lightweight; no external deps; `periodSeconds: 10`, `failureThreshold: 3` | PASS (line 19)      |
+| Readiness | Critical | May check deps; `periodSeconds: 5`, `failureThreshold: 3`                 | PASS (line 19)      |
+| Startup   | Low      | `failureThreshold * periodSeconds` >= max startup time                    | PASS -- 150s window |
 
-## Reliability
+### [2.3][RESOURCES_AND_DISRUPTION]
 
-### Image Tags
+| Check                                              | Severity | deploy.ts Status                              |
+| -------------------------------------------------- | -------- | --------------------------------------------- |
+| `requests.cpu` + `requests.memory` set             | Critical | PASS -- env-driven (line 168)                 |
+| `limits.memory` set                                | Critical | PASS -- `limits == requests` = Guaranteed QoS |
+| PDB for `replicas >= 2`                            | High     | WARN -- no PDB defined                        |
+| Pod anti-affinity                                  | Medium   | WARN -- not configured                        |
+| `topologySpreadConstraints`                        | Low      | INFO -- not configured                        |
+| Rolling update: `maxSurge: 1`, `maxUnavailable: 0` | Medium   | Uses default strategy                         |
 
-| Check | Severity | WHY | HOW |
-|-------|----------|-----|-----|
-| No `:latest` tag | High | Non-deterministic; `imagePullPolicy: Always` re-pulls on every restart; no rollback target | Pin to `image:v1.2.3` or digest `@sha256:...` |
-| No untagged images | High | Equivalent to `:latest` | Always specify `image:tag` |
-| No partial tags (`:v3`) | Medium | May resolve to different patch versions over time | Pin to full semver `:v3.1.2` |
+### [2.4][IN_PLACE_RESIZE]
 
-**deploy.ts status:** API image is env-driven (user controls tag). Observe images use `:latest` (deploy.ts:14: `alloy: 'grafana/alloy:latest'`, `grafana: 'grafana/grafana:latest'`, `prometheus: 'prom/prometheus:latest'`). Flag as [WARN] for production.
+| Check                            | Severity | WHY                                      |
+| -------------------------------- | -------- | ---------------------------------------- |
+| `resizePolicy` set per container | Low      | Controls whether resize requires restart |
+| Memory decrease within bounds    | Low      | Allowed in 1.35 GA; verify cgroup v2     |
 
-### Health Probes
+### [2.5][K8S_1.35_FEATURES]
 
-| Probe | Severity | WHY | Guidelines |
-|-------|----------|-----|------------|
-| Liveness | Critical | Without it, stuck processes never restart | Lightweight check; no external deps; `periodSeconds: 10`, `failureThreshold: 3` |
-| Readiness | Critical | Without it, traffic routes to unready pods causing 502/503 | May check dependencies; `periodSeconds: 5`, `failureThreshold: 3` |
-| Startup | Low | Without it, slow-starting apps get killed by liveness probe before ready | `failureThreshold * periodSeconds` >= max startup time |
+| Check                                              | Severity | WHY                                                                |
+| -------------------------------------------------- | -------- | ------------------------------------------------------------------ |
+| DRA ResourceClaim for structured resources         | Low      | GA 1.35; GPUs/FPGAs claimed vs node-level taints                   |
+| Topology-aware routing annotation                  | Low      | `service.kubernetes.io/topology-mode` enables zone-aware endpoints |
+| VolumeAttributesClass for storage tuning           | Low      | Modify IOPS/throughput without PVC recreation                      |
+| Sidecar `restartPolicy: Always` on init containers | Low      | GA 1.33; replaces DaemonSet sidecar pattern                        |
 
-**deploy.ts status:** All three probes configured (line 19). Startup window: 150s (30 x 5s). PASS.
+---
+## [3][NETWORKING]
+>**Dictum:** *Network isolation prevents lateral movement.*
 
-```typescript
-// Reference: deploy.ts:19
-livenessProbe:  { httpGet: { path: '/api/health/liveness', port: 4000 }, periodSeconds: 10, failureThreshold: 3 },
-readinessProbe: { httpGet: { path: '/api/health/readiness', port: 4000 }, periodSeconds: 5,  failureThreshold: 3 },
-startupProbe:   { httpGet: { path: '/api/health/liveness', port: 4000 }, periodSeconds: 5,  failureThreshold: 30 },
-```
+<br>
 
-### Resources
+| Check                                             | Severity | deploy.ts Status                               |
+| ------------------------------------------------- | -------- | ---------------------------------------------- |
+| Default-deny NetworkPolicy                        | Medium   | WARN -- none defined                           |
+| Ingress TLS configured                            | Medium   | PASS (line 175)                                |
+| Service type appropriate (ClusterIP for internal) | Low      | PASS (line 173)                                |
+| Gateway API readiness                             | Low      | INFO -- uses Ingress; Gateway API is successor |
 
-Check ALL containers in each pod spec (primary, init, sidecars with `restartPolicy: Always`).
+---
+## [4][STORAGE_AND_OBSERVABILITY]
+>**Dictum:** *Storage and observability gaps compound reliability risk.*
 
-| Field | Severity | WHY | Guideline |
-|-------|----------|-----|-----------|
-| `requests.cpu` | Critical | Scheduler uses requests for placement; without it, pod is `BestEffort` QoS (first evicted) | Set to steady-state usage |
-| `requests.memory` | Critical | OOM-kill threshold; missing = evicted first under pressure | Set to working-set size |
-| `limits.cpu` | Medium | Without it, one pod can starve neighbors on the node | 2-5x requests for burst headroom |
-| `limits.memory` | Critical | Unbounded memory -> OOM kills other pods on the node | Never lower than requests; critical workloads set `limits == requests` for `Guaranteed` QoS |
+<br>
 
-**deploy.ts status:** API container has requests + limits set equal (deploy.ts:168: `{ limits: { cpu, memory }, requests: { cpu, memory } }`). Guaranteed QoS. Alloy has limits (deploy.ts:148). PASS.
+| Check                            | Severity | deploy.ts Status                       |
+| -------------------------------- | -------- | -------------------------------------- |
+| PVC access mode matches workload | Medium   | PASS -- RWO for single-pod             |
+| Storage class specified          | Low      | Uses default class                     |
+| Prometheus annotations           | Low      | Not set on compute pods                |
+| OTEL endpoint configured         | Low      | PASS -- via `_Ops.runtime()` (line 94) |
 
-### PodDisruptionBudget
+---
+## [5][NAMING_AND_LABELS]
+>**Dictum:** *Consistent naming enables discovery and monitoring.*
 
-Every Deployment/StatefulSet with `replicas >= 2` needs a PDB.
+<br>
 
-| Setting | When | WHY |
-|---------|------|-----|
-| `minAvailable: "50%"` | General purpose | Survives node drain during cluster upgrades |
-| `maxUnavailable: 1` | Small replica count (2-3) | Ensures at least N-1 pods remain |
-| `minAvailable: 1` | Single-replica workloads | Blocks voluntary disruption entirely |
+| Label                                  | Severity | deploy.ts Status                     |
+| -------------------------------------- | -------- | ------------------------------------ |
+| `app.kubernetes.io/name`               | High     | INFO -- uses simple `{ app }` labels |
+| `app.kubernetes.io/managed-by: pulumi` | High     | INFO -- not set                      |
+| `app.kubernetes.io/version`            | Medium   | Not set                              |
 
-**deploy.ts status:** No PDB defined. Flag as [WARN] when replicas >= 2.
-
-### Scheduling
-
-| Pattern | Severity | WHY | Key field |
-|---------|----------|-----|-----------|
-| Pod anti-affinity | Medium | Single-node failure takes all replicas | `topologyKey: "kubernetes.io/hostname"` |
-| Topology spread | Low | Uneven zone distribution during failover | `topologyKey: "topology.kubernetes.io/zone"`, `maxSkew: 1` |
-| Rolling update strategy | Medium | Default may cause downtime | `maxSurge: 1`, `maxUnavailable: 0` for zero-downtime |
-
-### In-Place Pod Resize (K8s 1.35+ GA)
-
-| Check | Severity | WHY |
-|-------|----------|-----|
-| `resizePolicy` set per container | Low | Controls whether resize requires container restart |
-| Memory decrease within bounds | Low | Memory limit decreases now allowed in 1.35 GA; verify cgroup v2 support |
-
-**Known gap:** Not in current deploy.ts. Optional for future vertical scaling without restarts.
-
-## Networking
-
-| Check | Severity | WHY | HOW |
-|-------|----------|-----|-----|
-| Default-deny NetworkPolicy | Medium | Without it, any pod can reach any other pod in the namespace | `podSelector: {}`, `policyTypes: ["Ingress", "Egress"]` with empty rules |
-| Ingress TLS | Medium | Unencrypted external traffic | `spec.tls` with `hosts` + `secretName` |
-| Service type appropriate | Low | LoadBalancer costs money; NodePort exposes ports on every node | ClusterIP for internal (deploy.ts uses this), LoadBalancer for cloud external, NodePort for dev only |
-| Gateway API readiness | Low | Ingress is functional but Gateway API is the successor | Consider HTTPRoute/GRPCRoute for new workloads |
-
-**deploy.ts status:** Ingress TLS configured (line 175). ClusterIP used (line 173). No NetworkPolicy. Flag NetworkPolicy as [WARN].
-
-## Storage
-
-| Check | Severity | WHY | HOW |
-|-------|----------|-----|-----|
-| Access mode matches workload | Medium | RWO on multi-pod StatefulSet causes mount failures | RWO for single-pod (deploy.ts uses this for Prometheus/Grafana), RWX for shared access |
-| Storage class specified | Low | Default class may be wrong performance tier | Set `storageClassName` explicitly; use `gp3` on AWS for SSD |
-| Backup annotations | Low | Data loss on PV deletion | Enable Velero: `backup.velero.io/backup-volumes: data` |
-
-## Observability
-
-| Check | Severity | WHY | HOW |
-|-------|----------|-----|-----|
-| Prometheus annotations | Low | Metrics not scraped without them | `prometheus.io/scrape: "true"`, `prometheus.io/port`, `prometheus.io/path` |
-| Structured logging | Low | Unstructured logs are unsearchable at scale | Set `LOG_FORMAT=json` env var |
-| OTEL endpoint | Low | No distributed traces | Set `OTEL_EXPORTER_OTLP_ENDPOINT` + `OTEL_SERVICE_NAME` |
-
-**deploy.ts status:** OTEL endpoint configured via `_Ops.runtime()` (line 94). Metrics exporter set to `otlp`, logs/traces to `none` (lines 95-97). PASS.
-
-## Naming and Labels
-
-Required labels on all resources:
-
-| Label | Severity | WHY |
-|-------|----------|-----|
-| `app.kubernetes.io/name` | High | Standard selectors; required for service mesh and monitoring |
-| `app.kubernetes.io/instance` | High | Distinguishes multiple releases of same app |
-| `app.kubernetes.io/managed-by: pulumi` | High | Identifies management tool; prevents manual-edit conflicts |
-| `app.kubernetes.io/version` | Medium | Enables version-aware dashboards and rollback identification |
-| `app.kubernetes.io/component` | Medium | Distinguishes frontend/backend/worker within an app |
-| `app.kubernetes.io/part-of` | Low | Groups related apps into a logical application |
-
-**deploy.ts status:** Uses simple `{ app: 'parametric-api' }` labels (line 17) and `{ app, stack, tier }` for observe (line 123). Does not use `app.kubernetes.io/*` recommended labels. Flag as [INFO] (functional but non-standard).
-
-Naming rules: lowercase-hyphen, include component, under 63 chars, consistent prefix.
-
-## Cross-Resource Consistency
-
-| Check | Severity | What to Verify |
-|-------|----------|----------------|
-| Selector alignment | Critical | Service selector == Deployment matchLabels == HPA target labels == PDB selector |
-| Port chain | Critical | containerPort == Service targetPort == Ingress/HTTPRoute backend port |
-| Namespace uniformity | High | All related resources in same namespace |
-| Secret/ConfigMap refs | High | envFrom names match actual resource names |
-| PVC claim refs | High | volumeMount claimName matches PVC metadata name |
-| Ingress TLS secret | Medium | tls.secretName references existing secret with tls.crt and tls.key |
-| HPA scaleTargetRef | Medium | name matches Deployment/StatefulSet metadata name |
-| NetworkPolicy selector | Medium | podSelector.matchLabels matches target workload labels |
-| Gateway parentRef | Medium | HTTPRoute/GRPCRoute parentRefs.name matches Gateway name |
+Naming: lowercase-hyphen, include component, under 63 chars, consistent prefix. deploy.ts uses `<tier>-<kind>` pattern.

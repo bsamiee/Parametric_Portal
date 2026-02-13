@@ -4,9 +4,9 @@ type: complex
 depth: base
 user-invocable: false
 description: >-
-  Executes Exa AI search queries via Python CLI. Use when searching the web for
-  current information, finding code examples, researching APIs, SDKs, finding
-  similar pages, or getting AI-generated answers with citations.
+  Executes semantic web search via Exa AI Python CLI. Use when searching for
+  current information, code examples, API documentation, finding similar pages,
+  or generating AI answers with citations. Supports fast/deep/neural search.
 ---
 
 # [H1][EXA-TOOLS]
@@ -21,12 +21,12 @@ Execute Exa AI search queries via Python CLI. API key auto-injected via 1Passwor
 ---
 ## [1][COMMANDS]
 
-| [CMD]         | [ARGS]                        | [RETURNS]                        |
-| ------------- | ----------------------------- | -------------------------------- |
-| search        | `<query> [type] [num]`        | Web results with text content    |
-| code          | `<query> [num]`               | GitHub code context              |
-| find-similar  | `<url> [num]`                 | Pages similar to given URL       |
-| answer        | `<query>`                     | AI-generated answer with sources |
+| [CMD]        | [ARGS]                 | [RETURNS]                        |
+| ------------ | ---------------------- | -------------------------------- |
+| search       | `<query> [type] [num]` | Web results with text content    |
+| code         | `<query> [num]`        | GitHub code context              |
+| find-similar | `<url> [num]`          | Pages similar to given URL       |
+| answer       | `<query>`              | AI-generated answer with sources |
 
 ---
 ## [2][USAGE]
@@ -81,19 +81,19 @@ uv run .claude/skills/exa-tools/scripts/exa.py answer "What are the breaking cha
 
 Commands return: `{"status": "success|error", ...}`.
 
-| [INDEX] | [CMD]          | [RESPONSE]                                |
-| :-----: | -------------- | ----------------------------------------- |
-|   [1]   | `search`       | `{query, results[]}`                      |
-|   [2]   | `code`         | `{query, context[]}`                      |
-|   [3]   | `find-similar` | `{url, results[]}`                        |
-|   [4]   | `answer`       | `{query, answer, sources[]}`              |
+| [INDEX] | [CMD]          | [RESPONSE]                   |
+| :-----: | -------------- | ---------------------------- |
+|   [1]   | `search`       | `{query, results[]}`         |
+|   [2]   | `code`         | `{query, context[]}`         |
+|   [3]   | `find-similar` | `{url, results[]}`           |
+|   [4]   | `answer`       | `{query, answer, sources[]}` |
 
 ---
 ## [5][ENVIRONMENT]
 
-| [VAR]         | [REQUIRED] | [DESCRIPTION]                      |
-| ------------- | ---------- | ---------------------------------- |
-| `EXA_API_KEY` | Yes        | Exa API key (1Password injected)   |
+| [VAR]         | [REQUIRED] | [DESCRIPTION]                    |
+| ------------- | ---------- | -------------------------------- |
+| `EXA_API_KEY` | Yes        | Exa API key (1Password injected) |
 
 ---
 ## [6][ERROR_HANDLING]

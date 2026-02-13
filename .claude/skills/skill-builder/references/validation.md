@@ -121,16 +121,16 @@ wc -l SKILL.md                    # Must be < limit for depth
 wc -l references/*.md             # Each must be < limit for depth
 
 # Structure verification
-ls -la                            # Verify folder existence matches type
-find references/ -type f | wc -l  # Must be ≤7
+eza -la                            # Verify folder existence matches type
+fd -t f . references/ | wc -l     # Must be ≤7
 
 # Frontmatter verification
 head -1 SKILL.md                  # Must be exactly "---"
-grep "^name:" SKILL.md            # Must match folder name
-grep "Use when" SKILL.md          # Must exist in description
+rg "^name:" SKILL.md               # Must match folder name
+rg "Use when" SKILL.md             # Must exist in description
 
 # Name matching
-basename $(pwd)                   # Folder name
-grep "^name:" SKILL.md | cut -d: -f2 | tr -d ' '  # Frontmatter name
+basename "$(pwd)"                 # Folder name
+rg "^name:" SKILL.md | choose 1  # Frontmatter name
 # These must match exactly
 ```

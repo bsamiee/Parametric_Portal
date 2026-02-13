@@ -1,118 +1,142 @@
 ---
 name: dockerfile-validator
-description: Comprehensive toolkit for validating, linting, and securing Dockerfiles. Use this skill when validating Dockerfile syntax, checking security best practices, optimizing image builds. Applies to all Dockerfile variants (Dockerfile, Dockerfile.prod, Dockerfile.dev, etc.).
+type: complex
+depth: extended
+description: >-
+  Validates existing Dockerfiles through 5-stage pipeline (hadolint syntax, Checkov CKV policies, secret detection, BuildKit features, optimization). Use when checking syntax, finding security issues, auditing best practices, or analyzing layer efficiency. Not for generating Dockerfiles (use dockerfile-generator instead).
 ---
 
-# Dockerfile Validator
+# [H1][DOCKERFILE-VALIDATOR]
+>**Dictum:** *Automated validation enforces security and build quality.*
 
-> Docker Engine 27+ | BuildKit 0.14+ | hadolint 2.14+ | Checkov latest
+<br>
 
-Self-contained script: `scripts/dockerfile-validate.sh`. Auto-installs hadolint + Checkov in temp venvs, runs 5-stage validation, cleans up on exit via bash trap.
+Docker Engine 27+ | BuildKit 0.27+ | hadolint 2.14+ | Checkov latest
 
-## When to Use
+**Tasks:**
+1. Read the target Dockerfile -- Understand context before validation
+2. Run validation -- `bash scripts/dockerfile-validate.sh <Dockerfile>`
+3. Read [dockerfile_reference.md](./references/dockerfile_reference.md) -- Fix patterns for reported issues
+4. Summarize by severity -- critical -> high -> medium -> low
+5. Propose fixes with concrete code from reference patterns
+6. Offer to apply fixes to the Dockerfile
 
-- Validate/lint/check/optimize any Dockerfile
-- Security audit of container images
-- Pre-commit Dockerfile review
+**Scope:**
+- *Validation:* All Dockerfile variants (Dockerfile, Dockerfile.prod, Dockerfile.dev)
+- *Not:* Generating Dockerfiles (use dockerfile-generator), building/running containers, debugging
 
-## Do NOT Use For
+---
+## [1][VALIDATION_PIPELINE]
+>**Dictum:** *Five stages catch progressively subtler issues.*
 
-- Generating Dockerfiles (use dockerfile-generator)
-- Building/running containers (`pnpm exec nx run api:docker:build`)
-- Debugging running containers (`docker logs`, `docker exec`)
+<br>
 
-## Quick Start
+**Guidance:**<br>
+- `Stage 1` -- hadolint: Instruction validation, ShellCheck on RUN, 60+ lint rules.
+- `Stage 2` -- Checkov: 11 CKV_DOCKER policies + 17 CKV2_DOCKER graph checks.
+- `Stage 3` -- Extended security: Secrets, sudo, cert bypass (curl/wget/pip/npm/git), chpasswd, dangerous packages.
+- `Stage 4` -- Best practices: `:latest`, USER, HEALTHCHECK, STOPSIGNAL, MAINTAINER, ADD, apt, WORKDIR, shell form, cache cleanup, COPY order, BuildKit syntax, OCI labels, heredoc.
+- `Stage 5` -- Optimization: Base image size, multi-stage, layer count, BuildKit features (`--mount`, `--link`, `--chmod`), heredoc opportunities, .dockerignore, Chainguard.
 
-```bash
-bash scripts/dockerfile-validate.sh Dockerfile
-bash scripts/dockerfile-validate.sh Dockerfile.prod
-FORCE_TEMP_INSTALL=true bash scripts/dockerfile-validate.sh Dockerfile  # test temp install
-```
+**Best-Practices:**<br>
+- **Exit codes:** `0` all passed (warnings allowed), `1` validation failure (errors), `2` critical error
+- **Auto-install:** Script installs hadolint + Checkov in temp venvs if missing, cleans up via bash trap
+- **Force temp:** `FORCE_TEMP_INSTALL=true bash scripts/dockerfile-validate.sh Dockerfile`
 
-## Validation Stages
+[REFERENCE]: [→dockerfile_reference.md](./references/dockerfile_reference.md) -- Base images, security rules, hadolint/Checkov catalogs.
 
-| Stage | Tool | Checks |
-|-------|------|--------|
-| 1. Syntax | hadolint | Instruction validation, ShellCheck on RUN, 60+ lint rules |
-| 2. Security | Checkov | 11 CKV_DOCKER policies + 17 CKV2_DOCKER graph checks |
-| 3. Extended Security | custom | Secrets, sudo, cert bypass (curl/wget/pip/npm/git), chpasswd, dangerous packages |
-| 4. Best Practices | custom | :latest, USER, HEALTHCHECK, STOPSIGNAL, MAINTAINER, ADD, apt, WORKDIR, shell form, cache cleanup, COPY order, BuildKit syntax, OCI labels, heredoc suggestions |
-| 5. Optimization | custom | Base image size, multi-stage, layer count, BuildKit features (--mount, --link, --chmod), heredoc opportunities, secret env mounts, .dockerignore, Chainguard suggestions |
+---
+## [2][SEVERITY_CLASSIFICATION]
+>**Dictum:** *Severity determines fix priority.*
 
-Exit codes: `0` all passed (warnings allowed), `1` validation failure (errors only), `2` critical error.
+<br>
 
-## Mandatory Workflow
+**Guidance:**<br>
+- `Critical` -- Hardcoded secrets in ENV/ARG, cert bypass flags, no USER directive.
+- `High` -- `:latest` tag, sudo usage, SSH port (22), no HEALTHCHECK for services.
+- `Medium` -- Missing version pins, cache cleanup, missing OCI labels, no `--no-install-recommends`.
+- `Low` -- Style (layer count, STOPSIGNAL, heredoc opportunities).
 
-### 1. Pre-Validation
-Read the Dockerfile first to understand context.
+**Best-Practices:**<br>
+- **Fix order:** Critical first, then high, medium, low. Resolve all critical before moving to high.
+- **Iteration cap:** Max 3 fix-validate cycles. Remaining warnings acceptable if no errors.
 
-### 2. Run Validation
-```bash
-bash scripts/dockerfile-validate.sh <Dockerfile>
-```
+---
+## [3][KEY_RULES]
+>**Dictum:** *Rule references enable precise fix targeting.*
 
-### 3. Post-Validation
-1. **Summarize by severity**: critical (secrets, cert bypass, no USER) -> high (:latest, sudo, SSH port) -> medium (cache cleanup, version pinning, missing OCI labels) -> low (style, layer count, STOPSIGNAL, heredoc)
-2. **Read reference file**: `references/dockerfile_reference.md` for fix patterns
-3. **Propose fixes** with concrete code from reference patterns
-4. **Offer to apply** fixes to the Dockerfile
+<br>
 
-## Key Validation Rules
+| [INDEX] | [CATEGORY]     | [CHECK]                                                               | [RULE_ID]                           |
+| :-----: | -------------- | --------------------------------------------------------------------- | ----------------------------------- |
+|   [1]   | **Base image** | Pin version (not `:latest`), prefer slim-trixie/distroless/Chainguard | DL3006, DL3007, CKV_DOCKER_7        |
+|   [2]   | **Security**   | Non-root USER with UID/GID                                            | DL3002, CKV_DOCKER_3, CKV_DOCKER_8  |
+|   [3]   | **Security**   | No secrets in ENV/ARG                                                 | Custom + CKV2_DOCKER_17             |
+|   [4]   | **Security**   | No cert bypass flags                                                  | CKV2_DOCKER_2 through CKV2_DOCKER_6 |
+|   [5]   | **Security**   | No sudo, no chpasswd                                                  | CKV2_DOCKER_1, DL3004               |
+|   [6]   | **BuildKit**   | COPY --link on all COPY statements                                    | Custom                              |
+|   [7]   | **BuildKit**   | COPY --chmod (no separate RUN chmod)                                  | Custom                              |
+|   [8]   | **BuildKit**   | RUN --mount=type=cache for pkg managers                               | Custom                              |
+|   [9]   | **BuildKit**   | RUN --mount=type=secret,env= (not file-based)                         | Custom                              |
+|  [10]   | **BuildKit**   | RUN <<EOF heredoc for multi-line scripts                              | Custom                              |
+|  [11]   | **Runtime**    | HEALTHCHECK with exec-form CMD and `--start-interval`                 | CKV_DOCKER_2, DL3047                |
+|  [12]   | **Runtime**    | STOPSIGNAL for graceful shutdown                                      | Custom                              |
+|  [13]   | **Runtime**    | Exec-form ENTRYPOINT/CMD (not shell form)                             | DL3025                              |
+|  [14]   | **Metadata**   | OCI labels with revision/created/version                              | Custom                              |
+|  [15]   | **Metadata**   | Pulumi-injectable ARGs (GIT_SHA, BUILD_DATE)                          | Custom                              |
+|  [16]   | **Layers**     | Combine consecutive RUN with heredoc                                  | DL3059                              |
 
-| Category | Check | Reference |
-|----------|-------|-----------|
-| Base image | Pin version (not :latest), prefer slim-trixie/distroless/Chainguard | DL3006, DL3007, CKV_DOCKER_7 |
-| Security | Non-root USER with UID/GID | DL3002, CKV_DOCKER_3, CKV_DOCKER_8 |
-| Security | No secrets in ENV/ARG | Custom + CKV2_DOCKER_17 |
-| Security | No cert bypass flags | CKV2_DOCKER_2 through CKV2_DOCKER_6 |
-| Security | No sudo, no chpasswd | CKV2_DOCKER_1, CKV2_DOCKER_17, DL3004 |
-| Security | No SSH port (22) | CKV_DOCKER_1 |
-| BuildKit | COPY --link on all COPY statements | Custom optimization |
-| BuildKit | COPY --chmod (no separate RUN chmod) | Custom optimization |
-| BuildKit | RUN --mount=type=cache for pkg managers | Custom optimization |
-| BuildKit | RUN --mount=type=secret,env= (not file-based) | Custom security |
-| BuildKit | RUN <<EOF heredoc for multi-line scripts | Custom optimization |
-| Runtime | HEALTHCHECK present (exec-form with --start-interval) | CKV_DOCKER_2, DL3047 |
-| Runtime | STOPSIGNAL for graceful shutdown | Custom best practice |
-| Runtime | Exec-form ENTRYPOINT/CMD | DL3025 |
-| Runtime | Absolute WORKDIR | DL3000, CKV_DOCKER_10 |
-| Metadata | OCI labels (org.opencontainers.image.* with revision/created) | Custom best practice |
-| Metadata | Pulumi-injectable ARGs (GIT_SHA, BUILD_DATE) | Custom IaC pattern |
-| Layers | Combine consecutive RUN with heredoc | DL3059 |
-| Layers | apt --no-install-recommends | DL3015 |
+---
+## [4][RESOURCES]
+>**Dictum:** *Examples demonstrate both compliance and violations.*
 
-## Resources
+<br>
 
-| Path | Purpose |
-|------|---------|
-| `scripts/dockerfile-validate.sh` | Self-contained 5-stage validator with auto-install/cleanup |
-| `references/dockerfile_reference.md` | Best practices, security, version matrix, hadolint/Checkov reference |
-| `examples/good-example.Dockerfile` | Node.js multi-stage with all 18 best practices |
-| `examples/bad-example.Dockerfile` | 20 anti-patterns with inline explanations and fix references |
-| `examples/security-issues.Dockerfile` | Intentional security vulns with severity tags and CKV rule references |
-| `examples/python-optimized.Dockerfile` | Python multi-stage with uv and BuildKit optimization |
-| `examples/golang-distroless.Dockerfile` | Go cross-platform distroless with secret env mounts |
-| `examples/.dockerignore.example` | Build context exclusion patterns |
+| [INDEX] | [PATH]                                    | [PURPOSE]                                                                        |
+| :-----: | ----------------------------------------- | -------------------------------------------------------------------------------- |
+|   [1]   | **`scripts/dockerfile-validate.sh`**      | 5-stage validator with auto-install/cleanup.                                     |
+|   [2]   | **`scripts/_checks.sh`**                  | Extended security, best practices, and optimization checks.                      |
+|   [3]   | **`references/dockerfile_reference.md`**  | Base images, security rules, hadolint/Checkov catalogs, BuildKit version matrix. |
+|   [4]   | **`examples/good-example.Dockerfile`**    | Node.js multi-stage with all best practices.                                     |
+|   [5]   | **`examples/bad-example.Dockerfile`**     | 20 anti-patterns with fix references.                                            |
+|   [6]   | **`examples/security-issues.Dockerfile`** | Intentional security vulns with CKV rule references.                             |
 
-## Tool Installation
+---
+## [5][TOOL_INSTALLATION]
+>**Dictum:** *Tools auto-installed by script; permanent install optional.*
 
-Auto-installed by script. For permanent install:
+<br>
 
-| Tool | Install | Min Version |
-|------|---------|-------------|
-| hadolint | `brew install hadolint` | >= 2.14.0 |
-| Checkov | `pip3 install checkov` | latest (Python 3.9-3.14) |
-| Python | required for temp install | >= 3.9 |
+| [INDEX] | [TOOL]       | [INSTALL]                                                                        |      [MIN_VERSION]       |
+| :-----: | ------------ | -------------------------------------------------------------------------------- | :----------------------: |
+|   [1]   | **hadolint** | Nix-provided on dev machines. VPS: `bash .claude/scripts/bootstrap-cli-tools.sh` |          2.14.0          |
+|   [2]   | **Checkov**  | Nix-provided on dev machines. VPS: `bash .claude/scripts/bootstrap-cli-tools.sh` | latest (Python 3.9-3.14) |
 
-## Troubleshooting
+**Troubleshooting:**
 
-| Error | Fix |
-|-------|-----|
-| FROM must be first non-comment | Move `ARG` defining base tag before `FROM` |
-| Unknown instruction | Check spelling (common: RUNS, COPIES, FRUM) |
-| COPY failed: file not found | Verify path relative to build context, check .dockerignore |
-| Hardcoded secrets detected | Use `--mount=type=secret,env=VAR` or runtime config |
-| Slow builds | Layer cache ordering, .dockerignore, BuildKit, multi-stage |
-| COPY --link not recognized | Ensure `# syntax=docker/dockerfile:1` as first line, Docker 23.0+ |
-| Secret mount not working | Requires `docker buildx build --secret id=key,src=file` at build time |
-| Heredoc not recognized | Ensure `# syntax=docker/dockerfile:1` as first line, BuildKit 0.10+ |
+| [INDEX] | [ERROR]                            | [FIX]                                                         |
+| :-----: | ---------------------------------- | ------------------------------------------------------------- |
+|   [1]   | **FROM must be first non-comment** | Move `ARG` defining base tag before `FROM`.                   |
+|   [2]   | **Unknown instruction**            | Check spelling (common: RUNS, COPIES, FRUM).                  |
+|   [3]   | **COPY failed: file not found**    | Verify path relative to build context, check .dockerignore.   |
+|   [4]   | **Hardcoded secrets detected**     | `--mount=type=secret,env=VAR` or runtime config.              |
+|   [5]   | **COPY --link not recognized**     | `# syntax=docker/dockerfile:1` as first line, Docker 23.0+.   |
+|   [6]   | **Heredoc not recognized**         | `# syntax=docker/dockerfile:1` as first line, BuildKit 0.10+. |
+
+---
+## [6][VALIDATION]
+>**Dictum:** *Gates prevent incomplete validation reports.*
+
+<br>
+
+[VERIFY] Completion:
+- [ ] Target Dockerfile read and context understood
+- [ ] `scripts/dockerfile-validate.sh` executed against target
+- [ ] Issues summarized by severity (critical -> high -> medium -> low)
+- [ ] Fix patterns referenced from `dockerfile_reference.md`
+- [ ] Concrete fix code proposed for each issue
+- [ ] All critical and high issues resolved (medium/low: fix or document rationale)
+
+**Integration:**
+- **dockerfile-generator** -- Generates Dockerfiles validated by this skill
+- **k8s-debug** -- Container debugging when builds fail at runtime

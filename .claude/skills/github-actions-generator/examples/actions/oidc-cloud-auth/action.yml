@@ -1,0 +1,142 @@
+# Multi-Cloud OIDC Authentication — composite wrapping AWS/GCP/Azure.
+# Demonstrates: conditional step dispatch by provider input, output
+# normalization, ::add-mask:: for credential redaction, env indirection.
+# Requires caller permission: { id-token: write }
+# NOTE: harden-runner is CALLER responsibility — actions are steps, not jobs.
+name: 'Multi-Cloud OIDC Authentication'
+description: 'Unified OIDC federation for AWS, GCP, and Azure — conditional dispatch, normalized outputs, credential masking'
+author: 'Example Author'
+
+inputs:
+  provider:
+    description: 'Cloud provider: aws | gcp | azure'
+    required: true
+  # --- AWS ---
+  role-arn:
+    description: 'AWS IAM role ARN (arn:aws:iam::ACCOUNT:role/NAME)'
+    required: false
+  aws-region:
+    description: 'AWS region (overrides shared region for AWS-specific calls)'
+    required: false
+  # --- GCP ---
+  workload-identity-provider:
+    description: 'GCP Workload Identity Provider (projects/NUM/locations/global/workloadIdentityPools/POOL/providers/PROV)'
+    required: false
+  service-account:
+    description: 'GCP service account email (SA@PROJECT.iam.gserviceaccount.com)'
+    required: false
+  # --- Azure ---
+  client-id:
+    description: 'Azure AD / Entra ID application (client) ID'
+    required: false
+  tenant-id:
+    description: 'Azure AD / Entra ID tenant ID'
+    required: false
+  subscription-id:
+    description: 'Azure subscription ID'
+    required: false
+  # --- Shared ---
+  region:
+    description: 'Default cloud region (aws-region overrides for AWS if set)'
+    required: false
+    default: 'us-east-1'
+
+outputs:
+  account-id:
+    description: 'Normalized cloud account/project/subscription identifier (masked)'
+    value: ${{ steps.normalize.outputs.account-id }}
+  region:
+    description: 'Authenticated region'
+    value: ${{ steps.normalize.outputs.region }}
+  provider:
+    description: 'Authenticated provider name'
+    value: ${{ inputs.provider }}
+
+runs:
+  using: 'composite'
+  steps:
+    # --- Input validation: require provider-specific fields ---
+    - id: validate
+      shell: bash
+      env:
+        PROVIDER: ${{ inputs.provider }}
+        ROLE_ARN: ${{ inputs.role-arn }}
+        WIP: ${{ inputs.workload-identity-provider }}
+        SA: ${{ inputs.service-account }}
+        CLIENT_ID: ${{ inputs.client-id }}
+        TENANT_ID: ${{ inputs.tenant-id }}
+        SUB_ID: ${{ inputs.subscription-id }}
+      run: |
+        case "$PROVIDER" in
+          aws)
+            [[ -z "$ROLE_ARN" ]] && { echo "::error::role-arn required for aws"; exit 1; }
+            ;;
+          gcp)
+            [[ -z "$WIP" || -z "$SA" ]] && { echo "::error::workload-identity-provider + service-account required for gcp"; exit 1; }
+            ;;
+          azure)
+            [[ -z "$CLIENT_ID" || -z "$TENANT_ID" || -z "$SUB_ID" ]] && { echo "::error::client-id + tenant-id + subscription-id required for azure"; exit 1; }
+            ;;
+          *) echo "::error::Unknown provider '$PROVIDER' — must be aws | gcp | azure"; exit 1 ;;
+        esac
+
+    # --- AWS: STS AssumeRoleWithWebIdentity via OIDC ---
+    - if: inputs.provider == 'aws'
+      uses: aws-actions/configure-aws-credentials@8df5847569e6427dd6c4fb1cf565c83acfa8afa7 # v6.0.0
+      with:
+        role-to-assume: ${{ inputs.role-arn }}
+        aws-region: ${{ inputs.aws-region || inputs.region }}
+
+    # --- GCP: Workload Identity Federation (direct or impersonation) ---
+    - if: inputs.provider == 'gcp'
+      id: gcp-auth
+      uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+      with:
+        workload_identity_provider: ${{ inputs.workload-identity-provider }}
+        service_account: ${{ inputs.service-account }}
+
+    # --- Azure: Entra ID federated credentials via OIDC ---
+    - if: inputs.provider == 'azure'
+      uses: azure/login@a457da9ea143d694b1b9c7c869ebb04ebe844ef5 # v2.3.0
+      with:
+        client-id: ${{ inputs.client-id }}
+        tenant-id: ${{ inputs.tenant-id }}
+        subscription-id: ${{ inputs.subscription-id }}
+
+    # --- Normalize: extract account ID per provider, mask, emit outputs ---
+    - id: normalize
+      shell: bash
+      env:
+        PROVIDER: ${{ inputs.provider }}
+        REGION: ${{ inputs.aws-region || inputs.region }}
+        SA_EMAIL: ${{ inputs.service-account }}
+        SUB_ID: ${{ inputs.subscription-id }}
+      run: |
+        ACCOUNT_ID=""
+        case "$PROVIDER" in
+          aws)
+            # AWS_ACCOUNT_ID is set by configure-aws-credentials
+            ACCOUNT_ID="${AWS_ACCOUNT_ID:-unknown}"
+            ;;
+          gcp)
+            # Extract project from SA@PROJECT.iam.gserviceaccount.com
+            ACCOUNT_ID="${SA_EMAIL#*@}"
+            ACCOUNT_ID="${ACCOUNT_ID%.iam.gserviceaccount.com}"
+            ;;
+          azure)
+            ACCOUNT_ID="$SUB_ID"
+            ;;
+        esac
+        # Mask account identifiers in all subsequent log output
+        echo "::add-mask::$ACCOUNT_ID"
+        echo "account-id=$ACCOUNT_ID" >> "$GITHUB_OUTPUT"
+        echo "region=$REGION"          >> "$GITHUB_OUTPUT"
+        # Step summary with truncated ID for auditability
+        {
+          echo "## OIDC Authentication"
+          echo "| Field | Value |"
+          echo "|-------|-------|"
+          echo "| Provider | \`$PROVIDER\` |"
+          echo "| Region | \`$REGION\` |"
+          echo "| Account | \`${ACCOUNT_ID:0:4}****\` |"
+        } >> "$GITHUB_STEP_SUMMARY"

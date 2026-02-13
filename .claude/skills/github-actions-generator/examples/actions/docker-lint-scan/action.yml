@@ -1,0 +1,133 @@
+# Dockerfile Lint + Image Scan — Docker action using hadolint + grype.
+# Demonstrates: Docker action type (using: 'docker'), SARIF output, severity
+# gating via --fail-on, merged SARIF for upload-sarif, step summary report.
+# NOTE: harden-runner is CALLER responsibility — actions are steps, not jobs.
+name: 'Dockerfile Lint and Image Scan'
+description: 'Lint Dockerfiles with hadolint (--format sarif), scan images with grype (-o sarif), merge results, gate on severity'
+author: 'Example Author'
+
+inputs:
+  dockerfile:
+    description: 'Path to Dockerfile to lint'
+    required: false
+    default: 'Dockerfile'
+  image-ref:
+    description: 'Built image to scan (e.g., ghcr.io/org/app:sha-abc123). Skips scan if empty'
+    required: false
+  severity-threshold:
+    description: 'Grype --fail-on level: negligible | low | medium | high | critical'
+    required: false
+    default: 'high'
+  fail-on-findings:
+    description: 'Exit non-zero when findings exceed threshold (true/false)'
+    required: false
+    default: 'true'
+  sarif-output:
+    description: 'Path for merged SARIF v2.1.0 results file'
+    required: false
+    default: 'results.sarif'
+
+outputs:
+  findings-count:
+    description: 'Total findings across lint + scan'
+  sarif-file:
+    description: 'Path to merged SARIF results file'
+  lint-passed:
+    description: 'Whether hadolint found zero violations (true/false)'
+
+branding: { icon: shield, color: red }
+
+runs:
+  using: 'docker'
+  image: 'Dockerfile'
+  args:
+    - ${{ inputs.dockerfile }}
+    - ${{ inputs.image-ref }}
+    - ${{ inputs.severity-threshold }}
+    - ${{ inputs.fail-on-findings }}
+    - ${{ inputs.sarif-output }}
+
+# =============================================================================
+# Dockerfile (co-located — create as ./Dockerfile in action directory)
+# =============================================================================
+# FROM alpine:3.21 AS base
+# RUN apk add --no-cache bash jq curl
+#
+# # Hadolint v2.12.0 — native SARIF via --format sarif
+# COPY --from=hadolint/hadolint:v2.12.0-alpine /bin/hadolint /usr/local/bin/
+#
+# # Grype — SARIF via -o sarif, severity gating via --fail-on
+# RUN curl -sSfL https://get.anchore.io/grype | sh -s -- -b /usr/local/bin
+#
+# COPY entrypoint.sh /entrypoint.sh
+# RUN chmod +x /entrypoint.sh
+# ENTRYPOINT ["/entrypoint.sh"]
+
+# =============================================================================
+# entrypoint.sh (co-located — create as ./entrypoint.sh in action directory)
+# =============================================================================
+# #!/usr/bin/env bash
+# set -euo pipefail
+#
+# DOCKERFILE="$1"; IMAGE_REF="$2"; SEVERITY="$3"; FAIL_ON="$4"; SARIF_OUT="$5"
+# LINT_EXIT=0; SCAN_EXIT=0; LINT_FINDINGS=0; SCAN_FINDINGS=0
+#
+# # --- 1. Lint with hadolint (SARIF v2.1.0 output) ---
+# echo "::group::Linting $DOCKERFILE with hadolint"
+# hadolint "$DOCKERFILE" --format sarif > lint.sarif 2>&1 || LINT_EXIT=$?
+# LINT_FINDINGS=$(jq '[.runs[].results[]] | length' lint.sarif 2>/dev/null || echo 0)
+# echo "::endgroup::"
+#
+# if [[ "$LINT_EXIT" -eq 0 ]]; then
+#   echo "lint-passed=true" >> "$GITHUB_OUTPUT"
+# else
+#   echo "lint-passed=false" >> "$GITHUB_OUTPUT"
+#   # Emit PR annotations from SARIF locations
+#   jq -r '.runs[].results[] |
+#     "::warning file=\(.locations[0].physicalLocation.artifactLocation.uri),line=\(.locations[0].physicalLocation.region.startLine)::\(.message.text)"
+#   ' lint.sarif 2>/dev/null || true
+# fi
+#
+# # --- 2. Scan image with grype (SARIF + --fail-on severity gate) ---
+# if [[ -n "$IMAGE_REF" ]]; then
+#   echo "::group::Scanning $IMAGE_REF with grype (threshold: $SEVERITY)"
+#   grype "$IMAGE_REF" -o sarif --fail-on "$SEVERITY" > scan.sarif 2>&1 || SCAN_EXIT=$?
+#   SCAN_FINDINGS=$(jq '[.runs[].results[]] | length' scan.sarif 2>/dev/null || echo 0)
+#   echo "::endgroup::"
+# fi
+#
+# # --- 3. Merge SARIF runs into single file for codeql/upload-sarif ---
+# TOTAL=$((LINT_FINDINGS + SCAN_FINDINGS))
+# if [[ -f scan.sarif ]]; then
+#   jq -s '{
+#     "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/main/sarif-2.1/schema/sarif-schema-2.1.0.json",
+#     version: "2.1.0",
+#     runs: [.[].runs[]]
+#   }' lint.sarif scan.sarif > "$SARIF_OUT"
+# else
+#   cp lint.sarif "$SARIF_OUT"
+# fi
+#
+# # --- 4. Step summary ---
+# {
+#   echo "## Dockerfile Lint & Image Scan"
+#   echo "| Source | Findings | Status |"
+#   echo "|--------|----------|--------|"
+#   printf '| hadolint | %d | %s |\n' "$LINT_FINDINGS" \
+#     "$( (( LINT_EXIT == 0 )) && echo 'Passed' || echo 'Failed')"
+#   if [[ -n "$IMAGE_REF" ]]; then
+#     printf '| grype | %d | %s |\n' "$SCAN_FINDINGS" \
+#       "$( (( SCAN_EXIT == 0 )) && echo 'Passed' || echo 'Failed')"
+#   fi
+#   printf '\nSeverity threshold: `%s` | Total: **%d**\n' "$SEVERITY" "$TOTAL"
+# } >> "$GITHUB_STEP_SUMMARY"
+#
+# # --- 5. Outputs ---
+# echo "findings-count=$TOTAL"    >> "$GITHUB_OUTPUT"
+# echo "sarif-file=$SARIF_OUT"    >> "$GITHUB_OUTPUT"
+#
+# # --- 6. Fail if gating enabled and findings exceed threshold ---
+# if [[ "$FAIL_ON" == "true" && "$TOTAL" -gt 0 ]]; then
+#   echo "::error::$TOTAL finding(s) at or above severity '$SEVERITY'"
+#   exit 1
+# fi

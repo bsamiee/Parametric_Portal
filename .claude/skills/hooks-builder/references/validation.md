@@ -98,18 +98,18 @@ Consolidated checklist for hooks-builder. SKILL.md §VALIDATION contains high-le
 
 <br>
 
-| [SYMPTOM]                 | [CAUSE]                       | [FIX]                          |
-| ------------------------- | ----------------------------- | ------------------------------ |
-| Hook not registered       | Trailing commas in JSON       | Validate JSON syntax           |
-| Permission denied         | Missing executable permission | `chmod +x script.py`           |
-| Exit code 1 blocks        | Bug #4809                     | Use exit 0 for warnings        |
-| PermissionRequest race    | Hook >1.5s                    | Optimize or use PreToolUse     |
-| Env vars not expanded     | Windows platform              | Use absolute paths             |
-| `/hooks` shows "No hooks" | Wrong settings.json location  | Check file path (#11544)       |
-| Variables not expanded    | Template syntax `{{...}}`     | Use env vars instead           |
-| SessionEnd not firing     | `/clear` command used         | Known issue (#6428)            |
-| Prompt hook not firing    | Used on TeammateIdle          | TeammateIdle: exit codes only  |
-| Wrong timeout units       | Used milliseconds             | Timeouts are in SECONDS        |
+| [SYMPTOM]                 | [CAUSE]                       | [FIX]                         |
+| ------------------------- | ----------------------------- | ----------------------------- |
+| Hook not registered       | Trailing commas in JSON       | Validate JSON syntax          |
+| Permission denied         | Missing executable permission | `chmod +x script.py`          |
+| Exit code 1 blocks        | Bug #4809                     | Use exit 0 for warnings       |
+| PermissionRequest race    | Hook >1.5s                    | Optimize or use PreToolUse    |
+| Env vars not expanded     | Windows platform              | Use absolute paths            |
+| `/hooks` shows "No hooks" | Wrong settings.json location  | Check file path (#11544)      |
+| Variables not expanded    | Template syntax `{{...}}`     | Use env vars instead          |
+| SessionEnd not firing     | `/clear` command used         | Known issue (#6428)           |
+| Prompt hook not firing    | Used on TeammateIdle          | TeammateIdle: exit codes only |
+| Wrong timeout units       | Used milliseconds             | Timeouts are in SECONDS       |
 
 ---
 ## [8][OPERATIONAL_COMMANDS]
@@ -135,6 +135,6 @@ claude --debug
 # Press Ctrl+O in session
 
 # Executable verification
-ls -la .claude/hooks/*.py  # Check +x permission
-sed -n '1p' .claude/hooks/*.py  # Check shebang
+eza -la .claude/hooks/*.py  # Check +x permission
+head -1 .claude/hooks/*.py  # Check shebang
 ```

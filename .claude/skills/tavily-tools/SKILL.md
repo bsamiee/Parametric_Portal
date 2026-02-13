@@ -4,9 +4,7 @@ type: complex
 depth: base
 user-invocable: false
 description: >-
-  Executes Tavily AI web operations via unified Python CLI. Use when searching
-  the web, extracting content from URLs, crawling websites, mapping site
-  structure, or conducting deep multi-step research.
+  Executes Tavily AI search, extraction, crawling, mapping, and deep research via Python CLI. Use when web search, URL content extraction, site crawling, or multi-step research needed.
 ---
 
 # [H1][TAVILY-TOOLS]
@@ -21,13 +19,13 @@ Execute Tavily AI web operations through unified Python CLI.
 ---
 ## [1][COMMANDS]
 
-| [CMD]     | [REQUIRED_ARG]  | [PURPOSE]                              |
-| --------- | --------------- | -------------------------------------- |
-| search    | `--query TEXT`  | AI-powered web search with results     |
-| extract   | `--urls URLS`   | Extract content from one or more URLs  |
-| crawl     | `--url URL`     | Crawl website from base URL            |
-| map       | `--url URL`     | Map website URL structure              |
-| research  | `--query TEXT`  | Multi-step deep research with report   |
+| [CMD]    | [REQUIRED_ARG] | [PURPOSE]                             |
+| -------- | -------------- | ------------------------------------- |
+| search   | `--query TEXT` | AI-powered web search with results    |
+| extract  | `--urls URLS`  | Extract content from one or more URLs |
+| crawl    | `--url URL`    | Crawl website from base URL           |
+| map      | `--url URL`    | Map website URL structure             |
+| research | `--query TEXT` | Multi-step deep research with report  |
 
 ---
 ## [2][USAGE]
@@ -101,20 +99,20 @@ uv run .claude/skills/tavily-tools/scripts/tavily.py research --query "Effect vs
 
 Commands return: `{"status": "success|error", ...}`.
 
-| [INDEX] | [CMD]      | [RESPONSE]                                |
-| :-----: | ---------- | ----------------------------------------- |
-|   [1]   | `search`   | `{query, results[], images[], answer}`    |
-|   [2]   | `extract`  | `{urls[], results[], failed[]}`           |
-|   [3]   | `crawl`    | `{base_url, results[], urls_crawled}`     |
-|   [4]   | `map`      | `{base_url, urls[], total_mapped}`        |
-|   [5]   | `research` | `{query, report, sources[]}`              |
+| [INDEX] | [CMD]      | [RESPONSE]                             |
+| :-----: | ---------- | -------------------------------------- |
+|   [1]   | `search`   | `{query, results[], images[], answer}` |
+|   [2]   | `extract`  | `{urls[], results[], failed[]}`        |
+|   [3]   | `crawl`    | `{base_url, results[], urls_crawled}`  |
+|   [4]   | `map`      | `{base_url, urls[], total_mapped}`     |
+|   [5]   | `research` | `{query, report, sources[]}`           |
 
 ---
 ## [5][ENVIRONMENT]
 
-| [VAR]             | [REQUIRED] | [DESCRIPTION]                        |
-| ----------------- | ---------- | ------------------------------------ |
-| `TAVILY_API_KEY`  | Yes        | Tavily API key (1Password injected)  |
+| [VAR]            | [REQUIRED] | [DESCRIPTION]                       |
+| ---------------- | ---------- | ----------------------------------- |
+| `TAVILY_API_KEY` | Yes        | Tavily API key (1Password injected) |
 
 ---
 ## [6][ERROR_HANDLING]

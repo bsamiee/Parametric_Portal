@@ -1,0 +1,136 @@
+# ChatOps Dispatch -- Slash commands in PR comments + external repository_dispatch
+# CRITICAL: Never interpolate github.event.comment.body in expressions -- route through env.
+name: ChatOps Dispatch
+on:
+  issue_comment: { types: [created] }
+  repository_dispatch: { types: [deploy, benchmark, rollback] }
+
+permissions: {}
+
+jobs:
+  # --- [JOB 1] Parse + validate slash command (injection-safe) ---
+  parse:
+    if: >-
+      github.event_name == 'issue_comment' &&
+      github.event.issue.pull_request &&
+      startsWith(github.event.comment.body, '/') &&
+      contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: { pull-requests: read }
+    outputs:
+      command: ${{ steps.parse.outputs.command }}
+      environment: ${{ steps.parse.outputs.environment }}
+      args: ${{ steps.parse.outputs.args }}
+    steps:
+      - uses: step-security/harden-runner@5ef0c079ce82195b2a36a210272d6b661572d83e # v2.14.2
+        with: { egress-policy: audit }
+      - id: parse
+        env:
+          # CRITICAL: env-var indirection -- COMMENT_BODY is untrusted user input.
+          # Stored as env var, parsed in shell. Never used in ${{ }} expressions.
+          COMMENT_BODY: ${{ github.event.comment.body }}
+        shell: bash
+        run: |
+          FIRST_LINE=$(printf '%s' "$COMMENT_BODY" | head -n1)
+          COMMAND=$(printf '%s' "$FIRST_LINE" | awk '{print $1}' | tr -d '/')
+          ENVIRONMENT=$(printf '%s' "$FIRST_LINE" | awk '{print $2}')
+          # Allowlist validation -- reject unknown commands
+          case "$COMMAND" in
+            deploy|rollback|benchmark|status) ;;
+            *) echo "::error::Unknown command: $COMMAND"; exit 1 ;;
+          esac
+          if [[ -n "$ENVIRONMENT" ]]; then
+            case "$ENVIRONMENT" in
+              staging|production|preview) ;;
+              *) echo "::error::Unknown environment: $ENVIRONMENT"; exit 1 ;;
+            esac
+          fi
+          ARGS=$(printf '%s' "$FIRST_LINE" | awk '{$1=$2=""; print}' | xargs)
+          printf 'command=%s\n' "$COMMAND" >> "$GITHUB_OUTPUT"
+          printf 'environment=%s\n' "${ENVIRONMENT:-staging}" >> "$GITHUB_OUTPUT"
+          printf 'args=%s\n' "$ARGS" >> "$GITHUB_OUTPUT"
+
+  # --- [JOB 2] Acknowledge via reaction + status comment ---
+  acknowledge:
+    needs: parse
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: { pull-requests: write, issues: write }
+    steps:
+      - uses: step-security/harden-runner@5ef0c079ce82195b2a36a210272d6b661572d83e # v2.14.2
+        with: { egress-policy: audit }
+      - uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
+        env: { CMD: '${{ needs.parse.outputs.command }}', ENV_TARGET: '${{ needs.parse.outputs.environment }}' }
+        with:
+          script: |
+            await github.rest.reactions.createForIssueComment({
+              ...context.repo, comment_id: context.payload.comment.id, content: 'rocket'
+            });
+            await github.rest.issues.createComment({
+              ...context.repo, issue_number: context.issue.number,
+              body: `**ChatOps** | \`/${process.env.CMD}\` to **${process.env.ENV_TARGET}** | [Run](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})`
+            });
+
+  # --- [JOB 3] Execute slash command ---
+  execute:
+    needs: [parse, acknowledge]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions: { contents: read, id-token: write, deployments: write }
+    environment: ${{ needs.parse.outputs.environment }}
+    steps:
+      - uses: step-security/harden-runner@5ef0c079ce82195b2a36a210272d6b661572d83e # v2.14.2
+        with: { egress-policy: audit }
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: aws-actions/configure-aws-credentials@8df5847569e6427dd6c4fb1cf565c83acfa8afa7 # v6.0.0
+        with: { role-to-assume: '${{ vars.AWS_ROLE_ARN }}', aws-region: '${{ vars.AWS_REGION }}' }
+      - id: app-token
+        uses: actions/create-github-app-token@29824e69f54612133e76f7eaac726eef6c875baf # v2.2.1
+        with:
+          app-id: ${{ vars.DEPLOY_APP_ID }}
+          private-key: ${{ secrets.DEPLOY_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+      - name: Execute command
+        env:
+          CMD: ${{ needs.parse.outputs.command }}
+          ENV_TARGET: ${{ needs.parse.outputs.environment }}
+          ARGS: ${{ needs.parse.outputs.args }}
+          APP_TOKEN: ${{ steps.app-token.outputs.token }}
+        shell: bash
+        run: |
+          echo "## ChatOps Execution" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Field       | Value           |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|-------------|-----------------|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Command     | \`$CMD\`        |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Environment | \`$ENV_TARGET\` |" >> "$GITHUB_STEP_SUMMARY"
+          case "$CMD" in
+            deploy)    echo "Deploying to $ENV_TARGET..." ;;
+            rollback)  echo "Rolling back $ENV_TARGET..." ;;
+            benchmark) echo "Running benchmarks..." ;;
+            status)    echo "Fetching status for $ENV_TARGET..." ;;
+          esac
+
+  # --- [JOB 4] External dispatch handler (API / webhook triggered) ---
+  external:
+    if: github.event_name == 'repository_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions: { contents: read, id-token: write, deployments: write }
+    environment: ${{ github.event.client_payload.environment || 'staging' }}
+    steps:
+      - uses: step-security/harden-runner@5ef0c079ce82195b2a36a210272d6b661572d83e # v2.14.2
+        with: { egress-policy: audit }
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Validate + deploy
+        env:
+          PAYLOAD: ${{ toJSON(github.event.client_payload) }}
+          EVENT_TYPE: ${{ github.event.action }}
+        shell: bash
+        run: |
+          VERSION=$(printf '%s' "$PAYLOAD" | jq -r '.version // empty')
+          if [[ -z "$VERSION" ]]; then
+            echo "::error::client_payload.version is required"; exit 1
+          fi
+          echo "## Dispatch Deployment" >> "$GITHUB_STEP_SUMMARY"
+          echo "**Event:** \`$EVENT_TYPE\` | **Version:** \`$VERSION\`" >> "$GITHUB_STEP_SUMMARY"

@@ -71,7 +71,7 @@ Operational verification procedures for agent-builder. SKILL.md §VALIDATION con
 - [ ] No verbose introductions or explanations.
 - [ ] Stateless operation—no prior context assumptions.
 
-[IMPORTANT] Subagents receive ONLY their system prompt (markdown body) plus environment details. They do NOT receive the full Claude Code system prompt.
+[IMPORTANT] Subagents receive ONLY their system prompt (markdown body) plus environment details. They do NOT receive full Claude Code system prompt.
 
 ---
 ## [5][ARTIFACT_GATE]
@@ -97,20 +97,20 @@ Operational verification procedures for agent-builder. SKILL.md §VALIDATION con
 
 <br>
 
-| [SYMPTOM]                | [CAUSE]                    | [FIX]                            |
-| ------------------------ | -------------------------- | -------------------------------- |
-| YAML parse failure       | Tab character              | Replace with spaces              |
-| Frontmatter ignored      | Missing delimiter          | Add `---` before and after       |
-| Registration fails       | Name mismatch              | Match filename exactly           |
-| Discovery fails          | Vague description          | Add "Use when" + triggers        |
-| Agent not invoked        | No catch-all phrase        | Add "or related tasks"           |
-| Wrong model selected     | Type gate mismatch         | Match model to type              |
-| Tool permission error    | Missing tool in list       | Add required tool                |
-| Indexing error           | Wrong multi-line scalar    | Use `>-` not `\|`               |
-| Subagent spawns blocked  | Missing Task(type) syntax  | Use `Task(worker, researcher)`   |
-| Memory not persisting    | Missing memory field       | Add `memory: user\|project\|local` |
-| Permission prompts       | Wrong permissionMode       | Set appropriate permission mode  |
-| Tools appearing blocked  | disallowedTools too broad  | Narrow denylist scope            |
+| [INDEX] | [SYMPTOM]               | [CAUSE]                   | [FIX]                              |
+| :-----: | ----------------------- | ------------------------- | ---------------------------------- |
+|   [1]   | YAML parse failure      | Tab character             | Replace with spaces                |
+|   [2]   | Frontmatter ignored     | Missing delimiter         | Add `---` before and after         |
+|   [3]   | Registration fails      | Name mismatch             | Match filename exactly             |
+|   [4]   | Discovery fails         | Vague description         | Add "Use when" + triggers          |
+|   [5]   | Agent not invoked       | No catch-all phrase       | Add "or related tasks"             |
+|   [6]   | Wrong model selected    | Type gate mismatch        | Match model to type                |
+|   [7]   | Tool permission error   | Missing tool in list      | Add required tool                  |
+|   [8]   | Indexing error          | Wrong multi-line scalar   | Use `>-` not `\|`                  |
+|   [9]   | Subagent spawns blocked | Missing Task(type) syntax | Use `Task(worker, researcher)`     |
+|  [10]   | Memory not persisting   | Missing memory field      | Add `memory: user\|project\|local` |
+|  [11]   | Permission prompts      | Wrong permissionMode      | Set appropriate permission mode    |
+|  [12]   | Tools appearing blocked | disallowedTools too broad | Narrow denylist scope              |
 
 ---
 ## [7][OPERATIONAL_COMMANDS]
@@ -124,20 +124,20 @@ head -30 .claude/agents/my-agent.md  # Check frontmatter (11 fields possible)
 
 # Name matching
 basename .claude/agents/my-agent.md .md  # Should match name field
-grep "^name:" .claude/agents/my-agent.md
+rg "^name:" .claude/agents/my-agent.md
 
 # Description check
-grep -i "use when" .claude/agents/my-agent.md  # Must exist
+rg -i "use when" .claude/agents/my-agent.md  # Must exist
 
 # Tool declaration
-grep "^tools:" .claude/agents/my-agent.md
-grep "^disallowedTools:" .claude/agents/my-agent.md
+rg "^tools:" .claude/agents/my-agent.md
+rg "^disallowedTools:" .claude/agents/my-agent.md
 
 # Optional fields
-grep "^permissionMode:" .claude/agents/my-agent.md
-grep "^memory:" .claude/agents/my-agent.md
-grep "^maxTurns:" .claude/agents/my-agent.md
+rg "^permissionMode:" .claude/agents/my-agent.md
+rg "^memory:" .claude/agents/my-agent.md
+rg "^maxTurns:" .claude/agents/my-agent.md
 
 # Filename convention
-ls .claude/agents/ | grep -v "^[a-z-]*\.md$"  # Find violations
+eza .claude/agents/ | rg -v "^[a-z-]*\.md$"  # Find violations
 ```

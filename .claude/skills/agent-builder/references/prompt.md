@@ -69,7 +69,7 @@ Return structured summary with severity ranking.
 |   [4]   | `[NEVER]`     | Absolute prohibition  | No exceptions |
 |   [5]   | `[VERIFY]`    | Gate checklist        | Pre-condition |
 
-Placement pattern:
+**Placement pattern:**
 
 ```markdown
 [CRITICAL]:
@@ -108,13 +108,12 @@ Return structured summary:
 
 <br>
 
-| [INDEX] | [TYPE]        | [TOOLS]                       | [MODEL] | [PURPOSE]        |
-| :-----: | ------------- | ----------------------------- | :-----: | ---------------- |
-|   [1]   | Read-only     | `Read, Glob, Grep`            | sonnet  | Analysis, review |
-|   [2]   | Write-capable | `Read, Edit, Write, Bash`     | sonnet  | Implementation   |
+| [INDEX] | [TYPE]        | [TOOLS]                        | [MODEL] | [PURPOSE]        |
+| :-----: | ------------- | ------------------------------ | :-----: | ---------------- |
+|   [1]   | Read-only     | `Read, Glob, Grep`             | sonnet  | Analysis, review |
+|   [2]   | Write-capable | `Read, Edit, Write, Bash`      | sonnet  | Implementation   |
 |   [3]   | Orchestrator  | `Task, Read, Glob, TaskCreate` |  opus   | Agent dispatch   |
-|   [4]   | Full access   | *(omit tools field)*          | session | General-purpose  |
+|   [4]   | Full access   | *(omit tools field)*           | session | General-purpose  |
 
-[REFERENCE] Template scaffold: [→agent.template.md](../templates/agent.template.md)
-
-[REFERENCE] Validation checklist: [→validation.md§4](./validation.md#4prompt_gate)
+[REFERENCE] Template scaffold: [→agent.template.md](../templates/agent.template.md).
+[REFERENCE] Validation checklist: [→validation.md§4](./validation.md#4prompt_gate).

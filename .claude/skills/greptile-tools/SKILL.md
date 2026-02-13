@@ -4,10 +4,7 @@ type: complex
 depth: base
 user-invocable: false
 description: >-
-  Queries indexed repositories via Greptile API for codebase-aware answers. Use
-  when asking natural language questions about code architecture, searching for
-  implementations, understanding how features work, or locating specific code
-  patterns across the repository.
+  Executes natural language codebase queries against indexed repositories via Greptile API. Use when investigating code architecture, locating implementations, understanding feature workflows, or searching cross-repository patterns requiring semantic code graph traversal.
 ---
 
 # [H1][GREPTILE-TOOLS]
@@ -22,12 +19,12 @@ Query indexed repositories via Greptile API v2. Defaults to current repo.
 ---
 ## [1][COMMANDS]
 
-| [CMD]    | [ARGS]                   | [PURPOSE]                          |
-| -------- | ------------------------ | ---------------------------------- |
-| index    | --                       | Trigger repository indexing        |
-| status   | --                       | Check indexing progress/completion  |
-| query    | `<question> [genius]`    | Natural language codebase Q&A      |
-| search   | `<question>`             | Code search (files only, no answer)|
+| [CMD]  | [ARGS]                | [PURPOSE]                           |
+| ------ | --------------------- | ----------------------------------- |
+| index  | --                    | Trigger repository indexing         |
+| status | --                    | Check indexing progress/completion  |
+| query  | `<question> [genius]` | Natural language codebase Q&A       |
+| search | `<question>`          | Code search (files only, no answer) |
 
 ---
 ## [2][USAGE]
@@ -73,19 +70,28 @@ uv run .claude/skills/greptile-tools/scripts/greptile.py search "rate limiting i
 
 Commands return: `{"status": "success|error", ...}`.
 
-| [INDEX] | [CMD]    | [RESPONSE]                                          |
-| :-----: | -------- | --------------------------------------------------- |
-|   [1]   | `index`  | `{repo, message}`                                   |
-|   [2]   | `status` | `{repo, indexing, sha, progress, ready}`             |
-|   [3]   | `query`  | `{query, answer, sources: [{file, lines}]}`         |
-|   [4]   | `search` | `{query, results: [{file, lines, summary}]}`        |
+| [INDEX] | [CMD]    | [RESPONSE]                                   |
+| :-----: | -------- | -------------------------------------------- |
+|   [1]   | `index`  | `{repo, message}`                            |
+|   [2]   | `status` | `{repo, indexing, sha, progress, ready}`     |
+|   [3]   | `query`  | `{query, answer, sources: [{file, lines}]}`  |
+|   [4]   | `search` | `{query, results: [{file, lines, summary}]}` |
 
 Error responses include `retryable: bool` for transient failures (5xx, 429).
 
 ---
 ## [5][ENVIRONMENT]
 
-| [VAR]            | [REQUIRED] | [DESCRIPTION]                          |
-| ---------------- | ---------- | -------------------------------------- |
-| `GREPTILE_TOKEN` | Yes        | Greptile API bearer token              |
+| [VAR]            | [REQUIRED] | [DESCRIPTION]                                |
+| ---------------- | ---------- | -------------------------------------------- |
+| `GREPTILE_TOKEN` | Yes        | Greptile API bearer token                    |
 | `GITHUB_TOKEN`   | Yes        | GitHub token for repo access (or `GH_TOKEN`) |
+
+---
+## [6][ERROR_HANDLING]
+
+- HTTP errors print `[ERROR] <status>: <body>` and exit 1
+- Missing token: `[ERROR] GREPTILE_TOKEN environment variable not set` and exit 1
+- Repository not indexed: `[ERROR] Repository not indexed`; run `index` command first
+- Rate limit (429): retry after `Retry-After` header value
+- `query` returns `retryable: bool` for transient failures (5xx, 429)

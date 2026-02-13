@@ -3,8 +3,8 @@
 
 <br>
 
-| [INDEX] | [DOMAIN]      | [PATH]                              | [DICTUM]                                           |
-| :-----: | ------------- | ----------------------------------- | -------------------------------------------------- |
+| [INDEX] | [DOMAIN]      | [PATH]                                | [DICTUM]                                           |
+| :-----: | ------------- | ------------------------------------- | -------------------------------------------------- |
 |   [1]   | Configuration | [→global-config.md](global-config.md) | Frontmatter YAML governs parser behavior.          |
 |   [2]   | Styling       | [→styling.md](styling.md)             | Theme and visual configuration control appearance. |
 |   [3]   | Validation    | [→validation.md](validation.md)       | Anti-patterns and checklists prevent failures.     |

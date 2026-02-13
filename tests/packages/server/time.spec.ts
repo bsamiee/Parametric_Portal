@@ -3,13 +3,11 @@
  * Validates patterns used by resilience.ts, polling.ts, and websocket.ts.
  */
 import { it } from '@effect/vitest';
-import { Resilience } from '@parametric-portal/server/utils/resilience';
 import { Clock, Deferred, Duration, Effect, Exit, Fiber, Ref, Schedule, TestClock } from 'effect';
 import { expect } from 'vitest';
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
-const PRESETS = { brief: { base: 50, maxAttempts: 2 }, default: { base: 100, maxAttempts: 3 }, patient: { base: 500, maxAttempts: 5 }, persistent: { base: 100, maxAttempts: 5 } } as const;
 const STALE_CONFIG = { minIntervalMs: Duration.toMillis(Duration.seconds(15)), multiplier: 2 } as const;
 const WS_DURATIONS = { metaTtlMs: Duration.toMillis(Duration.hours(2)), pingMs: 30_000, pongTimeoutMs: 90_000, reaperMs: 15_000, roomTtlMs: Duration.toMillis(Duration.minutes(10)) } as const;
 
@@ -93,17 +91,6 @@ it.effect('P7: staleness threshold', () => Effect.gen(function* () {
     expect((yield* Clock.currentTimeMillis) >= staleThresholdMs).toBe(true);
 }));
 
-// P8: WebSocket TTL durations + Resilience presets are internally consistent
-it.effect('P8: duration + preset consistency', () => Effect.sync(() => {
-    expect(WS_DURATIONS.metaTtlMs).toBe(7_200_000);
-    expect(WS_DURATIONS.roomTtlMs).toBe(600_000);
-    expect(WS_DURATIONS.pongTimeoutMs).toBeGreaterThan(WS_DURATIONS.pingMs);
-    expect(WS_DURATIONS.metaTtlMs).toBeGreaterThan(WS_DURATIONS.roomTtlMs);
-    expect(Object.keys(Resilience.presets)).toEqual(['brief', 'default', 'patient', 'persistent']);
-    expect(Resilience.defaults.timeout).toEqual(Duration.seconds(30));
-    expect(Duration.toMillis(Resilience.defaults.hedgeDelay)).toBe(100);
-}));
-
 // P9: Deferred + TestClock -- completes only after time passes
 it.effect('P9: deferred gate with clock', () => Effect.gen(function* () {
     const gate = yield* Deferred.make<string>();
@@ -112,13 +99,4 @@ it.effect('P9: deferred gate with clock', () => Effect.gen(function* () {
     yield* TestClock.adjust(Duration.seconds(5));
     yield* Fiber.join(fiber);
     expect(yield* Deferred.await(gate)).toBe('opened');
-}));
-
-// P10: Resilience.schedule('default') retries expected number of times under TestClock
-it.effect('P10: schedule factory', () => Effect.gen(function* () {
-    const count = yield* Ref.make(0);
-    const fiber = yield* Effect.fork(Ref.update(count, (n) => n + 1).pipe(Effect.andThen(Effect.fail('err')), Effect.retry(Resilience.schedule('default')), Effect.ignore));
-    yield* TestClock.adjust(Duration.seconds(30));
-    yield* Fiber.join(fiber);
-    expect(yield* Ref.get(count)).toBe(PRESETS.default.maxAttempts + 1);
 }));

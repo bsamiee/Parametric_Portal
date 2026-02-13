@@ -1,0 +1,114 @@
+# LogQL Metric Query Patterns
+# LOC: 130
+
+## === ERROR ANALYSIS ===
+count_over_time({app="api"} | json | level="error" [5m])
+sum(rate({app="api"} | json | level="error" [5m]))
+# Error percentage
+(sum(rate({app="api"} | json | level="error" [5m])) / sum(rate({app="api"}[5m]))) * 100
+# Errors by type
+sum by (error_type) (count_over_time({app="api"} | json | level="error" [5m]))
+# Top 10 error messages
+topk(10, sum by (error_message) (count_over_time({app="api"} | json | level="error" [1h])))
+
+## === PERFORMANCE ===
+{app="api"} | json | duration > 1
+avg_over_time({app="api"} | json | unwrap duration [5m])
+quantile_over_time(0.95, {app="api"} | json | unwrap duration [5m])
+quantile_over_time(0.99, {app="api"} | json | unwrap duration [5m])
+max_over_time({app="api"} | json | unwrap duration [5m])
+
+## === TRAFFIC ===
+sum(rate({namespace="production"}[5m]))
+sum by (app) (rate({namespace="production"}[5m]))
+sum(bytes_rate({job="app"}[5m]))
+sum by (endpoint) (rate({app="api"} | json [5m]))
+sum by (status_code) (count_over_time({app="api"} | json [5m]))
+
+## === SECURITY ===
+{app="auth"} | json | event="login_failed"
+sum by (username) (count_over_time({app="auth"} | json | event="login_failed" [1h]))
+topk(10, sum by (username) (count_over_time({app="auth"} | json | event="login_failed" [1h])))
+{app="api"} | json | (status_code == 401 or status_code == 403)
+{app="api"} |~ "union.*select|select.*from.*where"
+
+## === TIME COMPARISONS ===
+# Current vs 1 hour ago
+sum(rate({app="api"} | json | level="error" [5m])) - sum(rate({app="api"} | json | level="error" [5m] offset 1h))
+# Current vs yesterday
+sum(rate({app="api"}[5m])) / sum(rate({app="api"}[5m] offset 1d))
+# Week-over-week
+sum(rate({app="api"} | json | level="error" [5m])) / sum(rate({app="api"} | json | level="error" [5m] offset 1w))
+
+## === AGGREGATION ===
+sum(sum_over_time({app="api"} | json | unwrap duration [5m]))
+avg by (pod) (avg_over_time({app="api"} | json | unwrap duration [5m]))
+max without (instance, pod) (max_over_time({app="api"} | json | unwrap response_size [5m]))
+# Count distinct values
+count(count by (user_id) ({app="api"} | json))
+
+## === ALERTING ===
+# Error rate > 5%
+(sum(rate({app="api"} | json | level="error" [5m])) / sum(rate({app="api"}[5m]))) > 0.05
+# Low log volume
+sum(rate({app="api"}[5m])) < 0.1
+# High latency p95 > 2s
+quantile_over_time(0.95, {app="api"} | json | unwrap duration [5m]) > 2
+# Dead service
+absent_over_time({app="api"}[5m])
+# Failed logins spike
+sum(rate({app="auth"} | json | event="login_failed" [5m])) > 10
+# vector() fallback for sparse logs (parentheses required -- or binds looser than >)
+(sum(rate({app="api"} | json | level="error" [5m])) or vector(0)) > 10
+# Percentage with fallback
+((sum(rate({app="api"} | json | level="error" [5m])) or vector(0)) / (sum(rate({app="api"}[5m])) or vector(1))) * 100
+
+## === APPROX_TOPK (3.6+, probabilistic, instant queries only) ===
+approx_topk(10, sum by (endpoint) (rate({app="api"}[5m])))
+approx_topk(20, sum by (error_message) (count_over_time({app="api"} | json | level="error" [1h])))
+
+## === RATE_COUNTER (counter-like log values) ===
+rate_counter({app="api"} | json | unwrap total_requests [5m])
+sum by (app) (rate_counter({app="api"} | json | unwrap bytes_processed [5m]))
+
+## === LABEL_REPLACE ===
+# Extract service name from compound label
+label_replace(rate({job="api-server", service="payment:v2"} |= "err" [1m]), "service_name", "$1", "service", "(.*):.*")
+# Environment from namespace
+label_replace(sum by (namespace) (rate({job="app"}[5m])), "env", "$1", "namespace", "(prod|staging|dev).*")
+# Pod to deployment name
+label_replace(sum by (pod) (rate({namespace="prod"}[5m])), "deployment", "$1", "pod", "(.*)-[a-f0-9]+-[a-z0-9]+")
+# Chained: extract team + service from job "team-platform/service-api"
+label_replace(label_replace(sum by (job) (rate({namespace="production"}[5m])), "team", "$1", "job", "team-([^/]+)/.*"), "service", "$1", "job", "[^/]+/service-(.*)")
+
+## === SORTING ===
+sort(sum by (app) (rate({job="api"}[5m])))
+sort_desc(sum by (app) (rate({job="api"}[5m])))
+sort_desc(topk(10, sum by (endpoint) (rate({app="api"}[5m]))))
+
+## === CONVERSION FUNCTIONS ===
+avg_over_time({app="api"} | json | unwrap duration_seconds(response_time) [5m])
+sum_over_time({app="api"} | json | unwrap bytes(payload_size) [5m])
+
+## === UNWRAPPED RANGE FUNCTIONS ===
+first_over_time({app="api"} | json | unwrap request_count [5m])
+last_over_time({app="api"} | json | unwrap request_count [5m])
+stddev_over_time({app="api"} | json | unwrap duration [5m])
+bytes_over_time({app="api"}[5m])
+
+## === SUBQUERY (nested range over instant) ===
+max_over_time(sum(rate({namespace="production"}[5m]))[24h:5m])
+
+## === AUTOMATIC LABELS ===
+# service_name (auto-populated from container name / OTel service.name)
+{service_name="my-api"} | json | level="error"
+sum by (service_name) (rate({namespace="production"} | json | level="error" [5m]))
+# detected_level (structured metadata, place BEFORE parser for acceleration)
+{cluster="prod"} | detected_level="error" | json
+sum by (detected_level) (rate({app="api"} | detected_level!="" | json [5m]))
+
+## === __ERROR__ DEBUGGING ===
+{app="api"} | json | __error__ != ""
+{app="api"} | json | __error__="" | level="error"
+{app="api"} | json | __error__ != "" | line_format "ERROR: {{.__error__}} LINE: {{.__line__}}"
+sum by (__error__) (count_over_time({app="api"} | json | __error__ != "" [5m]))

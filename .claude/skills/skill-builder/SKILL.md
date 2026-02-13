@@ -2,7 +2,8 @@
 name: skill-builder
 type: standard
 depth: full
-description: Creates and edits Claude Code skills with YAML frontmatter, folder structure, and depth-scaled content. Use when building new skills, updating existing skills, designing SKILL.md metadata, organizing skill folders, validating skill structure, or adding Python and TypeScript scripts for deterministic operations.
+description: >-
+    Creates and refines Claude Code skills via structured workflows with YAML frontmatter, typed folders, and depth-gated LOC limits. Use when authoring SKILL.md files, organizing references/, or validating skill structure.
 ---
 
 # [H1][SKILL-BUILDER]

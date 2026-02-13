@@ -1,68 +1,80 @@
-# Bash Scripting Guide (5.2+ / 5.3)
+# [H1][BASH-SCRIPTING-GUIDE]
+>**Dictum:** *Language mastery enables functional shell scripts.*
 
-## Bash vs POSIX sh
+<br>
 
-| Feature         | Bash 5.2+/5.3                                          | POSIX sh               |
-| --------------- | ------------------------------------------------------ | ---------------------- |
-| Arrays          | `arr=(one two three)`                                  | `set -- one two three` |
-| Assoc arrays    | `declare -A map=([k]=v)`                               | N/A                    |
-| Conditionals    | `[[ ... ]]` (regex, pattern, short-circuit)            | `[ ... ]`              |
-| Param expansion | `${var//pat/rep}`, `${var^^}`, `${var@Q}`              | Basic only             |
-| Process subst   | `<(command)`                                           | N/A                    |
-| Globbing        | `**` with `shopt -s globstar`                          | N/A                    |
-| Nameref         | `local -n ref=$1`                                      | N/A                    |
-| Readarray       | `readarray -d '' -t arr`                               | N/A                    |
-| Coproc          | `coproc NAME { cmd; }`                                 | N/A                    |
-| Timestamps      | `printf '%(%F %T)T' -1` (builtin, no fork)             | `date '+%F %T'`        |
-| EPOCHREALTIME   | `${EPOCHREALTIME}` (microsecond)                       | N/A                    |
-| Shell quoting   | `${var@Q}` (quote for re-eval)                         | N/A                    |
-| Attributes      | `${var@a}` (inspect declare flags)                     | N/A                    |
-| Case transform  | `${var@U}` upper, `${var@u}` ucfirst, `${var@L}` lower | N/A                    |
+Bash 5.2+/5.3 language reference. Strict mode, parameter expansion, arrays, conditionals, functional iteration.
 
-**Bash 5.2+/5.3** for modern Linux/macOS with full feature set. **POSIX sh** only for max portability or minimal containers.
+---
+## [1][BASH_VS_POSIX]
+>**Dictum:** *Feature awareness prevents portability regressions.*
 
-## Bash 5.3 New Features (July 2025)
+<br>
 
-| Feature                   | Syntax                             | Purpose                                                    |
-| ------------------------- | ---------------------------------- | ---------------------------------------------------------- |
-| Current-shell command sub | `${ cmd; }`                        | Capture stdout without forking a subshell                  |
-| REPLY command sub         | `${                                | cmd; }`                                                    | Run in current shell, result via `REPLY` variable |
-| GLOBSORT variable         | `GLOBSORT=name`                    | Control pathname-completion sort order (name, size, mtime) |
-| `source -p PATH`          | `source -p /custom/path script.sh` | Use custom PATH instead of `$PATH` for sourcing            |
-| `read -E`                 | `read -E -p "prompt: " var`        | Tab-completion via Readline during `read`                  |
+| [INDEX] | [FEATURE]       | [BASH_5.2+/5.3]                                        | [POSIX_SH]             |
+| :-----: | --------------- | ------------------------------------------------------ | ---------------------- |
+|   [1]   | Arrays          | `arr=(one two three)`                                  | `set -- one two three` |
+|   [2]   | Assoc arrays    | `declare -A map=([k]=v)`                               | N/A                    |
+|   [3]   | Conditionals    | `[[ ... ]]` (regex, pattern, short-circuit)            | `[ ... ]`              |
+|   [4]   | Param expansion | `${var//pat/rep}`, `${var^^}`, `${var@Q}`              | Basic only             |
+|   [5]   | Process subst   | `<(command)`                                           | N/A                    |
+|   [6]   | Globbing        | `**` with `shopt -s globstar`                          | N/A                    |
+|   [7]   | Nameref         | `local -n ref=$1`                                      | N/A                    |
+|   [8]   | Readarray       | `readarray -d '' -t arr`                               | N/A                    |
+|   [9]   | Timestamps      | `printf '%(%F %T)T' -1` (builtin, no fork)             | `date '+%F %T'`        |
+|  [10]   | EPOCHREALTIME   | `${EPOCHREALTIME}` (microsecond precision)             | N/A                    |
+|  [11]   | Case transform  | `${var@U}` upper, `${var@u}` ucfirst, `${var@L}` lower | N/A                    |
 
-## Strict Mode
+---
+## [2][BASH_5_3]
+>**Dictum:** *New builtins eliminate subshell overhead.*
 
-```bash
-#!/usr/bin/env bash
-set -Eeuo pipefail
-shopt -s inherit_errexit
-IFS=$'\n\t'
-```
+<br>
 
-| Flag              | Effect                                         |
-| ----------------- | ---------------------------------------------- |
-| `-e`              | Exit on non-zero status                        |
-| `-u`              | Error on unset variables                       |
-| `-o pipefail`     | Pipeline fails if any command fails            |
-| `-E`              | ERR trap inherits into functions and subshells |
-| `inherit_errexit` | Command substitutions inherit errexit          |
-| `IFS=$'\n\t'`     | Prevent word splitting on spaces               |
+| [INDEX] | [FEATURE]             | [SYNTAX]                           | [PURPOSE]                                   |
+| :-----: | --------------------- | ---------------------------------- | ------------------------------------------- |
+|   [1]   | Current-shell cmd sub | `${ cmd; }`                        | Capture stdout without forking subshell     |
+|   [2]   | REPLY cmd sub         | `${\| cmd; }`                      | Run in current shell, result via REPLY      |
+|   [3]   | GLOBSORT              | `GLOBSORT=name`                    | Control glob sort order (name, size, mtime) |
+|   [4]   | `source -p`           | `source -p /custom/path script.sh` | Custom PATH for sourcing                    |
+|   [5]   | `read -E`             | `read -E -p "prompt: " var`        | Tab-completion via Readline during read     |
+|   [6]   | `compgen -V`          | `compgen -V 'prefix'`              | List variables matching prefix              |
 
-Disable temporarily: `if ! output=$(cmd 2>&1); then handle_error "${output}"; fi`
+---
+## [3][ITERATION_HIERARCHY]
+>**Dictum:** *Declarative iteration outperforms imperative loops.*
 
-## Error Handling + Signals
+<br>
 
-```bash
-die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
-check_command() { command -v "$1" &>/dev/null || die "Required: $1"; }
-validate_file() { [[ -f "$1" ]] || die "Not found: $1"; [[ -r "$1" ]] || die "Not readable: $1"; }
-readonly WORK_DIR="$(mktemp -d)"
-cleanup() { local -r rc=$?; rm -rf "${WORK_DIR}"; exit "${rc}"; }
-trap cleanup EXIT    # EXIT fires on normal exit + signals; one trap is sufficient
-```
+| [INDEX] | [RANK]    | [PATTERN]                                             | [STYLE]                |
+| :-----: | --------- | ----------------------------------------------------- | ---------------------- |
+|   [1]   | BEST      | `mapfile -t arr < <(cmd)` + `for item in "${arr[@]}"` | Declarative collection |
+|   [2]   | GOOD      | `for item in "${array[@]}"`                           | Declarative iteration  |
+|   [3]   | GOOD      | `cmd1 \| cmd2 \| cmd3`                                | Stream pipeline        |
+|   [4]   | OK        | `for i in {1..10}`                                    | Brace expansion range  |
+|   [5]   | ELIMINATE | `while IFS= read -r line`                             | Replace with mapfile   |
+|   [6]   | ELIMINATE | `for ((i=0; i<n; i++))`                               | Brace expansion        |
 
-## Parameter Expansion
+---
+## [4][BRANCHING_HIERARCHY]
+>**Dictum:** *Parameter expansion replaces conditional branching.*
+
+<br>
+
+| [INDEX] | [RANK]    | [PATTERN]                                         | [STYLE]             |
+| :-----: | --------- | ------------------------------------------------- | ------------------- |
+|   [1]   | BEST      | `${var:-default}`, `${var:+alt}`, `${var:?error}` | Parameter expansion |
+|   [2]   | GOOD      | `(( count > 0 )) && action`                       | Arithmetic guard    |
+|   [3]   | GOOD      | `[[ "$var" == pat ]] && action \|\| other`        | Pattern guard       |
+|   [4]   | OK        | `case/esac`                                       | Multi-branch only   |
+|   [5]   | ELIMINATE | `if/then/else/elif/fi`                            | Zero tolerance      |
+|   [6]   | ELIMINATE | `[ ]` single brackets                             | Always `[[ ]]`      |
+
+---
+## [5][PARAMETER_EXPANSION]
+>**Dictum:** *Expansion operators replace external commands.*
+
+<br>
 
 ```bash
 ${var:-default}              # Default if unset/empty
@@ -77,198 +89,110 @@ ${var^^}  ${var,,}           # Uppercase/lowercase all
 ${var^}   ${var,}            # Uppercase/lowercase first char
 ${#var}                      # Length
 ${var:off:len}               # Substring
-${var@Q}                     # Shell-quoted for re-use as input
+${var@Q}                     # Shell-quoted for re-use
 ${var@A}                     # Assignment form (declare statement)
-${var@a}                     # Attribute flags (e.g., "r" for readonly)
-${var@U}                     # Uppercase all (bash 5.2+)
-${var@u}                     # Uppercase first char (bash 5.2+)
-${var@L}                     # Lowercase all (bash 5.2+)
+${var@a}                     # Attribute flags (r=readonly, a=array, A=assoc)
+${var@U}  ${var@L}           # Uppercase/lowercase all (5.2+)
 
 # file="/path/to/file.txt"
 ${file##*/}    # file.txt    ${file%.*}     # /path/to/file
 ${file##*.}    # txt         ${file%/*}     # /path/to
 ```
 
-## Variables + Functions
+---
+## [6][VARIABLES_AND_ARRAYS]
+>**Dictum:** *Readonly declarations enforce immutability.*
+
+<br>
 
 ```bash
 readonly MAX=3                                      # Constants: UPPER, readonly
-export LOG_LEVEL="INFO"                             # Env vars: UPPER, export
-local count=0                                       # Local: lowercase, in functions
 local -r base_dir="/opt"                            # Readonly local (immutable in scope)
 local -n ref=$1                                     # Nameref: alias to caller's variable
-fn_name() { local -r input="$1"; }                  # POSIX-style declaration (portable)
 printf -v timestamp '%(%F %T)T' -1                  # Assign timestamp without subshell
 get_data() { local -n out=$1; out="computed"; }     # Return via nameref (no subshell)
-```
 
-Always quote: `"${var}"`. Use `$()` over backticks. Use `printf -v` over `var=$(printf ...)`.
-
-## Arrays
-
-```bash
 arr=(one two three); arr+=("four")
 ${arr[0]} ${arr[@]} ${#arr[@]} ${!arr[@]}
-readarray -t lines < file.txt                       # File into array (replaces while-read loop)
-readarray -d '' -t files < <(find . -name "*.txt" -print0)  # Null-delimited safe
-
+readarray -t lines < file.txt                       # File into array (replaces while-read)
+readarray -d '' -t files < <(fd -e txt --print0)            # Null-delimited safe
 declare -A map=([k1]="v1" [k2]="v2")               # Associative array
 ${map[k1]} ${!map[@]} [[ -v map[k1] ]]              # Access, keys, existence check
 ```
 
-## Conditionals + Pattern Matching
+---
+## [7][DATA_STRUCTURES]
+>**Dictum:** *Associative arrays enable O(1) dispatch and membership.*
+
+<br>
 
 ```bash
-[[ -e f ]] # exists   [[ -f f ]] # file     [[ -d f ]] # dir
-[[ -r f ]] # readable [[ -w f ]] # writable [[ -x f ]] # exec
-[[ -s f ]] # non-empty [[ -L f ]] # symlink
-# String: -z (empty) -n (non-empty) == != =~ (regex) == pattern* (glob)
-# Numeric: -eq -ne -lt -le -gt -ge
+# Dispatch table (O(1) lookup, replaces case/esac chains)
+declare -Ar HANDLERS=([start]=cmd_start [stop]=cmd_stop [status]=cmd_status)
+[[ -v HANDLERS["${cmd}"] ]] || die "Unknown: ${cmd}"
+"${HANDLERS[${cmd}]}" "$@"
 
-# Prefer case (pattern matching) over if/elif chains
-case "${file}" in *.txt) printf "text" ;; *.jpg|*.png) printf "image" ;; *) printf "other" ;; esac
-
-# Dispatch table via associative array (functional alternative to case)
-declare -A -r HANDLERS=([start]=cmd_start [stop]=cmd_stop [status]=cmd_status)
-[[ -v HANDLERS[${command}] ]] && "${HANDLERS[${command}]}" "$@" || die "Unknown: ${command}"
-```
-
-## BASH_REMATCH for Parsing (replaces grep -oP / sed / awk)
-
-```bash
-# Extract fields via regex capture groups -- no external process
-[[ "${line}" =~ ^([0-9]{4}-[0-9]{2}-[0-9]{2})[[:space:]]([A-Z]+) ]] && {
-    local date="${BASH_REMATCH[1]}" level="${BASH_REMATCH[2]}"
-}
-
-# Parse "action@version" from YAML -- replaces sed + cut subshells
-[[ "${line}" =~ uses:[[:space:]]*([^@]+)@([^[:space:]#]+) ]] && {
-    local action="${BASH_REMATCH[1]}" version="${BASH_REMATCH[2]}"
-}
-
-# Trim whitespace via parameter expansion (replaces xargs/sed)
-var="${var#"${var%%[![:space:]]*}"}"   # strip leading
-var="${var%"${var##*[![:space:]]}"}"   # strip trailing
-```
-
-## Associative Array as Set (O(1) membership check)
-
-```bash
-# Declare set via associative array -- key existence is O(1) via [[ -v ]]
+# Associative set (O(1) membership, replaces grep/fgrep)
 declare -Ar VALID_EXTS=([txt]=1 [log]=1 [csv]=1)
 [[ -v VALID_EXTS["${ext}"] ]] || die "Unsupported: ${ext}"
 
-# Deduplicate results via associative array as set
+# Structured check definitions (data-driven validation)
+declare -Ar CHECKS=([eval]='eval[[:space:]].*\$|injection risk|_warn')
+for key in "${!CHECKS[@]}"; do IFS='|' read -r pat msg fn <<< "${CHECKS[${key}]}"; done
+
+# BASH_REMATCH for inline parsing (replaces grep -oP / sed / awk subshells)
+[[ "${line}" =~ ^([0-9-]+)[[:space:]]([A-Z]+) ]] && {
+    local -r date="${BASH_REMATCH[1]}" level="${BASH_REMATCH[2]}"
+}
+
+# IFS splitting (replaces cut / awk -F for simple delimiters)
+IFS='|' read -r pattern msg level <<< "${check_def}"
+IFS=, read -ra fields <<< "${csv_line}"
+
+# Deduplication via associative set
 declare -A seen=()
 for item in "${items[@]}"; do
     [[ -v seen["${item}"] ]] && continue
-    seen["${item}"]=1
-    process "${item}"
+    seen["${item}"]=1; process "${item}"
 done
 ```
 
-## IFS Manipulation for Splitting
+---
+## [8][NAMEREF_IDIOMS]
+>**Dictum:** *Namerefs enable pure function return values.*
+
+<br>
 
 ```bash
-# Split CSV fields -- no awk/cut needed
-IFS=, read -ra parts <<< "${csv_line}"
-printf 'Field 1: %s, Field 2: %s\n' "${parts[0]}" "${parts[1]}"
-
-# Split delimited data (pipe, colon, tab)
-IFS='|' read -r pattern msg level <<< "${check_def}"
-IFS=/ read -ra segments <<< "${file_path}"
-```
-
-## Functional Array Processing
-
-```bash
-# Prefer readarray + awk/grep pipelines over while-read loops
-
-# Populate array from command output
-readarray -t errors < <(grep -c 'ERROR' "${log_files[@]}")
-
-# Transform array via printf + process substitution
-readarray -t upper < <(printf '%s\n' "${items[@]}" | awk '{print toupper($0)}')
-
-# Filter array via grep
-readarray -t matches < <(printf '%s\n' "${items[@]}" | grep -E '^prefix')
-
-# Count without mutable counter
-readonly total=$(printf '%s\n' "${items[@]}" | wc -l)
-```
-
-## Process Substitution + Here-strings
-
-```bash
-diff <(sort file_a.txt) <(sort file_b.txt)                   # Compare sorted outputs
-comm -13 <(sort known.txt) <(sort found.txt)                  # Set difference
-while IFS= read -r line; do process "${line}"; done < <(cmd)  # Feed command output as stdin
-grep -c 'ERROR' <<< "${log_contents}"                         # Here-string: no echo pipe
-```
-
-## Higher-Order Functions + Nameref
-
-```bash
-# Pass function name as argument + array via nameref
+# Higher-order: pass function name + array via nameref
 apply_to_each() {
     local -r func="$1"; local -n _items=$2
-    local item
-    for item in "${_items[@]}"; do "${func}" "${item}"; done
+    local item; for item in "${_items[@]}"; do "${func}" "${item}"; done
 }
-process() { printf 'Processing: %s\n' "$1"; }
-local -a files=("a.txt" "b.txt")
-apply_to_each process files
 
-# Unified pattern checker: source text + pattern + message + callback
-check_pattern() {
-    local -r source="$1" pattern="$2" msg="$3" callback="$4"
-    grep -qE "${pattern}" <<< "${source}" && "${callback}" "${msg}"
-}
+# Return via nameref (no subshell capture)
+compute() { local -n _result=$1; _result="$(expensive_operation)"; }
+
+# Constraint: array variables cannot BE namerefs, but namerefs CAN reference arrays
+local -n arr_ref=my_array    # Valid: nameref pointing to array
+# local -na bad_ref=$1       # Invalid: -n and -a cannot combine
 ```
 
-## Inline Trivial Functions
+---
+## [9][COMMON_PITFALLS]
+>**Dictum:** *Pattern recognition prevents recurring errors.*
 
-```bash
-# BAD: single-use 2-line function called once
-run_section() { printf '## %s ##\n' "$1"; eval "$2" || true; }
-for entry in "${SECTIONS[@]}"; do run_section "${entry%%:*}" "${entry#*:}"; done
+<br>
 
-# GOOD: inline at call site (eliminates function overhead)
-for entry in "${SECTIONS[@]}"; do
-    printf '## %s ##\n' "${entry%%:*}"
-    eval "${entry#*:}" || true
-done
-```
-
-## Compound Command Grouping
-
-```bash
-# Brace grouping (current shell, no subshell overhead):
-{ cmd1; cmd2; cmd3; } > output.txt
-
-# Subshell (forked process, variable changes lost):
-( cmd1; cmd2; cmd3 ) > output.txt
-
-# Redirect once for multiple writes (no repeated file open):
-{
-    printf 'export %s="%s"\n' "KEY1" "val1"
-    printf 'export %s="%s"\n' "KEY2" "val2"
-} >> "${ENV_FILE}"
-```
-
-## Common Pitfalls
-
-| Pitfall         | Bad                                           | Good                                          |
-| --------------- | --------------------------------------------- | --------------------------------------------- |
-| Word splitting  | `rm $file`                                    | `rm "${file}"`                                |
-| UUOC            | `cat f \| grep p`                             | `grep p f`                                    |
-| Echo pipe       | `echo "$x" \| cmd`                            | `cmd <<< "${x}"`                              |
-| Cat subshell    | `data=$(cat file)`                            | `data=$(<file)`                               |
-| File spaces     | `for f in $(find ...)`                        | `readarray -d '' -t f < <(find -print0)`      |
-| Eval user input | `eval "${cmd}"`                               | `case "${cmd}" in start) ...`                 |
-| Validate paths  | (none)                                        | `[[ -f "${file}" ]] \|\| die "Not found"`     |
-| set -e + &&     | `[[ cond ]] && action`                        | `if [[ cond ]]; then action; fi`              |
-| echo unsafe     | `echo "${var}"`                               | `printf '%s\n' "${var}"`                      |
-| Date subshell   | `ts=$(date '+%F %T')`                         | `printf -v ts '%(%F %T)T' -1`                 |
-| Test bracket    | `[ -f "$f" ]`                                 | `[[ -f "${f}" ]]`                             |
-| Mutable counter | `count=0; for x in ...; do ((count++)); done` | `count=$(printf '%s\n' "${arr[@]}" \| wc -l)` |
+| [INDEX] | [PITFALL]       | [BAD]                                         | [GOOD]                                  |
+| :-----: | --------------- | --------------------------------------------- | --------------------------------------- |
+|   [1]   | Word splitting  | `rm $file`                                    | `rm "${file}"`                          |
+|   [2]   | UUOC            | `cat f \| grep p`                             | `rg p f`                                |
+|   [3]   | Echo pipe       | `echo "$x" \| cmd`                            | `cmd <<< "${x}"`                        |
+|   [4]   | Cat subshell    | `data=$(cat file)`                            | `data=$(<file)`                         |
+|   [5]   | File spaces     | `for f in $(find ...)`                        | `readarray -d '' -t f < <(fd --print0)` |
+|   [6]   | Eval injection  | `eval "${cmd}"`                               | Dispatch table or `case`                |
+|   [7]   | set -e + &&     | `[[ cond ]] && action` (last in func)         | `[[ cond ]] && action \|\| true`        |
+|   [8]   | Date subshell   | `ts=$(date '+%F %T')`                         | `printf -v ts '%(%F %T)T' -1`           |
+|   [9]   | Test bracket    | `[ -f "$f" ]`                                 | `[[ -f "${f}" ]]`                       |
+|  [10]   | Mutable counter | `count=0; for x in ...; do ((count++)); done` | `${#arr[@]}` or `rg -c pattern file`    |

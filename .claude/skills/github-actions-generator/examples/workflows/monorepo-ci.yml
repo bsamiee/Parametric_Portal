@@ -1,44 +1,127 @@
-# Monorepo CI -- Nx affected detection, pnpm workspace, cache v5, harden-runner
+# Monorepo CI -- Nx affected detection, dynamic matrix, split cache, sparse checkout, report job
 name: Monorepo CI
 on:
-    push: { branches: [main, develop] }
-    pull_request: { branches: [main] }
-    workflow_dispatch:
+  push:
+    branches: [main, develop]
+    paths-ignore: ['docs/**', '**/*.md', 'LICENSE', '.vscode/**']
+  pull_request:
+    branches: [main]
+    paths-ignore: ['docs/**', '**/*.md', 'LICENSE', '.vscode/**']
+  merge_group: { types: [checks_requested] }
+  workflow_dispatch:
 
-permissions: { contents: read }
-concurrency: { group: '${{ github.workflow }}-${{ github.ref }}', cancel-in-progress: true }
+permissions: {}
+concurrency:
+  group: mono-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ !contains(github.ref, 'refs/heads/main') }}
 env: { NODE_VERSION: '24' }
 
 jobs:
-    ci:
-        runs-on: ubuntu-latest
-        timeout-minutes: 30
-        steps:
-            - uses: step-security/harden-runner@002fdce3c6a235733a90a27c80493a3241e56863 # v2.12.0
-              with: { egress-policy: audit }
-            - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-              with: { fetch-depth: 0 }
+  setup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: { contents: read }
+    outputs:
+      affected: ${{ steps.affected.outputs.projects }}
+      has-affected: ${{ steps.affected.outputs.has-affected }}
+    steps:
+      - uses: step-security/harden-runner@5ef0c079ce82195b2a36a210272d6b661572d83e # v2.14.2
+        with: { egress-policy: audit }
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with: { fetch-depth: 0 }
+      - uses: nrwl/nx-set-shas@3e9ad7370203c1e93d109be57f3b72eb0eb511b1 # v4.4.0
+      - uses: actions/setup-node@6044e13b5dc448c55e2357c09f80417699197238 # v6.2.0
+        with: { node-version: '${{ env.NODE_VERSION }}' }
+      - run: corepack enable
+      # Save pnpm store + Nx cache once; ci jobs restore via split-cache pattern
+      - id: pnpm-cache
+        uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
+        with:
+          path: |
+            ~/.local/share/pnpm/store
+            .nx/cache
+          key: ${{ runner.os }}-pnpm-nx-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: ${{ runner.os }}-pnpm-nx-
+      - run: pnpm install --frozen-lockfile
+      - id: affected
+        env:
+          NX_CLOUD_ACCESS_TOKEN: ${{ secrets.NX_CLOUD_ACCESS_TOKEN }}
+        run: |
+          PROJECTS=$(pnpm exec nx show projects --affected -t lint,test,build --json 2>/dev/null)
+          echo "projects=$PROJECTS" >> "$GITHUB_OUTPUT"
+          COUNT=$(echo "$PROJECTS" | jq 'length')
+          if [ "$COUNT" -eq 0 ]; then
+            echo "has-affected=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "has-affected=true" >> "$GITHUB_OUTPUT"
+          fi
+      - if: always()
+        run: |
+          echo "## Nx Affected Analysis" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Base**: \`${{ env.NX_BASE }}\` | **Head**: \`${{ env.NX_HEAD }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Affected**: ${{ steps.affected.outputs.projects }}" >> "$GITHUB_STEP_SUMMARY"
 
-            - uses: nrwl/nx-set-shas@3e9ad7370203c1e93d109be57f3b72eb0eb511b1 # v4.4.0
+  ci:
+    needs: setup
+    if: needs.setup.outputs.has-affected == 'true'
+    strategy:
+      matrix:
+        project: ${{ fromJson(needs.setup.outputs.affected) }}
+      fail-fast: false
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions: { contents: read }
+    env:
+      NX_CLOUD_ACCESS_TOKEN: ${{ secrets.NX_CLOUD_ACCESS_TOKEN }}
+    steps:
+      - uses: step-security/harden-runner@5ef0c079ce82195b2a36a210272d6b661572d83e # v2.14.2
+        with: { egress-policy: audit }
+      # Sparse checkout: workspace root + all packages/apps (cone-mode requires directories)
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: |
+            package.json
+            pnpm-lock.yaml
+            pnpm-workspace.yaml
+            nx.json
+            tsconfig.base.json
+            packages/
+            apps/
+          sparse-checkout-cone-mode: true
+      - uses: actions/setup-node@6044e13b5dc448c55e2357c09f80417699197238 # v6.2.0
+        with: { node-version: '${{ env.NODE_VERSION }}' }
+      - run: corepack enable
+      # Restore-only from setup job's cache (no re-save to avoid contention)
+      - uses: actions/cache/restore@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
+        with:
+          path: |
+            ~/.local/share/pnpm/store
+            .nx/cache
+          key: ${{ runner.os }}-pnpm-nx-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: ${{ runner.os }}-pnpm-nx-
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec nx run-many -t lint,test,build -p ${{ matrix.project }}
 
-            - uses: actions/setup-node@6044e13b5dc448c55e2357c09f80417699197238 # v6.2.0
-              with: { node-version: '${{ env.NODE_VERSION }}' }
-
-            - run: corepack enable
-
-            - uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
-              with:
-                  path: |
-                      ~/.local/share/pnpm/store
-                      .nx/cache
-                  key: ${{ runner.os }}-pnpm-nx-${{ hashFiles('pnpm-lock.yaml') }}
-                  restore-keys: ${{ runner.os }}-pnpm-nx-
-
-            - run: pnpm install --frozen-lockfile
-
-            - run: pnpm exec nx affected -t lint,test,build --base=${{ env.NX_BASE }} --head=${{ env.NX_HEAD }}
-
-            - if: always()
-              run: |
-                  echo "## Nx Affected Results" >> $GITHUB_STEP_SUMMARY
-                  echo "Base: \`${{ env.NX_BASE }}\` | Head: \`${{ env.NX_HEAD }}\`" >> $GITHUB_STEP_SUMMARY
+  report:
+    needs: [setup, ci]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: { contents: read }
+    steps:
+      - uses: step-security/harden-runner@5ef0c079ce82195b2a36a210272d6b661572d83e # v2.14.2
+        with: { egress-policy: audit }
+      - run: |
+          echo "## Monorepo CI Report" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Job | Result |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|---|---|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Setup | \`${{ needs.setup.result }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| CI Matrix | \`${{ needs.ci.result }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          RESULTS="${{ join(needs.*.result, ',') }}"
+          if echo "$RESULTS" | grep -qE 'failure|cancelled'; then
+            echo "> [!CAUTION] Pipeline failed -- check individual matrix cells above." >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          echo "> [!TIP] All jobs passed." >> "$GITHUB_STEP_SUMMARY"

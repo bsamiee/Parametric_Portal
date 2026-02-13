@@ -4,8 +4,8 @@ type: complex
 depth: base
 user-invocable: false
 description: >-
-  Queries Context7 library documentation via Python CLI. Use when resolving
-  library IDs, fetching API references, code examples, or conceptual guides.
+  Queries version-specific library documentation from Context7. Use when fetching API references, code examples,
+  or conceptual guides for npm/PyPI packages. Resolves library IDs, retrieves docs by topic. Not for web search.
 ---
 
 # [H1][CONTEXT7-TOOLS]
@@ -20,11 +20,11 @@ Query Context7 library documentation. Matches MCP tool structure (resolve-librar
 ---
 ## [1][COMMANDS]
 
-| [CMD]    | [ARGS]                   | [RETURNS]                              |
-| -------- | ------------------------ | -------------------------------------- |
-| resolve  | `<library> [query]`      | Top 5 matching IDs with scores         |
-| docs     | `<library-id> <query>`   | Documentation filtered by query        |
-| lookup   | `<library> <query>`      | Resolve + docs in one call             |
+| [CMD]   | [ARGS]                 | [RETURNS]                       |
+| ------- | ---------------------- | ------------------------------- |
+| resolve | `<library> [query]`    | Top 5 matching IDs with scores  |
+| docs    | `<library-id> <query>` | Documentation filtered by query |
+| lookup  | `<library> <query>`    | Resolve + docs in one call      |
 
 ---
 ## [2][USAGE]
@@ -73,22 +73,22 @@ Use `resolve` first when disambiguation needed (e.g., multiple React packages).
 
 Commands return JSON or plain text.
 
-| [INDEX] | [CMD]     | [RESPONSE]                                             |
-| :-----: | --------- | ------------------------------------------------------ |
+| [INDEX] | [CMD]     | [RESPONSE]                                            |
+| :-----: | --------- | ----------------------------------------------------- |
 |   [1]   | `resolve` | JSON array: `[{id, title, score, vip}]`               |
-|   [2]   | `docs`    | Plain text documentation prefixed with `[library-id]`  |
-|   [3]   | `lookup`  | Plain text documentation (same as docs)                |
+|   [2]   | `docs`    | Plain text documentation prefixed with `[library-id]` |
+|   [3]   | `lookup`  | Plain text documentation (same as docs)               |
 
 ---
 ## [6][ENVIRONMENT]
 
-| [VAR]             | [REQUIRED] | [DESCRIPTION]                    |
-| ----------------- | ---------- | -------------------------------- |
-| `CONTEXT7_API_KEY` | No        | Optional bearer token for auth   |
+| [VAR]              | [REQUIRED] | [DESCRIPTION]                  |
+| ------------------ | ---------- | ------------------------------ |
+| `CONTEXT7_API_KEY` | No         | Optional bearer token for auth |
 
 ---
 ## [7][ERROR_HANDLING]
 
 - HTTP errors print `[ERROR] <status>: <body>` and exit 1
 - Connection errors print `[ERROR] <message>` and exit 1
-- No library found returns `[ERROR] No library found for '<query>'`
+- No library found: `[ERROR] No library found for '<query>'` and exit 1

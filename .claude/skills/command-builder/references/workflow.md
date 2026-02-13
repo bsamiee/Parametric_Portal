@@ -108,13 +108,13 @@ Create `.claude/commands/${name}.md`:
 
 **Pattern Gates:**
 
-| [PATTERN] | [TOOLS]                     | [MODEL] | [STRUCTURE]                 |
-| --------- | --------------------------- | :-----: | --------------------------- |
-| file      | Read                        |  haiku  | @$1 target, analyze, report |
+| [PATTERN] | [TOOLS]                      | [MODEL] | [STRUCTURE]                 |
+| --------- | ---------------------------- | :-----: | --------------------------- |
+| file      | Read                         |  haiku  | @$1 target, analyze, report |
 | multi     | Read, Edit, Glob, TaskCreate | sonnet  | Glob $1, iterate, apply     |
 | agent     | Task, Read, Glob, TaskCreate |  opus   | Dispatch Task, synthesize   |
 | skill     | Read, Task, Edit, TaskCreate | sonnet  | Load @skill, validate       |
-| free      | Varies                      | session | $ARGUMENTS prose            |
+| free      | Varies                       | session | $ARGUMENTS prose            |
 
 [CRITICAL]:
 - [ALWAYS] Validate artifact against template before completion.

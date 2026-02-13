@@ -1,45 +1,46 @@
-# Grafana Dashboards Reference
+# [H1][GRAFANA_DASHBOARDS]
+>**Dictum:** *Dashboard panels map recording rules to visual monitoring.*
 
-> **Grafana 12.3+** dashboard JSON model. `schemaVersion: 39` (current stable). Provisioned via Pulumi ConfigMaps, never UI-created.
-> **Datasource:** Prometheus only (`_Ops.grafana(promUrl)`, deploy.ts:59). Loki panels require extension.
-> **Namespace:** `parametric` (deploy.ts:18). All dashboard ConfigMaps deploy here.
-> **Features:** Grafana 12 introduces dashboard schema v2, dynamic dashboards, tabs, SQL Expressions, and Git Sync.
+<br>
 
-## Grafana 12.x Features
+**Grafana 12.3.2**, `schemaVersion: 39`. Provisioned via Pulumi ConfigMaps, never UI-created.<br>
+**Datasource:** Prometheus only (`_Ops.grafana(promUrl)`, deploy.ts:59). Loki panels require extension.
 
-| Feature | Version | Status | Impact |
-|---------|---------|--------|--------|
-| Dashboard Schema v2 | 12.0 | Experimental (requires `kubernetesDashboards` + dynamic dashboards feature toggles) | New JSON structure with TabsLayout, GridLayout, AutoGridLayout, RowsLayout; backward-compatible |
-| Dynamic Dashboards | 12.0 | Stable | Panels generated from query results; reduces static panel maintenance |
-| Tabs | 12.0 | Stable | Group panels into tabs within a single dashboard; replaces row-based layout for complex views |
-| SQL Expressions | 12.0 | Stable | Join and transform data from multiple sources using SQL syntax |
-| Git Sync | 12.0 | Stable | Bidirectional sync between Grafana and Git; alternative to ConfigMap provisioning |
-| Switch Template Variable | 12.3 | Stable | Boolean toggle variable replacing cumbersome drop-down menus for on/off states |
-| Redesigned Logs Panel | 12.3 | Stable | Faster pattern recognition, clearer context, improved log exploration UX |
-| Interactive Learning | 12.3 | Preview | In-product help and tutorials |
-| Native Histogram Heatmap | 12.0+ | Stable | Heatmap panel renders native histograms without explicit bucket boundaries |
-| `schemaVersion: 39` | 12.0+ | Current | Latest stable schema version for JSON model |
+---
+## [1][GRAFANA_12_FEATURES]
+>**Dictum:** *Version-specific features determine dashboard capabilities.*
 
-## Provisioning
+<br>
 
-Deploy two ConfigMaps: one for the dashboard provider config (tells Grafana where to find JSON files), one for the dashboard JSON files themselves.
+| [INDEX] | [FEATURE]                    | [VERSION] | [STATUS]     | [IMPACT]                                                      |
+| :-----: | ---------------------------- | --------- | ------------ | ------------------------------------------------------------- |
+|   [1]   | **Dashboard Schema v2**      | 12.0      | Experimental | TabsLayout, GridLayout, AutoGridLayout, RowsLayout.           |
+|   [2]   | **Dynamic Dashboards**       | 12.0      | Stable       | Panels generated from query results.                          |
+|   [3]   | **Tabs**                     | 12.0      | Stable       | Group panels into tabs within single dashboard.               |
+|   [4]   | **SQL Expressions**          | 12.0      | Stable       | Join/transform data from multiple sources via SQL.            |
+|   [5]   | **Switch Template Variable** | 12.3      | Stable       | Boolean toggle variable for on/off states.                    |
+|   [6]   | **Native Histogram Heatmap** | 12.0+     | Stable       | Renders native histograms without explicit bucket boundaries. |
+
+---
+## [2][PROVISIONING]
+>**Dictum:** *ConfigMap-based provisioning ensures reproducible dashboard deployment.*
+
+<br>
+
+Deploy two ConfigMaps: dashboard provider (where to find JSON), dashboard JSON files.
 
 ```typescript
-// Dashboard provider -- tells Grafana to load JSON from /var/lib/grafana/dashboards
 const dashboardProvider = new k8s.core.v1.ConfigMap("grafana-dashboard-provider", {
     metadata: _Ops.meta(ns.metadata.name, 'grafana', 'grafana-dashboard-provider'),
     data: {
         "dashboards.yml": JSON.stringify({
             apiVersion: 1,
-            providers: [{
-                name: "default", orgId: 1, folder: "", type: "file",
+            providers: [{ name: "default", orgId: 1, folder: "", type: "file",
                 disableDeletion: false, editable: true,
-                options: { path: "/var/lib/grafana/dashboards" },
-            }],
+                options: { path: "/var/lib/grafana/dashboards" } }],
         }),
     },
 });
-// Dashboard JSON files
 const dashboards = new k8s.core.v1.ConfigMap("grafana-dashboards", {
     metadata: _Ops.meta(ns.metadata.name, 'grafana', 'grafana-dashboards'),
     data: {
@@ -49,228 +50,124 @@ const dashboards = new k8s.core.v1.ConfigMap("grafana-dashboards", {
 });
 ```
 
-### Integration with `_k8sObserve`
+Integration with `_k8sObserve`: use `k8s.apps.v1.DeploymentPatch` (SSA, Pulumi v4.23+) to add dashboard provider at `/etc/grafana/provisioning/dashboards` and JSON at `/var/lib/grafana/dashboards`.
 
-The Grafana Deployment created by `_k8sObserve` (deploy.ts:120-126) mounts one ConfigMap at `configPath` (datasource provisioning). Dashboard provisioning requires two additional volume mounts:
-1. Dashboard provider YAML at `/etc/grafana/provisioning/dashboards`
-2. Dashboard JSON files at `/var/lib/grafana/dashboards`
+---
+## [3][HTTP_OVERVIEW_DASHBOARD]
+>**Dictum:** *HTTP dashboard surfaces request rate, error ratio, and latency distribution.*
 
-Use `k8s.apps.v1.DeploymentPatch` (SSA, Pulumi v4.23+) to add volumes without modifying the `_k8sObserve` factory.
+<br>
 
-## HTTP Overview Dashboard
+`uid: "http-overview"`, tags: `["http", "service", "overview"]`, refresh: `30s`, `schemaVersion: 39`.
+Variable: `$service` = `label_values(http_server_request_duration_seconds_count, service_name)`.
 
-`uid: "http-overview"`, tags: `["http", "service", "overview"]`, refresh: `30s`, `schemaVersion: 39`
+<br>
 
-Variable: `$service` = `label_values(http_server_request_duration_seconds_count, service_name)`
+### [3.1][STATS_ROW]
 
-### Stats Row (y=0)
+| [INDEX] | [TYPE]   | [TITLE]       | [QUERY]                                               | [UNIT]      | [H_W_X_Y] | [THRESHOLDS]                  |
+| :-----: | -------- | ------------- | ----------------------------------------------------- | ----------- | --------- | ----------------------------- |
+|   [1]   | **stat** | Request Rate. | `sum(http:requests:rate5m{service_name="$service"})`. | reqps       | 4,6,0,0   | Informational.                |
+|   [2]   | **stat** | Error Rate.   | `http:errors:ratio5m{service_name="$service"}`.       | percentunit | 4,6,6,0   | green/yellow(0.01)/red(0.05). |
+|   [3]   | **stat** | P99 Latency.  | `http:latency:p99_5m{service_name="$service"}`.       | s           | 4,6,12,0  | green/yellow(1)/red(5).       |
+|   [4]   | **stat** | P50 Latency.  | `http:latency:p50_5m{service_name="$service"}`.       | s           | 4,6,18,0  | green/yellow(0.5)/red(2).     |
 
-Top-level KPIs. All use recording rules from `alert_rules.md` for consistency and performance.
+---
+### [3.2][SERIES_ROW]
 
-| Type | Title | Query | Unit | h,w,x,y | Threshold Rationale |
-|------|-------|-------|------|----------|---------------------|
-| stat | Request Rate | `sum(http:requests:rate5m{service_name="$service"})` | reqps | 4,6,0,0 | No threshold; informational |
-| stat | Error Rate | `http:errors:ratio5m{service_name="$service"}` | percentunit | 4,6,6,0 | green(0)/yellow(0.01)/red(0.05) -- matches HttpHighErrorRate (1%) and HttpCriticalErrorRate (5%) alert thresholds |
-| stat | P99 Latency | `http:latency:p99_5m{service_name="$service"}` | s | 4,6,12,0 | green(0)/yellow(1)/red(5) -- yellow at 1s (degraded UX), red at 5s (matches HttpCriticalLatencyP99 alert) |
-| stat | P50 Latency | `http:latency:p50_5m{service_name="$service"}` | s | 4,6,18,0 | green(0)/yellow(0.5)/red(2) -- P50 > 500ms indicates systemic issue, not just tail latency |
+| [INDEX] | [TYPE]         | [TITLE]                 | [QUERY]                                                                                                     | [UNIT] | [H_W_X_Y] |
+| :-----: | -------------- | ----------------------- | ----------------------------------------------------------------------------------------------------------- | ------ | --------- |
+|   [1]   | **timeseries** | Request Rate by Status. | `sum(rate(http_server_request_duration_seconds_count{service_name="$service"}[5m])) by (http_status_code)`. | reqps  | 8,12,0,4  |
+|   [2]   | **timeseries** | Latency Distribution.   | `http:latency:p50_5m` + `p95_5m` + `p99_5m` (all `{service_name="$service"}`).                              | s      | 8,12,12,4 |
 
-### Series Row (y=4)
+---
+### [3.3][ERRORS_ROW]
 
-Time-series panels for trend analysis.
+| [INDEX] | [TYPE]         | [TITLE]             | [QUERY]                                                                                                                              | [UNIT] | [H_W_X_Y]  |
+| :-----: | -------------- | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------ | ------ | ---------- |
+|   [1]   | **timeseries** | Error Rate (5xx).   | `sum(rate(http_server_request_duration_seconds_count{service_name="$service", http_status_code=~"5.."}[5m])) by (http_status_code)`. | reqps  | 8,12,0,12  |
+|   [2]   | **timeseries** | Active Connections. | `http_server_active_requests{service_name="$service"}`.                                                                              | short  | 8,12,12,12 |
 
-| Type | Title | Query | Unit | h,w,x,y |
-|------|-------|-------|------|----------|
-| timeseries | Request Rate by Status | `sum(rate(http_server_request_duration_seconds_count{service_name="$service"}[5m])) by (http_status_code)` | reqps | 8,12,0,4 |
-| timeseries | Latency Distribution | `http:latency:p50_5m{service_name="$service"}` + `http:latency:p95_5m{service_name="$service"}` + `http:latency:p99_5m{service_name="$service"}` | s | 8,12,12,4 |
+---
+### [3.4][NATIVE_HISTOGRAM_HEATMAP]
 
-### Errors Row (y=12)
+| [INDEX] | [TYPE]      | [TITLE]          | [QUERY]                                                                         | [UNIT] | [H_W_X_Y] |
+| :-----: | ----------- | ---------------- | ------------------------------------------------------------------------------- | ------ | --------- |
+|   [1]   | **heatmap** | Latency Heatmap. | `sum(rate(http_server_request_duration_seconds{service_name="$service"}[5m]))`. | s      | 8,24,0,20 |
 
-Error-focused panels for incident investigation.
+Renders automatically in Grafana 12+ without bucket boundaries -- resolution adapts dynamically.
 
-| Type | Title | Query | Unit | h,w,x,y |
-|------|-------|-------|------|----------|
-| timeseries | Error Rate (5xx) | `sum(rate(http_server_request_duration_seconds_count{service_name="$service", http_status_code=~"5.."}[5m])) by (http_status_code)` | reqps | 8,12,0,12 |
-| timeseries | Active Connections | `http_server_active_requests{service_name="$service"}` | short | 8,12,12,12 |
+---
+## [4][INFRASTRUCTURE_DASHBOARD]
+>**Dictum:** *Infrastructure dashboard monitors pod resources, node health, and storage utilization.*
 
-### Native Histogram Panels (Prometheus 3.8+)
+<br>
 
-With native histograms enabled (`scrape_native_histograms: true`), add a heatmap panel for latency distribution:
+`uid: "infrastructure-overview"`, tags: `["infrastructure", "kubernetes"]`, refresh: `30s`.
+Variable: `$namespace` = `label_values(kube_pod_info, namespace)` (default: `parametric`).
 
-| Type | Title | Query | Unit | h,w,x,y |
-|------|-------|-------|------|----------|
-| heatmap | Latency Heatmap | `sum(rate(http_server_request_duration_seconds{service_name="$service"}[5m]))` | s | 8,24,0,20 |
+<br>
 
-Native histogram heatmaps render automatically in Grafana 12+ without bucket boundaries -- the histogram resolution adapts dynamically.
+### [4.1][POD_ROW]
 
-## Infrastructure Dashboard
+| [INDEX] | [TYPE]         | [TITLE]        | [QUERY]                                                                              | [UNIT] | [H_W_X_Y] |
+| :-----: | -------------- | -------------- | ------------------------------------------------------------------------------------ | ------ | --------- |
+|   [1]   | **timeseries** | Pod CPU Usage. | `sum(rate(container_cpu_usage_seconds_total{namespace="$namespace"}[5m])) by (pod)`. | cores  | 8,12,0,0  |
+|   [2]   | **timeseries** | Pod Memory.    | `sum(container_memory_usage_bytes{namespace="$namespace"}) by (pod)`.                | bytes  | 8,12,12,0 |
 
-`uid: "infrastructure-overview"`, tags: `["infrastructure", "kubernetes", "resources"]`, refresh: `30s`, `schemaVersion: 39`
+---
+### [4.2][NODE_ROW]
 
-Variable: `$namespace` = `label_values(kube_pod_info, namespace)` (default: `parametric`)
+| [INDEX] | [TYPE]    | [TITLE]      | [QUERY]                                                                                                 | [UNIT]  | [H_W_X_Y] | [THRESHOLDS]              |
+| :-----: | --------- | ------------ | ------------------------------------------------------------------------------------------------------- | ------- | --------- | ------------------------- |
+|   [1]   | **gauge** | Node CPU.    | `100 - (avg(rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100)`.                                     | percent | 6,8,0,8   | green/yellow(70)/red(90). |
+|   [2]   | **gauge** | Node Memory. | `(1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) * 100`.                              | percent | 6,8,8,8   | green/yellow(70)/red(90). |
+|   [3]   | **gauge** | Node Disk.   | `(1 - node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"}) * 100`. | percent | 6,8,16,8  | green/yellow(80)/red(95). |
 
-### Pod Row (y=0)
+---
+### [4.3][PVC_ROW]
 
-| Type | Title | Query | Unit | h,w,x,y | What to Watch |
-|------|-------|-------|------|----------|---------------|
-| timeseries | Pod CPU Usage | `sum(rate(container_cpu_usage_seconds_total{namespace="$namespace"}[5m])) by (pod)` | cores | 8,12,0,0 | Compare against `requests.cpu` from deploy.ts:168; sustained usage > requests triggers HPA |
-| timeseries | Pod Memory Usage | `sum(container_memory_usage_bytes{namespace="$namespace"}) by (pod)` | bytes | 8,12,12,0 | Compare against `limits.memory` from deploy.ts:168; approaching limit triggers OOMKill |
+| [INDEX] | [TYPE]    | [TITLE]          | [QUERY]                                                                                                                  | [UNIT]      | [H_W_X_Y] |
+| :-----: | --------- | ---------------- | ------------------------------------------------------------------------------------------------------------------------ | ----------- | --------- |
+|   [1]   | **table** | PVC Utilization. | `kubelet_volume_stats_used_bytes{namespace="$namespace"} / kubelet_volume_stats_capacity_bytes{namespace="$namespace"}`. | percentunit | 8,24,0,14 |
 
-### Node Row (y=8)
+---
+## [5][DASHBOARD_SCHEMA_V2]
+>**Dictum:** *Schema v2 migration is one-way -- evaluate before converting.*
 
-| Type | Title | Query | Unit | h,w,x,y | Threshold Rationale |
-|------|-------|-------|------|----------|---------------------|
-| gauge | Node CPU | `100 - (avg(rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100)` | percent | 6,8,0,8 | green(0)/yellow(70)/red(90) -- 70% sustained = schedule pressure; 90% = risk of CPU throttling across pods |
-| gauge | Node Memory | `(1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) * 100` | percent | 6,8,8,8 | green(0)/yellow(70)/red(90) -- 70% = approaching eviction threshold; 90% = kernel OOM killer active |
-| gauge | Node Disk | `(1 - node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"}) * 100` | percent | 6,8,16,8 | green(0)/yellow(80)/red(95) -- 80% = plan expansion; 95% = imminent write failures, kubelet eviction |
+<br>
 
-### PVC Row (y=14)
+Requires `kubernetesDashboards` + dynamic dashboards feature toggles. **WARNING:** One-way migration -- v2 dashboards cannot revert to v1.
 
-| Type | Title | Query | Unit | h,w,x,y | What to Watch |
-|------|-------|-------|------|----------|---------------|
-| table | PVC Utilization | `kubelet_volume_stats_used_bytes{namespace="$namespace"} / kubelet_volume_stats_capacity_bytes{namespace="$namespace"}` | percentunit | 8,24,0,14 | Prometheus PVC (`_k8sObserve`, deploy.ts:121) and Grafana PVC; >80% needs storage expansion |
+Layout types: `GridLayout` (manual x/y/w/h), `AutoGridLayout` (auto-wrap), `RowsLayout` (collapsible), `TabsLayout` (grouped tabs).
 
-## Grafana 12 Dashboard Schema v2 (Experimental)
+<br>
 
-Schema v2 is automatically enabled with the Dynamic Dashboards feature toggle and also requires `kubernetesDashboards` feature toggle. Supports multiple layout types: GridLayout, AutoGridLayout, RowsLayout, and TabsLayout.
+### [5.1][RECOMMENDED_TAB_STRUCTURE]
 
-**WARNING:** Schema v2 is experimental. Do not use in production without understanding that data migration is one-way. Dashboards saved in v2 cannot be reverted to v1.
+**HTTP Overview:** Overview (stats) | Latency (distribution + heatmap) | Errors (5xx + connections).<br>
+**Infrastructure:** Compute (pod CPU/memory, node health) | Storage (PVC, disk predictions) | Network (traffic, connections).
 
-### TabsLayout (replaces row-based layout for complex views)
+---
+## [6][EXTENSION_LOKI_INTEGRATION]
+>**Dictum:** *Loki integration adds log panels alongside metric dashboards.*
 
-```json
-{
-  "apiVersion": "v2alpha1",
-  "kind": "DashboardWithAccessInfo",
-  "metadata": { "name": "http-overview" },
-  "spec": {
-    "title": "HTTP Overview",
-    "schemaVersion": 39,
-    "timeSettings": { "from": "now-1h", "to": "now" },
-    "variables": [],
-    "layout": {
-      "kind": "TabsLayout",
-      "spec": {
-        "tabs": [
-          {
-            "kind": "TabsLayoutTab",
-            "spec": {
-              "title": "Overview",
-              "layout": {
-                "kind": "GridLayout",
-                "spec": {
-                  "items": [
-                    {
-                      "kind": "GridLayoutItem",
-                      "spec": {
-                        "x": 0, "y": 0, "width": 12, "height": 4,
-                        "element": { "kind": "Panel", "spec": { "title": "Request Rate", "vizConfig": {} } }
-                      }
-                    }
-                  ]
-                }
-              }
-            }
-          },
-          {
-            "kind": "TabsLayoutTab",
-            "spec": {
-              "title": "Latency",
-              "layout": {
-                "kind": "GridLayout",
-                "spec": { "items": [] }
-              }
-            }
-          },
-          {
-            "kind": "TabsLayoutTab",
-            "spec": {
-              "title": "Errors",
-              "layout": {
-                "kind": "GridLayout",
-                "spec": { "items": [] }
-              }
-            }
-          }
-        ]
-      }
-    }
-  }
-}
-```
+<br>
 
-### Layout Types
+Deploy Loki first (see `stack_architecture.md`), then extend `_Ops.grafana()` (deploy.ts:59) with Loki datasource including `derivedFields` for trace correlation.
 
-| Layout | Use When | Description |
-|--------|----------|-------------|
-| `GridLayout` | Default, manual positioning | Grid-based panel placement with x/y/width/height coordinates |
-| `AutoGridLayout` | Uniform panel sizes | Automatic grid positioning; panels wrap to fill available space |
-| `RowsLayout` | Collapsible sections | Panels organized in collapsible rows (similar to v1 row panels) |
-| `TabsLayout` | Complex multi-view dashboards | Panels grouped into tabs; tabs can nest any layout type inside |
+<br>
 
-### Recommended Tab Structure
+### [6.1][LOG_PANELS]
 
-**HTTP Overview Dashboard:**
-- **Overview** tab: Stats row (request rate, error rate, P99, P50)
-- **Latency** tab: Request rate by status, latency distribution, native histogram heatmap
-- **Errors** tab: Error rate (5xx), active connections
+| [INDEX] | [TYPE]         | [TITLE]              | [LOGQL]                                                                                    |
+| :-----: | -------------- | -------------------- | ------------------------------------------------------------------------------------------ |
+|   [1]   | **logs**       | Error Logs.          | `{service_name="$service"} \|= "error" \| logfmt \| level = "error"`.                      |
+|   [2]   | **logs**       | Structured Logs.     | `{service_name="$service"} \| json \| __error__=""`.                                       |
+|   [3]   | **timeseries** | Log Volume by Level. | `sum(count_over_time({service_name="$service"} \| json \| __error__="" [1m])) by (level)`. |
 
-**Infrastructure Dashboard:**
-- **Compute** tab: Pod CPU/memory, node health
-- **Storage** tab: PVC utilization, disk predictions
-- **Network** tab: Traffic rates, connection counts
+---
+### [6.2][LOGS_EXPLORER_DASHBOARD]
 
-## Extension: Loki Integration
-
-Deploy Loki first (see `stack_architecture.md#loki-36`), then extend `_Ops.grafana()` (deploy.ts:59):
-
-```typescript
-const datasources = {
-    apiVersion: 1,
-    datasources: [
-        { name: "Prometheus", type: "prometheus", access: "proxy",
-          url: "http://prometheus.parametric.svc.cluster.local:9090",
-          isDefault: true, editable: false },
-        { name: "Loki", type: "loki", access: "proxy",
-          url: "http://loki.parametric.svc.cluster.local:3100",
-          editable: false,
-          jsonData: {
-              derivedFields: [{
-                  datasourceUid: "prometheus",
-                  matcherRegex: "traceID=(\\w+)",
-                  name: "TraceID",
-                  url: "$${__value.raw}",
-              }],
-          },
-        },
-    ],
-};
-```
-
-### Log Panels (Loki Datasource)
-
-`datasourceUid: "loki"`
-
-| Type | Title | LogQL | Options |
-|------|-------|-------|---------|
-| logs | Error Logs | `{service_name="$service"} \|= "error" \| logfmt \| level = "error"` | showTime, wrapLogMessage, enableLogDetails, sortOrder: Descending |
-| logs | Structured Logs | `{service_name="$service"} \| json \| __error__=""` | showLabels, prettifyLogMessage, enableLogDetails |
-| timeseries | Log Volume by Level | `sum(count_over_time({service_name="$service"} \| json \| __error__="" [1m])) by (level)` | drawStyle: bars, stacking: normal |
-
-### Logs Explorer Dashboard (Loki)
-
-`uid: "logs-explorer"`, tags: `["logs", "loki", "explorer"]`, refresh: `30s`, `schemaVersion: 39`
-
-Variables: `$service` = `label_values(service_name)` (Loki), `$level` = custom `debug,info,warn,error,fatal` (multi, includeAll)
-
-| Type | Title | LogQL | h,w,x,y |
-|------|-------|-------|----------|
-| timeseries | Log Volume | `sum(count_over_time({service_name="$service"} \| json \| level =~ "$level" \| __error__="" [1m])) by (level)` | 6,24,0,0 |
-| logs | Log Stream | `{service_name="$service"} \| json \| level =~ "$level" \| __error__=""` | 18,24,0,6 |
-
-Log Volume: `drawStyle: "bars"`, `stacking: { mode: "normal" }`. Log Stream: `showLabels`, `prettifyLogMessage`, `enableLogDetails`.
-
-### Recommended Tab Structure (Logs Explorer)
-
-- **Volume** tab: Log volume timeseries with level breakdown
-- **Stream** tab: Live log stream with filtering
-- **Errors** tab: Error-only view with extracted fields
+`uid: "logs-explorer"`, variables: `$service` (Loki `label_values`), `$level` (custom multi: debug,info,warn,error,fatal).
+Tabs: **Volume** (log volume timeseries) | **Stream** (live log stream) | **Errors** (error-only with extracted fields).

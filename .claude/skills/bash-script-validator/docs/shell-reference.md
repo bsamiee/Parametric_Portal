@@ -1,58 +1,60 @@
-# Shell Reference — Bash vs POSIX sh
+# [H1][SHELL-REFERENCE]
+>**Dictum:** *Bash/POSIX distinctions prevent portability defects.*
 
-## Bash-Only Features (NOT in POSIX sh)
+<br>
 
-| Feature | Bash | POSIX sh Alternative |
-|---------|------|---------------------|
-| Arrays | `array=(a b c); ${array[0]}` | `set -- a b c; echo "$1"` |
-| Test construct | `[[ "$v" == pat* ]]` | `[ "$v" = "exact" ]` |
-| Process substitution | `diff <(ls d1) <(ls d2)` | Use temp files |
-| Brace expansion | `echo {1..10}` | Use seq or loop |
-| Function keyword | `function f { ... }` | `f() { ... }` |
-| Local variables | `local var="val"` | Name-prefix convention |
-| Source command | `source script.sh` | `. script.sh` |
-| String equality | `[ "$a" == "$b" ]` | `[ "$a" = "$b" ]` |
-| Case conversion | `${var,,}` / `${var^^}` / `${var@U}` / `${var@L}` | `tr '[:upper:]' '[:lower:]'` |
-| Pattern replace | `${var//pat/repl}` | `sed` / `expr` |
-| Extended globbing | `shopt -s extglob` | N/A |
-| Built-in vars | `$RANDOM $SECONDS $BASH_SOURCE` | N/A |
+Bash 5.2+/5.3 vs POSIX sh feature matrix, parameter expansion, FP control flow, data structures, common mistakes.
 
-## Parameter Expansion (POSIX)
+---
+## [1][BASH_ONLY_FEATURES]
+>**Dictum:** *Feature awareness prevents portability defects.*
 
-```bash
-${var:-default}     # Use default if unset/null
-${var:=default}     # Assign default if unset/null
-${var:?error}       # Error if unset/null
-${var:+alternate}   # Use alternate if set
-${#var}             # Length
-${var#pattern}      # Remove shortest prefix match
-${var##pattern}     # Remove longest prefix match
-${var%pattern}      # Remove shortest suffix match
-${var%%pattern}     # Remove longest suffix match
-```
+<br>
 
-### Bash-Only Extensions
+| [INDEX] | [FEATURE]                | [BASH]                                            | [POSIX_SH]                         |
+| :-----: | ------------------------ | ------------------------------------------------- | ---------------------------------- |
+|   [1]   | **Arrays**               | `array=(a b c); ${array[0]}`                      | `set -- a b c; printf '%s\n' "$1"` |
+|   [2]   | **Test construct**       | `[[ "$v" == pat* ]]`                              | `[ "$v" = "exact" ]`               |
+|   [3]   | **Process substitution** | `diff <(ls d1) <(ls d2)`                          | Temp files                         |
+|   [4]   | **Brace expansion**      | `printf '%s\n' {1..10}`                           | `seq` or loop                      |
+|   [5]   | **Local variables**      | `local var="val"`                                 | Name-prefix convention             |
+|   [6]   | **Source command**       | `source script.sh`                                | `. script.sh`                      |
+|   [7]   | **Case conversion**      | `${var,,}` / `${var^^}` / `${var@U}` / `${var@L}` | `tr '[:upper:]' '[:lower:]'`       |
+|   [8]   | **Pattern replace**      | `${var//pat/repl}`                                | `sed` / `expr`                     |
+|   [9]   | **Extended globbing**    | `shopt -s extglob`                                | N/A                                |
+|  [10]   | **Built-in vars**        | `$RANDOM $SECONDS $BASH_SOURCE`                   | N/A                                |
+
+---
+## [2][PARAMETER_EXPANSION]
+>**Dictum:** *Expansion operators replace external commands.*
+
+<br>
 
 ```bash
-${var:offset:length}           # Substring
-${var/pattern/replacement}     # Replace first
-${var//pattern/replacement}    # Replace all
-${var^} / ${var^^}             # Uppercase first/all
-${var,} / ${var,,}             # Lowercase first/all
+# POSIX (portable)
+${var:-default}     ${var:=default}     ${var:?error}       ${var:+alternate}
+${#var}             ${var#pattern}      ${var##pattern}     ${var%pattern}     ${var%%pattern}
+
+# Bash-only extensions
+${var:offset:length}            # Substring
+${var/pattern/replacement}      # Replace first
+${var//pattern/replacement}     # Replace all
+${var^} / ${var^^}              # Uppercase first/all
+${var,} / ${var,,}              # Lowercase first/all
+
+# Bash 5.2+ transformation operators
+${var@U}  ${var@L}              # Uppercase/lowercase all
+${var@u}                        # Uppercase first char
+${var@Q}                        # Quoted for re-input
+${var@a}                        # Attribute flags (r=readonly, x=exported, a=array, A=assoc)
+${var@A}                        # Assignment statement to recreate variable
 ```
 
-### Bash 5.2+ Transformation Operators
+---
+## [3][BASH_5_3]
+>**Dictum:** *New builtins eliminate subshell overhead.*
 
-```bash
-${var@U}                       # Uppercase entire value
-${var@u}                       # Uppercase first character
-${var@L}                       # Lowercase entire value
-${var@Q}                       # Quoted for re-input
-${var@a}                       # Attribute flags (r=readonly, x=exported, a=array, A=assoc)
-${var@A}                       # Assignment statement to recreate variable
-```
-
-### Bash 5.3 Features (July 2025)
+<br>
 
 ```bash
 ${ cmd; }                      # Current-shell command substitution (no subshell fork)
@@ -60,86 +62,42 @@ ${| cmd; }                     # REPLY command substitution (cmd sets REPLY, val
 GLOBSORT=nosort                # Control glob result ordering (nosort, name, size, mtime)
 source -p PATH script.sh       # Source from explicit search PATH
 read -E                        # Use readline for read input
+compgen -V 'prefix'            # List variables matching prefix
 ```
 
-## Special Variables
+---
+## [4][FP_CONTROL_FLOW]
+>**Dictum:** *Guards and dispatch tables replace branching.*
+
+<br>
 
 ```bash
-$0      # Script name           $#      # Arg count
-$1-$9   # Positional params     ${10}   # 10+ (braces required)
-$*      # All args (single)     $@      # All args (separate)
-$$      # Shell PID             $!      # Last background PID
-$?      # Last exit status      $_      # Last arg of prev cmd
+# Conditional guards (A && B || C only safe when B cannot fail)
+[[ -f "${file}" ]] || die "Not found: ${file}"
+(( count > 0 )) && printf 'Items: %d\n' "${count}"
+: "${REQUIRED_VAR:?Must be set}"
+
+# Dispatch table (replace if/elif chains)
+declare -Ar HANDLERS=([start]=cmd_start [stop]=cmd_stop)
+[[ -v HANDLERS["${cmd}"] ]] && "${HANDLERS[${cmd}]}" "$@"
+
+# Declarative iteration
+mapfile -t lines < <(rg 'pat' file.txt)
+for line in "${lines[@]}"; do handle "${line}"; done
 ```
 
-## Control Structures
+---
+## [5][DATA_STRUCTURES]
+>**Dictum:** *Associative arrays enable O(1) dispatch and membership.*
+
+<br>
 
 ```bash
-# if/elif/else           # case
-if [ cond ]; then        case "$var" in
-    ...                      pat1) ... ;;
-elif [ cond ]; then          pat2|pat3) ... ;;
-    ...                      *) ... ;;
-else                     esac
-    ...
-fi
-
-# for                    # while/until
-for item in list; do     while [ cond ]; do ... done
-    ...                  until [ cond ]; do ... done
-done
-```
-
-## Error Handling
-
-```bash
-set -Eeuo pipefail                   # Strict mode (-E propagates traps to functions)
-shopt -s inherit_errexit             # Subshells inherit -e (bash 4.4+)
-trap 'printf "Error line %d\n" "$LINENO"' ERR # Trap errors (bash)
-trap cleanup EXIT INT TERM           # Cleanup on exit
-command || { printf "Failed\n" >&2; exit 1; }  # Inline guard
-```
-
-## Quoting Rules
-
-```bash
-"$var"   # Expands variables, preserves spaces (ALWAYS use for vars)
-'$var'   # Literal string, no expansion
-$()      # Command substitution (preferred over backticks)
-$(())    # Arithmetic expansion
-```
-
-## Common Mistakes
-
-| # | Mistake | Fix |
-|---|---------|-----|
-| 1 | `cat $file` (unquoted var) | `cat "$file"` |
-| 2 | `cd dir; rm -rf *` (no guard) | `cd dir \|\| exit 1` |
-| 3 | `` result=`cmd` `` (backticks) | `result=$(cmd)` |
-| 4 | `cat f \| grep p` (UUOC) | `grep p f` |
-| 5 | `while read line` (no -r) | `while IFS= read -r line` |
-| 6 | `cmd1; cmd2; if [ $? ]` (stale) | `if cmd1; then` |
-| 7 | Arrays in `#!/bin/sh` | Use `set --` or bash shebang |
-| 8 | Function called before defined | Define functions before main |
-| 9 | `eval $user_input` (injection) | Use `${!var}` indirect expansion |
-| 10 | Missing `set -u` (typo silent) | Add `set -u` / `set -eu` |
-| 11 | `[ "$v" == "x" ]` in sh | Use `=` not `==` in `[ ]` |
-| 12 | `for f in $(ls *.txt)` (spaces) | `for f in *.txt` |
-| 13 | `rm -rf "/$1"` (empty arg) | Validate `$1` first |
-| 14 | `for f in *` (no nullglob) | `shopt -s nullglob` (bash) or `[ -e "$f" ] \|\| continue` |
-| 15 | `-a`/`-o` in `[ ]` (deprecated) | `[ c1 ] && [ c2 ]` or `[[ c1 && c2 ]]` |
-| 16 | `echo -e` (non-portable flags) | `printf '%s\n' "$msg"` |
-| 17 | `$(cat file)` (fork + exec) | `$(<file)` (bash built-in, no subshell) |
-| 18 | `$(date +%F)` (fork) | `printf -v var '%(%F)T' -1` (bash built-in) |
-
-## Data Structure Patterns (Bash 4.0+)
-
-```bash
-# Associative array as dispatch table (O(1) lookup, replaces case/esac chains)
+# Dispatch table: declare -Ar must assign on declaration line
 declare -Ar HANDLERS=([start]=cmd_start [stop]=cmd_stop [status]=cmd_status)
 [[ -v HANDLERS["${cmd}"] ]] && "${HANDLERS[${cmd}]}" "$@"
 
-# Associative array as set (O(1) membership, replaces grep/fgrep)
+# Associative set (O(1) membership)
 declare -Ar VALID=([txt]=1 [log]=1 [csv]=1)
 [[ -v VALID["${ext}"] ]] || die "Unsupported: ${ext}"
 
@@ -147,37 +105,53 @@ declare -Ar VALID=([txt]=1 [log]=1 [csv]=1)
 declare -Ar CHECKS=([eval]='eval[[:space:]].*\$|injection risk|_warn')
 for key in "${!CHECKS[@]}"; do IFS='|' read -r pat msg fn <<< "${CHECKS[${key}]}"; done
 
-# Deduplication set (track seen items in O(1))
-declare -A seen=(); for item in "${items[@]}"; do [[ -v seen["${item}"] ]] && continue; seen["${item}"]=1; done
-
-# BASH_REMATCH for inline parsing (replaces grep -oP / sed / awk subshells)
+# BASH_REMATCH (replaces rg -oP / sed / awk subshells)
 [[ "${line}" =~ ^([0-9-]+)[[:space:]]([A-Z]+) ]] && local -r date="${BASH_REMATCH[1]}" level="${BASH_REMATCH[2]}"
 
-# IFS splitting (replaces cut / awk -F for simple delimiters)
+# IFS splitting (replaces cut / choose / awk -F)
 IFS='|' read -r pattern msg level <<< "${check_def}"
 IFS=, read -ra fields <<< "${csv_line}"
 
-# mapfile replaces while-read loops
-mapfile -t lines < <(grep 'ERROR' "${log_file}")
-readarray -d '' -t files < <(find . -name "*.txt" -print0)
+# mapfile (3-5x faster than while-read)
+mapfile -t lines < <(rg 'ERROR' "${log_file}")
+readarray -d '' -t files < <(fd -e txt --print0)
+
+# Nameref: array vars cannot BE namerefs, but namerefs CAN reference arrays
+apply_to_each() { local -r func="$1"; local -n _items=$2; for item in "${_items[@]}"; do "${func}" "${item}"; done; }
 ```
 
-## Best Practices Checklist
+---
+## [6][COMMON_MISTAKES]
+>**Dictum:** *Pattern recognition prevents recurring errors.*
 
-```
-[ ] Shebang: #!/usr/bin/env bash  OR  #!/bin/sh
-[ ] Strict mode: set -Eeuo pipefail + shopt -s inherit_errexit (bash) / set -eu (sh)
-[ ] All variables quoted: "$var"
-[ ] $() not backticks; $(<file) not $(cat file)
-[ ] printf not echo (portable, no flag ambiguity)
-[ ] local -r for immutable locals inside functions
-[ ] Functions defined before use
-[ ] Error handling: || exit, trap, set -e
-[ ] Input validation before dangerous ops
-[ ] ShellCheck v0.11.0+ passes
-[ ] POSIX sh: no [[ ]], arrays, function keyword, source, ==
-[ ] Associative arrays for dispatch/lookup over case chains (bash)
-[ ] BASH_REMATCH for simple field extraction over grep/sed subshells (bash)
-[ ] mapfile/readarray over while-read loops for array population (bash)
-[ ] IFS splitting over cut/awk for simple delimiters (bash)
+<br>
+
+| [INDEX] | [MISTAKE]                           | [FIX]                                                 |
+| :-----: | ----------------------------------- | ----------------------------------------------------- |
+|   [1]   | **`cat $file` (unquoted var)**      | `cat "${file}"`                                       |
+|   [2]   | **`cd dir; rm -rf *` (no guard)**   | `cd dir \|\| exit 1`                                  |
+|   [3]   | **`` result=`cmd` `` (backticks)**  | `result=$(cmd)`                                       |
+|   [4]   | **`cat f \| grep p` (UUOC)**        | `rg p f`                                              |
+|   [5]   | **`while read line` (no -r)**       | `mapfile -t lines < file`                             |
+|   [6]   | **Arrays in `#!/bin/sh`**           | Use `set --` or bash shebang                          |
+|   [7]   | **`eval $user_input` (injection)**  | `${!var}` indirect expansion or dispatch table        |
+|   [8]   | **`[ "$v" == "x" ]` in sh**         | `[[ "${v}" == "x" ]]` (bash) or `[ "$v" = "x" ]` (sh) |
+|   [9]   | **`for f in $(ls *.txt)` (spaces)** | `for f in *.txt`                                      |
+|  [10]   | **`-a`/`-o` in `[ ]` (deprecated)** | `[[ c1 && c2 ]]`                                      |
+|  [11]   | **`echo -e` (non-portable)**        | `printf '%s\n' "$msg"`                                |
+|  [12]   | **`$(cat file)` (fork)**            | `$(<file)` (bash built-in)                            |
+|  [13]   | **`$(date +%F)` (fork)**            | `printf -v var '%(%F)T' -1` (bash built-in)           |
+
+---
+## [7][ERROR_HANDLING]
+>**Dictum:** *Strict mode and traps prevent silent failures.*
+
+<br>
+
+```bash
+set -Eeuo pipefail                   # Strict mode (-E propagates ERR trap to functions)
+shopt -s inherit_errexit             # Command substitutions inherit -e (bash 4.4+)
+trap 'printf "Error line %d\n" "$LINENO"' ERR
+trap cleanup EXIT                    # EXIT fires on normal exit + signals
+command || { printf "Failed\n" >&2; exit 1; }
 ```

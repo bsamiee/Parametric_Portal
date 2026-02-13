@@ -3,9 +3,10 @@ name: n8n-builder
 type: standard
 depth: base
 description: >-
-  Generates valid n8n workflow JSON with nodes, connections, settings, credentials.
-  Use when creating workflow automations programmatically, scaffolding AI agent
-  workflows with LangChain nodes, or converting requirements into n8n JSON.
+    Generates production-ready n8n 2.0+ workflow JSON with nodes, connections, AI
+    agents, RAG pipelines, Task Runners, MCP clients, and validation. Use when
+    building workflow automations, scaffolding LangChain agents with tools/memory,
+    implementing RAG retrieval systems, or converting requirements to n8n JSON.
 ---
 
 # [H1][N8N-BUILDER]
@@ -34,21 +35,21 @@ Generate valid n8n workflow JSON.
 
 **Breaking Changes (December 2025):**
 
-| [INDEX] | [CHANGE]         | [DETAIL]                                                                   |
-| :-----: | ---------------- | -------------------------------------------------------------------------- |
-|   [1]   | Database         | PostgreSQL required; MySQL/MariaDB support dropped                         |
-|   [2]   | Python           | `"language": "python"` removed; use `"pythonNative"` with Task Runners     |
-|   [3]   | Security         | `ExecuteCommand` and `LocalFileTrigger` disabled by default                |
-|   [4]   | Code Isolation   | Environment variable access blocked (`N8N_BLOCK_ENV_ACCESS_IN_NODE=true`)  |
-|   [5]   | Agent Type       | Agent type selection removed (v1.82+); all agents are Tools Agent          |
-|   [6]   | Task Runners     | Enabled by default for code execution isolation; external process sandbox  |
-|   [7]   | MCP Client       | `mcpClient` standalone node for calling external MCP servers as AI tools   |
-|   [8]   | HITL             | Human-in-the-loop for AI tool calls; agent pauses for human approval       |
-|   [9]   | MCP OAuth        | MCP servers support OAuth 2.1 authentication for credential exchange       |
-|  [10]   | Publish/Save     | Save preserves edits (draft); Publish updates live version (separate act)  |
-|  [11]   | SQLite Pool      | High-performance pooling driver reduces "Database Locked" errors           |
-|  [12]   | Sub-Workflow Wait| Sub-workflows pause, wait for external input (Slack approval), return data |
-|  [13]   | Project Vars     | Project-level variables alongside global; override global per project      |
+| [INDEX] | [CHANGE]          | [DETAIL]                                                                   |
+| :-----: | ----------------- | -------------------------------------------------------------------------- |
+|   [1]   | Database          | PostgreSQL required; MySQL/MariaDB support dropped                         |
+|   [2]   | Python            | `"language": "python"` removed; use `"pythonNative"` with Task Runners     |
+|   [3]   | Security          | `ExecuteCommand` and `LocalFileTrigger` disabled by default                |
+|   [4]   | Code Isolation    | Environment variable access blocked (`N8N_BLOCK_ENV_ACCESS_IN_NODE=true`)  |
+|   [5]   | Agent Type        | Agent type selection removed (v1.82+); all agents are Tools Agent          |
+|   [6]   | Task Runners      | Enabled by default for code execution isolation; external process sandbox  |
+|   [7]   | MCP Client        | `mcpClient` standalone node for calling external MCP servers as AI tools   |
+|   [8]   | HITL              | Human-in-the-loop for AI tool calls; agent pauses for human approval       |
+|   [9]   | MCP OAuth         | MCP servers support OAuth 2.1 authentication for credential exchange       |
+|  [10]   | Publish/Save      | Save preserves edits (draft); Publish updates live version (separate act)  |
+|  [11]   | SQLite Pool       | High-performance pooling driver reduces "Database Locked" errors           |
+|  [12]   | Sub-Workflow Wait | Sub-workflows pause, wait for external input (Slack approval), return data |
+|  [13]   | Project Vars      | Project-level variables alongside global; override global per project      |
 
 [CRITICAL]:
 - [ALWAYS] Use Task Runners for Code node execution — default isolation mode since 2025.

@@ -3,11 +3,7 @@ name: hooks-builder
 type: standard
 depth: extended
 description: >-
-  Creates and configures Claude Code hooks for lifecycle automation. Use when
-  implementing PreToolUse validation, PostToolUse/PostToolUseFailure formatting,
-  PermissionRequest auto-approve, Stop/SubagentStop evaluation via prompt/agent hooks,
-  TeammateIdle/TaskCompleted coordination, custom notifications, session management,
-  subagent lifecycle, or deterministic agent control via command/prompt/agent hooks.
+  Creates Claude Code hooks executing shell commands, prompt evaluations, or multi-turn agents at 15 lifecycle events. Use when building PreToolUse validation, PostToolUse formatting, PermissionRequest auto-approval, Stop/SubagentStop evaluation, TeammateIdle prevention, TaskCompleted gating, Setup provisioning, SessionStart context injection, or deterministic agent control via blocking/non-blocking hooks.
 ---
 
 # [H1][HOOKS-BUILDER]
@@ -15,7 +11,7 @@ description: >-
 
 <br>
 
-Build Claude Code hooks—shell commands, prompt evaluations, or multi-turn agents execute at 14 agent lifecycle events.
+Build Claude Code hooks—shell commands, prompt evaluations, or multi-turn agents execute at 15 agent lifecycle events.
 
 **Tasks:**
 1. Read [index.md](./index.md) — Reference file listing for navigation
@@ -47,33 +43,35 @@ Build Claude Code hooks—shell commands, prompt evaluations, or multi-turn agen
 - *React after completion?* → PostToolUse (format, lint, add context)
 - *React after failure?* → PostToolUseFailure (error handling, retry logic)
 - *Inject at session boundaries?* → SessionStart (context), UserPromptSubmit (per-message)
+- *One-time provisioning?* → Setup (tool installation, dependency setup via `claude --init`)
 - *Evaluate task completion?* → Stop/SubagentStop (prompt/agent type for LLM judgment)
 - *Coordinate teams?* → TeammateIdle (prevent idle), TaskCompleted (validate completion)
 - *Observe subagent lifecycle?* → SubagentStart/SubagentStop (logging)
 
 **Blocking Events (exit 2 blocks action):**
 
-| [INDEX] | [EVENT]            | [EXIT_2_EFFECT]                                        |
-| :-----: | ------------------ | ------------------------------------------------------ |
-|   [1]   | PreToolUse         | Blocks tool call; stderr shown to Claude               |
-|   [2]   | PermissionRequest  | Denies the permission                                  |
-|   [3]   | UserPromptSubmit   | Blocks prompt processing; erases prompt from context   |
-|   [4]   | Stop               | Prevents Claude from stopping; continues conversation  |
-|   [5]   | SubagentStop       | Prevents subagent from stopping                        |
-|   [6]   | TeammateIdle       | Prevents teammate from going idle; stderr = feedback   |
-|   [7]   | TaskCompleted      | Prevents task completion; stderr = feedback to model   |
+| [INDEX] | [EVENT]           | [EXIT_2_EFFECT]                                       |
+| :-----: | ----------------- | ----------------------------------------------------- |
+|   [1]   | PreToolUse        | Blocks tool call; stderr shown to Claude              |
+|   [2]   | PermissionRequest | Denies the permission                                 |
+|   [3]   | UserPromptSubmit  | Blocks prompt processing; erases prompt from context  |
+|   [4]   | Stop              | Prevents Claude from stopping; continues conversation |
+|   [5]   | SubagentStop      | Prevents subagent from stopping                       |
+|   [6]   | TeammateIdle      | Prevents teammate from going idle; stderr = feedback  |
+|   [7]   | TaskCompleted     | Prevents task completion; stderr = feedback to model  |
 
 **Non-blocking Events (exit 2 shows stderr only):**
 
-| [INDEX] | [EVENT]            | [EXIT_2_EFFECT]                                        |
-| :-----: | ------------------ | ------------------------------------------------------ |
-|   [1]   | PostToolUse        | Shows stderr to Claude (tool already ran)              |
-|   [2]   | PostToolUseFailure | Shows stderr to Claude (tool already failed)           |
-|   [3]   | SessionStart       | Shows stderr to user only                              |
-|   [4]   | SessionEnd         | Shows stderr to user only                              |
-|   [5]   | Notification       | Shows stderr to user only                              |
-|   [6]   | SubagentStart      | Shows stderr to user only                              |
-|   [7]   | PreCompact         | Shows stderr to user only                              |
+| [INDEX] | [EVENT]            | [EXIT_2_EFFECT]                              |
+| :-----: | ------------------ | -------------------------------------------- |
+|   [1]   | PostToolUse        | Shows stderr to Claude (tool already ran)    |
+|   [2]   | PostToolUseFailure | Shows stderr to Claude (tool already failed) |
+|   [3]   | SessionStart       | Shows stderr to user only                    |
+|   [4]   | Setup              | Shows stderr to user only                    |
+|   [6]   | SessionEnd         | Shows stderr to user only                    |
+|   [7]   | Notification       | Shows stderr to user only                    |
+|   [8]   | SubagentStart      | Shows stderr to user only                    |
+|   [9]   | PreCompact         | Shows stderr to user only                    |
 
 ---
 ## [2][CONFIGURATION]
@@ -97,11 +95,11 @@ Build Claude Code hooks—shell commands, prompt evaluations, or multi-turn agen
 
 <br>
 
-| [INDEX] | [TYPE]  | [USE_CASE]                           | [TIMEOUT] | [CHARACTERISTICS]              |
-| :-----: | ------- | ------------------------------------ | :-------: | ------------------------------ |
-|   [1]   | command | Validation, formatting, rules        |   600s    | Deterministic, shell scripts   |
-|   [2]   | prompt  | Complex evaluation, LLM judgment     |    30s    | Single-turn, context-aware     |
-|   [3]   | agent   | Tool-using evaluation                |    60s    | Multi-turn, up to 50 turns     |
+| [INDEX] | [TYPE]  | [USE_CASE]                       | [TIMEOUT] | [CHARACTERISTICS]            |
+| :-----: | ------- | -------------------------------- | :-------: | ---------------------------- |
+|   [1]   | command | Validation, formatting, rules    |   600s    | Deterministic, shell scripts |
+|   [2]   | prompt  | Complex evaluation, LLM judgment |    30s    | Single-turn, context-aware   |
+|   [3]   | agent   | Tool-using evaluation            |    60s    | Multi-turn, up to 50 turns   |
 
 **Prompt/Agent Eligible Events:** PreToolUse, PostToolUse, PostToolUseFailure, PermissionRequest, UserPromptSubmit, Stop, SubagentStop, TaskCompleted.
 
@@ -117,14 +115,14 @@ Build Claude Code hooks—shell commands, prompt evaluations, or multi-turn agen
 
 **Command Hook Fields:**
 
-| [INDEX] | [FIELD]         | [TYPE]  | [DEFAULT]     | [EFFECT]                                   |
-| :-----: | --------------- | ------- | :-----------: | ------------------------------------------ |
-|   [1]   | `type`          | string  |       —       | `"command"`, `"prompt"`, or `"agent"`      |
-|   [2]   | `command`       | string  |       —       | Shell command or script path               |
-|   [3]   | `timeout`       | number  | type-specific | Seconds: command=600, prompt=30, agent=60  |
-|   [4]   | `async`         | boolean |    `false`    | Background execution; non-blocking         |
-|   [5]   | `statusMessage` | string  |       —       | Custom spinner text during execution       |
-|   [6]   | `once`          | boolean |    `false`    | Run once per session (skills only)         |
+| [INDEX] | [FIELD]         | [TYPE]  |   [DEFAULT]   | [EFFECT]                                  |
+| :-----: | --------------- | ------- | :-----------: | ----------------------------------------- |
+|   [1]   | `type`          | string  |       —       | `"command"`, `"prompt"`, or `"agent"`     |
+|   [2]   | `command`       | string  |       —       | Shell command or script path              |
+|   [3]   | `timeout`       | number  | type-specific | Seconds: command=600, prompt=30, agent=60 |
+|   [4]   | `async`         | boolean |    `false`    | Background execution; non-blocking        |
+|   [5]   | `statusMessage` | string  |       —       | Custom spinner text during execution      |
+|   [6]   | `once`          | boolean |    `false`    | Run once per session (skills only)        |
 
 **Prompt/Agent Hook Fields:**
 
@@ -149,7 +147,7 @@ Python 3.14+ with strict typing. Zero imperative patterns.
 
 [VERIFY] Completion:
 - [ ] Event: Selected correct hook type for automation goal.
-- [ ] Blocking: Verified event supports blocking (7 events) or observing (7 events).
+- [ ] Blocking: Verified event supports blocking (7 events) or observing (8 events).
 - [ ] Schema: Configuration structure validated per schema.md.
 - [ ] Timeout: Correct units (seconds): command=600, prompt=30, agent=60.
 - [ ] Integration: Environment variables and context injection applied.

@@ -3,7 +3,7 @@
 # =============================================================================
 # Good Example — Node.js Multi-Stage with All Best Practices
 # =============================================================================
-# Docker Engine 27+ | BuildKit 0.14+ | Dockerfile 1.14 | node:24-alpine3.22
+# Docker Engine 27+ | BuildKit 0.27+ | Dockerfile 1.14 | node:24-alpine3.23
 #
 # This file is the MIRROR of bad-example.Dockerfile — every anti-pattern in
 # that file has a corresponding best practice demonstrated here.
@@ -36,11 +36,11 @@ ARG GIT_SHA="unknown"
 ARG BUILD_DATE="unknown"
 
 # --- DEPS --------------------------------------------------------------------
-FROM node:${NODE_VERSION}-alpine3.22 AS deps
+FROM node:${NODE_VERSION}-alpine3.23 AS deps
 WORKDIR /app
 COPY --link package.json package-lock.json ./
 RUN --mount=type=cache,target=/root/.npm \
-    npm ci --only=production
+    npm ci --omit=dev
 
 # --- BUILD -------------------------------------------------------------------
 FROM deps AS builder
@@ -48,7 +48,7 @@ COPY --link . .
 RUN npm run build
 
 # --- RUNTIME -----------------------------------------------------------------
-FROM node:${NODE_VERSION}-alpine3.22 AS runtime
+FROM node:${NODE_VERSION}-alpine3.23 AS runtime
 
 ARG GIT_SHA
 ARG BUILD_DATE

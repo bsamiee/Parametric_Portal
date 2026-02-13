@@ -23,9 +23,9 @@
 |   [8]   | `allowed-tools`            | list    |   No   |     —     | Comma-separated tools permitted without approval          |
 |   [9]   | `model`                    | string  |   No   | `inherit` | `opus`, `sonnet`, `haiku`, or `inherit`                   |
 |  [10]   | `context`                  | enum    |   No   |     —     | `fork` — run skill in isolated subagent context           |
-|  [11]   | `agent`                    | string  |   No   | general   | Subagent type when `context: fork` set                    |
+|  [11]   | `agent`                    | string  |   No   |  general  | Subagent type when `context: fork` set                    |
 |  [12]   | `hooks`                    | object  |   No   |     —     | Scoped lifecycle hooks (all 14 event types supported)     |
-|  [13]   | `version`                  | string  |   No   |     —     | Metadata for tracking skill versions (e.g., `"1.0.0"`)   |
+|  [13]   | `version`                  | string  |   No   |     —     | Metadata for tracking skill versions (e.g., `"1.0.0"`)    |
 
 ^1^Reserved: "anthropic", "claude" — registration fails.
 ^2^Required by skill-builder for refine workflow; not required by Claude Code itself.
@@ -36,11 +36,11 @@
 
 <br>
 
-| [FRONTMATTER]                      | [USER] | [CLAUDE] | [CONTEXT_LOADING]                                |
-| :--------------------------------- | :----: | :------: | :----------------------------------------------- |
-| (default)                          |  Yes   |   Yes    | Description always loaded; full skill on invoke  |
-| `disable-model-invocation: true`   |  Yes   |    No    | Description NOT in context; loads on user invoke |
-| `user-invocable: false`            |   No   |   Yes    | Description always loaded; full skill on invoke  |
+| [FRONTMATTER]                    | [USER] | [CLAUDE] | [CONTEXT_LOADING]                                |
+| :------------------------------- | :----: | :------: | :----------------------------------------------- |
+| (default)                        |  Yes   |   Yes    | Description always loaded; full skill on invoke  |
+| `disable-model-invocation: true` |  Yes   |    No    | Description NOT in context; loads on user invoke |
+| `user-invocable: false`          |   No   |   Yes    | Description always loaded; full skill on invoke  |
 
 [IMPORTANT] `user-invocable` controls menu visibility only, NOT Skill tool access. Use `disable-model-invocation: true` to block programmatic invocation.
 
@@ -83,12 +83,12 @@
 
 <br>
 
-| [INDEX] | [VARIABLE]             | [DESCRIPTION]                                                          |
-| :-----: | ---------------------- | ---------------------------------------------------------------------- |
-|   [1]   | `$ARGUMENTS`           | All text after `/skill-name`; appended as `ARGUMENTS:` if not present  |
-|   [2]   | `$ARGUMENTS[N]`        | 0-based positional access: `$ARGUMENTS[0]` = first arg                 |
-|   [3]   | `$N`                   | Shorthand for `$ARGUMENTS[N]`: `$0` = first, `$1` = second            |
-|   [4]   | `${CLAUDE_SESSION_ID}` | Current session ID for logging or session-specific files               |
+| [INDEX] | [VARIABLE]             | [DESCRIPTION]                                                                   |
+| :-----: | ---------------------- | ------------------------------------------------------------------------------- |
+|   [1]   | `$ARGUMENTS`           | All text after `/skill-name`; appended as `ARGUMENTS:` if not present           |
+|   [2]   | `$ARGUMENTS[N]`        | 0-based positional access: `$ARGUMENTS[0]` = first arg                          |
+|   [3]   | `$N`                   | Shorthand for `$ARGUMENTS[N]`: `$0` = first, `$1` = second                      |
+|   [4]   | `${CLAUDE_SESSION_ID}` | Current session ID for logging or session-specific files                        |
 |   [5]   | `` !`command` ``       | Shell preprocessing — command output replaces placeholder before Claude sees it |
 
 [IMPORTANT]:
@@ -128,19 +128,19 @@
 
 Available tool names for the `allowed-tools` field:
 
-| [INDEX] | [TOOL]       | [CAPABILITY]                           |
-| :-----: | ------------ | -------------------------------------- |
-|   [1]   | `Read`       | Read file contents                     |
-|   [2]   | `Glob`       | File pattern matching                  |
-|   [3]   | `Grep`       | Content search with regex              |
-|   [4]   | `Edit`       | String replacement in files            |
-|   [5]   | `Write`      | Create or overwrite files              |
-|   [6]   | `Bash`       | Execute shell commands                 |
-|   [7]   | `Task`       | Spawn subagents                        |
-|   [8]   | `WebFetch`   | Fetch and process URLs                 |
-|   [9]   | `WebSearch`  | Web search                             |
-|  [10]   | `NotebookEdit` | Edit Jupyter notebook cells          |
-|  [11]   | `mcp__*`     | MCP server tools (regex pattern)       |
+| [INDEX] | [TOOL]         | [CAPABILITY]                     |
+| :-----: | -------------- | -------------------------------- |
+|   [1]   | `Read`         | Read file contents               |
+|   [2]   | `Glob`         | File pattern matching            |
+|   [3]   | `Grep`         | Content search with regex        |
+|   [4]   | `Edit`         | String replacement in files      |
+|   [5]   | `Write`        | Create or overwrite files        |
+|   [6]   | `Bash`         | Execute shell commands           |
+|   [7]   | `Task`         | Spawn subagents                  |
+|   [8]   | `WebFetch`     | Fetch and process URLs           |
+|   [9]   | `WebSearch`    | Web search                       |
+|  [10]   | `NotebookEdit` | Edit Jupyter notebook cells      |
+|  [11]   | `mcp__*`       | MCP server tools (regex pattern) |
 
 **Common patterns:**
 - Read-only: `allowed-tools: Read, Glob, Grep`
@@ -153,14 +153,14 @@ Available tool names for the `allowed-tools` field:
 
 <br>
 
-| [INDEX] | [CONSTRAINT]             | [VIOLATION]                | [RESULT]              |
-| :-----: | ------------------------ | -------------------------- | --------------------- |
-|   [1]   | `---` on line 1          | Content before delimiter   | Skill not discovered  |
-|   [2]   | `---` closes on own line | Missing closing delimiter  | YAML parse failure    |
-|   [3]   | Spaces only (no tabs)    | Tab indentation            | Parse error           |
-|   [4]   | Quote special characters | Unquoted `: # @ | >`      | Field value corrupted |
-|   [5]   | Name matches folder      | `name` differs from folder | Registration failure  |
-|   [6]   | Use `>-` for multi-line  | Literal scalar `|`         | Indexing error        |
+| [INDEX] | [CONSTRAINT]             | [VIOLATION]                | [RESULT]             |
+| :-----: | ------------------------ | -------------------------- | -------------------- |
+|   [1]   | `---` on line 1          | Content before delimiter   | Skill not discovered |
+|   [2]   | `---` closes on own line | Missing closing delimiter  | YAML parse failure   |
+|   [3]   | Spaces only (no tabs)    | Tab indentation            | Parse error          |
+|   [4]   | Quote special characters | Unquoted `: # @            | >`                   | Field value corrupted |
+|   [5]   | Name matches folder      | `name` differs from folder | Registration failure |
+|   [6]   | Use `>-` for multi-line  | Literal scalar `           | `                    | Indexing error        |
 
 **Multi-line:** Folded scalar `>-` renders as single line:
 ```yaml

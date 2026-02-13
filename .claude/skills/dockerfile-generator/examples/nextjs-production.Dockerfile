@@ -3,7 +3,7 @@
 # =============================================================================
 # Next.js Production Dockerfile — Multi-Stage with BuildKit + Heredoc
 # =============================================================================
-# Docker Engine 27+ | BuildKit 0.14+ | Dockerfile 1.14 | node:24-slim-trixie
+# Docker Engine 29.2+ | BuildKit 0.27+ | Dockerfile syntax 1 | node:24-slim-trixie
 #
 # Features:
 #   - Syntax directive for automatic BuildKit frontend updates
@@ -45,7 +45,7 @@ RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
 FROM deps AS builder
 ENV NEXT_TELEMETRY_DISABLED=1
 COPY --link . .
-# Mount SENTRY_AUTH_TOKEN as env var (BuildKit 0.14+, no file read needed)
+# Mount SENTRY_AUTH_TOKEN as env var (BuildKit 0.14+, env-based secret mount)
 RUN --mount=type=secret,id=sentry_auth_token,env=SENTRY_AUTH_TOKEN \
     pnpm run build
 

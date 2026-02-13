@@ -1,40 +1,103 @@
+# [ACTION_NAME] -- [DESCRIPTION]
+# NOTE: harden-runner is caller's responsibility — actions are steps, not jobs.
+# ┌─────────────────────────────────────────────────────────────────────────────┐
+# │ Placeholders: [UPPER_SNAKE_CASE] — replace before use.                      │
+# │  Identity:    [ACTION_NAME], [DESCRIPTION], [AUTHOR_NAME]                   │
+# │  Docker:      [BUILDER_IMAGE] (e.g., golang:1.24, rust:1.85)                │
+# │               [BASE_IMAGE] (default: distroless — see below)                │
+# │               [ENTRYPOINT] (binary name copied to /)                        │
+# │               [BUILD_CMD] (compiler invocation in builder stage)            │
+# │  Branding:    [ICON_NAME], [COLOR]                                          │
+# │                                                                             │
+# │  Base image options (pin by digest for reproducibility):                    │
+# │    gcr.io/distroless/static-debian12:nonroot   — Google distroless          │
+# │    cgr.dev/chainguard/static:latest             — Chainguard (SBOM+Cosign). │
+# │  Docker actions only run on Linux runners. Startup overhead: 5-30s.         │
+# │  entrypoint: in action.yml overrides Dockerfile ENTRYPOINT.                 │
+# │  args: in action.yml overrides Dockerfile CMD.                              │
+# └─────────────────────────────────────────────────────────────────────────────┘
 name: '[ACTION_NAME]'
-description: '[ACTION_DESCRIPTION]'
+description: '[DESCRIPTION]'
 author: '[AUTHOR_NAME]'
 
 inputs:
-    [input-name]:
-        description: '[INPUT_DESCRIPTION]'
-        required: [true/false]
-        default: '[DEFAULT_VALUE]'
+  source-path:
+    description: 'Path to source files to process'
+    required: true
+  output-format:
+    description: 'Output format (json|yaml|text)'
+    required: false
+    default: 'json'
+  debug:
+    description: 'Enable debug logging (true|false)'
+    required: false
+    default: 'false'
 
 outputs:
-    [output-name]:
-        description: '[OUTPUT_DESCRIPTION]'
+  result:
+    description: 'Processing result'
+  duration:
+    description: 'Execution time in seconds'
 
 branding:
-    icon: '[ICON_NAME]'
-    color: '[COLOR]'
+  icon: '[ICON_NAME]'
+  color: '[COLOR]'
 
 runs:
-    using: 'docker'
-    image: 'Dockerfile'     # Or: 'docker://[REGISTRY]/[IMAGE]:[TAG]'
-    args: ['${{ inputs.[input-name] }}']
-    env: { [ENV_VAR]: '${{ inputs.[input-name] }}' }
+  using: 'docker'
+  image: 'Dockerfile'
+  args:
+    - ${{ inputs.source-path }}
+    - ${{ inputs.output-format }}
+  env:
+    DEBUG: ${{ inputs.debug }}
 
-# --- Dockerfile (save as Dockerfile alongside this action.yml) ----------------
-# FROM [BASE_IMAGE]:[TAG]
-# RUN [PACKAGE_MANAGER] update && [PACKAGE_MANAGER] install -y [PACKAGES] && [CLEANUP]
-# COPY entrypoint.sh /entrypoint.sh
-# RUN chmod +x /entrypoint.sh
-# ENTRYPOINT ["/entrypoint.sh"]
+# --- Dockerfile (multi-stage distroless) ------------------------------------
 #
-# --- entrypoint.sh (save as entrypoint.sh alongside this action.yml) ----------
-# #!/bin/bash
-# set -e
-# INPUT_1="$1"
-# if [ -z "$INPUT_1" ]; then echo "::error::input is required"; exit 1; fi
-# echo "::group::Running [ACTION_NAME]"
-# [MAIN_COMMAND]
-# echo "[output-name]=[OUTPUT_VALUE]" >> "$GITHUB_OUTPUT"
+# # syntax=docker/dockerfile:1
+# FROM [BUILDER_IMAGE] AS builder
+# WORKDIR /build
+# COPY . .
+# RUN [BUILD_CMD]
+#
+# # Pin base by digest — mutable tags drift.
+# # Distroless: gcr.io/distroless/static-debian12:nonroot@sha256:<DIGEST>
+# # Chainguard: cgr.dev/chainguard/static:latest@sha256:<DIGEST>
+# FROM [BASE_IMAGE]
+# COPY --from=builder --chmod=0555 /build/[ENTRYPOINT] /[ENTRYPOINT]
+# USER nonroot:nonroot
+# # HEALTHCHECK --interval=30s --timeout=3s CMD ["/[ENTRYPOINT]", "--health"]
+# ENTRYPOINT ["/[ENTRYPOINT]"]
+#
+# --- entrypoint.sh (shell wrapper — use when args need env expansion) -------
+# Exec-form ENTRYPOINT does NOT expand ${{ }} or shell variables.
+# Wrap in shell script when action args contain environment variables.
+#
+# #!/bin/sh
+# set -eu
+#
+# SOURCE_PATH="$1"
+# OUTPUT_FORMAT="${2:-json}"
+#
+# if [ ! -e "$SOURCE_PATH" ]; then
+#   echo "::error title=Not Found::Source path does not exist: $SOURCE_PATH"
+#   exit 1
+# fi
+#
+# echo "::group::Processing $SOURCE_PATH"
+# START=$(date +%s)
+#
+# # [MAIN_LOGIC]
+# RESULT="processed"
+#
+# DURATION=$(( $(date +%s) - START ))
 # echo "::endgroup::"
+#
+# echo "result=$RESULT" >> "$GITHUB_OUTPUT"
+# echo "duration=$DURATION" >> "$GITHUB_OUTPUT"
+#
+# echo "## [ACTION_NAME] Results" >> "$GITHUB_STEP_SUMMARY"
+# echo "| Metric | Value |" >> "$GITHUB_STEP_SUMMARY"
+# echo "|--------|-------|" >> "$GITHUB_STEP_SUMMARY"
+# echo "| Duration | ${DURATION}s |" >> "$GITHUB_STEP_SUMMARY"
+# echo "| Format | $OUTPUT_FORMAT |" >> "$GITHUB_STEP_SUMMARY"

@@ -4,9 +4,8 @@ type: complex
 depth: base
 user-invocable: false
 description: >-
-  Executes Hostinger API operations via Python wrapper. Use when managing VPS
-  instances, Docker Compose projects, DNS records, domains, firewalls, SSH keys,
-  snapshots, backups, billing, hosting, or WHOIS profiles.
+  Executes Hostinger API operations managing VPS instances, Docker Compose, DNS, domains, billing, firewalls, SSH keys, snapshots. Use when controlling
+  virtual machines, containers, domain configuration, or hosting infrastructure.
 ---
 
 # [H1][HOSTINGER-TOOLS]
@@ -203,19 +202,19 @@ uv run .claude/skills/hostinger-tools/scripts/hostinger.py template-view --id 10
 
 Commands return: `{"status": "success|error", ...}`.
 
-| [INDEX] | [PATTERN]       | [RESPONSE]                    |
-| :-----: | --------------- | ----------------------------- |
-|   [1]   | List commands   | `{items: object[]}`           |
-|   [2]   | View commands   | `{id: int, item: object}`     |
-|   [3]   | Action commands | `{id: int, action: bool}`     |
-|   [4]   | Create commands | `{id: int, created: bool}`    |
+| [INDEX] | [PATTERN]       | [RESPONSE]                 |
+| :-----: | --------------- | -------------------------- |
+|   [1]   | List commands   | `{items: object[]}`        |
+|   [2]   | View commands   | `{id: int, item: object}`  |
+|   [3]   | Action commands | `{id: int, action: bool}`  |
+|   [4]   | Create commands | `{id: int, created: bool}` |
 
 ---
 ## [17][ENVIRONMENT]
 
-| [VAR]              | [REQUIRED] | [DESCRIPTION]                           |
-| ------------------ | ---------- | --------------------------------------- |
-| `HOSTINGER_TOKEN`  | Yes        | Hostinger API bearer token              |
+| [VAR]             | [REQUIRED] | [DESCRIPTION]              |
+| ----------------- | ---------- | -------------------------- |
+| `HOSTINGER_TOKEN` | Yes        | Hostinger API bearer token |
 
 ---
 ## [18][ERROR_HANDLING]
@@ -224,3 +223,4 @@ Commands return: `{"status": "success|error", ...}`.
 - Missing token: `[ERROR] HOSTINGER_TOKEN environment variable not set`
 - VPS not found: `[ERROR] 404: Virtual machine not found`
 - Action pending: `[ERROR] 409: Action already in progress`; wait for completion
+

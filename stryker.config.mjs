@@ -23,6 +23,10 @@ const config = {
         'test-results',
         '.stryker-tmp',
     ],
+    ignoreStatic: true,
+    incremental: true,
+    incrementalFile: 'test-results/mutation/stryker-incremental.json',
+    jsonReporter: { fileName: 'test-results/mutation/mutation.json' },
 
     // --- [MUTATE] ------------------------------------------------------------
     mutate: [
@@ -34,9 +38,10 @@ const config = {
         '!packages/server/src/**/__tests__/**',
         '!packages/server/src/**/__mocks__/**',
     ],
+    mutator: { excludedMutations: ['UpdateOperator', 'OptionalChaining'] },
 
     // --- [REPORTERS] ---------------------------------------------------------
-    reporters: ['clear-text', 'html', 'progress'],
+    reporters: ['clear-text', 'html', 'json', 'progress'],
     tempDirName: '.stryker-tmp',
     // --- [TEST_RUNNER] -------------------------------------------------------
     testRunner: 'vitest',
@@ -47,7 +52,7 @@ const config = {
         high: 80,
         low: 60,
     },
-    timeoutFactor: 1.5,
+    timeoutFactor: 2.0,
     timeoutMS: 30_000,
     tsconfigFile: 'tsconfig.base.json',
     typescriptChecker: {

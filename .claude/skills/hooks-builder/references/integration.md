@@ -13,12 +13,12 @@ Hooks integrate via settings files, environment variables, and context injection
 
 ### [1.1][HOOK_VARIABLES]
 
-| [INDEX] | [VARIABLE]            | [SCOPE]      | [VALUE]                            |
-| :-----: | --------------------- | ------------ | ---------------------------------- |
-|   [1]   | `CLAUDE_PROJECT_DIR`  | All hooks    | Absolute path to project root      |
-|   [2]   | `CLAUDE_CODE_REMOTE`  | All hooks    | `"true"` for web, unset for CLI    |
-|   [3]   | `CLAUDE_ENV_FILE`     | SessionStart | Path to append `export` statements |
-|   [4]   | `CLAUDE_PLUGIN_ROOT`  | Plugin hooks | Absolute path to plugin directory  |
+| [INDEX] | [VARIABLE]           | [SCOPE]      | [VALUE]                            |
+| :-----: | -------------------- | ------------ | ---------------------------------- |
+|   [1]   | `CLAUDE_PROJECT_DIR` | All hooks    | Absolute path to project root      |
+|   [2]   | `CLAUDE_CODE_REMOTE` | All hooks    | `"true"` for web, unset for CLI    |
+|   [3]   | `CLAUDE_ENV_FILE`    | SessionStart | Path to append `export` statements |
+|   [4]   | `CLAUDE_PLUGIN_ROOT` | Plugin hooks | Absolute path to plugin directory  |
 
 [IMPORTANT] All other event-specific data (session_id, tool_name, tool_input, cwd, etc.) is delivered via JSON stdin, NOT environment variables. Parse with `jq` (Bash) or `json.load(sys.stdin)` (Python).
 
@@ -53,13 +53,13 @@ _debug = lambda msg: DEBUG and print(f"[hook] {msg}", file=sys.stderr)
 
 ### [2.1][OUTPUT_ROUTING]
 
-| [INDEX] | [EVENT]          | [STDOUT_HANDLING]            |
-| :-----: | ---------------- | ---------------------------- |
-|   [1]   | SessionStart     | Added as context for Claude  |
-|   [2]   | UserPromptSubmit | Added as context for Claude  |
+| [INDEX] | [EVENT]          | [STDOUT_HANDLING]              |
+| :-----: | ---------------- | ------------------------------ |
+|   [1]   | SessionStart     | Added as context for Claude    |
+|   [2]   | UserPromptSubmit | Added as context for Claude    |
 |   [3]   | PreToolUse       | Shown in verbose mode (Ctrl+O) |
 |   [4]   | PostToolUse      | Shown in verbose mode (Ctrl+O) |
-|   [5]   | Others           | Debug log only (`--debug`)   |
+|   [5]   | Others           | Debug log only (`--debug`)     |
 
 ### [2.2][SESSIONSTART_PATTERN]
 

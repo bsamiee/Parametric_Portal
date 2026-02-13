@@ -51,10 +51,6 @@ class _B:
     timeout: int = 60
     blocked: frozenset[str] = frozenset(("rm -rf", "sudo"))
     field_re: re.Pattern[str] = field(default_factory=lambda: re.compile(r"^([^:]+):(.*)$"))
-    groups: tuple[tuple[str, tuple[str, ...]], ...] = (
-        ("quality", ("check", "lint", "typecheck")),
-        ("build", ("build", "dev")),
-    )
 
 B: Final[_B] = _B()
 DEBUG: Final[bool] = os.environ.get("CLAUDE_HOOK_DEBUG", "").lower() in ("1", "true")
@@ -63,7 +59,7 @@ _debug = lambda msg: DEBUG and print(f"[hook] {msg}", file=sys.stderr)
 
 ---
 ## [4][DISPATCH]
->**Dictum:** *Handler tables route all behavior—zero conditionals.*
+>**Dictum:** *Handler tables route all behavior — zero conditionals.*
 
 <br>
 
@@ -73,7 +69,7 @@ handlers: dict[str, Handler] = {
     "project": (lambda a: ("npx", "nx", "show", "project", a["name"], "--json"), lambda o, a: {"name": a["name"], "project": json.loads(o)}),
 }
 
-# Decorator registration — auto-registers function by name
+# Decorator registration
 _tools: dict[str, tuple[Callable, dict]] = {}
 def tool(**cfg: Any) -> Callable[[Callable], Callable]:
     return lambda fn: (_tools.__setitem__(fn.__name__, (fn, {"method": "POST", **cfg})), fn)[1]
@@ -99,13 +95,6 @@ def _fold_line(state: ParseState, line: str) -> ParseState:
         case _:
             return state
 
-# Walrus in match guard
-match cmd:
-    case tuple() if (r := subprocess.run(cmd, capture_output=True, text=True)).returncode == 0:
-        output = r.stdout
-    case _:
-        output = None
-
 # Exhaustive matching with assert_never
 type Action = Literal["allow", "block", "ask"]
 def handle(action: Action) -> int:
@@ -122,13 +111,10 @@ def handle(action: Action) -> int:
 <br>
 
 ```python
-# Walrus in comprehension — assignment within filter
+# Walrus in comprehension
 lines = [line for n, g in B.groups if (line := f'<group name="{n}">{" ".join(g)}</group>')]
 
-# Expression-based argparse — list comprehension for side effects
-[p.add_argument(a, **o) for a, o in [("command", {"choices": handlers.keys()}), ("--name", {})]]
-
-# Ternary chain — single expression, no if/else block
+# Ternary chain
 result = {"status": "success", **fmt(o, a)} if o else {"status": "error", "msg": f"{cmd} failed"}
 ```
 
@@ -145,17 +131,8 @@ def _format_xml(skills: list[SkillEntry], targets: frozenset[str]) -> str:
         f'  <skills count="{len(skills)}">',
         *[f'    <skill name="{s.name}">{s.trigger}</skill>' for s in skills],
         "  </skills>",
-        '  <nx_targets command="nx run-many -t {target}">',
-        *[f'    <group name="{n}">{" ".join(t for t in g if t in targets)}</group>' for n, g in B.groups],
-        "  </nx_targets>",
         "</session_context>",
     ])
-
-def main() -> None:
-    match (skills, targets):
-        case ([], ts) if not ts: pass
-        case _: print(_format_xml(skills, targets))
-    sys.exit(0)
 ```
 
 ---
@@ -164,15 +141,11 @@ def main() -> None:
 
 <br>
 
-| [FORBIDDEN] | [REQUIRED] |
-|-------------|------------|
-| `os.system(f"...{input}")` | `subprocess.run([...], shell=False)` |
-| `eval()` / `exec()` | `json.load(sys.stdin)` |
-| `path.startswith(prefix)` | `Path(p).resolve().is_relative_to(root)` |
-
-```python
-safe = lambda p: Path(p).resolve().is_relative_to(Path(os.environ.get("CLAUDE_PROJECT_DIR", ".")).resolve())
-```
+| [FORBIDDEN]                | [REQUIRED]                               |
+| -------------------------- | ---------------------------------------- |
+| `os.system(f"...{input}")` | `subprocess.run([...], shell=False)`     |
+| `eval()` / `exec()`        | `json.load(sys.stdin)`                   |
+| `path.startswith(prefix)`  | `Path(p).resolve().is_relative_to(root)` |
 
 ---
 ## [9][TOOLING]
@@ -190,7 +163,7 @@ target-version = "py314"
 select = ["E", "F", "W", "B", "I", "UP", "ANN", "S", "C90"]
 ```
 
-| [GATE] | [COMMAND] |
-|--------|-----------|
-| Type | `basedpyright .` |
-| Lint | `ruff check --fix . && ruff format .` |
+| [GATE] | [COMMAND]                             |
+| ------ | ------------------------------------- |
+| Type   | `basedpyright .`                      |
+| Lint   | `ruff check --fix . && ruff format .` |

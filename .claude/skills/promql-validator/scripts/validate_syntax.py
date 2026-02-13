@@ -73,29 +73,15 @@ CMDS: CommandRegistry = {}
 
 
 def _check_delimiters(query: str) -> list[Finding]:
-    """Check balanced brackets, braces, parens, and quotes via single-pass fold.
-
-    Args:
-        query: PromQL query string to validate.
-
-    Returns:
-        List of finding dicts for unmatched/unclosed delimiters.
-    """
-    def _fold(
-        state: tuple[dict[str, list[int]], list[Finding], bool, bool],
-        indexed: tuple[int, str],
-    ) -> tuple[dict[str, list[int]], list[Finding], bool, bool]:
+    """Check balanced brackets, braces, parens, and quotes via single-pass fold."""
+    def _fold(state: tuple[dict[str, list[int]], list[Finding], bool, bool], indexed: tuple[int, str]) -> tuple[dict[str, list[int]], list[Finding], bool, bool]:
         stacks, errors, in_string, escape = state
         position, character = indexed
         match character:
-            case _ if escape:
-                return (stacks, errors, in_string, False)
-            case '\\':
-                return (stacks, errors, in_string, True)
-            case '"':
-                return (stacks, errors, not in_string, False)
-            case _ if in_string:
-                return (stacks, errors, in_string, False)
+            case _ if escape: return (stacks, errors, in_string, False)
+            case '\\': return (stacks, errors, in_string, True)
+            case '"': return (stacks, errors, not in_string, False)
+            case _ if in_string: return (stacks, errors, in_string, False)
             case opener if opener in stacks:
                 stacks[opener].append(position)
                 return (stacks, errors, False, False)
@@ -107,22 +93,9 @@ def _check_delimiters(query: str) -> list[Finding]:
                 else:
                     stacks[opener].pop()
                 return (stacks, errors, False, False)
-            case _:
-                return (stacks, errors, False, False)
-
-    stacks, errors, in_string, _ = reduce(
-        _fold,
-        enumerate(query),
-        ({'[': [], '{': [], '(': []}, [], False, False),
-    )
-
-    unclosed_string = [{'type': 'unclosed_string', 'message': 'Unclosed string literal', 'severity': 'error'}] if in_string else []
-    unclosed_delimiters = [
-        {'type': f'unclosed_{_OPENER_LABELS[opener]}', 'message': f'Unclosed {_OPENER_LABELS[opener]} at position {pos}', 'position': pos, 'severity': 'error'}
-        for opener, stack in stacks.items()
-        for pos in stack
-    ]
-    return errors + unclosed_string + unclosed_delimiters
+            case _: return (stacks, errors, False, False)
+    stacks, errors, in_string, _ = reduce(_fold, enumerate(query), ({'[': [], '{': [], '(': []}, [], False, False))
+    return errors + ([{'type': 'unclosed_string', 'message': 'Unclosed string literal', 'severity': 'error'}] if in_string else []) + [{'type': f'unclosed_{_OPENER_LABELS[opener]}', 'message': f'Unclosed {_OPENER_LABELS[opener]} at position {pos}', 'position': pos, 'severity': 'error'} for opener, stack in stacks.items() for pos in stack]
 
 
 def _check_selectors(query: str) -> list[Finding]:
@@ -135,30 +108,24 @@ def _check_selectors(query: str) -> list[Finding]:
         List of finding dicts for selector issues.
     """
     query_clean = RE_STRING_LITERAL.sub('""', query)
+    findings: list[Finding] = []
 
-    empty_matcher = (
-        [{'type': 'empty_label_matcher', 'message': 'Empty label matcher {} may match many series', 'severity': 'warning'}]
-        if _RE_EMPTY_MATCHER.search(query_clean)
-        else []
-    )
+    if _RE_EMPTY_MATCHER.search(query_clean):
+        findings.append({'type': 'empty_label_matcher', 'message': 'Empty label matcher {} may match many series', 'severity': 'warning'})
 
-    utf8_warnings = [
-        (
-            {'type': 'utf8_metric_unnecessary_quoting', 'message': f'"{name}" valid in classic format, quoting unnecessary', 'severity': 'info'}
-            if RE_METRIC_NAME.fullmatch(name)
-            else {'type': 'invalid_utf8_metric', 'message': f'Invalid UTF-8 metric name: "{name}"', 'severity': 'error'}
-            if not name.strip() or '\x00' in name
-            else None
-        )
-        for name in (match.group(1) for match in _RE_UTF8_METRIC.finditer(query))
-    ]
+    for match in _RE_UTF8_METRIC.finditer(query):
+        name = match.group(1)
+        if RE_METRIC_NAME.fullmatch(name):
+            findings.append({'type': 'utf8_metric_unnecessary_quoting', 'message': f'"{name}" valid in classic format, quoting unnecessary', 'severity': 'info'})
+        elif not name.strip() or '\x00' in name:
+            findings.append({'type': 'invalid_utf8_metric', 'message': f'Invalid UTF-8 metric name: "{name}"', 'severity': 'error'})
 
-    dot_warnings = [
+    findings.extend(
         {'type': 'possible_utf8_syntax_error', 'message': f'"{match.group(1)}" has dots -- use {{"{match.group(1)}"}} for UTF-8 metric', 'severity': 'warning'}
         for match in _RE_DOT_METRIC_IN_SELECTOR.finditer(query_clean)
-    ]
+    )
 
-    return empty_matcher + [warning for warning in utf8_warnings if warning is not None] + dot_warnings
+    return findings
 
 
 def _check_time_ranges(query: str) -> list[Finding]:
@@ -170,48 +137,24 @@ def _check_time_ranges(query: str) -> list[Finding]:
     Returns:
         List of finding dicts for invalid durations and subqueries.
     """
-    def _validate_range(raw: str) -> list[Finding]:
+    findings: list[Finding] = []
+    for raw in _RE_RANGE_CONTENT.findall(query):
         content = raw.strip()
-        match content.split(':'):
-            case [single] if not _RE_DURATION_FULL.fullmatch(single):
-                return [{'type': 'invalid_duration', 'message': f'Invalid duration: {content}', 'severity': 'error'}]
-            case parts if len(parts) > 2:
-                return [{'type': 'invalid_subquery', 'message': f'Invalid subquery: [{content}]', 'severity': 'error'}]
-            case parts:
-                return [
-                    {'type': 'invalid_duration', 'message': f'Invalid duration: {part}', 'severity': 'error'}
-                    for part in (segment.strip() for segment in parts)
-                    if part and not _RE_DURATION_FULL.fullmatch(part)
-                ]
-
-    return [
-        finding
-        for raw in _RE_RANGE_CONTENT.findall(query)
-        for finding in _validate_range(raw)
-    ]
+        parts = content.split(':')
+        if len(parts) == 1 and not _RE_DURATION_FULL.fullmatch(content):
+            findings.append({'type': 'invalid_duration', 'message': f'Invalid duration: {content}', 'severity': 'error'})
+        elif len(parts) > 2:
+            findings.append({'type': 'invalid_subquery', 'message': f'Invalid subquery: [{content}]', 'severity': 'error'})
+        else:
+            findings.extend({'type': 'invalid_duration', 'message': f'Invalid duration: {part}', 'severity': 'error'} for part in (segment.strip() for segment in parts) if part and not _RE_DURATION_FULL.fullmatch(part))
+    return findings
 
 
 def _check_functions(query: str) -> list[Finding]:
-    """Check for unknown function names with typo suggestions.
-
-    Args:
-        query: PromQL query string to validate.
-
-    Returns:
-        List of finding dicts for unknown functions with Levenshtein-based suggestions.
-    """
+    """Check for unknown function names with typo suggestions."""
     return [
-        {
-            'type': 'unknown_function',
-            'message': f'Unknown function: {func}' + (
-                f'. Did you mean: {", ".join(close)}?'
-                if (close := [candidate for candidate in FUNCTIONS if abs(len(func.lower()) - len(candidate)) <= 2 and levenshtein(func.lower(), candidate) <= 2][:3])
-                else ''
-            ),
-            'severity': 'error',
-        }
-        for func in RE_FUNC_CALL.findall(query)
-        if func.lower() not in KEYWORDS and func.lower() not in FUNCTIONS
+        {'type': 'unknown_function', 'message': f'Unknown function: {func}' + (f'. Did you mean: {", ".join(close)}?' if (close := [c for c in FUNCTIONS if abs(len(func.lower()) - len(c)) <= 2 and levenshtein(func.lower(), c) <= 2][:3]) else ''), 'severity': 'error'}
+        for func in RE_FUNC_CALL.findall(query) if func.lower() not in KEYWORDS and func.lower() not in FUNCTIONS
     ]
 
 

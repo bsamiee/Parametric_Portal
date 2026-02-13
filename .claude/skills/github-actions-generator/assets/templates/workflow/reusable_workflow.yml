@@ -1,27 +1,107 @@
-# [NAME] -- [DESCRIPTION]
-# Usage: uses: [OWNER]/[REPO]/.github/workflows/[FILE]@[REF]
-name: [NAME]
+# [WORKFLOW_NAME] -- Reusable workflow: [DESCRIPTION]
+# Caller: uses: [OWNER]/[REPO]/.github/workflows/[FILE]@[REF]
+# ┌─────────────────────────────────────────────────────────────────────────────┐
+# │ Placeholders: [UPPER_SNAKE_CASE] — replace before use.                      │
+# │  Identity:  [WORKFLOW_NAME], [DESCRIPTION], [OWNER], [REPO], [FILE], [REF]. │
+# │  Runtime:   [RUNTIME_VERSION], [ENABLE_CMD]                                 │
+# │  Package:   [PACKAGE_MANAGER], [INSTALL_CMD], [BUILD_CMD], [BUILD_PATH]     │
+# │  Secrets:   [REGISTRY_TOKEN]                                                │
+# │  Extract:   [VERSION_EXTRACT_CMD] — see examples below                      │
+# └─────────────────────────────────────────────────────────────────────────────┘
+# [VERSION_EXTRACT_CMD] examples:
+#   Node:   node -p 'require("./package.json").version'
+#   Python: python -c 'import tomllib; print(tomllib.load(open("pyproject.toml","rb"))["project"]["version"])'
+#   Cargo:  cargo metadata --no-deps --format-version=1 | jq -r '.packages[0].version'
+#   Go:     git describe --tags --abbrev=0 | sed 's/^v//'
+#   .NET:   dotnet msbuild -getProperty:Version
+name: [WORKFLOW_NAME]
 on:
   workflow_call:
     inputs:
-      [INPUT]: { description: '[DESC]', required: true, type: string, default: '[DEFAULT]' }
+      runtime-version:
+        description: 'Runtime version (e.g., 24, 3.12, 1.23)'
+        required: true
+        type: string
+      environment:
+        description: 'Target deployment environment'
+        required: false
+        type: string
+        default: 'staging'
+      enable-attestation:
+        description: 'Generate SLSA provenance attestation on main'
+        required: false
+        type: boolean
+        default: true
     secrets:
-      [SECRET]: { description: '[DESC]', required: false }  # required: false when using secrets: inherit
+      '[REGISTRY_TOKEN]':
+        description: 'Package registry auth token'
+        required: false
     outputs:
-      [OUTPUT]: { description: '[DESC]', value: '${{ jobs.[JOB].outputs.[KEY] }}' }
+      artifact-id:
+        description: 'Uploaded artifact ID'
+        value: ${{ jobs.build.outputs.artifact-id }}
+      version:
+        description: 'Resolved package version'
+        value: ${{ jobs.build.outputs.version }}
 
-permissions: { contents: read }
+permissions: {}
 
 jobs:
-  [JOB]:
+  build:
     runs-on: ubuntu-latest
-    timeout-minutes: [TIMEOUT]
-    permissions: { contents: read, [SCOPE]: read }
-    outputs: { [KEY]: '${{ steps.[STEP].outputs.[NAME] }}' }
+    timeout-minutes: 30
+    permissions: { contents: read, id-token: write, attestations: write }
+    outputs:
+      artifact-id: ${{ steps.upload.outputs.artifact-id }}
+      version: ${{ steps.version.outputs.value }}
     steps:
+      - uses: step-security/harden-runner@5ef0c079ce82195b2a36a210272d6b661572d83e # v2.14.2
+        with: { egress-policy: audit }
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with: { fetch-depth: 1 }
-      - id: [STEP]
-        run: |
-          # inputs.${{ inputs.[INPUT] }}, secrets.${{ secrets.[SECRET] }}
-          echo "[NAME]=[VALUE]" >> $GITHUB_OUTPUT
+        with: { persist-credentials: false }
+      - uses: actions/setup-node@6044e13b5dc448c55e2357c09f80417699197238 # v6.2.0
+        with: { node-version: '${{ inputs.runtime-version }}', cache: '[PACKAGE_MANAGER]' }
+      - run: '[ENABLE_CMD]'
+      - run: '[INSTALL_CMD]'
+      - id: version
+        run: echo "value=$([VERSION_EXTRACT_CMD])" >> "$GITHUB_OUTPUT"
+      - run: '[BUILD_CMD]'
+        env: { NODE_AUTH_TOKEN: '${{ secrets.[REGISTRY_TOKEN] }}' }
+      - id: upload
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: build-${{ github.sha }}
+          path: '[BUILD_PATH]'
+          if-no-files-found: error
+      - if: inputs.enable-attestation && github.ref == 'refs/heads/main'
+        uses: actions/attest-build-provenance@96278af6caaf10aea03fd8d33a09a777ca52d62f # v3.2.0
+        with: { subject-path: '[BUILD_PATH]' }
+      - run: |
+          echo "## Build Summary" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Version**: \`${{ steps.version.outputs.value }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Artifact**: \`${{ steps.upload.outputs.artifact-id }}\`" >> "$GITHUB_STEP_SUMMARY"
+
+# --- CALLER EXAMPLE (copy into your workflow) ---------------------------------
+# name: CI
+# on:
+#   push: { branches: [main] }
+#   pull_request: { branches: [main] }
+# permissions: {}
+# jobs:
+#   ci:
+#     uses: [OWNER]/[REPO]/.github/workflows/[FILE]@[REF]
+#     permissions: { contents: read, id-token: write, attestations: write }
+#     with:
+#       runtime-version: '24'
+#       environment: production
+#     secrets:
+#       [REGISTRY_TOKEN]: ${{ secrets.NPM_TOKEN }}
+#   consume:
+#     needs: ci
+#     runs-on: ubuntu-latest
+#     timeout-minutes: 5
+#     permissions: { contents: read }
+#     steps:
+#       - uses: step-security/harden-runner@5ef0c079ce82195b2a36a210272d6b661572d83e # v2.14.2
+#         with: { egress-policy: audit }
+#       - run: echo "Built v${{ needs.ci.outputs.version }}, artifact ${{ needs.ci.outputs.artifact-id }}"

@@ -1,127 +1,136 @@
-# LogQL Best Practices
+# [H1][BEST_PRACTICES]
+>**Dictum:** *Performance patterns prevent production query failures.*
 
-## Performance Checklist
+<br>
 
-- [ ] Stream selectors as specific as possible (`{ns="prod", app="api"}` not `{ns="prod"}`) -- reduces chunk scan volume
-- [ ] Line filters BEFORE parsers (`|= "error" | json` not `| json |= "error"`) -- substring check is O(1), parser is O(n)
-- [ ] Pattern match `|>` over regex `|~` when possible (10x faster) -- compiled wildcards vs regex engine
-- [ ] Exact string match over regex (`|= "ERROR"` not `|~ "ERROR"`) -- bypasses regex compilation
-- [ ] Structured metadata filters BEFORE parsers for bloom acceleration (3.3+) -- bloom provides O(1) chunk skipping
-- [ ] Shortest time range for use case (`[1m]` real-time, `[1h]` trends) -- reduces chunks scanned
-- [ ] Extract only needed JSON fields (`| json level, status` not `| json`) -- reduces allocation per line (improved in 3.6)
-- [ ] `by` over `without` for aggregation grouping -- explicit label control
-- [ ] Drop unneeded labels before aggregation (`| drop instance, pod`) -- reduces series cardinality
-- [ ] `__error__=""` in production dashboards to exclude parse failures -- prevents noisy results
-- [ ] `vector(0)` fallback in alerting rules for sparse logs -- prevents "no data" flapping
-- [ ] Metric queries for dashboards/alerts, log queries for exploration -- metric queries are pre-aggregated
+---
+## [1][PERFORMANCE_CHECKLIST]
+>**Dictum:** *Specific selectors and ordered pipelines minimize resource consumption.*
 
-## Pipeline Ordering (Critical for Performance)
+<br>
+
+- [ ] Stream selectors specific (`{ns="prod", app="api"}` not `{ns="prod"}`) -- reduces chunk scan volume.
+- [ ] Line filters BEFORE parsers (`|= "error" | json` not `| json |= "error"`) -- O(1) vs O(n).
+- [ ] Pattern match `|>` over regex `|~` (10x faster) -- compiled wildcards vs regex engine.
+- [ ] Structured metadata filters BEFORE parsers for bloom acceleration (3.3+) -- O(1) chunk skipping.
+- [ ] Extract only needed JSON fields (`| json level, status` not `| json`) -- reduced allocations (3.6).
+- [ ] Drop unneeded labels before aggregation (`| drop instance, pod`) -- reduces series cardinality.
+- [ ] `__error__=""` in production dashboards to exclude parse failures.
+- [ ] `vector(0)` fallback in alerting rules for sparse logs -- prevents "no data" flapping.
+- [ ] Metric queries for dashboards/alerts, log queries for exploration.
+
+---
+## [2][PIPELINE_ORDERING]
+>**Dictum:** *Each stage filters before the next -- expensive operations later means fewer entries processed.*
+
+<br>
 
 ```
 {stream} -> line filter -> decolorize -> struct metadata -> parser -> label filter -> keep/drop -> format -> aggregate
 ```
 
-[RULE] Each stage filters before the next. Moving expensive operations earlier wastes resources because they process entries that cheaper stages would have eliminated.
+---
+## [3][PARSER_SELECTION]
+>**Dictum:** *Parser choice determines per-line processing cost.*
 
-## Parser Selection
+<br>
 
-| #  | Parser | Use When | Why This Order |
-|----|--------|----------|----------------|
-| 1  | `pattern` | Fixed-delimiter structured text | No regex engine, compiled once, lowest overhead |
-| 2  | `logfmt` | `key=value` pairs | Specialized parser, reduced allocations in 3.6 |
-| 3  | `json` | JSON logs (specify fields for perf) | Field selection reduces allocations in 3.6 |
-| 4  | `regexp` | Complex extraction, last resort | Full regex engine, highest per-line cost |
+| [INDEX] | [PARSER]      | [USE_WHEN]                       | [WHY]                                            |
+| :-----: | ------------- | -------------------------------- | ------------------------------------------------ |
+|   [1]   | **`pattern`** | Fixed-delimiter structured text. | No regex engine, compiled once, lowest overhead. |
+|   [2]   | **`logfmt`**  | `key=value` pairs.               | Specialized parser, reduced allocations in 3.6.  |
+|   [3]   | **`json`**    | JSON logs (specify fields).      | Field selection reduces allocations in 3.6.      |
+|   [4]   | **`regexp`**  | Complex extraction, last resort. | Full regex engine, highest per-line cost.        |
 
-`logfmt` flags: `--strict` (fail on malformed -- populates `__error__`), `--keep-empty` (retain standalone keys as empty strings).
-
+`logfmt` flags: `--strict` (fail on malformed), `--keep-empty` (retain standalone keys).
 JSON field access: dot notation (`request.method`), bracket (`headers["User-Agent"]`), array (`items[0]`).
+`unpack`: Decodes packed JSON from Promtail/Alloy `pack` stage.
 
-`unpack`: Decodes packed JSON from Promtail's `pack` stage (also supported by Alloy's `loki.process`).
+---
+## [4][CARDINALITY_RULES]
+>**Dictum:** *Label cardinality determines stream count and ingestion cost.*
 
-## Cardinality Rules
+<br>
 
-**Good labels** (low cardinality): `namespace`, `app`, `environment`, `cluster`, `level`, `job`
+**Good labels** (low cardinality): `namespace`, `app`, `environment`, `cluster`, `level`, `job`.<br>
+**Bad labels** (use line filters or structured metadata): `user_id`, `trace_id`, `request_id`, `ip_address`.
 
-**Bad labels** (high cardinality -- use line filters or structured metadata): `user_id`, `trace_id`, `request_id`, `session_id`, `ip_address`
+High-cardinality labels in stream selectors create millions of streams, causing ingestion failures and OOM.
 
-Why: Each unique label combination creates a separate stream. High-cardinality labels in stream selectors create millions of streams, causing ingestion failures and OOM.
+---
+## [5][STRUCTURED_METADATA]
+>**Dictum:** *Structured metadata enables high-cardinality filtering without index impact.*
+
+<br>
+
+NOT indexed -- no cardinality impact. Filter AFTER stream selector, BEFORE parsers for bloom acceleration.
+
+| [INDEX] | [METADATA]       | [CARDINALITY] | [RECOMMENDATION]                 |
+| :-----: | ---------------- | ------------- | -------------------------------- |
+|   [1]   | **`trace_id`**   | ~1M/day       | Structured metadata, debug only. |
+|   [2]   | **`user_id`**    | ~100K         | Structured metadata with filter. |
+|   [3]   | **`pod_name`**   | ~100          | Regular label (low cardinality). |
+|   [4]   | **`request_id`** | ~1B           | NOT suitable -- use tracing.     |
+
+<br>
+
+### [5.1][BLOOM_ACCELERATION]
+
+Accelerated forms: string equality (`| key="value"`), OR (`| key="a" or key="b"`), simple regex internally converted.
+Place BEFORE parsers -- bloom filters provide O(1) membership testing, skipping non-matching chunks.
 
 ```logql
-# GOOD: filter after parsing (no stream cardinality impact)
-{app="api"} | json | user_id="12345"
-# BAD: high-cardinality label in stream selector (creates stream per user)
-{app="api", user_id="12345"}
+{cluster="prod"} | detected_level="error" | json                  # ACCELERATED
+{cluster="prod"} | json | detected_level="error"                  # NOT accelerated (after parser)
 ```
 
-## Structured Metadata (3.0+)
+---
+## [6][ALERTING]
+>**Dictum:** *Alerts require metric queries -- log queries cannot fire alert rules.*
 
-- NOT indexed -- no cardinality impact, requires scanning
-- Filter AFTER stream selector, BEFORE parsers for bloom acceleration
-- Ideal for: trace_id, user_id, pod UIDs
+<br>
 
-| Metadata | Cardinality | Recommendation | Why |
-|----------|-------------|----------------|-----|
-| `trace_id` | ~1M/day | Structured metadata, query debugging only | Too high for labels, too useful to discard |
-| `user_id` | ~100K | Structured metadata OK with filter | Bloom acceleration makes filtering fast |
-| `pod_name` | ~100 | Regular label (low cardinality) | Low enough for indexing, high query value |
-| `request_id` | ~1B | NOT suitable -- use tracing | Even structured metadata scanning is too slow at this volume |
+- `absent_over_time({app="svc"}[5m])` for dead service detection.
+- `or vector(0)` prevents "no data" flapping (parentheses required -- `or` binds looser than `>`).
+- `limit` is API parameter (`&limit=100`), not a pipeline operator.
 
-### Bloom Filter Acceleration (3.3+)
+---
+## [7][DECOLORIZE]
+>**Dictum:** *ANSI color codes break structured parsers.*
 
-Only these filter forms are accelerated:
-- String equality: `| key="value"`
-- OR: `| detected_level="error" or detected_level="warn"`
-- Simple regex converted internally: `| key=~"value1|value2"`
+<br>
 
-Why bloom filters work: Bloom filters provide O(1) membership testing against chunk metadata. When a filter is placed BEFORE parsers, Loki can skip entire chunks that definitely do not contain matching entries. Filters AFTER parsers bypass this optimization because the chunk has already been decompressed and parsed.
+Strip first: `| decolorize | logfmt | level="error"`.
+Debug: `{app="api"} |~ "\\x1b\\["` to detect ANSI presence.
 
-```logql
-# ACCELERATED (bloom skips non-matching chunks)
-{cluster="prod"} | detected_level="error" | json
-# NOT ACCELERATED (chunk already decompressed for parser)
-{cluster="prod"} | json | detected_level="error"
-```
+---
+## [8][ERROR_DEBUGGING]
+>**Dictum:** *Parse errors silently drop log entries -- debug with `__error__` label.*
 
-## Alerting
+<br>
 
-- Alerts require metric queries (aggregations), not log queries -- Loki evaluates metric expressions for alerting
-- Set thresholds based on SLOs or historical baselines -- prevents alert fatigue
-- `absent_over_time({app="svc"}[5m])` detects dead services -- fires when no logs exist in window
-- `or vector(0)` prevents "no data" flapping on sparse logs (parentheses required around `or`) -- `or` binds looser than comparison operators
-- `limit` is API parameter (`&limit=100`), not a pipeline operator -- do not generate `| limit N`
-
-## Decolorize Before Parsing
-
-ANSI color codes break `logfmt` and `json` parsers because escape sequences appear inside key/value boundaries. Strip first:
-```logql
-{app="api"} | decolorize | logfmt | level="error"
-# Debug: check if ANSI codes are present
-{app="api"} |~ "\\x1b\\["
-```
-
-## __error__ Debugging
-
-| Error Value | Cause | Fix |
-|-------------|-------|-----|
-| `JSONParserErr` | Invalid JSON | Check log format, use `--strict` to isolate |
-| `LogfmtParserErr` | Invalid logfmt | Verify key=value format, check ANSI codes |
-| `PatternParserErr` | Pattern did not match | Adjust pattern template to match log structure |
-| `RegexpParserErr` | Regex did not match | Test regex against sample logs |
+| [INDEX] | [ERROR_VALUE]          | [CAUSE]           | [FIX]                                        |
+| :-----: | ---------------------- | ----------------- | -------------------------------------------- |
+|   [1]   | **`JSONParserErr`**    | Invalid JSON.     | Check log format, use `--strict` to isolate. |
+|   [2]   | **`LogfmtParserErr`**  | Invalid logfmt.   | Verify key=value format, check ANSI codes.   |
+|   [3]   | **`PatternParserErr`** | Pattern mismatch. | Adjust pattern template.                     |
 
 ```logql
-# Debug: show failing lines with error type
+# Debug: show failing lines
 {app="api"} | json | __error__ != "" | line_format "{{.__error__}}: {{.__line__}}"
-# Count by error type to find most common parse failures
+# Count by error type
 sum by (__error__) (count_over_time({app="api"} | json | __error__ != "" [5m]))
-# Production: exclude parse failures from results
+# Production: exclude failures
 {app="api"} | json | __error__="" | level="error"
 ```
 
-## Recording Rules
+---
+## [9][RECORDING_RULES]
+>**Dictum:** *Precompute expensive queries as metrics for dashboard and alert reuse.*
 
-Precompute expensive queries as metrics. Use when: frequent dashboard queries, complex aggregations, timeout-prone queries.
+<br>
 
-Why: Recording rules evaluate once per interval and store results as metrics, turning O(scan) log queries into O(1) metric lookups.
+Use when: frequent dashboard queries, complex aggregations, timeout-prone.
 
 ```yaml
 groups:
@@ -131,48 +140,32 @@ groups:
       - record: app:error_rate:1m
         expr: sum by (app) (rate({job="kubernetes-pods"} | json | level="error" [1m]))
         labels: { source: loki_recording_rule }
-  - name: alerting_rules
-    interval: 1m
-    rules:
-      - alert: HighErrorRate
-        expr: (sum by (app) (rate({job="app"} | json | level="error" [5m])) / sum by (app) (rate({job="app"}[5m]))) > 0.05
-        for: 10m
-        labels: { severity: warning }
-        annotations:
-          summary: "High error rate for {{ $labels.app }}"
 ```
 
-## Anti-Patterns
+---
+## [10][ANTI_PATTERNS]
+>**Dictum:** *Common mistakes produce slow queries or incorrect results.*
 
-| Anti-Pattern | Fix | Why |
-|--------------|-----|-----|
-| `{app="api", user_id="x"}` | `{app="api"} \| json \| user_id="x"` | user_id in stream selector creates stream per user |
-| `\| json \| json \| json` | `\| json` (once is enough) | Multiple parses waste CPU, results are identical |
-| `\|~ "GET"` for simple string | `\|= "GET"` (exact match faster) | Regex compilation overhead for literal string |
-| `\|~ "error\|fatal"` for structured logs | `\|> "<_> level=error <_>"` (pattern match 10x faster) | Pattern compiler is simpler than regex engine |
-| `sum(rate(...[5m]))` without grouping | `sum by (ns, app) (rate(...[5m]))` | Loses all dimensional data for debugging |
-| `rate(...[24h])` for real-time | `rate(...[5m])` | 24h scans too many chunks for real-time panels |
-| `\| json` then filter | `\|= "error" \| json` (line filter first) | Parser processes all lines; line filter skips non-matching |
-| Filter after parser for struct metadata | Filter BEFORE parser for bloom acceleration | Post-parser filter bypasses O(1) bloom chunk skipping |
+<br>
 
-## Non-Existent Features
+| [INDEX] | [ANTI_PATTERN]                            | [FIX]                                        |
+| :-----: | ----------------------------------------- | -------------------------------------------- |
+|   [1]   | **`{app="api", user_id="x"}`**            | `{app="api"} \| json \| user_id="x"`.        |
+|   [2]   | **`\|~ "GET"` for simple string**         | `\|= "GET"` (exact match faster).            |
+|   [3]   | **`\|~ "error\|fatal"` for structured**   | `\|> "<_> level=error <_>"` (10x faster).    |
+|   [4]   | **`sum(rate(...[5m]))` without grouping** | `sum by (ns, app) (rate(...[5m]))`.          |
+|   [5]   | **`\| json` then filter**                 | `\|= "error" \| json` (line filter first).   |
+|   [6]   | **Filter after parser for struct meta**   | Filter BEFORE parser for bloom acceleration. |
 
-- **No `| dedup`**: UI-level in Grafana Explore. Programmatic: `sum by (msg) (count_over_time(...)) > 0`
-- **No `| distinct`**: Reverted PR #8662. Use `count(count by (field) (...))`
-- **No `| limit N`**: API param `&limit=100`, Grafana "Line limit", logcli `--limit=100`
+---
+## [11][PROMTAIL_MIGRATION]
+>**Dictum:** *Promtail EOL March 2, 2026 -- migrate to Alloy.*
 
-## Alloy Pipeline Reference
+<br>
 
-For pipeline configuration, refer to `grafana alloy` MCP or `infrastructure/src/deploy.ts` lines 29-36.
-
-## Promtail Migration (EOL March 2, 2026)
-
-Promtail was deprecated in Loki 3.5 with EOL March 2, 2026. Migration to Alloy:
-
-| Promtail | Alloy Equivalent |
-|----------|-----------------|
-| `scrape_configs` | `loki.source.file` + `loki.relabel` |
-| `pipeline_stages.json` | `loki.process` with `stage.json` |
-| `pipeline_stages.regex` | `loki.process` with `stage.regex` |
-| `pipeline_stages.pack` | `loki.process` with `stage.pack` (consumed by `| unpack`) |
-| `pipeline_stages.multiline` | `loki.process` with `stage.multiline` |
+| [INDEX] | [PROMTAIL]                      | [ALLOY_EQUIVALENT]                     |
+| :-----: | ------------------------------- | -------------------------------------- |
+|   [1]   | **`scrape_configs`**            | `loki.source.file` + `loki.relabel`.   |
+|   [2]   | **`pipeline_stages.json`**      | `loki.process` with `stage.json`.      |
+|   [3]   | **`pipeline_stages.regex`**     | `loki.process` with `stage.regex`.     |
+|   [4]   | **`pipeline_stages.multiline`** | `loki.process` with `stage.multiline`. |

@@ -1,45 +1,89 @@
+# [ACTION_NAME] -- [DESCRIPTION]
+# NOTE: harden-runner is caller's responsibility — actions are steps, not jobs.
+# ┌─────────────────────────────────────────────────────────────────────────────┐
+# │ Placeholders: [UPPER_SNAKE_CASE] — replace before use.                      │
+# │  Identity:    [ACTION_NAME], [DESCRIPTION], [AUTHOR_NAME]                   │
+# │  Runtime:     [RUNTIME_VERSION] (default: '24')                             │
+# │  Package:     [PACKAGE_MANAGER] (pnpm|npm|yarn|bun), [INSTALL_CMD]          │
+# │  Build:       [MAIN_COMMAND], [OUTPUT_VALUE]                                │
+# │  Branding:    [ICON_NAME], [COLOR]                                          │
+# │  Cleanup:     [CLEANUP_PATTERN] (glob for temp files)                       │
+# │                                                                             │
+# │  Node 20 EOL: April 2026. Forced node24 migration: March 4, 2026.           │
+# │  Composite actions lack pre/post lifecycle — use if: always() for cleanup.  │
+# └─────────────────────────────────────────────────────────────────────────────┘
 name: '[ACTION_NAME]'
-description: '[ACTION_DESCRIPTION]'
+description: '[DESCRIPTION]'
 author: '[AUTHOR_NAME]'
 
 inputs:
-  [input-name]:
-    description: '[INPUT_DESCRIPTION]'
-    required: [true/false]
-    default: '[DEFAULT_VALUE]'
+  runtime-version:
+    description: 'Runtime version to install'
+    required: false
+    default: '24'
+  working-directory:
+    description: 'Directory containing project manifest'
+    required: false
+    default: '.'
 
 outputs:
-  [output-name]:
+  result:
     description: '[OUTPUT_DESCRIPTION]'
-    value: ${{ steps.[step-id].outputs.[output-name] }}
+    value: ${{ steps.main.outputs.result }}
 
 branding:
   icon: '[ICON_NAME]'
-  color: '[COLOR]'  # white|yellow|blue|green|orange|red|purple|gray-dark
+  color: '[COLOR]'  # white | yellow | blue | green | orange | red | purple | gray-dark
 
 runs:
   using: 'composite'
   steps:
+    # --- Validate inputs before any work ---
     - name: Validate inputs
       shell: bash
       run: |
-        if [ -z "${{ inputs.[input-name] }}" ]; then
-          echo "::error::Input [input-name] is required"; exit 1
+        if [[ -z "$VERSION" ]]; then
+          echo "::error title=Missing Input::runtime-version is required"
+          exit 1
         fi
+        if [[ ! -f "$WORKDIR/package.json" ]]; then
+          echo "::error title=No Manifest::package.json not found in $WORKDIR"
+          exit 1
+        fi
+      env:
+        VERSION: ${{ inputs.runtime-version }}
+        WORKDIR: ${{ inputs.working-directory }}
 
-    - name: [SETUP_STEP_NAME]
-      uses: [SETUP_ACTION]@[SHA] # [VERSION]
-      with: { [SETUP_INPUT]: '${{ inputs.[input-name] }}' }
+    # --- Detect container context (skip setup-node inside containers) ---
+    - name: Setup runtime
+      if: runner.environment != 'github-hosted' || env.CONTAINER == ''
+      uses: actions/setup-node@6044e13b5dc448c55e2357c09f80417699197238 # v6.2.0
+      with:
+        node-version: ${{ inputs.runtime-version }}
+        cache: '[PACKAGE_MANAGER]'
+      env:
+        CONTAINER: ${{ job.container.id }}
 
-    - name: [MAIN_STEP_NAME]
-      id: [step-id]
+    - name: Install dependencies
       shell: bash
-      env: { INPUT_VALUE: '${{ inputs.[input-name] }}' }
-      run: |
-        [MAIN_COMMAND]
-        echo "[output-name]=[OUTPUT_VALUE]" >> $GITHUB_OUTPUT
+      working-directory: ${{ inputs.working-directory }}
+      run: '[INSTALL_CMD]'
 
+    # --- Main logic — set outputs via GITHUB_OUTPUT ---
+    - name: Execute main logic
+      id: main
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        echo "::group::[ACTION_NAME]"
+        # [MAIN_COMMAND]
+        echo "result=[OUTPUT_VALUE]" >> "$GITHUB_OUTPUT"
+        echo "::endgroup::"
+      env:
+        RUNTIME_VERSION: ${{ inputs.runtime-version }}
+
+    # --- Cleanup runs unconditionally (composite has no post: lifecycle) ---
     - name: Cleanup
       if: always()
       shell: bash
-      run: echo "Cleanup completed" # Add cleanup logic
+      run: rm -rf "${{ runner.temp }}/[CLEANUP_PATTERN]" 2>/dev/null || true

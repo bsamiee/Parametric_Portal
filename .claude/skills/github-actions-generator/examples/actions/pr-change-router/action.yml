@@ -1,0 +1,150 @@
+# PR Change Router — merge-base safe diff, glob matching, dynamic matrix JSON.
+# Demonstrates: shallow clone deepening, delimiter syntax, fromJSON, dedup.
+# NOTE: harden-runner is CALLER responsibility — actions are steps, not jobs.
+name: 'PR Change Router'
+description: 'Map changed files to project labels, emit dynamic CI matrix JSON for strategy.matrix via fromJSON'
+
+inputs:
+  base-ref:
+    description: 'Base SHA for diff (defaults to PR base). Merge-base resolved automatically'
+    required: false
+    default: ${{ github.event.pull_request.base.sha }}
+  head-ref:
+    description: 'Head SHA for diff (defaults to PR head)'
+    required: false
+    default: ${{ github.event.pull_request.head.sha }}
+  path-mapping:
+    description: 'JSON glob->config map: {"packages/api/**":{"project":"api","test-cmd":"pnpm test:api","runner":"ubuntu-latest","timeout":15}}'
+    required: true
+  fallback-project:
+    description: 'Project to include when no patterns match (empty = skip CI entirely)'
+    required: false
+    default: ''
+  fetch-depth:
+    description: 'Additional commits to fetch if merge-base resolution fails in shallow clone'
+    required: false
+    default: '100'
+
+outputs:
+  matrix:
+    description: 'JSON for strategy.matrix via fromJSON — {"include":[...]}'
+    value: ${{ steps.build-matrix.outputs.matrix }}
+  affected-projects:
+    description: 'Comma-separated affected project names'
+    value: ${{ steps.build-matrix.outputs.affected }}
+  has-changes:
+    description: 'true if any projects affected, false otherwise'
+    value: ${{ steps.build-matrix.outputs.has-changes }}
+
+branding: { icon: git-branch, color: purple }
+
+runs:
+  using: 'composite'
+  steps:
+    # --- Resolve merge-base (handles shallow clones, force pushes, merge commits) ---
+    - id: resolve-refs
+      shell: bash
+      env:
+        INPUT_BASE: ${{ inputs.base-ref }}
+        INPUT_HEAD: ${{ inputs.head-ref }}
+        FETCH_DEPTH: ${{ inputs.fetch-depth }}
+      run: |
+        HEAD="${INPUT_HEAD:-HEAD}"
+        if [[ -z "$INPUT_BASE" || "$INPUT_BASE" == "null" ]]; then
+          # No base ref (push event) — diff against parent
+          BASE=$(git rev-parse HEAD~1 2>/dev/null || git rev-parse --verify HEAD)
+        else
+          # PR event — resolve merge-base for accurate three-dot diff
+          # Shallow clones may lack the merge-base commit; deepen if needed
+          BASE=$(git merge-base "$INPUT_BASE" "$HEAD" 2>/dev/null || true)
+          if [[ -z "$BASE" ]]; then
+            echo "::notice::Shallow clone — deepening by $FETCH_DEPTH commits"
+            git fetch --deepen="$FETCH_DEPTH" origin "$INPUT_BASE" 2>/dev/null || true
+            BASE=$(git merge-base "$INPUT_BASE" "$HEAD" 2>/dev/null || echo "$INPUT_BASE")
+          fi
+        fi
+        echo "base=$BASE" >> "$GITHUB_OUTPUT"
+        echo "head=$HEAD"  >> "$GITHUB_OUTPUT"
+    # --- Compute changed file list via git diff ---
+    - id: changed-files
+      shell: bash
+      run: |
+        FILES=$(git diff --name-only "${{ steps.resolve-refs.outputs.base }}".."${{ steps.resolve-refs.outputs.head }}" 2>/dev/null || echo "")
+        if [[ -z "$FILES" ]]; then
+          echo "::notice::No changed files detected"
+          echo "files=" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+        COUNT=$(echo "$FILES" | wc -l | tr -d ' ')
+        echo "::notice::$COUNT file(s) changed"
+        # Multi-line output with heredoc delimiter syntax (GITHUB_OUTPUT safe)
+        {
+          echo "files<<CHANGED_FILES_DELIM"
+          echo "$FILES"
+          echo "CHANGED_FILES_DELIM"
+        } >> "$GITHUB_OUTPUT"
+
+    # --- Match files against path-mapping, build matrix JSON for fromJSON ---
+    - id: build-matrix
+      shell: bash
+      env:
+        PATH_MAPPING: ${{ inputs.path-mapping }}
+        CHANGED_FILES: ${{ steps.changed-files.outputs.files }}
+        FALLBACK: ${{ inputs.fallback-project }}
+      run: |
+        emit_fallback() {
+          if [[ -n "$FALLBACK" ]]; then
+            echo "matrix={\"include\":[{\"project\":\"$FALLBACK\",\"test-cmd\":\"echo no-op\",\"runner\":\"ubuntu-latest\",\"timeout\":10}]}" >> "$GITHUB_OUTPUT"
+            echo "affected=$FALLBACK"  >> "$GITHUB_OUTPUT"
+            echo "has-changes=true"    >> "$GITHUB_OUTPUT"
+          else
+            echo 'matrix={"include":[]}' >> "$GITHUB_OUTPUT"
+            echo "affected="             >> "$GITHUB_OUTPUT"
+            echo "has-changes=false"     >> "$GITHUB_OUTPUT"
+          fi
+        }
+        if [[ -z "$CHANGED_FILES" ]]; then emit_fallback; exit 0; fi
+
+        # Parse path-mapping keys, match against changed files
+        MATCHED=()
+        INCLUDES="["
+        while IFS= read -r PATTERN; do
+          # Glob -> regex: ** -> .*, * -> [^/]* (anchored match)
+          REGEX=$(echo "$PATTERN" | sed 's|\*\*|__DSTAR__|g; s|\*|[^/]*|g; s|__DSTAR__|.*|g')
+          HIT=false
+          while IFS= read -r FILE; do
+            [[ "$FILE" =~ $REGEX ]] && { HIT=true; break; }
+          done <<< "$CHANGED_FILES"
+          if [[ "$HIT" == "true" ]]; then
+            PROJECT=$(echo "$PATH_MAPPING" | jq -r --arg p "$PATTERN" '.[$p].project')
+            # Deduplicate by project name
+            [[ " ${MATCHED[*]:-} " == *" $PROJECT "* ]] && continue
+            MATCHED+=("$PROJECT")
+            ENTRY=$(echo "$PATH_MAPPING" | jq -c --arg p "$PATTERN" '.[$p]')
+            (( ${#MATCHED[@]} > 1 )) && INCLUDES+=","
+            INCLUDES+="$ENTRY"
+          fi
+        done < <(echo "$PATH_MAPPING" | jq -r 'keys[]')
+        INCLUDES+="]"
+
+        if [[ ${#MATCHED[@]} -gt 0 ]]; then
+          AFFECTED=$(IFS=,; echo "${MATCHED[*]}")
+          # Delimiter syntax for safe multi-line JSON in GITHUB_OUTPUT
+          {
+            echo "matrix<<MATRIX_DELIM"
+            echo "{\"include\":$INCLUDES}"
+            echo "MATRIX_DELIM"
+          } >> "$GITHUB_OUTPUT"
+          echo "affected=$AFFECTED"    >> "$GITHUB_OUTPUT"
+          echo "has-changes=true"      >> "$GITHUB_OUTPUT"
+        else
+          emit_fallback; exit 0
+        fi
+
+        # Step summary
+        {
+          echo "## PR Change Router"
+          echo "| Project | Runner | Timeout | Test Command |"
+          echo "|---------|--------|---------|--------------|"
+          echo "$INCLUDES" | jq -r '.[] | "| \(.project) | \(.runner) | \(.timeout)m | `\(."test-cmd")` |"'
+        } >> "$GITHUB_STEP_SUMMARY"

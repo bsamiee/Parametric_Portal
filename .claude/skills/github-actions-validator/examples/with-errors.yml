@@ -1,69 +1,87 @@
-# Example: Workflow with Intentional Errors
-# This workflow contains common errors for testing validation
-# Use: bash scripts/validate_workflow.sh examples/with-errors.yml
-# Use: bash scripts/validate_workflow.sh --check-best-practices examples/with-errors.yml
+# Exemplar: Workflow with intentional violations -- triggers EVERY best_practice_checks.sh check
+# Validate: bash scripts/validate_workflow.sh examples/with-errors.yml
+# Validate: bash scripts/validate_workflow.sh --check-best-practices examples/with-errors.yml
 #
-# ACTIONLINT ERRORS:
-# 1. Line 26: Typo in runner label (ubuntu-lastest) [runner-label]
-# 2. Line 16: Invalid CRON expression (day 8 doesn't exist) [events]
-# 3. Line 20: Invalid glob pattern (** without /) [glob]
-# 4. Line 37: Script injection vulnerability [expression]
-# 5. Line 44: Undefined job dependency (biuld instead of build) [job-needs]
-#
-# BEST PRACTICE VIOLATIONS (caught by --check-best-practices):
-# 6. No top-level permissions: block [PERMISSIONS]
-# 7. No timeout-minutes on any job [TIMEOUT]
-# 8. Unpinned actions (tag only, no SHA) [UNPINNED]
-# 9. No concurrency group [CONCURRENCY]
-# 10. Deprecated set-output command [DEPRECATED-CMD]
+# BEST PRACTICE VIOLATIONS (by check function):
+#  1. [PERMISSIONS]    -- No top-level permissions: block
+#  2. [UNPINNED]       -- Mutable tag refs (actions/checkout@v4, actions/setup-node@v3)
+#  3. [SHA-NO-COMMENT] -- SHA-pinned but missing # vX.Y.Z comment
+#  4. [TIMEOUT]        -- Jobs missing timeout-minutes
+#  5. [RUNNER]         -- Deprecated runner (ubuntu-20.04)
+#  6. [CONCURRENCY]    -- No concurrency group
+#  7. [DEPRECATED-CMD] -- Uses ::set-output removed workflow command
+#  8. [HARDEN]         -- Missing harden-runner; and not-first-step in second job
+#  9. [INJECTION]      -- Direct ${{ github.event.pull_request.title }} in run: block
+# 10. [APP-TOKEN]      -- PAT secret for cross-repo ops
+# 11. [IMMUTABLE]      -- Action publishing without immutable OCI
 
 name: Workflow with Errors
 
 on:
   push:
     branches: [main]
-  schedule:
-    # ERROR: Invalid CRON - day of week 8 doesn't exist (should be 0-6)
-    - cron: '0 0 * * 8'
   pull_request:
-    paths:
-      # ERROR: Invalid glob pattern - should be **/*.js
-      - '**.js'
+    branches: [main]
 
-# MISSING: permissions: block (defaults to read-write)
-# MISSING: concurrency: group
+# [VIOLATION] No top-level permissions: block -- defaults to read-write
+# [VIOLATION] No concurrency: group -- redundant runs waste runner minutes
 
 jobs:
   build:
     name: Build
-    # ERROR: Typo in runner label (should be ubuntu-latest)
-    runs-on: ubuntu-lastest
-    # MISSING: timeout-minutes
+    # [VIOLATION] Deprecated runner -- ubuntu-20.04 is EOL, use ubuntu-24.04
+    runs-on: ubuntu-20.04
+    # [VIOLATION] Missing timeout-minutes -- default is 6 hours
 
     steps:
-      # UNPINNED: uses tag only, not SHA
-      - name: Checkout
-        uses: actions/checkout@v4
+      # [VIOLATION] No harden-runner as first step (missing entirely in this job)
 
-      - name: Build
-        run: npm run build
+      # [VIOLATION] Mutable tag ref -- supply chain risk (CVE-2025-30066)
+      - uses: actions/checkout@v4
 
-      # ERROR: Script injection vulnerability - untrusted input directly in script
-      - name: Process issue
+      # [VIOLATION] Mutable tag ref -- v3 is outdated
+      - uses: actions/setup-node@v3
+        with:
+          node-version: '20'
+
+      - run: npm ci && npm run build
+
+      # [VIOLATION] Direct untrusted input in run: block -- shell injection risk
+      - name: Log PR title
         run: |
-          echo "Processing: ${{ github.event.issue.title }}"
+          echo "PR: ${{ github.event.pull_request.title }}"
 
-      # DEPRECATED: set-output command
-      - name: Set output (deprecated)
+      # [VIOLATION] Deprecated ::set-output command (removed Oct 2023)
+      - name: Set output
         run: echo "::set-output name=result::success"
+
+      # [VIOLATION] PAT for cross-repo ops -- use create-github-app-token instead
+      - name: Cross-repo sync
+        run: |
+          curl -H "Authorization: token ${{ secrets.PAT }}" https://api.github.com/repos/org/other/dispatches
+        env:
+          GH_TOKEN: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
 
   deploy:
     name: Deploy
     runs-on: ubuntu-latest
-    # ERROR: Undefined job dependency (typo: biuld instead of build)
-    needs: biuld
-    # MISSING: timeout-minutes
+    needs: build
+    # [VIOLATION] Missing timeout-minutes
 
     steps:
-      - name: Deploy
-        run: echo "Deploying..."
+      # [VIOLATION] harden-runner present but NOT first step
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: step-security/harden-runner@5ef0c079ce82195b2a36a210272d6b661572d83e # v2.14.2
+        with: { egress-policy: audit }
+
+      # [VIOLATION] SHA-pinned but missing version comment (no # vX.Y.Z)
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+        with:
+          name: deploy-bundle
+          path: dist/
+
+      # [VIOLATION] Action publishing without immutable OCI distribution
+      - name: Publish action
+        run: |
+          cp action.yml dist/
+          echo "Publishing action..."

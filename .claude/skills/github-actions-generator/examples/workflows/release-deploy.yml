@@ -1,0 +1,147 @@
+# Release and Deploy -- Tag-driven promotion chain with environment gates, changelog, Slack
+name: Release and Deploy
+on:
+  push: { tags: ['v*'] }
+  workflow_dispatch:
+    inputs:
+      environment: { type: environment, required: true }
+      version: { type: string, required: true, description: 'Semantic version (e.g., 1.2.3)' }
+      dry-run: { type: boolean, default: false }
+
+permissions: {}
+concurrency: { group: release-${{ github.ref_name }}, cancel-in-progress: false }
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: { contents: read }
+    outputs:
+      version: ${{ steps.version.outputs.value }}
+      changelog: ${{ steps.changelog.outputs.value }}
+      is-prerelease: ${{ steps.version.outputs.prerelease }}
+    steps:
+      - uses: step-security/harden-runner@5ef0c079ce82195b2a36a210272d6b661572d83e # v2.14.2
+        with: { egress-policy: audit }
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with: { fetch-depth: 0 }
+      - id: version
+        run: |
+          if [[ "${{ github.ref_type }}" == "tag" ]]; then
+            VER="${{ github.ref_name }}"; VER="${VER#v}"
+          else
+            VER="${{ inputs.version }}"
+          fi
+          if [[ ! "$VER" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?$ ]]; then
+            echo "::error::Invalid semver: $VER"; exit 1
+          fi
+          PRERELEASE=$([[ "$VER" =~ -(rc|beta|alpha) ]] && echo "true" || echo "false")
+          echo "value=$VER"             >> "$GITHUB_OUTPUT"
+          echo "prerelease=$PRERELEASE" >> "$GITHUB_OUTPUT"
+      - id: changelog
+        run: |
+          PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+          RANGE="${PREV_TAG:+$PREV_TAG..HEAD}"
+          RANGE="${RANGE:-HEAD~20..HEAD}"
+          {
+            echo "value<<CHANGELOG_EOF"
+            git log "$RANGE" --pretty=format:"- %s (%h)" --no-merges
+            echo ""; echo "CHANGELOG_EOF"
+          } >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: prepare
+    permissions: { contents: read, id-token: write, attestations: write }
+    uses: ./.github/workflows/build.yml
+    with: { version: '${{ needs.prepare.outputs.version }}' }
+    secrets: inherit
+
+  staging:
+    needs: build
+    if: ${{ !inputs.dry-run }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: { name: staging, url: 'https://staging.example.com' }
+    permissions: { contents: read, id-token: write }
+    concurrency: { group: deploy-staging, cancel-in-progress: false }
+    steps:
+      - uses: step-security/harden-runner@5ef0c079ce82195b2a36a210272d6b661572d83e # v2.14.2
+        with: { egress-policy: audit }
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with: { name: build-artifact, path: dist/ }
+      - uses: aws-actions/configure-aws-credentials@8df5847569e6427dd6c4fb1cf565c83acfa8afa7 # v6.0.0
+        with: { role-to-assume: '${{ vars.AWS_ROLE_STAGING }}', aws-region: '${{ vars.AWS_REGION }}' }
+      - run: echo "Deploying to staging..."
+      - name: Smoke test
+        run: |
+          for i in 1 2 3 4 5; do
+            STATUS=$(curl -sf -o /dev/null -w '%{http_code}' https://staging.example.com/health || true)
+            if [[ "$STATUS" == "200" ]]; then echo "Health check passed"; exit 0; fi
+            sleep $((i * 5))
+          done
+          echo "::error::Health check failed after 5 attempts"; exit 1
+
+  production:
+    needs: [build, staging]
+    if: startsWith(github.ref, 'refs/tags/v') || inputs.environment == 'production'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: { name: production, url: 'https://example.com' }
+    permissions: { contents: read, id-token: write }
+    concurrency: { group: deploy-production, cancel-in-progress: false }
+    steps:
+      - uses: step-security/harden-runner@5ef0c079ce82195b2a36a210272d6b661572d83e # v2.14.2
+        with: { egress-policy: audit }
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with: { name: build-artifact, path: dist/ }
+      - uses: aws-actions/configure-aws-credentials@8df5847569e6427dd6c4fb1cf565c83acfa8afa7 # v6.0.0
+        with: { role-to-assume: '${{ vars.AWS_ROLE_PRODUCTION }}', aws-region: '${{ vars.AWS_REGION }}' }
+      - run: echo "Deploying to production..."
+      - name: Health check
+        run: |
+          for i in 1 2 3; do
+            STATUS=$(curl -sf -o /dev/null -w '%{http_code}' https://example.com/health || true)
+            if [[ "$STATUS" == "200" ]]; then echo "Production healthy"; exit 0; fi
+            sleep 15
+          done
+          echo "::error::Production health check failed"; exit 1
+
+  release:
+    needs: [prepare, production]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: { contents: write }
+    steps:
+      - uses: step-security/harden-runner@5ef0c079ce82195b2a36a210272d6b661572d83e # v2.14.2
+        with: { egress-policy: audit }
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with: { name: build-artifact, path: dist/ }
+      - uses: softprops/action-gh-release@a06a81a03ee405af7f2048a818ed3f03bbf83c7b # v2.5.0
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: Release ${{ needs.prepare.outputs.version }}
+          body: ${{ needs.prepare.outputs.changelog }}
+          prerelease: ${{ needs.prepare.outputs.is-prerelease }}
+          files: dist/*
+          generate_release_notes: true
+        env: { GITHUB_TOKEN: '${{ secrets.GITHUB_TOKEN }}' }
+
+  notify-failure:
+    needs: [prepare, build, staging, production, release]
+    if: always() && contains(join(needs.*.result, ','), 'failure')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - uses: step-security/harden-runner@5ef0c079ce82195b2a36a210272d6b661572d83e # v2.14.2
+        with: { egress-policy: audit }
+      - uses: slackapi/slack-github-action@91efab103c0de0a537f72a35f6b8cda0ee76bf0a # v2.1.1
+        with:
+          method: chat.postMessage
+          token: ${{ secrets.SLACK_BOT_TOKEN }}
+          payload: |
+            channel: ${{ vars.SLACK_RELEASES_CHANNEL }}
+            text: "Release ${{ needs.prepare.outputs.version || github.ref_name }} failed -- <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View run>"

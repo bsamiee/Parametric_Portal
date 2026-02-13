@@ -4,11 +4,7 @@ type: complex
 depth: base
 user-invocable: false
 description: >-
-  Queries Nx workspace metadata, project configurations, affected detection,
-  generator schemas, and dependency graphs via unified Python CLI. Use when
-  analyzing monorepo structure, inspecting project.json configurations,
-  determining affected projects for CI optimization, discovering available
-  generators, or visualizing workspace dependencies.
+  Queries Nx monorepo metadata via Python CLI: workspace projects, affected detection, dependency graphs, project.json configs, generator schemas. Use when analyzing monorepo structure, optimizing CI via affected projects, or inspecting workspace topology.
 ---
 
 # [H1][NX-TOOLS]
@@ -23,18 +19,18 @@ Query Nx workspace with unified Python CLI. Wraps `pnpm exec nx` commands.
 ---
 ## [1][COMMANDS]
 
-| [CMD]      | [ARGS]                | [PURPOSE]                            |
-| ---------- | --------------------- | ------------------------------------ |
-| workspace  | --                    | List all projects                    |
-| path       | --                    | Get workspace root path              |
-| generators | --                    | List available generators            |
-| project    | `<name>`              | View project configuration           |
-| run        | `<target>`            | Run target across projects           |
-| schema     | `<generator>`         | View generator schema                |
-| affected   | `[base]`              | List affected projects (default: main) |
-| graph      | `[output]`            | Generate dependency graph            |
-| tokens     | `[path]`              | Count tokens in file/directory       |
-| docs       | `[topic]`             | View Nx command documentation        |
+| [CMD]      | [ARGS]        | [PURPOSE]                              |
+| ---------- | ------------- | -------------------------------------- |
+| workspace  | --            | List all projects                      |
+| path       | --            | Get workspace root path                |
+| generators | --            | List available generators              |
+| project    | `<name>`      | View project configuration             |
+| run        | `<target>`    | Run target across projects             |
+| schema     | `<generator>` | View generator schema                  |
+| affected   | `[base]`      | List affected projects (default: main) |
+| graph      | `[output]`    | Generate dependency graph              |
+| tokens     | `[path]`      | Count tokens in file/directory         |
+| docs       | `[topic]`     | View Nx command documentation          |
 
 ---
 ## [2][USAGE]

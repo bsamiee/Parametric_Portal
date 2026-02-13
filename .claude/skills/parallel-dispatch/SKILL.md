@@ -4,12 +4,10 @@ type: simple
 depth: base
 user-invocable: false
 description: >-
-  Orchestrates concurrent workstreams via Task tool for non-trivial requests.
-  Decomposes complex tasks into 3-10 parallel agents with independent scopes
-  and synthesizes results. Use when requests involve: (1) multiple investigative
-  paths or validation layers, (2) research, analysis, or debugging exceeding
-  trivial scope, (3) implementation planning requiring facet exploration, or
-  (4) any moderate+ complexity task benefiting from parallel execution.
+  Orchestrates concurrent workstreams via Task tool, decomposing non-trivial
+  requests into 3-10 parallel agents with independent scopes. Use when multiple
+  investigative paths, validation layers, research/analysis/debugging exceed
+  trivial scope, or implementation planning requires facet exploration.
 ---
 
 # [H1][PARALLEL-DISPATCH]
@@ -113,17 +111,17 @@ Task(description="Agent C: [scope, objective, output format]", subagent_type="ge
 
 **Tool Parameters:**
 
-| [INDEX] | [PARAMETER]    | [TYPE]   | [REQUIRED] | [DESCRIPTION]                                          |
-| :-----: | -------------- | -------- | :--------: | ------------------------------------------------------ |
-|   [1]   | `description`  | string   |    Yes     | Full agent prompt with scope, objective, output format  |
-|   [2]   | `subagent_type`| string   |    No      | `"Explore"` for research; omit for general-purpose     |
+| [INDEX] | [PARAMETER]     | [TYPE] | [REQUIRED] | [DESCRIPTION]                                          |
+| :-----: | --------------- | ------ | :--------: | ------------------------------------------------------ |
+|   [1]   | `description`   | string |    Yes     | Full agent prompt with scope, objective, output format |
+|   [2]   | `subagent_type` | string |     No     | `"Explore"` for research; omit for general-purpose     |
 
 **Agent Type Selection:**
 
-| [INDEX] | [TYPE]            | [ACCESS]                  | [USE_WHEN]                                      |
-| :-----: | ----------------- | ------------------------- | ----------------------------------------------- |
-|   [1]   | `"Explore"`       | Glob, Grep, Read, WebFetch | Codebase search, file analysis, web research    |
-|   [2]   | (omit/default)    | All tools                 | General tasks, file creation, code modification |
+| [INDEX] | [TYPE]         | [ACCESS]                   | [USE_WHEN]                                      |
+| :-----: | -------------- | -------------------------- | ----------------------------------------------- |
+|   [1]   | `"Explore"`    | Glob, Grep, Read, WebFetch | Codebase search, file analysis, web research    |
+|   [2]   | (omit/default) | All tools                  | General tasks, file creation, code modification |
 
 [IMPORTANT]:
 - [ALWAYS] Include complete context per agent — stateless execution.

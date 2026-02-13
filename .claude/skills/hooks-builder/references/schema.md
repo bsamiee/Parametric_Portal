@@ -22,31 +22,9 @@ Three nesting levels: event -> matcher group -> hook handler.
 }
 ```
 
-### [1.1][COMMON_FIELDS]
-All hook handler types share:
-
-| [INDEX] | [FIELD]         | [TYPE]  | [REQ] | [DEFAULT]     | [CONSTRAINT]                                        |
-| :-----: | --------------- | ------- | :---: | :-----------: | --------------------------------------------------- |
-|   [1]   | `type`          | string  |  Yes  |       —       | `"command"`, `"prompt"`, or `"agent"`               |
-|   [2]   | `timeout`       | number  |  No   | type-specific | Seconds. command=600, prompt=30, agent=60           |
-|   [3]   | `statusMessage` | string  |  No   |       —       | Custom spinner text during hook execution           |
-|   [4]   | `once`          | boolean |  No   |    `false`    | Run once per session, then removed. Skills only     |
-
-### [1.2][COMMAND_FIELDS]
-Additional fields for `type: "command"`:
-
-| [INDEX] | [FIELD]   | [TYPE]  | [REQ] | [DEFAULT] | [CONSTRAINT]                                       |
-| :-----: | --------- | ------- | :---: | :-------: | -------------------------------------------------- |
-|   [1]   | `command` | string  |  Yes  |     —     | Shell command or script path                       |
-|   [2]   | `async`   | boolean |  No   |  `false`  | Run in background; non-blocking; no decision control |
-
-### [1.3][PROMPT_AND_AGENT_FIELDS]
-Additional fields for `type: "prompt"` and `type: "agent"`:
-
-| [INDEX] | [FIELD]  | [TYPE] | [REQ] | [DEFAULT]  | [CONSTRAINT]                                           |
-| :-----: | -------- | ------ | :---: | :--------: | ------------------------------------------------------ |
-|   [1]   | `prompt` | string |  Yes  |     —      | Instructions for LLM; `$ARGUMENTS` = hook input JSON   |
-|   [2]   | `model`  | string |  No   | fast model | Model to use for evaluation                            |
+**Common fields (all types):** `type` (required: "command"|"prompt"|"agent"), `timeout` (command=600, prompt=30, agent=60), `statusMessage` (spinner text), `once` (boolean, skills only).
+**Command fields:** `command` (shell command/path), `async` (background, no decision control).
+**Prompt/Agent fields:** `prompt` (instructions, `$ARGUMENTS` = hook input JSON), `model` (fast model default).
 
 ---
 ## [2][MATCHERS]
@@ -54,45 +32,19 @@ Additional fields for `type: "prompt"` and `type: "agent"`:
 
 <br>
 
-### [2.1][TOOL_MATCHERS]
-PreToolUse, PermissionRequest, PostToolUse, PostToolUseFailure match on `tool_name`:
+**Tool matchers** (PreToolUse, PermissionRequest, PostToolUse, PostToolUseFailure):
 
-| [INDEX] | [PATTERN]  | [EXAMPLE]             | [MATCHES]                     |
-| :-----: | ---------- | --------------------- | ----------------------------- |
-|   [1]   | Exact      | `"Bash"`              | Bash tool only                |
-|   [2]   | Regex OR   | `"Edit\|Write"`       | Edit or Write tools           |
-|   [3]   | Regex wild | `"Notebook.*"`        | NotebookRead, NotebookEdit    |
-|   [4]   | Empty/`*`  | `""`                  | All tools (catch-all)         |
-|   [5]   | MCP exact  | `"mcp__memory__.*"`   | All tools from memory server  |
-|   [6]   | MCP broad  | `"mcp__.*__write.*"`  | Any MCP tool containing write |
+| [INDEX] | [PATTERN]  | [EXAMPLE]           | [MATCHES]                    |
+| :-----: | ---------- | ------------------- | ---------------------------- |
+|   [1]   | Exact      | `"Bash"`            | Bash tool only               |
+|   [2]   | Regex OR   | `"Edit\|Write"`     | Edit or Write                |
+|   [3]   | Regex wild | `"Notebook.*"`      | NotebookRead, NotebookEdit   |
+|   [4]   | Empty/`*`  | `""`                | All tools (catch-all)        |
+|   [5]   | MCP        | `"mcp__memory__.*"` | All tools from memory server |
 
-### [2.2][SESSION_MATCHERS]
-
-| [INDEX] | [EVENT]      | [MATCHER]                    | [TRIGGERS_ON]                     |
-| :-----: | ------------ | ---------------------------- | --------------------------------- |
-|   [1]   | SessionStart | `"startup"`                  | New session                       |
-|   [2]   | SessionStart | `"resume"`                   | `--resume`, `--continue`, `/resume` |
-|   [3]   | SessionStart | `"clear"`                    | After `/clear` command            |
-|   [4]   | SessionStart | `"compact"`                  | Auto or manual compaction         |
-|   [5]   | SessionEnd   | `"clear"`                    | Session cleared                   |
-|   [6]   | SessionEnd   | `"logout"`                   | User logout                       |
-|   [7]   | SessionEnd   | `"prompt_input_exit"`        | User exits at prompt              |
-|   [8]   | SessionEnd   | `"bypass_permissions_disabled"` | Bypass mode disabled           |
-|   [9]   | SessionEnd   | `"other"`                    | Other exit reasons                |
-
-### [2.3][OTHER_MATCHERS]
-
-| [INDEX] | [EVENT]       | [MATCHER]                 | [TRIGGERS_ON]              |
-| :-----: | ------------- | ------------------------- | -------------------------- |
-|   [1]   | Notification  | `"permission_prompt"`     | Permission dialog shown    |
-|   [2]   | Notification  | `"idle_prompt"`           | Idle timeout notification  |
-|   [3]   | Notification  | `"auth_success"`          | Authentication completed   |
-|   [4]   | Notification  | `"elicitation_dialog"`    | Information request dialog |
-|   [5]   | SubagentStart | `"Explore"`, `"Plan"`, etc | Agent type name           |
-|   [6]   | SubagentStop  | Same as SubagentStart      | Agent type name           |
-|   [7]   | PreCompact    | `"manual"` or `"auto"`    | Compaction trigger type   |
-
-**No matcher support:** UserPromptSubmit, Stop, TeammateIdle, TaskCompleted — always fire on every occurrence.
+**Session matchers:** `"startup"`, `"resume"`, `"clear"`, `"compact"` (SessionStart); `"init"`, `"maintenance"` (Setup); `"clear"`, `"logout"`, `"prompt_input_exit"`, `"bypass_permissions_disabled"`, `"other"` (SessionEnd).
+**Other matchers:** Notification: `"permission_prompt"`, `"idle_prompt"`, `"auth_success"`, `"elicitation_dialog"`. SubagentStart/Stop: agent type name. PreCompact: `"manual"|"auto"`.
+**No matcher support:** UserPromptSubmit, Stop, TeammateIdle, TaskCompleted — always fire.
 
 ---
 ## [3][JSON_RESPONSES]
@@ -100,66 +52,15 @@ PreToolUse, PermissionRequest, PostToolUse, PostToolUseFailure match on `tool_na
 
 <br>
 
-### [3.1][UNIVERSAL_OUTPUT]
-Fields available to all events on exit 0:
+**Universal output (exit 0):** `continue` (false halts Claude), `stopReason` (message on halt), `suppressOutput` (hide stdout), `systemMessage` (warning to user).
 
-| [INDEX] | [FIELD]          | [TYPE]  | [DEFAULT] | [EFFECT]                                   |
-| :-----: | ---------------- | ------- | :-------: | ------------------------------------------ |
-|   [1]   | `continue`       | boolean |  `true`   | `false` halts Claude entirely (overrides all) |
-|   [2]   | `stopReason`     | string  |     —     | Message shown to user when `continue: false` |
-|   [3]   | `suppressOutput` | boolean |  `false`  | Hides hook stdout from verbose mode output |
-|   [4]   | `systemMessage`  | string  |     —     | Warning message shown to user              |
+**PreToolUse:** `hookSpecificOutput.permissionDecision` ("allow"|"deny"|"ask"), `permissionDecisionReason`, `updatedInput` (modify tool params), `additionalContext`.
 
-### [3.2][PRETOOLUSE_OUTPUT]
-Uses `hookSpecificOutput` for three-way decision:
+**PermissionRequest:** `hookSpecificOutput.decision.behavior` ("allow"|"deny"), `decision.updatedInput`, `decision.updatedPermissions`, `decision.message` (deny reason), `decision.interrupt` (stop Claude on deny).
 
-| [INDEX] | [FIELD]                    | [VALUES]        | [EFFECT]                              |
-| :-----: | -------------------------- | --------------- | ------------------------------------- |
-|   [1]   | `permissionDecision`       | `"allow"`       | Bypasses permission system            |
-|   [2]   | `permissionDecision`       | `"deny"`        | Blocks tool; reason shown to Claude   |
-|   [3]   | `permissionDecision`       | `"ask"`         | Prompts user to confirm               |
-|   [4]   | `permissionDecisionReason` | string          | Explanation (user for allow/ask; Claude for deny) |
-|   [5]   | `updatedInput`             | object          | Modifies tool parameters before execution |
-|   [6]   | `additionalContext`        | string          | Context added before tool executes    |
+**Top-level decision** (UserPromptSubmit, PostToolUse, PostToolUseFailure, Stop, SubagentStop): `decision` ("block"), `reason`, `additionalContext`.
 
-```json
-{"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "allow"}}
-```
-
-### [3.3][PERMISSIONREQUEST_OUTPUT]
-Uses `hookSpecificOutput` with nested `decision`:
-
-| [INDEX] | [FIELD]              | [VALUES]  | [EFFECT]                                  |
-| :-----: | -------------------- | --------- | ----------------------------------------- |
-|   [1]   | `decision.behavior`  | `"allow"` | Grants permission silently                |
-|   [2]   | `decision.behavior`  | `"deny"`  | Denies with optional message              |
-|   [3]   | `decision.updatedInput` | object | Modifies tool parameters (allow only)     |
-|   [4]   | `decision.updatedPermissions` | object | Applies permission rule updates (allow only) |
-|   [5]   | `decision.message`   | string    | Denial reason shown to Claude (deny only) |
-|   [6]   | `decision.interrupt`  | boolean  | Stops Claude if denied (deny only)        |
-
-```json
-{"hookSpecificOutput": {"hookEventName": "PermissionRequest", "decision": {"behavior": "allow"}}}
-```
-
-### [3.4][TOP_LEVEL_DECISION]
-Used by UserPromptSubmit, PostToolUse, PostToolUseFailure, Stop, SubagentStop:
-
-| [INDEX] | [FIELD]             | [VALUES]  | [EFFECT]                                    |
-| :-----: | ------------------- | --------- | ------------------------------------------- |
-|   [1]   | `decision`          | `"block"` | Prevents action; Claude receives reason     |
-|   [2]   | `reason`            | string    | Explanation shown to Claude                 |
-|   [3]   | `additionalContext` | string    | Added to Claude's context                   |
-
-### [3.5][CONTEXT_INJECTION]
-SessionStart and UserPromptSubmit support context injection:
-
-| [INDEX] | [METHOD]                   | [EFFECT]                             |
-| :-----: | -------------------------- | ------------------------------------ |
-|   [1]   | Plain stdout (non-JSON)    | Injected as context for Claude       |
-|   [2]   | `additionalContext` in JSON | Injected as context (more discrete) |
-
-SessionStart also supports `CLAUDE_ENV_FILE` for persisting environment variables.
+**Context injection** (SessionStart, Setup, UserPromptSubmit): Plain stdout or `additionalContext` in JSON. SessionStart supports `CLAUDE_ENV_FILE`. Setup stdout becomes context visible to Claude.
 
 ---
 ## [4][HOOK_TYPES]
@@ -167,27 +68,11 @@ SessionStart also supports `CLAUDE_ENV_FILE` for persisting environment variable
 
 <br>
 
-### [4.1][COMMAND_HOOKS]
-Deterministic shell scripts. Receive JSON stdin, return exit codes + optional JSON stdout.
+**Command hooks:** Deterministic shell scripts. JSON stdin, exit codes + optional JSON stdout.
+**Prompt hooks:** Single-turn LLM evaluation. Response: `{"ok": true}` or `{"ok": false, "reason": "..."}`.
+**Agent hooks:** Multi-turn subagent with tool access (Read, Grep, Glob). Up to 50 turns. Same response schema as prompt.
 
-### [4.2][PROMPT_HOOKS]
-Single-turn LLM evaluation. Sends hook input + prompt to a fast Claude model.
-
-**Eligible events:** PreToolUse, PostToolUse, PostToolUseFailure, PermissionRequest, UserPromptSubmit, Stop, SubagentStop, TaskCompleted.
-
-**Response schema:**
-```json
-{"ok": true}
-{"ok": false, "reason": "Explanation shown to Claude"}
-```
-
-`ok: true` allows the action. `ok: false` blocks it with the provided reason.
-
-### [4.3][AGENT_HOOKS]
-Multi-turn subagent evaluation with tool access (Read, Grep, Glob). Up to 50 turns.
-
-**Eligible events:** Same as prompt hooks.
-**Response schema:** Same as prompt hooks: `{"ok": true/false, "reason": "..."}`.
+**Eligible events (prompt/agent):** PreToolUse, PostToolUse, PostToolUseFailure, PermissionRequest, UserPromptSubmit, Stop, SubagentStop, TaskCompleted.
 
 [IMPORTANT] TeammateIdle does NOT support prompt or agent hooks — exit codes only.
 
@@ -202,7 +87,7 @@ Multi-turn subagent evaluation with tool access (Read, Grep, Glob). Up to 50 tur
 |   [1]   | List hooks  | `/hooks` interactive manager                      |
 |   [2]   | Debug mode  | `claude --debug` — shows hook match/execution     |
 |   [3]   | Verbose     | `Ctrl+O` toggle — shows hook output in transcript |
-|   [4]   | Direct test | `echo '{"tool_name":"Bash"}' \| python hook.py`  |
+|   [4]   | Direct test | `echo '{"tool_name":"Bash"}' \| python hook.py`   |
 |   [5]   | Disable all | `"disableAllHooks": true` in settings             |
 
 [REFERENCE] Validation checklist: [->validation.md§1](./validation.md#1schema_gate)

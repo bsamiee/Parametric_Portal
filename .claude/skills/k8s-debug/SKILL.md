@@ -1,58 +1,54 @@
 ---
 name: k8s-debug
-description: Comprehensive Kubernetes debugging and troubleshooting toolkit. Use this skill when diagnosing Kubernetes cluster issues, debugging failing pods, investigating network connectivity problems, analyzing resource usage, troubleshooting deployments, or performing cluster health checks.
+type: complex
+depth: extended
+description: >-
+  Diagnoses Kubernetes pod failures, network connectivity, deployment rollouts,
+  HPA scaling, and EKS cluster issues. Use when debugging CrashLoopBackOff,
+  ImagePullBackOff, Pending pods, service endpoints, ingress/Gateway API routing,
+  sidecar containers, in-place resize, node pressure, VPC CNI, IRSA, or observability
+  stack. Covers K8s 1.32-1.35 GA features: sidecars, DRA, ValidatingAdmissionPolicy.
 ---
 
-# Kubernetes Debugging Skill
+# [H1][K8S-DEBUG]
+>**Dictum:** *Systematic diagnosis eliminates guesswork.*
 
-> **Scope**: Cloud mode (EKS/K8s 1.32+) only. Selfhosted mode uses Docker containers -- see the docker-gen/docker-val skills instead.
-> **K8s Versions**: Tested on 1.32-1.35. Uses stable APIs: sidecar containers GA (1.33), in-place pod resize GA (1.35), `kubectl events --for` (1.32+), `kubectl debug --copy-to` (1.32+), ValidatingAdmissionPolicy GA (1.30+), Gateway API v1.4 (1.35+).
+<br>
 
-## Project Resource Map
+Cloud mode (EKS/K8s 1.32+) only. Selfhosted uses Docker containers -- see docker-gen/docker-val skills.
 
-Source of truth: `infrastructure/src/deploy.ts` (207 LOC)
+**K8s:** 1.32-1.35 | Stable APIs: sidecar containers GA (1.33), DRA GA (1.33), in-place pod resize GA (1.35), fine-grained supplemental groups GA (1.35), topology-aware routing GA (1.34), VolumeAttributesClass GA (1.34), `kubectl events --for` (1.32+), `kubectl debug --copy-to` (1.32+), ValidatingAdmissionPolicy GA (1.30+), Gateway API v1.4 (1.35+) | **Canonical:** `infrastructure/src/deploy.ts` (207 LOC)
 
-| Category | Resource | Pulumi Name | K8s Kind | Key Details |
-|---|---|---|---|---|
-| Namespace | `parametric-ns` | Namespace | `metadata.name: parametric` |
-| Compute | `compute-deploy` | Deployment | Container `api`, label `app: parametric-api`, port 4000 |
-| Compute | `compute-svc` | Service (ClusterIP) | Port 4000/TCP, selector `app: parametric-api` |
-| Compute | `compute-hpa` | HPA (autoscaling/v2) | CPU + memory utilization targets, env-driven min/max |
-| Compute | `compute-ingress` | Ingress (nginx class) | TLS via `compute-tls` secret, `ssl-redirect: true`, `proxy-body-size: 50m` |
-| Compute | `compute-config` | ConfigMap | Non-secret env vars (API_BASE_URL, POSTGRES_HOST, REDIS_HOST, OTEL_*, etc.) |
-| Compute | `compute-secret` | Secret | Secret env vars (POSTGRES_PASSWORD, REDIS_PASSWORD, etc.) |
-| Observe | `observe-alloy` | DaemonSet | Grafana Alloy OTLP collector, image `grafana/alloy:latest` |
-| Observe | `observe-alloy-svc` | Service (ClusterIP) | gRPC :4317, HTTP :4318, metrics :12345 |
-| Observe | `prometheus` | Deployment (via `_k8sObserve`) | Port 9090, PVC for `/prometheus`, scrape interval 15s |
-| Observe | `grafana` | Deployment (via `_k8sObserve`) | Port 3000, PVC for `/var/lib/grafana`, Prometheus datasource |
+**Tasks:**
+1. Identify pod status from decision tree below.
+2. Follow the matching workflow branch.
+3. Read `references/troubleshooting_pods.md` for pod/networking workflows or `references/troubleshooting_cluster.md` for cluster/operational workflows.
+4. Read `references/common_issues.md` for detailed diagnostic tables.
+5. Use scripts for automated data collection (see Scripts section).
+6. Follow escalation checklist if unresolved.
 
-### Probes (from `_CONFIG.k8s.probes` in deploy.ts:19)
+---
+## [1][RESOURCE_MAP]
+>**Dictum:** *deploy.ts resources are the debugging targets.*
 
-| Probe | Path | Port | Period | Failure Threshold | Total Window |
-|---|---|---|---|---|---|
-| Startup | `/api/health/liveness` | 4000 | 5s | 30 | 150s (5s x 30) |
-| Liveness | `/api/health/liveness` | 4000 | 10s | 3 | 30s (10s x 3) |
-| Readiness | `/api/health/readiness` | 4000 | 5s | 3 | 15s (5s x 3) |
+<br>
 
-`terminationGracePeriodSeconds: 30` (deploy.ts:171)
+| [INDEX] | [CATEGORY]    | [RESOURCE]        | [KIND]                | [KEY_DETAILS]                                            |
+| :-----: | ------------- | ----------------- | --------------------- | -------------------------------------------------------- |
+|   [1]   | **Namespace** | `parametric-ns`   | Namespace             | `metadata.name: parametric`.                             |
+|   [2]   | **Compute**   | `compute-deploy`  | Deployment            | Container `api`, label `app: parametric-api`, port 4000. |
+|   [3]   | **Compute**   | `compute-svc`     | Service (ClusterIP)   | Port 4000/TCP, selector `app: parametric-api`.           |
+|   [4]   | **Compute**   | `compute-hpa`     | HPA (autoscaling/v2)  | CPU + memory targets, env-driven min/max.                |
+|   [5]   | **Compute**   | `compute-ingress` | Ingress (nginx class) | TLS `compute-tls`, ssl-redirect, proxy-body-size 50m.    |
+|   [6]   | **Compute**   | `compute-config`  | ConfigMap             | API_BASE_URL, POSTGRES_HOST, REDIS_HOST, OTEL_*.         |
+|   [7]   | **Compute**   | `compute-secret`  | Secret                | POSTGRES_PASSWORD, REDIS_PASSWORD.                       |
+|   [8]   | **Observe**   | `observe-alloy`   | DaemonSet             | Alloy OTLP: gRPC :4317, HTTP :4318, metrics :12345.      |
+|   [9]   | **Observe**   | `prometheus`      | Deployment            | Port 9090, PVC `/prometheus`, scrape interval 15s.       |
+|  [10]   | **Observe**   | `grafana`         | Deployment            | Port 3000, PVC `/var/lib/grafana`.                       |
 
-### Downward API Env Vars (from `_Ops.k8sEnv` in deploy.ts:61)
+**Probes** (`_CONFIG.k8s.probes`, deploy.ts:19): Startup 150s window (5s x 30), Liveness 30s (10s x 3), Readiness 15s (5s x 3). `terminationGracePeriodSeconds: 30`.
 
-| Env Var | Source |
-|---|---|
-| `K8S_CONTAINER_NAME` | `"api"` (literal) |
-| `K8S_DEPLOYMENT_NAME` | `"compute-deploy"` (literal) |
-| `K8S_NAMESPACE` | `metadata.namespace` (fieldRef) |
-| `K8S_NODE_NAME` | `spec.nodeName` (fieldRef) |
-| `K8S_POD_NAME` | `metadata.name` (fieldRef) |
-
-### Labels and Selectors
-
-| Tier | Label Set | Used By |
-|---|---|---|
-| Compute | `app: parametric-api` | Deployment selector, Service selector, HPA target |
-| Observe | `app: <component>, stack: parametric, tier: observe` | DaemonSet/Deployment selectors, pod identity |
-| Metadata | `component: <name>, stack: parametric, tier: observe` | `_Ops.meta()` on all observe resources |
+**Labels:** Compute: `app: parametric-api`. Observe: `app: <name>, stack: parametric, tier: observe`. Metadata: `component: <name>, stack: parametric, tier: observe`.
 
 ```bash
 # Quick status for all project resources
@@ -61,55 +57,53 @@ kubectl get pods -n parametric -o wide
 kubectl top pods -n parametric --containers
 ```
 
-## Decision Tree
+---
+## [2][DECISION_TREE]
+>**Dictum:** *Pod status determines the diagnostic path.*
+
+<br>
 
 ```
 START: What is the pod status?
 |
-+-- Pending --------> [SCHEDULING WORKFLOW]
-|   |
++-- Pending --------> [SCHEDULING]
 |   +-- "Insufficient cpu/memory" --> kubectl top nodes --> add nodes or free resources
 |   +-- "didn't match node affinity" --> check nodeSelector --> adjust constraint
-|   +-- Taints block scheduling --> check taints --> add tolerations or remove taint
+|   +-- Taints block scheduling --> add tolerations or remove taint
 |   +-- "unbound PersistentVolumeClaims" --> kubectl get pvc -n parametric --> fix PVC binding
 |
-+-- CrashLoopBackOff --> [APPLICATION CRASH WORKFLOW]
-|   |
++-- CrashLoopBackOff --> [APPLICATION CRASH]
 |   +-- kubectl logs <pod> -n parametric -c api --previous
-|   |   +-- Stack trace / exception --> fix app code, redeploy
+|   |   +-- Stack trace --> fix app code, redeploy
 |   |   +-- "Error: connect ECONNREFUSED" --> verify DB/Redis/deps running
 |   |   +-- Missing env var --> check compute-config and compute-secret
-|   |
 |   +-- kubectl describe pod <pod> -n parametric
 |       +-- "OOMKilled" (exit 137) --> increase memory limits (deploy.ts:168)
-|       +-- "Startup probe failed" --> app boot > 150s; increase failureThreshold
-|       +-- "Liveness probe failed" (post-startup) --> app hung; check /api/health/liveness
+|       +-- "Startup probe failed" --> boot > 150s; increase failureThreshold
+|       +-- "Liveness probe failed" --> app hung; check /api/health/liveness
 |
-+-- ImagePullBackOff --> [IMAGE PULL WORKFLOW]
-|   |
-|   +-- "manifest unknown" / "not found" --> verify image:tag exists in registry
-|   +-- "unauthorized" / "access denied" --> create/update imagePullSecrets
++-- ImagePullBackOff --> [IMAGE PULL]
+|   +-- "manifest unknown" --> verify image:tag exists in registry
+|   +-- "unauthorized" --> create/update imagePullSecrets
 |
-+-- Running but broken --> [SERVICE/NETWORK WORKFLOW]
-|   |
++-- Running but broken --> [SERVICE/NETWORK]
 |   +-- kubectl get endpoints compute-svc -n parametric
 |   |   +-- ENDPOINTS empty --> selector mismatch (must be app: parametric-api)
 |   |   +-- ENDPOINTS has IPs --> test connectivity from debug pod
-|   |       +-- DNS fails --> [DNS WORKFLOW]
-|   |       +-- Connection refused --> targetPort mismatch (must be 4000)
-|   |       +-- Timeout --> check NetworkPolicies
-|   |
 |   +-- Ingress 502/503 --> check pod readiness + ingress controller
 |   +-- TLS handshake error --> check compute-tls secret + cert expiry
 |
-+-- Error / Unknown --> [NODE/CLUSTER WORKFLOW]
-    |
++-- Error / Unknown --> [NODE/CLUSTER]
     +-- kubectl describe node <node>
-    +-- MemoryPressure/DiskPressure/PIDPressure --> evict pods, clean disk, add nodes
+    +-- MemoryPressure/DiskPressure --> evict pods, clean disk, add nodes
     +-- NetworkUnavailable --> check CNI plugin (aws-node on EKS)
 ```
 
-## Essential Commands
+---
+## [3][ESSENTIAL_COMMANDS]
+>**Dictum:** *Structured queries replace grep-based debugging.*
+
+<br>
 
 ```bash
 # --- Pod Lifecycle ---
@@ -120,10 +114,9 @@ kubectl exec <pod> -n parametric -c api -it -- /bin/sh
 kubectl top pod <pod> -n parametric --containers
 kubectl events --for pod/<pod> -n parametric
 
-# --- Structured Queries (jsonpath -- no grep) ---
+# --- Structured Queries (jsonpath) ---
 kubectl get pod <pod> -n parametric -o jsonpath='{.status.containerStatuses[*].state}'
 kubectl get pod <pod> -n parametric -o jsonpath='{.status.containerStatuses[?(@.name=="api")].restartCount}'
-kubectl get pods -n parametric -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.status.phase}{"\n"}{end}'
 kubectl get deploy compute-deploy -n parametric -o jsonpath='{.status.conditions[?(@.type=="Available")].status}'
 
 # --- Service / Network ---
@@ -131,139 +124,100 @@ kubectl get svc,endpoints -n parametric
 kubectl run tmp-shell --rm -i --tty --image nicolaka/netshoot -- /bin/bash
 kubectl exec <pod> -n parametric -- nslookup compute-svc.parametric.svc.cluster.local
 
-# --- Ingress (nginx -- project default) ---
+# --- Ingress (nginx) / Gateway API ---
 kubectl describe ingress compute-ingress -n parametric
-kubectl get pods -n ingress-nginx
 kubectl logs -n ingress-nginx -l app.kubernetes.io/name=ingress-nginx --tail=50
-
-# --- Gateway API (if using Gateway API v1.2+) ---
 kubectl get gateways,httproutes,grpcroutes -n parametric
-kubectl describe gateway <gateway> -n parametric
 kubectl get httproute <route> -n parametric -o jsonpath='{.status.parents[*].conditions}'
 
-# --- HPA ---
-kubectl get hpa compute-hpa -n parametric
+# --- HPA / Observability ---
 kubectl describe hpa compute-hpa -n parametric
-
-# --- Observability Stack ---
 kubectl get pods -n parametric -l tier=observe
 kubectl logs -n parametric -l app=alloy --tail=50
-kubectl logs -n parametric -l app=prometheus --tail=50
-kubectl logs -n parametric -l app=grafana --tail=50
-
-# --- Cluster ---
-kubectl top nodes
-kubectl get events -n parametric --sort-by='.lastTimestamp'
-kubectl get nodes -o wide
 
 # --- Debug Containers (stable 1.25+) ---
-# Attach ephemeral debug container to running pod (no restart)
 kubectl debug <pod> -n parametric -it --image=nicolaka/netshoot --target=api
-# Copy pod for debugging (shares process namespace)
 kubectl debug <pod> -it --copy-to=debug-pod --share-processes --container=api -- /bin/sh
-# Debug distroless containers (no shell in original image)
-kubectl debug <pod> -n parametric -it --image=busybox --target=api -- /bin/sh
-# Debug node-level issues
 kubectl debug node/<node> -it --image=ubuntu
 
 # --- Sidecar Containers (GA 1.33+) ---
-# Sidecars are init containers with restartPolicy: Always
-# Check sidecar definition:
 kubectl get pod <pod> -n parametric -o jsonpath='{.spec.initContainers[?(@.restartPolicy=="Always")]}'
-# Check sidecar status:
 kubectl get pod <pod> -n parametric -o jsonpath='{.status.initContainerStatuses[*].name}'
-# Sidecar ordering: sidecars start in order BEFORE main containers
-# If sidecar depends on another sidecar, order matters in initContainers array
 
 # --- In-Place Pod Resize (GA 1.35+) ---
-# Resize CPU/memory without pod restart:
 kubectl patch pod <pod> -n parametric --subresource resize --type merge -p \
   '{"spec":{"containers":[{"name":"api","resources":{"requests":{"cpu":"500m","memory":"512Mi"},"limits":{"cpu":"1000m","memory":"1Gi"}}}]}}'
-# Check resize status:
+# > [IMPORTANT] kubectl patch --subresource resize is temporary. Update deploy.ts resource specs + pulumi up.
 kubectl get pod <pod> -n parametric -o jsonpath='{.status.resize}'
-# Expected output: "" (empty = done), "InProgress", "Deferred", "Infeasible"
-# Check allocated resources after resize:
-kubectl get pod <pod> -n parametric -o jsonpath='{.status.containerStatuses[?(@.name=="api")].allocatedResources}'
 
 # --- ValidatingAdmissionPolicy (GA 1.30+) ---
 kubectl get validatingadmissionpolicies
-kubectl get validatingadmissionpolicybindings
-# Debug policy rejections:
-kubectl describe validatingadmissionpolicy <policy-name>
-# Check CEL expression evaluation errors:
 kubectl get events --field-selector reason=ValidatingAdmissionPolicyRejection -n parametric
 
-# --- Dry-Run / Diff ---
-kubectl diff -f manifest.yaml
-kubectl apply --dry-run=server -f manifest.yaml
-
-# --- Wait / Condition-Based Scripting ---
+# --- Wait / Condition-Based ---
 kubectl wait --for=condition=ready pod -l app=parametric-api -n parametric --timeout=120s
 kubectl wait --for=condition=available deployment/compute-deploy -n parametric --timeout=300s
-kubectl wait --for=delete pod/<pod> -n parametric --timeout=60s
-kubectl wait --for=jsonpath='{.status.phase}'=Running pod/<pod> -n parametric --timeout=60s
-# Wait for HPA to have current metrics:
-kubectl wait --for=jsonpath='{.status.currentMetrics[0].resource.current.averageUtilization}' hpa/compute-hpa -n parametric --timeout=120s
 
 # --- ConfigMap / Secret Verification ---
 kubectl get configmap compute-config -n parametric -o yaml
 kubectl get secret compute-secret -n parametric -o jsonpath='{.data}' | jq 'keys'
-kubectl exec <pod> -n parametric -c api -- env | sort
 
 # --- EKS-Specific ---
 aws eks describe-cluster --name <cluster>
-aws eks describe-addon --cluster-name <cluster> --addon-name <addon>
 kubectl get pods -n kube-system -l k8s-app=aws-node
 kubectl logs -n kube-system -l k8s-app=aws-node --tail=50
 
-# --- Emergency ---
+# --- Emergency (IaC-first: all state-modifying commands below are temporary) ---
 kubectl rollout restart deployment/compute-deploy -n parametric
+# > [IMPORTANT] Temporary fix. Update deploy.ts image tag or config for permanent resolution via pulumi up.
 kubectl rollout undo deployment/compute-deploy -n parametric
+# > [IMPORTANT] Temporary rollback. Fix root cause in deploy.ts and redeploy via pulumi up.
 kubectl delete pod <pod> -n parametric --force --grace-period=0
+# > [IMPORTANT] Temporary. Investigate root cause in deployment config (deploy.ts).
 kubectl drain <node> --ignore-daemonsets --delete-emptydir-data
-kubectl cordon <node>
+# > [CRITICAL] Bypasses Pulumi state. Coordinate with Pulumi node group config. Run pulumi refresh after.
+kubectl scale deployment/compute-deploy -n parametric --replicas=N
+# > [IMPORTANT] Temporary. Update HPA/deployment replica specs in Pulumi for permanent resolution via pulumi up.
+kubectl taint nodes <node> <key>:<effect>-
+# > [CRITICAL] Bypasses Pulumi state. Update deploy.ts toleration/taint config + pulumi up.
 ```
 
-## EKS Debugging
+---
+## [4][EKS_DEBUGGING]
+>**Dictum:** *EKS-specific issues require AWS-level diagnostics.*
 
-| Symptom | Diagnostic | What to Look For | Fix |
-|---|---|---|---|
-| Pod stuck `ContainerCreating` | `kubectl logs -n kube-system -l k8s-app=aws-node --tail=50` | "ipamd: no available IP addresses" or "failed to setup ENI" | VPC CNI IP/ENI exhaustion: scale node group, use prefix delegation, or use larger instance type |
-| Pod cannot reach AWS APIs | `kubectl describe sa <sa> -n parametric` | Missing `eks.amazonaws.com/role-arn` annotation | IRSA misconfigured: annotate ServiceAccount with correct IAM role ARN |
-| Node cannot join cluster | `aws eks describe-nodegroup --cluster-name <c> --nodegroup-name <ng>` | `status: CREATE_FAILED` or health issues | Attach `AmazonEKSWorkerNodePolicy`, `AmazonEKS_CNI_Policy`, `AmazonEC2ContainerRegistryReadOnly` |
-| Add-on unhealthy | `aws eks describe-addon --cluster-name <c> --addon-name <name>` | `status: DEGRADED` with version conflict | `aws eks update-addon --cluster-name <c> --addon-name <name> --addon-version <latest>` |
-| CloudWatch missing logs | `aws logs describe-log-groups --log-group-name-prefix /aws/eks` | No log groups matching cluster name | Enable Container Insights: `aws eks update-cluster-config --logging` |
-| CoreDNS CrashLoop on EKS | `kubectl logs -n kube-system -l k8s-app=kube-dns` | OOMKilled or Fargate scheduling errors | Add CoreDNS Fargate profile or patch compute type annotation |
-| ALB not routing | `kubectl logs -n kube-system -l app.kubernetes.io/name=aws-load-balancer-controller` | "failed to build model" or subnet errors | Check subnet tags (`kubernetes.io/role/elb`) and IAM policy |
+<br>
 
-**Note:** This project uses nginx ingress (NOT ALB), per deploy.ts:16. ALB debugging applies only if ALB controller is installed separately.
+| [INDEX] | [SYMPTOM]                         | [DIAGNOSTIC]                                                                         | [FIX]                                                                   |
+| :-----: | --------------------------------- | ------------------------------------------------------------------------------------ | ----------------------------------------------------------------------- |
+|   [1]   | **Pod stuck `ContainerCreating`** | `kubectl logs -n kube-system -l k8s-app=aws-node --tail=50`                          | VPC CNI IP exhaustion: scale nodes, prefix delegation, larger instance. |
+|   [2]   | **Pod cannot reach AWS APIs**     | `kubectl describe sa <sa> -n parametric`                                             | IRSA: annotate SA with `eks.amazonaws.com/role-arn`.                    |
+|   [3]   | **Node cannot join cluster**      | `aws eks describe-nodegroup --cluster-name <c> --nodegroup-name <ng>`                | Attach EKS node IAM policies.                                           |
+|   [4]   | **Add-on unhealthy**              | `aws eks describe-addon --cluster-name <c> --addon-name <name>`                      | `aws eks update-addon --addon-version <latest>`.                        |
+|   [5]   | **CoreDNS CrashLoop on EKS**      | `kubectl logs -n kube-system -l k8s-app=kube-dns`                                    | Add Fargate profile or patch compute type.                              |
+|   [6]   | **ALB not routing**               | `kubectl logs -n kube-system -l app.kubernetes.io/name=aws-load-balancer-controller` | Check subnet tags + IAM policy (project uses nginx, not ALB).           |
 
-## Scripts
+---
+## [5][SCRIPTS]
+>**Dictum:** *Automated collection prevents missed diagnostics.*
 
-| Script | Scope | Usage |
-|---|---|---|
-| `scripts/pod_diagnostics.py` | Single pod deep-dive | `python3 scripts/pod_diagnostics.py <pod> -n parametric [-c api] [-o report.txt]` |
-| `scripts/cluster_health.sh` | Cluster-wide overview | `./scripts/cluster_health.sh` (requires: `jq`) |
-| `scripts/network_debug.sh` | Pod network connectivity | `./scripts/network_debug.sh parametric <pod>` |
+| [INDEX] | [SCRIPT]                         | [SCOPE]               | [USAGE]                                                                            |
+| :-----: | -------------------------------- | --------------------- | ---------------------------------------------------------------------------------- |
+|   [1]   | **`scripts/pod_diagnostics.py`** | Single pod deep-dive  | `python3 scripts/pod_diagnostics.py <pod> -n parametric [-c api] [-o report.txt]`. |
+|   [2]   | **`scripts/_collectors.py`**     | Diagnostic collectors | Imported by `pod_diagnostics.py` (not run directly).                               |
+|   [3]   | **`scripts/cluster_health.sh`**  | Cluster-wide overview | `./scripts/cluster_health.sh`.                                                     |
+|   [4]   | **`scripts/network_debug.sh`**   | Network connectivity  | `./scripts/network_debug.sh parametric <pod>`.                                     |
 
-## Escalation Checklist
+---
+## [6][ESCALATION_CHECKLIST]
+>**Dictum:** *Systematic escalation prevents missed root causes.*
 
-- [ ] Reviewed pod events via `kubectl events --for pod/<pod> -n parametric`
-- [ ] Checked current + previous logs: `kubectl logs <pod> -n parametric -c api [--previous]`
-- [ ] Distinguished startup probe failure (150s window) from liveness probe failure (30s window)
-- [ ] Verified node resource availability via `kubectl top nodes`
-- [ ] Confirmed image accessible: `kubectl get deploy compute-deploy -n parametric -o jsonpath='{.spec.template.spec.containers[0].image}'`
-- [ ] Validated service selector matches pod labels (`app: parametric-api`)
-- [ ] Tested DNS: `kubectl exec <pod> -n parametric -- nslookup compute-svc.parametric.svc.cluster.local`
-- [ ] Checked NetworkPolicies: `kubectl get networkpolicies -n parametric`
-- [ ] Confirmed ConfigMap + Secret exist: `kubectl get configmap compute-config secret compute-secret -n parametric`
-- [ ] Verified env vars injected: `kubectl exec <pod> -n parametric -c api -- env | sort`
-- [ ] Checked HPA status: `kubectl describe hpa compute-hpa -n parametric`
-- [ ] Checked Ingress + TLS: `kubectl describe ingress compute-ingress -n parametric`
-- [ ] Validated RBAC: `kubectl auth can-i --list --as=system:serviceaccount:parametric:default -n parametric`
-- [ ] Checked ResourceQuotas: `kubectl get resourcequotas -n parametric`
-- [ ] Verified observability stack: `kubectl get pods -n parametric -l tier=observe`
-- [ ] Checked sidecar containers (1.33+): `kubectl get pod <pod> -n parametric -o jsonpath='{.spec.initContainers[?(@.restartPolicy=="Always")]}'`
-- [ ] Checked in-place resize status (1.35+): `kubectl get pod <pod> -n parametric -o jsonpath='{.status.resize}'`
-- [ ] (EKS) Verified VPC CNI health: `kubectl get pods -n kube-system -l k8s-app=aws-node`
-- [ ] (EKS) Verified IRSA: `kubectl describe sa -n parametric`
+- [ ] Pod events + current/previous logs.
+- [ ] Startup (150s) vs liveness (30s) probe failure distinguished.
+- [ ] Node resources: `kubectl top nodes`.
+- [ ] Image tag exists in registry.
+- [ ] Service selector matches labels (`app: parametric-api`) + DNS resolves.
+- [ ] NetworkPolicies not blocking + ConfigMap/Secret/env vars present.
+- [ ] HPA status + Ingress/TLS healthy.
+- [ ] Sidecar containers (1.33+) + in-place resize status (1.35+).
+- [ ] (EKS) VPC CNI health + IRSA annotation.

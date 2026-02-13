@@ -1,326 +1,228 @@
-# GitHub Actions Best Practices
+# [H1][BEST-PRACTICES]
+>**Dictum:** *Security hardening, supply chain integrity, and performance optimization govern workflow quality.*
 
-**Last Updated:** February 2026
+<br>
 
-## Security Checklist
+---
+## [1][SECURITY]
+>**Dictum:** *Defense-in-depth layers prevent credential theft, injection, and unauthorized access.*
 
-- [ ] **Pin to SHA**: `uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2`
-- [ ] **Minimal permissions**: Top-level `permissions: contents: read`, job-level grants
-- [ ] **Secrets via env**: Pass through `env:`, never in `run:` interpolation
-- [ ] **Mask secrets**: `printf '::add-mask::%s\n' "$VALUE"` for dynamic sensitive values
-- [ ] **No mutable refs**: Never `@main`, `@master`, `@latest` -- use SHA or major tag
-- [ ] **Dependency review**: `actions/dependency-review-action@3c4e3dcb1aa7874d2c16be7d79418e9b7efd6261 # v4.8.2` on PRs
-- [ ] **Sparse checkout**: Use `sparse-checkout:` to fetch only needed paths
-- [ ] **Supply chain**: Cosign signing + `actions/attest-build-provenance@62fc1d596301d0ab9914e1fec14dc5c8d93f65cd # v3.2.0`
-- [ ] **Immutable actions**: Publish via `actions/publish-immutable-action` to GHCR as OCI; or consume immutable refs via `ghcr.io/`
-- [ ] **App tokens over PATs**: `actions/create-github-app-token@d72941d797fd3113feb6b93fd0dec494b13a2547 # v2.0.6` for cross-repo ops
-- [ ] **Harden-Runner**: `step-security/harden-runner@002fdce3c6a235733a90a27c80493a3241e56863 # v2.12.0` as first step in sensitive jobs
+<br>
 
-### Safe Interpolation
+[CRITICAL]:
+- [ALWAYS] SHA-pin every `uses:` reference — format: `owner/repo@<SHA> # vN.N.N`. [REFERENCE] Pinning protocol and incident history: [->version-discovery.md](./version-discovery.md).
+- [ALWAYS] `step-security/harden-runner` as **first step** in every job — monitors network egress, file integrity, process activity. Block mode enforces endpoint allowlists.
+- [ALWAYS] Minimal permissions at **job level** — top-level `permissions: {}` (deny-all default), grant per-job. [REFERENCE] Per-action permissions: [->version-discovery.md§COMMON_ACTIONS_INDEX](./version-discovery.md).
+- [ALWAYS] OIDC federation for cloud auth (`id-token: write`) — eliminates static credentials entirely.
+- [ALWAYS] `actions/create-github-app-token` for cross-repo ops — scoped, 1-hour expiry, survives offboarding.
+- [NEVER] Direct `${{ }}` interpolation of untrusted input in `run:` blocks. [REFERENCE] Safe patterns: [->expressions-and-contexts.md§INJECTION_PREVENTION](./expressions-and-contexts.md).
+- [NEVER] Mutable refs (`@main`, `@latest`, `@v1`) — SHA-pinned or immutable OCI only.
+
+| [INDEX] | [TRIGGER]                 | [SECRETS] | [CODE_CONTEXT] | [RISK]                                      |
+| :-----: | ------------------------- | :-------: | -------------- | ------------------------------------------- |
+|   [1]   | **`pull_request`**        |    No     | PR branch      | Safe — no secret access.                    |
+|   [2]   | **`pull_request_target`** |    Yes    | Default branch | High — never checkout PR head without gate. |
+|   [3]   | **`workflow_run`**        |    Yes    | Default branch | Safe if validating conclusion.              |
+
+[IMPORTANT] **Secure-by-Default (Dec 8, 2025 — enforced):** `pull_request_target` workflows now anchor execution to default-branch definitions. `GITHUB_REF` resolves to `refs/heads/main`; `GITHUB_SHA` points to default branch HEAD at run start. Environment policy evaluation aligns with the execution ref. This cuts off "pwn request" attacks by pinning workflow source to a trusted branch. [->advanced-triggers.md§PULL_REQUEST_TARGET](./advanced-triggers.md).
+
+---
+### [1.1][GITHUB_TOKEN_SCOPES]
+
+| [INDEX] | [SCOPE]           | [LEVELS]            | [COMMON_USE]                       |
+| :-----: | ----------------- | ------------------- | ---------------------------------- |
+|   [1]   | `actions`         | read / write / none | Manage workflow runs               |
+|   [2]   | `attestations`    | read / write / none | Build provenance, SBOM attestation |
+|   [3]   | `checks`          | read / write / none | Check runs and suites              |
+|   [4]   | `contents`        | read / write / none | Repo content, commits, releases    |
+|   [5]   | `deployments`     | read / write / none | Create/manage deployments          |
+|   [6]   | `discussions`     | read / write / none | GitHub Discussions                 |
+|   [7]   | `id-token`        | write / none        | OIDC federation (no read level)    |
+|   [8]   | `issues`          | read / write / none | Issues and comments                |
+|   [9]   | `models`          | read / none         | GitHub Models inference API        |
+|  [10]   | `packages`        | read / write / none | Upload/publish packages (GHCR)     |
+|  [11]   | `pages`           | read / write / none | GitHub Pages builds                |
+|  [12]   | `pull-requests`   | read / write / none | PRs, labels, reviews               |
+|  [13]   | `security-events` | read / write / none | Code scanning, SARIF upload        |
+|  [14]   | `statuses`        | read / write / none | Commit statuses                    |
+
+Shorthand: `permissions: read-all` / `permissions: write-all` / `permissions: {}` (deny-all). `write` implies `read` for all scopes except `id-token`.
+
+---
+## [2][SUPPLY_CHAIN]
+>**Dictum:** *Layered controls secure artifacts from source to deployment.*
+
+<br>
+
+| [INDEX] | [CONTROL]             | [IMPLEMENTATION]                                                              |
+| :-----: | --------------------- | ----------------------------------------------------------------------------- |
+|   [1]   | **SHA pinning**       | [->version-discovery.md§SHA_PINNING_FORMAT](./version-discovery.md)           |
+|   [2]   | **Harden-Runner**     | Audit mode first -> generate baseline -> enforce block mode with allowlist.   |
+|   [3]   | **SLSA provenance**   | `actions/attest-build-provenance` = L2; reusable workflow caller = L3.        |
+|   [4]   | **SBOM attestation**  | `anchore/sbom-action` (SPDX-JSON) + `actions/attest-sbom` -> registry.        |
+|   [5]   | **Cosign signing**    | `sigstore/cosign-installer` keyless via OIDC — `cosign sign --yes`.           |
+|   [6]   | **Immutable actions** | [->version-discovery.md§IMMUTABLE_ACTIONS](./version-discovery.md)            |
+|   [7]   | **Dependency review** | `actions/dependency-review-action` on PRs — license + vulnerability gates.    |
+|   [8]   | **Secret scanning**   | Push protection blocks detected secrets pre-merge; up to 500 custom patterns. |
+|   [9]   | **Auto-maintenance**  | [->version-discovery.md§AUTOMATED_MAINTENANCE](./version-discovery.md)        |
+
+<br>
+
+### [2.1][OIDC_FEDERATION]
+
+| [INDEX] | [PROVIDER] | [ACTION]                                | [KEY_INPUTS]                                    |
+| :-----: | ---------- | --------------------------------------- | ----------------------------------------------- |
+|   [1]   | **AWS**    | `aws-actions/configure-aws-credentials` | `role-to-assume`, `aws-region`                  |
+|   [2]   | **GCP**    | `google-github-actions/auth`            | `workload_identity_provider`, `service_account` |
+|   [3]   | **Azure**  | `azure/login`                           | `client-id`, `tenant-id`, `subscription-id`     |
+
+Prerequisite: `permissions: { id-token: write }` at job level. Subject claims include repo, branch, environment for fine-grained trust policies. Short-lived tokens per session — zero rotation overhead.
+
+---
+### [2.2][TOKEN_SELECTION]
+
+| [INDEX] | [TYPE]               | [SCOPE]            |  [LIFETIME]  | [CROSS_REPO] | [USE_CASE]           |
+| :-----: | -------------------- | ------------------ | :----------: | :----------: | -------------------- |
+|   [1]   | **`GITHUB_TOKEN`**   | Current repo       | Job duration |      No      | Standard in-repo CI. |
+|   [2]   | **Fine-grained PAT** | Selected repos     | Up to 1 year |     Yes      | Personal automation. |
+|   [3]   | **GitHub App token** | Installation repos |    1 hour    |     Yes      | Org-wide automation. |
+
+[IMPORTANT] Prefer App tokens over PATs — scoped, auditable, account-independent.
+
+---
+## [3][PERFORMANCE]
+>**Dictum:** *Caching, concurrency, and targeted execution minimize cost and latency.*
+
+<br>
+
+[IMPORTANT]:
+- [ALWAYS] `actions/cache` or setup action built-in cache (`cache: 'pnpm'`) — v5 backend is ~80% faster uploads.
+- [ALWAYS] `concurrency` groups with `cancel-in-progress: true` for CI; `false` for deploys.
+- [ALWAYS] `timeout-minutes:` on every job — prevents runaway billing. Step-level `timeout-minutes:` also supported natively (not in composite actions).
+- [ALWAYS] `paths:` / `paths-ignore:` filters to skip irrelevant workflows.
+- [ALWAYS] Sparse checkout for monorepos — 96.6% clone time reduction in benchmarks.
 
 ```yaml
-# SAFE -- env var
-- env: { TITLE: '${{ github.event.pull_request.title }}' }
-  run: [[ "$TITLE" =~ ^octocat ]] && printf '%s\n' "Match"
-
-# UNSAFE -- direct interpolation in run:
-- run: printf '%s\n' "${{ github.event.pull_request.title }}"
-```
-
-### PR Security Model
-
-| Trigger | Secrets | Code Context | Risk |
-|---------|---------|-------------|------|
-| `pull_request` | No | PR branch | Safe |
-| `pull_request_target` | Yes | Target branch | High -- never checkout PR code |
-| `workflow_run` (after PR CI) | Yes | Target branch | Safe if correct |
-
-## Performance Checklist
-
-- [ ] **Caching**: `actions/cache@v5` (new backend, node24) or setup action's built-in cache (`cache: 'pnpm'`)
-- [ ] **Concurrency**: Cancel outdated runs with `cancel-in-progress: true`; queue deploys with `cancel-in-progress: false`
-- [ ] **Path filtering**: `paths:` to skip irrelevant workflows
-- [ ] **Timeouts**: Job-level `timeout-minutes:` on every job
-- [ ] **Matrix**: `fail-fast: false`, `max-parallel:`, `exclude:` expensive combos
-- [ ] **Job summaries**: Write Markdown to `$GITHUB_STEP_SUMMARY` for rich build reports
-
-### pnpm + Nx Caching
-
-Three independent cache layers for pnpm/Nx monorepos:
-
-| Layer | Path | Cache Key | Purpose |
-|-------|------|-----------|---------|
-| pnpm store | `$(pnpm store path)` | `${{ runner.os }}-pnpm-${{ hashFiles('pnpm-lock.yaml') }}` | Package download cache |
-| node_modules | `node_modules` / `.pnpm` | Same as pnpm store (or use `pnpm install --frozen-lockfile` each time) | Installed dependencies |
-| Nx computation | `.nx/cache` | `${{ runner.os }}-nx-${{ hashFiles('pnpm-lock.yaml') }}` | Lint/test/build task outputs |
-
-```yaml
-# Combined pnpm store + Nx cache (v5 backend)
-- uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
+# Sparse checkout — monorepo: only needed packages
+- uses: actions/checkout@<SHA> # v6
   with:
-      path: |
-          ~/.local/share/pnpm/store
-          .nx/cache
-      key: ${{ runner.os }}-pnpm-nx-${{ hashFiles('pnpm-lock.yaml') }}
-      restore-keys: ${{ runner.os }}-pnpm-nx-
+    sparse-checkout: |
+      packages/api
+      packages/shared
+    sparse-checkout-cone-mode: true
+    fetch-depth: 1
 ```
 
-Alternatively, split into separate cache steps for independent invalidation:
+| [INDEX] | [LAYER]             | [PATH]               | [CACHE_KEY]                                                |
+| :-----: | ------------------- | -------------------- | ---------------------------------------------------------- |
+|   [1]   | **pnpm store**      | `$(pnpm store path)` | `${{ runner.os }}-pnpm-${{ hashFiles('pnpm-lock.yaml') }}` |
+|   [2]   | **Nx computation**  | `.nx/cache`          | `${{ runner.os }}-nx-${{ hashFiles('pnpm-lock.yaml') }}`   |
+|   [3]   | **Docker BuildKit** | GHA cache backend    | `cache-from: type=gha` / `cache-to: type=gha,mode=max`     |
 
-```yaml
-# pnpm store only
-- uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
-  with:
-      path: ~/.local/share/pnpm/store
-      key: ${{ runner.os }}-pnpm-${{ hashFiles('pnpm-lock.yaml') }}
-      restore-keys: ${{ runner.os }}-pnpm-
+<br>
 
-# Nx computation cache only
-- uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
-  with:
-      path: .nx/cache
-      key: ${{ runner.os }}-nx-${{ github.sha }}
-      restore-keys: ${{ runner.os }}-nx-
-```
+### [3.1][WORKFLOW_AND_RUNNER_LIMITS]
 
-### Concurrency
+| [INDEX] | [LIMIT]                         | [VALUE]                                             |
+| :-----: | ------------------------------- | --------------------------------------------------- |
+|   [1]   | **Matrix jobs**                 | 256 per workflow run (hard limit).                  |
+|   [2]   | **Job execution (hosted)**      | 6 hours max per job.                                |
+|   [3]   | **Job execution (self-hosted)** | 5 days max per job.                                 |
+|   [4]   | **Workflow run time**           | 35 days max per run.                                |
+|   [5]   | **Job queue time**              | 24 hours before auto-cancel.                        |
+|   [6]   | **GITHUB_OUTPUT**               | 1 MB per job; 50 MB total per workflow run.         |
+|   [7]   | **GITHUB_STEP_SUMMARY**         | 1 MiB per step; max 20 summaries displayed per job. |
+|   [8]   | **Artifact (individual)**       | 10 GB per artifact.                                 |
+|   [9]   | **Artifacts per job**           | 500 max.                                            |
+|  [10]   | **Cache**                       | 10 GB per repository.                               |
+|  [11]   | **Workflow queue rate**         | 500 runs / 10 seconds per repository.               |
+|  [12]   | **API rate (GITHUB_TOKEN)**     | 1,000 requests / hour per repository.               |
 
-```yaml
-# CI: cancel outdated runs
-concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+**Concurrent jobs (GitHub-hosted standard runners):**
 
-# Deployment: queue runs, never cancel in-progress
-concurrency:
-  group: deploy-${{ inputs.environment || 'production' }}
-  cancel-in-progress: false
-```
+| [INDEX] | [PLAN]         | [CONCURRENT_JOBS] | [macOS] |
+| :-----: | -------------- | :---------------: | :-----: |
+|   [1]   | **Free**       |        20         |    5    |
+|   [2]   | **Pro**        |        40         |    5    |
+|   [3]   | **Team**       |        60         |    5    |
+|   [4]   | **Enterprise** |        500        |   50    |
 
-## Workflow Design
+Larger runners (Team/Enterprise): up to 1,000 concurrent jobs; 100 GPU max.
 
-```yaml
-jobs:
-  lint:
-    runs-on: ubuntu-latest
-    steps: [...]
-  test:
-    runs-on: ubuntu-latest
-    steps: [...]
-  build:
-    needs: [lint, test]
-    steps: [...]
-  deploy:
-    needs: build
-    if: github.ref == 'refs/heads/main'
-    steps: [...]
-```
+---
+### [3.2][RUNNERS]
 
-### Status Functions
+| [INDEX] | [TYPE]        | [SPEC]          | [NOTES]                                                    |
+| :-----: | ------------- | --------------- | ---------------------------------------------------------- |
+|   [1]   | **Standard**  | 2 vCPU / 7 GB   | Default `ubuntu-latest`.                                   |
+|   [2]   | **4-core**    | 4 vCPU / 16 GB  | Team/Enterprise plans; SSD-backed.                         |
+|   [3]   | **8-64-core** | 8-64 vCPU       | Up to 256 GB RAM; SSD-backed.                              |
+|   [4]   | **GPU (T4)**  | 4 vCPU / 28 GB  | Tesla T4 / 16 GB VRAM; $0.07/min.                          |
+|   [5]   | **ARM64**     | 4 vCPU (Cobalt) | `ubuntu-24.04-arm` — free for public repos; ~37% cost cut. |
 
-| Function | When |
-|----------|------|
-| `success()` | All previous steps succeeded (default) |
-| `failure()` | Any previous step failed |
-| `always()` | Run regardless |
-| `cancelled()` | Workflow cancelled |
+[IMPORTANT] ARM64 labels: `ubuntu-24.04-arm`, `ubuntu-22.04-arm`. No `-arm64` suffix — the canonical format is `-arm`. Free for public repos; Team/Enterprise for private repos.
 
-### Reusable Workflows
+---
+### [3.3][SELF_HOSTED_SCALING]
 
-```yaml
-# Caller
-jobs:
-  call-build:
-    uses: ./.github/workflows/reusable-build.yml
-    with: { environment: production }
-    secrets: inherit  # pass all secrets (or explicit: token: '${{ secrets.DEPLOY_TOKEN }}')
+**Actions Runner Controller (ARC)** — Kubernetes operator for ephemeral, autoscaling self-hosted runners.
 
-# Callee (workflow_call)
-on:
-  workflow_call:
-    inputs:
-      environment: { required: true, type: string }
-    secrets:
-      token: { required: false }  # required: false when using secrets: inherit
-    outputs:
-      build-id: { value: '${{ jobs.build.outputs.id }}' }
-```
+- Runner Scale Sets: ephemeral container-based runners; clean scale-up/down.
+- ScaleSet Listener patches EphemeralRunnerSet replica count via K8s APIs.
+- Install via Helm: `oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set-controller`.
+- Runner Groups: security boundaries controlling which orgs/repos access which runners.
 
-## Error Handling
+---
+## [4][CONTAINER_SERVICES]
+>**Dictum:** *Service containers provide ephemeral backing services for integration tests.*
 
-```yaml
-jobs:
-  build:
-    timeout-minutes: 30
-    steps:
-      - id: tests
-        continue-on-error: true
-        run: npm test
-      - if: always()
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
-        with: { name: results, path: test-results/ }
-      - if: steps.tests.outcome == 'failure'
-        run: exit 1
-```
+<br>
 
-## Job Summaries
+| [INDEX] | [SERVICE]    | [IMAGE]       | [HEALTH_CMD]      | [ENV]                                   |
+| :-----: | ------------ | ------------- | ----------------- | --------------------------------------- |
+|   [1]   | **Postgres** | `postgres:17` | `pg_isready`      | `POSTGRES_PASSWORD`, `POSTGRES_DB`      |
+|   [2]   | **Redis**    | `redis:7`     | `redis-cli ping`  | _(none)_                                |
+|   [3]   | **MySQL**    | `mysql:8`     | `mysqladmin ping` | `MYSQL_ROOT_PASSWORD`, `MYSQL_DATABASE` |
 
-```yaml
-- run: |
-    printf '%s\n' "## Build Results" >> "$GITHUB_STEP_SUMMARY"
-    printf '%s\n' "| Metric | Value |" >> "$GITHUB_STEP_SUMMARY"
-    printf '%s\n' "|--------|-------|" >> "$GITHUB_STEP_SUMMARY"
-    printf '%s\n' "| Duration | ${SECONDS}s |" >> "$GITHUB_STEP_SUMMARY"
-    printf '%s\n' "| Commit | \`${{ github.sha }}\` |" >> "$GITHUB_STEP_SUMMARY"
-```
+Networking: service name as hostname inside container jobs (`postgres://postgres:5432`). VM runners use `localhost` with port mapping.
 
-## Environments
+---
+## [5][ORGANIZATIONAL_CONTROLS]
+>**Dictum:** *Repository rulesets and required workflows enforce org-wide CI standards.*
 
-```yaml
-environment:
-  name: ${{ github.ref_name == 'main' && 'production' || 'staging' }}
-  url: ${{ github.ref_name == 'main' && 'https://example.com' || 'https://staging.example.com' }}
-```
+<br>
 
-Protection rules (Settings > Environments): required reviewers, wait timer, deployment branches, environment secrets.
+- **Required workflows via rulesets**: org/enterprise-level CI enforcement; replaces deprecated `required_workflows` feature.
+- **Ruleset features**: branch targeting, bypass rules for admins, evaluation/dry-run mode before enforcement.
+- **Merge queue integration**: required workflow rulesets require `merge_group` event trigger alongside `pull_request`.
+- **Environment protection**: required reviewers (1 of N), wait timers (1-43,200 min), deployment branch restrictions.
 
-## Container Jobs
+### [5.1][CUSTOM_DEPLOYMENT_PROTECTION_RULES]
 
-```yaml
-jobs:
-  test:
-    runs-on: ubuntu-latest
-    container: { image: 'node:24-alpine', options: '--cpus 2 --memory 4g' }
-    services:
-      postgres:
-        image: postgres:17
-        env: { POSTGRES_PASSWORD: postgres }
-        options: --health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 5
-      redis:
-        image: redis:7
-        options: --health-cmd "redis-cli ping" --health-interval 10s --health-timeout 5s --health-retries 5
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-      - env: { DATABASE_URL: 'postgres://postgres:postgres@postgres:5432/test', REDIS_URL: 'redis://redis:6379' }
-        run: npm test
-```
+**Status:** Generally Available. Powered by GitHub Apps via webhooks and callbacks.
 
-## Annotations and Summaries
+- GitHub sends `deployment_protection_rule` webhook payload when a job reaches a protected environment.
+- App responds via `POST /repos/{owner}/{repo}/actions/runs/{run_id}/deployment_protection_rule` with `state: "approved"` or `state: "rejected"`.
+- Status reports support Markdown (up to 1,024 characters).
+- Integrations: Datadog, ServiceNow, Honeycomb — external gates for canary metrics, change management, SLO verification.
 
-| Command | Purpose |
-|---------|---------|
-| `::notice::` | Info (blue) |
-| `::warning::` | Warning (yellow) |
-| `::error file=f,line=n::` | Error (red) with location |
-| `::group::`/`::endgroup::` | Collapsible log section |
-| `::add-mask::` | Mask value in logs |
-| `>> $GITHUB_STEP_SUMMARY` | Markdown in Actions UI |
-| `>> $GITHUB_OUTPUT` | Set step outputs (`name=value`) |
-| `>> $GITHUB_ENV` | Set env vars for subsequent steps (`name=value`) |
+---
+## [6][ANTI_PATTERNS]
+>**Dictum:** *Known anti-patterns require specific remediations.*
 
-## Naming Conventions
+<br>
 
-| Resource | Convention | Example |
-|----------|-----------|---------|
-| Workflow file | lowercase-hyphen | `ci-pipeline.yml` |
-| Job ID | lowercase-hyphen | `test-node` |
-| Step name | Action-oriented | `Install dependencies` |
-
-## YAML Anchors
-
-Reduce duplication within a single workflow file. Define anchors with `&name`, reference with `*name`.
-
-```yaml
-# Define reusable step sequences
-x-checkout-and-setup: &checkout-and-setup
-  - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-  - uses: actions/setup-node@6044e13b5dc448c55e2357c09f80417699197238 # v6.2.0
-    with: { node-version: '24', cache: 'pnpm' }
-  - run: corepack enable && pnpm install --frozen-lockfile
-
-jobs:
-  lint:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - *checkout-and-setup
-      - run: pnpm lint
-  test:
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - *checkout-and-setup
-      - run: pnpm test
-```
-
-Anchors are file-scoped. For cross-file reuse, use reusable workflows or composite actions.
-
-### ARM64 Runners in Matrix
-
-```yaml
-# Multi-architecture CI (ARM64 free for public repos)
-strategy:
-  matrix:
-    include:
-      - runner: ubuntu-latest
-        arch: x64
-      - runner: ubuntu-latest-arm64
-        arch: arm64
-runs-on: ${{ matrix.runner }}
-```
-
-## Reuse Strategy Decision Tree
-
-| Need | Solution | When |
-|------|----------|------|
-| Share steps within one file | YAML anchors (`&name` / `*name`) | Same steps repeated across jobs in one workflow |
-| Share steps across repos | Composite action (`.github/actions/` or standalone repo) | Reusable step template (setup, lint, deploy) |
-| Share entire pipelines | Reusable workflow (`workflow_call`) | Full CI/CD pipeline template consumed by multiple repos |
-| Orchestrate workflows | `workflow_run` trigger | Chain workflows after completion (e.g., deploy after CI) |
-
-**Composite vs Reusable Workflow:**
-
-| Dimension | Composite Action | Reusable Workflow |
-|-----------|-----------------|-------------------|
-| Scope | Steps within a job | Entire job(s) |
-| Secrets | Inherited from caller job | Explicit `secrets:` or `secrets: inherit` |
-| Runners | Caller's runner | Own `runs-on:` per job |
-| Nesting | Unlimited | 4 levels max, 20 unique per run |
-| Marketplace | Publishable | Not publishable |
-| SLSA | No `job_workflow_ref` claim | Yes -- enables SLSA Build Level 3 |
-
-## Supply Chain Security Hardening
-
-| Control | Implementation |
-|---------|---------------|
-| SHA pinning | `@<40-char-sha> # vX.Y.Z` on every `uses:` |
-| Immutable actions | Publish via `actions/publish-immutable-action` to GHCR as OCI; consume via `ghcr.io/owner/action@1.0.0` |
-| Dependabot | `.github/dependabot.yml` with `package-ecosystem: "github-actions"` |
-| Least privilege | Top-level `permissions: contents: read`, job-level grants |
-| OIDC over secrets | `id-token: write` + cloud provider federation |
-| App token over PAT | `actions/create-github-app-token` for cross-repo ops (scoped, short-lived, auditable) |
-| Build attestation | `actions/attest-build-provenance` for SLSA L2 provenance |
-| SBOM generation | `anchore/sbom-action` + `actions/attest-sbom` |
-| Image signing | `sigstore/cosign-installer` keyless signing via OIDC |
-| Dependency review | `actions/dependency-review-action` on PRs |
-| Harden-Runner | `step-security/harden-runner@v2.12.0` as first step -- monitors egress, detects anomalous network/process activity |
-
-## Anti-Patterns
-
-| Anti-Pattern | Fix |
-|-------------|-----|
-| `permissions: write-all` | Explicit minimal permissions |
-| `@main` / `@latest` | Pin to SHA with version comment |
-| No timeout on jobs | `timeout-minutes:` on every job |
-| `actions/setup-node@v4` | Use latest major (v6) |
-| `actions/cache@v3`/`v4` | v5 required (new backend, Dec 2025) |
-| `npm ci` in pnpm workspace | `corepack enable` + `pnpm install --frozen-lockfile` |
-| No Nx cache in CI | Cache `.nx/cache` directory between runs |
-| `set-output` command | Use `>> $GITHUB_OUTPUT` (deprecated since Oct 2022) |
-| `save-state` command | Use `>> $GITHUB_STATE` |
-| Long-lived cloud credentials | Use OIDC federation (`id-token: write`) |
-| PATs for cross-repo access | `actions/create-github-app-token` (scoped, short-lived, auditable) |
-| Mutable action tags only | SHA pin + Dependabot for automated updates; or use immutable OCI actions via GHCR |
-| No SBOM for container images | `anchore/sbom-action` + `actions/attest-sbom` |
-| No egress monitoring | `step-security/harden-runner` as first step in security-sensitive jobs |
-| Intel-only CI | Add `ubuntu-latest-arm64` to matrix for ARM64 coverage (free for public repos) |
+| [INDEX] | [ANTI_PATTERN]                                | [FIX]                                                                    |
+| :-----: | --------------------------------------------- | ------------------------------------------------------------------------ |
+|   [1]   | **`permissions: write-all`**                  | Explicit minimal permissions per job.                                    |
+|   [2]   | **`@main` / `@latest` / `@v1`**               | SHA-pin with version comment; Dependabot auto-updates.                   |
+|   [3]   | **No timeout on jobs**                        | `timeout-minutes:` on every job.                                         |
+|   [4]   | **`actions/cache@v3`/`v4`**                   | v5 required — Node 24 runtime, faster backend (~80% upload speedup).     |
+|   [5]   | **`set-output` / `save-state`**               | `>> $GITHUB_OUTPUT` / `>> $GITHUB_STATE`.                                |
+|   [6]   | **Long-lived cloud credentials**              | OIDC federation (`id-token: write`).                                     |
+|   [7]   | **PATs for cross-repo ops**                   | `actions/create-github-app-token` — scoped, auditable, 1-hour TTL.       |
+|   [8]   | **No harden-runner**                          | `step-security/harden-runner` as first step; detected tj-actions breach. |
+|   [9]   | **No SBOM for containers**                    | `anchore/sbom-action` + `actions/attest-sbom`.                           |
+|  [10]   | **Intel-only CI**                             | ARM64 matrix: `ubuntu-24.04-arm` — free for public repos.                |
+|  [11]   | **`cancel-in-progress` on deploy**            | Serialize deploys: `cancel-in-progress: false` (state corruption).       |
+|  [12]   | **Checkout PR head in `pull_request_target`** | Environment protection gate with required reviewers.                     |
