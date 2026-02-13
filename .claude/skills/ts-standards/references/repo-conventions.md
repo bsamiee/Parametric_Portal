@@ -47,21 +47,21 @@ Authoritative sources: `CLAUDE.md` (behavior, constraints, Effect patterns), `RE
 
 **Effect type parameter naming:**
 
-| [PARAM] | [MEANING]                           | [EXAMPLE]                           |
-| :-----: | ----------------------------------- | ----------------------------------- |
-|   `A`   | Success value                       | `Effect<A, E, R>`                   |
-|   `E`   | Error channel                       | `Effect<User, AuthError, R>`        |
-|   `R`   | Requirements (service dependencies) | `Effect<User, AuthError, UserRepo>` |
-|   `I`   | Encoded (schema input) type         | `Schema<A, I, R>`                   |
+| [INDEX] | [PARAM] | [MEANING]                           | [EXAMPLE]                           |
+| :-----: | :-----: | ----------------------------------- | ----------------------------------- |
+|   [1]   |   `A`   | Success value                       | `Effect<A, E, R>`                   |
+|   [2]   |   `E`   | Error channel                       | `Effect<User, AuthError, R>`        |
+|   [3]   |   `R`   | Requirements (service dependencies) | `Effect<User, AuthError, UserRepo>` |
+|   [4]   |   `I`   | Encoded (schema input) type         | `Schema<A, I, R>`                   |
 
 **Service naming conventions:**
 
-| [SUFFIX]     | [ROLE]                             | [EXAMPLE]                        |
-| ------------ | ---------------------------------- | -------------------------------- |
-| `XxxService` | Effect.Service application service | `AuthService`, `FeatureService`  |
-| `XxxRepo`    | Data access / repository           | `UserRepo`, `AuditRepo`          |
-| `XxxAdapter` | External system integration        | `StorageAdapter`, `EmailAdapter` |
-| `XxxClient`  | External API caller                | `HttpClient`, `S3Client`         |
+| [INDEX] | [SUFFIX]     | [ROLE]                             | [EXAMPLE]                        |
+| :-----: | ------------ | ---------------------------------- | -------------------------------- |
+|   [1]   | `XxxService` | Effect.Service application service | `AuthService`, `FeatureService`  |
+|   [2]   | `XxxRepo`    | Data access / repository           | `UserRepo`, `AuditRepo`          |
+|   [3]   | `XxxAdapter` | External system integration        | `StorageAdapter`, `EmailAdapter` |
+|   [4]   | `XxxClient`  | External API caller                | `HttpClient`, `S3Client`         |
 
 ---
 ## [6][FILE_ORGANIZATION]
@@ -88,14 +88,14 @@ Authoritative sources: `CLAUDE.md` (behavior, constraints, Effect patterns), `RE
 
 **Platform services:**
 
-| [CONCERN]  | [CANONICAL_SOURCE]                         | [RULE]                                            |
-| ---------- | ------------------------------------------ | ------------------------------------------------- |
-| Caching    | `packages/server/src/platform/cache.ts`    | Use CacheService; no custom cache                 |
-| Resilience | `packages/server/src/utils/resilience.ts`  | Use for retry, circuit, bulkhead, timeout         |
-| Tracing    | `packages/server/src/observe/telemetry.ts` | `Telemetry.span` for routes; `Effect.fn` internal |
-| Metrics    | `packages/server/src/observe/metrics.ts`   | Domain-specific metrics; generic as fallback      |
-| Context    | `packages/server/src/context.ts`           | Propagate `Context.Request` in all effects        |
-| Middleware | `packages/server/src/middleware.ts`        | Follow header/cookie/auth/tenant patterns         |
+| [INDEX] | [CONCERN]  | [CANONICAL_SOURCE]                         | [RULE]                                            |
+| :-----: | ---------- | ------------------------------------------ | ------------------------------------------------- |
+|   [1]   | Caching    | `packages/server/src/platform/cache.ts`    | Use CacheService; no custom cache                 |
+|   [2]   | Resilience | `packages/server/src/utils/resilience.ts`  | Use for retry, circuit, bulkhead, timeout         |
+|   [3]   | Tracing    | `packages/server/src/observe/telemetry.ts` | `Telemetry.span` for routes; `Effect.fn` internal |
+|   [4]   | Metrics    | `packages/server/src/observe/metrics.ts`   | Domain-specific metrics; generic as fallback      |
+|   [5]   | Context    | `packages/server/src/context.ts`           | Propagate `Context.Request` in all effects        |
+|   [6]   | Middleware | `packages/server/src/middleware.ts`        | Follow header/cookie/auth/tenant patterns         |
 
 [REFERENCE] Full patterns: [->composition.md](./composition.md), [->errors-and-services.md](./errors-and-services.md)
 
@@ -105,14 +105,14 @@ Authoritative sources: `CLAUDE.md` (behavior, constraints, Effect patterns), `RE
 
 **Schema-derived types:**
 
-| [PATTERN]                | [SYNTAX]                                    | [WHEN]                       |
-| ------------------------ | ------------------------------------------- | ---------------------------- |
-| Domain type from schema  | `type X = typeof XSchema.Type`              | All domain types             |
-| Table type from Drizzle  | `type User = typeof users.$inferSelect`     | Database models              |
-| Encoded type from schema | `type XEncoded = typeof XSchema.Encoded`    | Wire format / boundary types |
-| Recursive schema         | `S.suspend(() => TreeNode)`                 | Self-referential structures  |
-| Composed schema          | `S.compose(ASchema, BSchema)`               | Transform pipeline A -> B    |
-| Transform schema         | `S.transform(From, To, { decode, encode })` | Bidirectional mapping        |
+| [INDEX] | [PATTERN]                | [SYNTAX]                                    | [WHEN]                       |
+| :-----: | ------------------------ | ------------------------------------------- | ---------------------------- |
+|   [1]   | Domain type from schema  | `type X = typeof XSchema.Type`              | All domain types             |
+|   [2]   | Table type from Drizzle  | `type User = typeof users.$inferSelect`     | Database models              |
+|   [3]   | Encoded type from schema | `type XEncoded = typeof XSchema.Encoded`    | Wire format / boundary types |
+|   [4]   | Recursive schema         | `S.suspend(() => TreeNode)`                 | Self-referential structures  |
+|   [5]   | Composed schema          | `S.compose(ASchema, BSchema)`               | Transform pipeline A -> B    |
+|   [6]   | Transform schema         | `S.transform(From, To, { decode, encode })` | Bidirectional mapping        |
 
 [IMPORTANT]:
 - [ALWAYS] `as const satisfies T` for config objects -- literal inference + shape validation.

@@ -100,13 +100,13 @@ const classify = (input: string | number | boolean) =>
 
 **Advanced matching:**
 
-| [TECHNIQUE]                   | [API]                                              |
-| ----------------------------- | -------------------------------------------------- |
-| Multi-tag with shared handler | `Match.tag('A', 'B', handler)`                     |
-| Multi-field discrimination    | `Match.discriminatorsExhaustive('_tag', 'status')` |
-| Class-based matching          | `Match.when(Match.instanceOf(MyClass), ...)`       |
-| Nested discriminated matching | Outer `Match.tag` -> inner `Match.value`           |
-| Predicate-based narrowing     | `Match.when(Predicate.isString, ...)`              |
+| [INDEX] | [TECHNIQUE]                   | [API]                                              |
+| :-----: | ----------------------------- | -------------------------------------------------- |
+|   [1]   | Multi-tag with shared handler | `Match.tag('A', 'B', handler)`                     |
+|   [2]   | Multi-field discrimination    | `Match.discriminatorsExhaustive('_tag', 'status')` |
+|   [3]   | Class-based matching          | `Match.when(Match.instanceOf(MyClass), ...)`       |
+|   [4]   | Nested discriminated matching | Outer `Match.tag` -> inner `Match.value`           |
+|   [5]   | Predicate-based narrowing     | `Match.when(Predicate.isString, ...)`              |
 
 [IMPORTANT]:
 - [ALWAYS] Use `Match.type<T>()` for reusable matchers (function value).
@@ -120,12 +120,12 @@ const classify = (input: string | number | boolean) =>
 
 <br>
 
-| [FINALIZER]        | [BEHAVIOR]                                  |
-| ------------------ | ------------------------------------------- |
-| `Match.exhaustive` | Compile error if any variant unhandled      |
-| `Match.orElse`     | Fallback for unmatched (non-exhaustive)     |
-| `Match.option`     | `Option.some` on match, `Option.none` else  |
-| `Match.either`     | `Either.right` on match, `Either.left` else |
+| [INDEX] | [FINALIZER]        | [BEHAVIOR]                                  |
+| :-----: | ------------------ | ------------------------------------------- |
+|   [1]   | `Match.exhaustive` | Compile error if any variant unhandled      |
+|   [2]   | `Match.orElse`     | Fallback for unmatched (non-exhaustive)     |
+|   [3]   | `Match.option`     | `Option.some` on match, `Option.none` else  |
+|   [4]   | `Match.either`     | `Either.right` on match, `Either.left` else |
 
 [IMPORTANT]:
 - [ALWAYS] Prefer `Match.exhaustive` -- compile-time safety over runtime fallbacks.

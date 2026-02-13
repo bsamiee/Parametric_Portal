@@ -86,20 +86,20 @@ export { Timestamp };
 
 <br>
 
-| [HAND_ROLLED]                    | [EFFECT_MODULE]   | [KEY_APIS]                                         |
-| -------------------------------- | ----------------- | -------------------------------------------------- |
-| `arr.filter().map()`             | `Array`           | `filterMap`, `groupBy`, `dedupe`, `intersection`   |
-| `Object.keys().reduce()`         | `Record`          | `map`, `filter`, `collect`, `fromEntries`          |
-| `x != null`                      | `Option`          | `fromNullable`, `map`, `flatMap`, `getOrElse`      |
-| `pred1 && pred2`                 | `Predicate`       | `and`, `or`, `not`, `compose`                      |
-| `if/switch`                      | `Match`           | `type`, `value`, `tag`, `when`, `exhaustive`       |
-| `new Map()` + locks              | `TMap` via `STM`  | `empty`, `get`, `set`, `takeFirst`, `merge`        |
-| `Map<K, Fiber>` + cleanup        | `FiberMap`        | `make`, `run`, `remove`, `join`, `awaitEmpty`      |
-| Manual retry loops               | `Schedule`        | `exponential`, `jittered`, `intersect`, `upTo`     |
-| `EventEmitter`                   | `PubSub`+`Stream` | `fromPubSub`, `broadcast`, `groupByKey`            |
-| `let cache; if (!cache)`         | `Effect`          | `cached`, `cachedWithTTL`, `once`                  |
-| `Array.find` returns `undefined` | `Array`           | `findFirst` returns `Option<A>`                    |
-| Manual `structuredClone`         | `Data`            | `Data.struct`, `Data.tagged` (structural equality) |
+| [INDEX] | [HAND_ROLLED]                    | [EFFECT_MODULE]   | [KEY_APIS]                                         |
+| :-----: | -------------------------------- | ----------------- | -------------------------------------------------- |
+|   [1]   | `arr.filter().map()`             | `Array`           | `filterMap`, `groupBy`, `dedupe`, `intersection`   |
+|   [2]   | `Object.keys().reduce()`         | `Record`          | `map`, `filter`, `collect`, `fromEntries`          |
+|   [3]   | `x != null`                      | `Option`          | `fromNullable`, `map`, `flatMap`, `getOrElse`      |
+|   [4]   | `pred1 && pred2`                 | `Predicate`       | `and`, `or`, `not`, `compose`                      |
+|   [5]   | `if/switch`                      | `Match`           | `type`, `value`, `tag`, `when`, `exhaustive`       |
+|   [6]   | `new Map()` + locks              | `TMap` via `STM`  | `empty`, `get`, `set`, `takeFirst`, `merge`        |
+|   [7]   | `Map<K, Fiber>` + cleanup        | `FiberMap`        | `make`, `run`, `remove`, `join`, `awaitEmpty`      |
+|   [8]   | Manual retry loops               | `Schedule`        | `exponential`, `jittered`, `intersect`, `upTo`     |
+|   [9]   | `EventEmitter`                   | `PubSub`+`Stream` | `fromPubSub`, `broadcast`, `groupByKey`            |
+|  [10]   | `let cache; if (!cache)`         | `Effect`          | `cached`, `cachedWithTTL`, `once`                  |
+|  [11]   | `Array.find` returns `undefined` | `Array`           | `findFirst` returns `Option<A>`                    |
+|  [12]   | Manual `structuredClone`         | `Data`            | `Data.struct`, `Data.tagged` (structural equality) |
 
 Schedule composition replaces manual retry:
 
@@ -120,7 +120,7 @@ const retryPolicy = Schedule.exponential('100 millis', 2).pipe(
 
 ---
 ## [4][POLYMORPHISM]
->**Dictum:** *Fewer functions, more overloads. If 3+ functions share similar signatures, consolidate into ONE with a discriminated config param.*
+>**Dictum:** *Fewer functions, more overloads. Discriminated config preserves exhaustive type safety.*
 
 <br>
 

@@ -81,11 +81,11 @@ Enforce dense, consolidated, ADT-first TypeScript. Prefer namespace merges over 
 
 <br>
 
-| [PATTERN]           | [SYNTAX]                                | [WHEN]                           |
-| ------------------- | --------------------------------------- | -------------------------------- |
-| Schema-derived type | `type X = typeof XSchema.Type`          | All domain types                 |
-| Table-derived type  | `type User = typeof users.$inferSelect` | Database models                  |
-| Branded type        | `S.String.pipe(S.brand('UserId'))`      | Domain primitives (IIFE pattern) |
+| [INDEX] | [PATTERN]           | [SYNTAX]                                | [WHEN]                           |
+| :-----: | ------------------- | --------------------------------------- | -------------------------------- |
+|   [1]   | Schema-derived type | `type X = typeof XSchema.Type`          | All domain types                 |
+|   [2]   | Table-derived type  | `type User = typeof users.$inferSelect` | Database models                  |
+|   [3]   | Branded type        | `S.String.pipe(S.brand('UserId'))`      | Domain primitives (IIFE pattern) |
 
 [CRITICAL]:
 - [NEVER] Type aliases adding no semantic value.
@@ -100,20 +100,20 @@ Enforce dense, consolidated, ADT-first TypeScript. Prefer namespace merges over 
 
 <br>
 
-| [PACKAGE]               | [KEY_IMPORTS]                                                     | [WHEN]                        |
-| ----------------------- | ----------------------------------------------------------------- | ----------------------------- |
-| `effect`                | `Effect`, `Schema as S`, `Match`, `pipe`, `Array as A`, `Option`  | Core composition              |
-| `effect`                | `STM`, `TMap`, `TRef`, `FiberMap`, `Schedule`, `Stream`, `PubSub` | Advanced concurrency/reactive |
-| `effect`                | `Queue`, `Deferred`, `Semaphore`, `Pool`, `Latch`, `Mailbox`      | Concurrency primitives        |
-| `@effect/platform`      | `HttpClient`, `FileSystem`, `Path`, `Command`, `Socket`           | Platform IO                   |
-| `@effect/sql`           | `SqlClient`, `Statement`                                          | Database access               |
-| `@effect/opentelemetry` | `NodeSdk`, `Resource`                                             | Tracing                       |
-| `@effect/experimental`  | `Machine`, `VariantSchema`                                        | Server-side state machines    |
-| `@effect/workflow`      | `Workflow`, `Activity`                                            | Durable execution             |
-| `@effect/rpc`           | `Router`, `Resolver`                                              | Type-safe RPC                 |
-| `ts-toolbelt`           | `O.Merge`, `L.Concat`                                             | Type-level ops (quarantine)   |
-| `type-fest`             | `Simplify`, `LiteralUnion`                                        | Public API readability        |
-| `ts-essentials`         | `XOR`, `DeepReadonly`                                             | Exclusive unions, deep immut  |
+| [INDEX] | [PACKAGE]               | [KEY_IMPORTS]                                                     | [WHEN]                        |
+| :-----: | ----------------------- | ----------------------------------------------------------------- | ----------------------------- |
+|   [1]   | `effect`                | `Effect`, `Schema as S`, `Match`, `pipe`, `Array as A`, `Option`  | Core composition              |
+|   [2]   | `effect`                | `STM`, `TMap`, `TRef`, `FiberMap`, `Schedule`, `Stream`, `PubSub` | Advanced concurrency/reactive |
+|   [3]   | `effect`                | `Queue`, `Deferred`, `Semaphore`, `Pool`, `Latch`, `Mailbox`      | Concurrency primitives        |
+|   [4]   | `@effect/platform`      | `HttpClient`, `FileSystem`, `Path`, `Command`, `Socket`           | Platform IO                   |
+|   [5]   | `@effect/sql`           | `SqlClient`, `Statement`                                          | Database access               |
+|   [6]   | `@effect/opentelemetry` | `NodeSdk`, `Resource`                                             | Tracing                       |
+|   [7]   | `@effect/experimental`  | `Machine`, `VariantSchema`                                        | Server-side state machines    |
+|   [8]   | `@effect/workflow`      | `Workflow`, `Activity`                                            | Durable execution             |
+|   [9]   | `@effect/rpc`           | `Router`, `Resolver`                                              | Type-safe RPC                 |
+|  [10]   | `ts-toolbelt`           | `O.Merge`, `L.Concat`                                             | Type-level ops (quarantine)   |
+|  [11]   | `type-fest`             | `Simplify`, `LiteralUnion`                                        | Public API readability        |
+|  [12]   | `ts-essentials`         | `XOR`, `DeepReadonly`                                             | Exclusive unions, deep immut  |
 
 [REFERENCE] No-hand-rolling table: [->consolidation.md](references/consolidation.md).
 

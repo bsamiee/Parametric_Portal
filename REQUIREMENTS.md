@@ -78,22 +78,22 @@ Data crossing system boundaries follows 3-level model:
 ```typescript
 // Branded primitives: IIFE companion with schema + operations
 const Timestamp = (() => {
-  const schema = S.Number.pipe(S.positive(), S.brand('Timestamp'));
-  type T = typeof schema.Type;
-  return {
-    add: (ts: T, ms: number): T => (ts + ms) as T,
-    now: Effect.sync(() => Date.now() as T),
-    schema,
-  } as const;
+    const schema = S.Number.pipe(S.positive(), S.brand('Timestamp'));
+    type T = typeof schema.Type;
+    return {
+        add: (ts: T, ms: number): T => (ts + ms) as T,
+        now: Effect.sync(() => Date.now() as T),
+        schema,
+    } as const;
 })();
 type Timestamp = typeof Timestamp.schema.Type;
 
 // Entity models: Model.Class with field modifiers
 class User extends Model.Class<User>('User')({
-  id: Model.Generated(S.UUID),           // DB-generated, excluded from insert
-  hash: Model.Sensitive(S.String),       // Excluded from all json variants
-  deletedAt: Model.FieldOption(S.DateFromSelf),
-  updatedAt: Model.DateTimeUpdateFromDate,
+    id: Model.Generated(S.UUID),           // DB-generated, excluded from insert
+    hash: Model.Sensitive(S.String),       // Excluded from all json variants
+    deletedAt: Model.FieldOption(S.DateFromSelf),
+    updatedAt: Model.DateTimeUpdateFromDate,
 }) {}
 // Auto-derives: User.select, User.insert, User.update, User.json
 ```
@@ -106,22 +106,22 @@ class User extends Model.Class<User>('User')({
 ```typescript
 // Domain errors: Data.TaggedError (client-side, business logic)
 class Browser extends Data.TaggedError('Browser')<{
-  readonly code: 'CLIPBOARD_READ' | 'STORAGE_FAILED';
-  readonly details?: string;
+    readonly code: 'CLIPBOARD_READ' | 'STORAGE_FAILED';
+    readonly details?: string;
 }> {}
 
 // HTTP errors: S.TaggedError with HttpApiSchema annotations + static factory
 class Auth extends S.TaggedError<Auth>()('Auth',
-  { cause: S.optional(S.Unknown), details: S.String },
-  HttpApiSchema.annotations({ status: 401 }),
+    { cause: S.optional(S.Unknown), details: S.String },
+    HttpApiSchema.annotations({ status: 401 }),
 ) {
-  static readonly of = (details: string, cause?: unknown) => new Auth({ cause, details });
+    static readonly of = (details: string, cause?: unknown) => new Auth({ cause, details });
 }
 
 // Namespace + const merge for grouped exports
 const HttpError = { Auth, NotFound, Forbidden } as const;
 namespace HttpError {
-  export type Any = Auth | NotFound | Forbidden;
+    export type Any = Auth | NotFound | Forbidden;
 }
 ```
 
@@ -135,25 +135,25 @@ import { Match, Schema as S } from 'effect'
 
 // Discriminated union
 const Shape = S.Union(
-  S.Struct({ _tag: S.Literal('Circle'), radius: S.Number }),
-  S.Struct({ _tag: S.Literal('Rect'), width: S.Number, height: S.Number }),
+    S.Struct({ _tag: S.Literal('Circle'), radius: S.Number }),
+    S.Struct({ _tag: S.Literal('Rect'), width: S.Number, height: S.Number }),
 )
 type Shape = typeof Shape.Type
 
 // Match.type for exhaustive handling (compiler error if cases missing)
 const area = Match.type<Shape>().pipe(
-  Match.tag('Circle', ({ radius }) => Math.PI * radius ** 2),
-  Match.tag('Rect', ({ width, height }) => width * height),
-  Match.exhaustive,
+    Match.tag('Circle', ({ radius }) => Math.PI * radius ** 2),
+    Match.tag('Rect', ({ width, height }) => width * height),
+    Match.exhaustive,
 )
 
 // Match.value for single-value matching
 const formatStatus = (code: number) =>
-  Match.value(code).pipe(
-    Match.when(200, () => 'OK'),
-    Match.when(404, () => 'Not Found'),
-    Match.orElse(() => 'Unknown'),
-  )
+    Match.value(code).pipe(
+        Match.when(200, () => 'OK'),
+        Match.when(404, () => 'Not Found'),
+        Match.orElse(() => 'Unknown'),
+    )
 ```
 
 ---
@@ -166,20 +166,20 @@ import { Effect, Layer } from 'effect'
 
 // Service definition with Effect.Service
 class UserRepo extends Effect.Service<UserRepo>()('UserRepo', {
-  effect: Effect.gen(function* () {
-    // Acquire dependencies
-    // const sql = yield* SqlClient
-    return {
-      findById: (id: UserId) => Effect.succeed({ id, name: 'Test' }),
-      create: (data: CreateUser) => Effect.succeed({ id: UserId.make(), ...data }),
-    }
-  }),
+    effect: Effect.gen(function* () {
+        // Acquire dependencies
+        // const sql = yield* SqlClient
+        return {
+            findById: (id: UserId) => Effect.succeed({ id, name: 'Test' }),
+            create: (data: CreateUser) => Effect.succeed({ id: UserId.make(), ...data }),
+        }
+    }),
 }) {}
 
 // Usage: yield* ServiceTag
 const program = Effect.gen(function* () {
-  const repo = yield* UserRepo
-  return yield* repo.findById(userId)
+    const repo = yield* UserRepo
+    return yield* repo.findById(userId)
 })
 
 // Provide at composition root
@@ -199,28 +199,28 @@ const normalize = (name: string) => name.trim().toLowerCase()
 
 // Effect.all for aggregating independent effects
 const fetchUserData = (id: UserId) =>
-  Effect.all({
-    user: UserRepo.findById(id),
-    perms: PermissionRepo.findByUser(id),
-    prefs: PreferenceRepo.findByUser(id),
-  })
+    Effect.all({
+        user: UserRepo.findById(id),
+        perms: PermissionRepo.findByUser(id),
+        prefs: PreferenceRepo.findByUser(id),
+    })
 
 // Effect.gen for sequential operations—use Option.match, never if
 const processUser = (id: UserId) =>
-  Effect.gen(function* () {
-    const userOpt = yield* UserRepo.findById(id)
-    const user = yield* Option.match(userOpt, {
-      onNone: () => Effect.fail(new NotFound({ resource: 'User', id })),
-      onSome: Effect.succeed,
+    Effect.gen(function* () {
+        const userOpt = yield* UserRepo.findById(id)
+        const user = yield* Option.match(userOpt, {
+            onNone: () => Effect.fail(new NotFound({ resource: 'User', id })),
+            onSome: Effect.succeed,
+        })
+        return yield* UserRepo.update(id, { name: normalize(user.name) })
     })
-    return yield* UserRepo.update(id, { name: normalize(user.name) })
-  })
 
 // pipe for linear transformations
 const getActiveUsers = pipe(
-  UserRepo.findAll(),
-  Effect.map((users) => users.filter((u) => u.active)),
-  Effect.map((users) => users.map((u) => u.id)),
+    UserRepo.findAll(),
+    Effect.map((users) => users.filter((u) => u.active)),
+    Effect.map((users) => users.map((u) => u.id)),
 )
 ```
 
@@ -232,15 +232,15 @@ const getActiveUsers = pipe(
 ```typescript
 // Config with as const (Object.freeze unnecessary)
 const config = {
-  timeoutMs: 5000,
-  maxAttempts: 3,
-  backoffMs: 1000,
+    timeoutMs: 5000,
+    maxAttempts: 3,
+    backoffMs: 1000,
 } as const
 
 // satisfies validates shape while preserving literals
 const mimeTypes = {
-  image: ['image/png', 'image/jpeg', 'image/webp'],
-  document: ['application/pdf', 'text/plain'],
+    image: ['image/png', 'image/jpeg', 'image/webp'],
+    document: ['application/pdf', 'text/plain'],
 } as const satisfies Record<string, readonly string[]>
 
 // Type derived from config
@@ -257,13 +257,13 @@ type MimeType = (typeof mimeTypes)[MimeCategory][number]
 // Tiered composition: Platform → Infra → Domain
 const PlatformLayer = Layer.mergeAll(Client.layer, StorageAdapter.layer);
 const InfraLayer = Layer.mergeAll(DatabaseService.Default, MetricsService.Default)
-  .pipe(Layer.provideMerge(PlatformLayer));
+    .pipe(Layer.provideMerge(PlatformLayer));
 const AppLayer = Layer.mergeAll(SessionService.Default, MfaService.Default)
-  .pipe(Layer.provideMerge(InfraLayer));
+    .pipe(Layer.provideMerge(InfraLayer));
 
 // Layer.unwrapEffect for layers needing runtime service access
 const AuthLayer = Layer.unwrapEffect(
-  SessionService.pipe(Effect.map((s) => Middleware.Auth.makeLayer(s.lookup)))
+    SessionService.pipe(Effect.map((s) => Middleware.Auth.makeLayer(s.lookup)))
 ).pipe(Layer.provide(AppLayer));
 
 // ManagedRuntime for clean lifecycle + testability

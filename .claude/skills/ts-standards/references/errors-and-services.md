@@ -9,11 +9,11 @@
 
 <br>
 
-| [TYPE]               | [WHEN]                                    | [KEY_PROPERTY]                  |
-| -------------------- | ----------------------------------------- | ------------------------------- |
-| `Data.TaggedError`   | Internal domain errors, `catchTag`        | Lightweight, not serializable   |
-| `Schema.TaggedError` | Boundary errors (HTTP, RPC, wire)         | Schema-backed, HTTP-annotated   |
-| `Effect.die`         | Unrecoverable programmer errors (defects) | Not in `E`, surfaces in `Cause` |
+| [INDEX] | [TYPE]               | [WHEN]                                    | [KEY_PROPERTY]                  |
+| :-----: | -------------------- | ----------------------------------------- | ------------------------------- |
+|   [1]   | `Data.TaggedError`   | Internal domain errors, `catchTag`        | Lightweight, not serializable   |
+|   [2]   | `Schema.TaggedError` | Boundary errors (HTTP, RPC, wire)         | Schema-backed, HTTP-annotated   |
+|   [3]   | `Effect.die`         | Unrecoverable programmer errors (defects) | Not in `E`, surfaces in `Cause` |
 
 Namespace merge for error grouping:
 
@@ -70,13 +70,13 @@ const withRecovery = <A, R>(program: Effect.Effect<A, NotFound | CacheError | Db
 
 **Additional patterns:**
 
-| [PATTERN]              | [API]                                                    |
-| ---------------------- | -------------------------------------------------------- |
-| Error accumulation     | `Effect.partition(items, fn)` -> `[failures, successes]` |
-| Full cause inspection  | `Effect.catchAllCause` + `Cause.match`                   |
-| Defect (unrecoverable) | `Effect.die` -- not tracked in `E`                       |
-| Typed timeout          | `Effect.timeoutFail(new TimeoutError(...))`              |
-| Error union collapse   | `Effect.mapError` at boundary to reduce variants         |
+| [INDEX] | [PATTERN]              | [API]                                                    |
+| :-----: | ---------------------- | -------------------------------------------------------- |
+|   [1]   | Error accumulation     | `Effect.partition(items, fn)` -> `[failures, successes]` |
+|   [2]   | Full cause inspection  | `Effect.catchAllCause` + `Cause.match`                   |
+|   [3]   | Defect (unrecoverable) | `Effect.die` -- not tracked in `E`                       |
+|   [4]   | Typed timeout          | `Effect.timeoutFail(new TimeoutError(...))`              |
+|   [5]   | Error union collapse   | `Effect.mapError` at boundary to reduce variants         |
 
 [CRITICAL]:
 - [NEVER] Non-exhaustive error mapping at boundaries -- `Match.exhaustive` is mandatory.
@@ -112,11 +112,11 @@ class TenantService extends Effect.Service<TenantService>()('app/TenantService',
 
 **Three constructors:**
 
-| [MODE]    | [WHEN]                             | [SIGNATURE]                        |
-| --------- | ---------------------------------- | ---------------------------------- |
-| `succeed` | Static namespace (no dependencies) | `succeed: { method1, method2 }`    |
-| `effect`  | Needs deps but no scoped resources | `effect: Effect.gen(function* ())` |
-| `scoped`  | Acquires resources needing cleanup | `scoped: Effect.gen(function* ())` |
+| [INDEX] | [MODE]    | [WHEN]                             | [SIGNATURE]                        |
+| :-----: | --------- | ---------------------------------- | ---------------------------------- |
+|   [1]   | `succeed` | Static namespace (no dependencies) | `succeed: { method1, method2 }`    |
+|   [2]   | `effect`  | Needs deps but no scoped resources | `effect: Effect.gen(function* ())` |
+|   [3]   | `scoped`  | Acquires resources needing cleanup | `scoped: Effect.gen(function* ())` |
 
 [IMPORTANT]:
 - [ALWAYS] `Effect.Service<T>()('tag', { ... })` -- NOT `Context.Tag`.
@@ -142,13 +142,13 @@ const AppLayer = Layer.mergeAll(
 
 **Advanced layer patterns:**
 
-| [PATTERN]             | [API]                                      |
-| --------------------- | ------------------------------------------ |
-| Runtime-config layers | `Layer.unwrapEffect`                       |
-| Fire-and-forget init  | `Layer.effectDiscard`                      |
-| Composition root      | `ManagedRuntime.make(AppLayer)`            |
-| Test doubles          | `Layer.succeed(ServiceTag, mockImpl)`      |
-| Layer naming          | `Default` for production, `Test` for mocks |
+| [INDEX] | [PATTERN]             | [API]                                      |
+| :-----: | --------------------- | ------------------------------------------ |
+|   [1]   | Runtime-config layers | `Layer.unwrapEffect`                       |
+|   [2]   | Fire-and-forget init  | `Layer.effectDiscard`                      |
+|   [3]   | Composition root      | `ManagedRuntime.make(AppLayer)`            |
+|   [4]   | Test doubles          | `Layer.succeed(ServiceTag, mockImpl)`      |
+|   [5]   | Layer naming          | `Default` for production, `Test` for mocks |
 
 [IMPORTANT]:
 - [ALWAYS] `Layer.provideMerge` to inject dependencies downward.

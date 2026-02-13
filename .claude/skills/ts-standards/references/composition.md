@@ -9,17 +9,17 @@
 
 <br>
 
-| [COMBINATOR]     | [WHEN]                                                 |
-| ---------------- | ------------------------------------------------------ |
-| `pipe()`         | Linear left-to-right composition                       |
-| `Effect.map`     | Sync transform of success value (A -> B)               |
-| `Effect.flatMap` | Chain Effect-returning functions (A -> Effect\<B\>)    |
-| `Effect.andThen` | Mixed input (value, Promise, Effect, Option, Either)   |
-| `Effect.tap`     | Side effects without changing value                    |
-| `Effect.all`     | Aggregate independent effects into struct/tuple        |
-| `Effect.gen`     | 3+ dependent operations or control flow                |
-| `Effect.fn`      | Named function with automatic tracing span             |
-| `Effect.iterate` | Type-safe recursive computation (replaces while loops) |
+| [INDEX] | [COMBINATOR]     | [WHEN]                                                 |
+| :-----: | ---------------- | ------------------------------------------------------ |
+|   [1]   | `pipe()`         | Linear left-to-right composition                       |
+|   [2]   | `Effect.map`     | Sync transform of success value (A -> B)               |
+|   [3]   | `Effect.flatMap` | Chain Effect-returning functions (A -> Effect\<B\>)    |
+|   [4]   | `Effect.andThen` | Mixed input (value, Promise, Effect, Option, Either)   |
+|   [5]   | `Effect.tap`     | Side effects without changing value                    |
+|   [6]   | `Effect.all`     | Aggregate independent effects into struct/tuple        |
+|   [7]   | `Effect.gen`     | 3+ dependent operations or control flow                |
+|   [8]   | `Effect.fn`      | Named function with automatic tracing span             |
+|   [9]   | `Effect.iterate` | Type-safe recursive computation (replaces while loops) |
 
 [CRITICAL]:
 - [NEVER] Mix `async/await` with Effect -- use `Effect.promise` for interop.
@@ -27,15 +27,15 @@
 
 **Tracing rule:**
 
-| [CONTEXT]      | [USE]                         | [NOT]            |
-| -------------- | ----------------------------- | ---------------- |
-| Service method | `Effect.fn('Service.method')` | `Telemetry.span` |
-| Route handler  | `Telemetry.routeSpan('name')` | `Effect.fn`      |
-| Pure function  | Neither                       | Either           |
+| [INDEX] | [CONTEXT]      | [USE]                         | [NOT]            |
+| :-----: | -------------- | ----------------------------- | ---------------- |
+|   [1]   | Service method | `Effect.fn('Service.method')` | `Telemetry.span` |
+|   [2]   | Route handler  | `Telemetry.routeSpan('name')` | `Effect.fn`      |
+|   [3]   | Pure function  | Neither                       | Either           |
 
 ---
 ## [2][STM_AND_TMAP]
->**Dictum:** *Composable atomic transactions replace locks. TMap is a transactional concurrent map.*
+>**Dictum:** *Composable atomic transactions replace locks and manual coordination.*
 
 <br>
 
@@ -75,17 +75,17 @@ scoped: Effect.gen(function* () {
 
 **Key STM APIs:**
 
-| [API]            | [REPLACES]                                      |
-| ---------------- | ----------------------------------------------- |
-| `STM.commit`     | Materializes transaction into Effect            |
-| `STM.all`        | Composes multiple STM ops atomically            |
-| `STM.zipRight`   | Sequential composition (discard left result)    |
-| `STM.check`      | Blocks until predicate holds (replaces polling) |
-| `STM.retry`      | Blocks until referenced TRef values change      |
-| `STM.gen`        | Generator syntax for multi-step transactions    |
-| `TMap.takeFirst` | Blocks until matching entry appears             |
-| `TRef`           | Single transactional mutable reference          |
-| `TQueue`         | Bounded/unbounded transactional queue           |
+| [INDEX] | [API]            | [REPLACES]                                      |
+| :-----: | ---------------- | ----------------------------------------------- |
+|   [1]   | `STM.commit`     | Materializes transaction into Effect            |
+|   [2]   | `STM.all`        | Composes multiple STM ops atomically            |
+|   [3]   | `STM.zipRight`   | Sequential composition (discard left result)    |
+|   [4]   | `STM.check`      | Blocks until predicate holds (replaces polling) |
+|   [5]   | `STM.retry`      | Blocks until referenced TRef values change      |
+|   [6]   | `STM.gen`        | Generator syntax for multi-step transactions    |
+|   [7]   | `TMap.takeFirst` | Blocks until matching entry appears             |
+|   [8]   | `TRef`           | Single transactional mutable reference          |
+|   [9]   | `TQueue`         | Bounded/unbounded transactional queue           |
 
 [CRITICAL]:
 - [NEVER] `new Map()` + manual locks -- use `TMap` via STM.
@@ -111,17 +111,17 @@ yield* Effect.addFinalizer(() => FiberMap.join(runningJobs).pipe(Effect.ignore))
 
 **Related patterns:**
 
-| [API]                      | [REPLACES]                                       |
-| -------------------------- | ------------------------------------------------ |
-| `FiberMap.make/run/remove` | `Map<string, Fiber>` + manual lifecycle          |
-| `FiberSet.make/run`        | `Set<Fiber>` + cleanup for anonymous tasks       |
-| `FiberHandle.make/run`     | `let fiber: Fiber \| null` + replacement logic   |
-| `Effect.acquireRelease`    | `try/finally` for resource cleanup               |
-| `Effect.addFinalizer`      | Scope-bound cleanup registration                 |
-| `Mailbox`                  | Bounded async fiber communication                |
-| `Effect.serviceOption`     | Optional dependency injection (returns `Option`) |
-| `Semaphore.withPermits(n)` | Manual concurrency limiting                      |
-| `Pool.make/makeWithTTL`    | Connection pool with auto-sizing                 |
+| [INDEX] | [API]                      | [REPLACES]                                       |
+| :-----: | -------------------------- | ------------------------------------------------ |
+|   [1]   | `FiberMap.make/run/remove` | `Map<string, Fiber>` + manual lifecycle          |
+|   [2]   | `FiberSet.make/run`        | `Set<Fiber>` + cleanup for anonymous tasks       |
+|   [3]   | `FiberHandle.make/run`     | `let fiber: Fiber \| null` + replacement logic   |
+|   [4]   | `Effect.acquireRelease`    | `try/finally` for resource cleanup               |
+|   [5]   | `Effect.addFinalizer`      | Scope-bound cleanup registration                 |
+|   [6]   | `Mailbox`                  | Bounded async fiber communication                |
+|   [7]   | `Effect.serviceOption`     | Optional dependency injection (returns `Option`) |
+|   [8]   | `Semaphore.withPermits(n)` | Manual concurrency limiting                      |
+|   [9]   | `Pool.make/makeWithTTL`    | Connection pool with auto-sizing                 |
 
 [CRITICAL]:
 - [NEVER] `Map<string, Fiber>` + manual interrupt/cleanup -- use `FiberMap`.
@@ -148,16 +148,16 @@ const _mkSchedule = (config: {
 
 **Composition operators:**
 
-| [OPERATOR]             | [SEMANTICS]                                   |
-| ---------------------- | --------------------------------------------- |
-| `intersect(a, b)`      | Both must continue; takes longer delay        |
-| `union(a, b)`          | Either can continue; takes shorter delay      |
-| `andThen(a, b)`        | Run first schedule, then second sequentially  |
-| `compose(a, b)`        | First output feeds second input               |
-| `whileInput(pred)`     | Continue while input satisfies predicate      |
-| `upTo(duration)`       | Cap total elapsed time                        |
-| `tapOutput(f)`         | Side-effect on each schedule output (metrics) |
-| `resetAfter(duration)` | Reset state after idle period                 |
+| [INDEX] | [OPERATOR]             | [SEMANTICS]                                   |
+| :-----: | ---------------------- | --------------------------------------------- |
+|   [1]   | `intersect(a, b)`      | Both must continue; takes longer delay        |
+|   [2]   | `union(a, b)`          | Either can continue; takes shorter delay      |
+|   [3]   | `andThen(a, b)`        | Run first schedule, then second sequentially  |
+|   [4]   | `compose(a, b)`        | First output feeds second input               |
+|   [5]   | `whileInput(pred)`     | Continue while input satisfies predicate      |
+|   [6]   | `upTo(duration)`       | Cap total elapsed time                        |
+|   [7]   | `tapOutput(f)`         | Side-effect on each schedule output (metrics) |
+|   [8]   | `resetAfter(duration)` | Reset state after idle period                 |
 
 **Cron:** `Schedule.cron('0 */6 * * *')` replaces `node-cron`. Also: `dayOfMonth`, `dayOfWeek`, `hourOfDay`, `minuteOfHour`.
 
@@ -182,16 +182,16 @@ const eventStream = Stream.fromPubSub(eventBus).pipe(
 
 **Key patterns:**
 
-| [PATTERN]                       | [API]                                                  |
-| ------------------------------- | ------------------------------------------------------ |
-| Heartbeat + data interleaving   | `Stream.merge` with halt strategy                      |
-| Fan-out to multiple consumers   | `Stream.broadcast`                                     |
-| Partitioned parallel processing | `Stream.groupByKey`                                    |
-| External source ingestion       | `Stream.fromReadableStream` / `fromAsyncIterable`      |
-| Backpressure control            | `Stream.buffer({ capacity: 16, strategy: 'sliding' })` |
-| Time-windowed batching          | `Stream.groupedWithin(100, '5 seconds')`               |
-| Debounced processing            | `Stream.debounce('300 millis')`                        |
-| Text line processing            | `Stream.splitLines` / `Stream.decodeText`              |
+| [INDEX] | [PATTERN]                       | [API]                                                  |
+| :-----: | ------------------------------- | ------------------------------------------------------ |
+|   [1]   | Heartbeat + data interleaving   | `Stream.merge` with halt strategy                      |
+|   [2]   | Fan-out to multiple consumers   | `Stream.broadcast`                                     |
+|   [3]   | Partitioned parallel processing | `Stream.groupByKey`                                    |
+|   [4]   | External source ingestion       | `Stream.fromReadableStream` / `fromAsyncIterable`      |
+|   [5]   | Backpressure control            | `Stream.buffer({ capacity: 16, strategy: 'sliding' })` |
+|   [6]   | Time-windowed batching          | `Stream.groupedWithin(100, '5 seconds')`               |
+|   [7]   | Debounced processing            | `Stream.debounce('300 millis')`                        |
+|   [8]   | Text line processing            | `Stream.splitLines` / `Stream.decodeText`              |
 
 [CRITICAL]:
 - [NEVER] Eager `Array<Effect>` for unbounded data -- use `Stream`.
@@ -203,22 +203,22 @@ const eventStream = Stream.fromPubSub(eventBus).pipe(
 
 <br>
 
-| [API]                            | [REPLACES]                                    |
-| -------------------------------- | --------------------------------------------- |
-| `Effect.cached`                  | Manual memoization with closure variable      |
-| `Effect.cachedWithTTL`           | Timed cache invalidation                      |
-| `Effect.once`                    | At-most-one execution guard                   |
-| `Effect.partition`               | `[failures, successes]` without short-circuit |
-| `Effect.iterate`                 | Recursive computation (replaces `while`)      |
-| `Effect.serviceOption`           | Optional dependency (returns `Option`)        |
-| `Effect.annotateCurrentSpan`     | Add attributes to active tracing span         |
-| `Effect.withSpan`                | Wrap effect in named span                     |
-| `Effect.timeoutFail`             | Fail with typed error on timeout              |
-| `Queue.bounded/sliding/dropping` | Back-pressure async queue                     |
-| `Deferred`                       | One-shot synchronization primitive            |
-| `Semaphore`                      | Permit-based concurrency control              |
-| `Latch`                          | Gate synchronization (open/close/await)       |
-| `SubscriptionRef`                | Ref with reactive `changes` stream            |
-| `SynchronizedRef`                | Ref with effectful `updateEffect`             |
+| [INDEX] | [API]                            | [REPLACES]                                    |
+| :-----: | -------------------------------- | --------------------------------------------- |
+|   [1]   | `Effect.cached`                  | Manual memoization with closure variable      |
+|   [2]   | `Effect.cachedWithTTL`           | Timed cache invalidation                      |
+|   [3]   | `Effect.once`                    | At-most-one execution guard                   |
+|   [4]   | `Effect.partition`               | `[failures, successes]` without short-circuit |
+|   [5]   | `Effect.iterate`                 | Recursive computation (replaces `while`)      |
+|   [6]   | `Effect.serviceOption`           | Optional dependency (returns `Option`)        |
+|   [7]   | `Effect.annotateCurrentSpan`     | Add attributes to active tracing span         |
+|   [8]   | `Effect.withSpan`                | Wrap effect in named span                     |
+|   [9]   | `Effect.timeoutFail`             | Fail with typed error on timeout              |
+|  [10]   | `Queue.bounded/sliding/dropping` | Back-pressure async queue                     |
+|  [11]   | `Deferred`                       | One-shot synchronization primitive            |
+|  [12]   | `Semaphore`                      | Permit-based concurrency control              |
+|  [13]   | `Latch`                          | Gate synchronization (open/close/await)       |
+|  [14]   | `SubscriptionRef`                | Ref with reactive `changes` stream            |
+|  [15]   | `SynchronizedRef`                | Ref with effectful `updateEffect`             |
 
 [REFERENCE] Consolidation patterns: [->consolidation.md](./consolidation.md).
