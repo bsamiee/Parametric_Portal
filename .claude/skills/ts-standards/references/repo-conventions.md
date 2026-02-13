@@ -1,17 +1,10 @@
 # [H1][REPO_CONVENTIONS]
 >**Dictum:** *Authoritative sources prevent convention drift.*
 
-<br>
-
 ---
 ## [1][SOURCES_OF_TRUTH]
 
-| [INDEX] | [FILE]                                  | [GOVERNS]                                    |
-| :-----: | --------------------------------------- | -------------------------------------------- |
-|   [1]   | `CLAUDE.md`                             | Agent behavior, constraints, Effect patterns |
-|   [2]   | `AGENTS.md`                             | Agent roles and responsibilities             |
-|   [3]   | `REQUIREMENTS.md`                       | Feature requirements and acceptance criteria |
-|   [4]   | `packages/server/src/domain/REBUILD.md` | Domain model rebuild specifications          |
+Authoritative sources: `CLAUDE.md` (behavior, constraints, Effect patterns), `REQUIREMENTS.md` (features, acceptance criteria).
 
 ---
 ## [2][FORMATTING]
@@ -35,104 +28,102 @@
 ---
 ## [4][IMPORTS]
 
-[CRITICAL]:
-- [NEVER] Default imports -- use named imports.
-- [NEVER] Barrel file imports (`./index`) -- import from source module.
-- [NEVER] Re-export external types -- consumers import directly.
-- [NEVER] Wildcard imports -- except `Schema as S`, `Array as A`.
-
 [IMPORTANT]:
-- [ALWAYS] Import `Schema as S`, `Array as A` from `effect`.
+- [ALWAYS] Alias ecosystem modules: `Schema as S`, `Array as A` from `effect`.
 - [ALWAYS] Group: external libs first, internal paths second, blank line between.
+- [ALWAYS] Use `import type { ... }` for types not used at runtime.
+- [NEVER] Wildcard imports -- except ecosystem aliases (`Schema as S`, `Array as A`).
 
 ---
 ## [5][NAMING]
 
 [CRITICAL]:
 - [NEVER] 1-3 letter parameter abbreviations: `(s)` -> `(service)`, `(d)` -> `(delta)`.
-- [NEVER] Ambiguous names: `data`, `info`, `item`, `result`, `temp`, `value`.
 
 [IMPORTANT]:
 - [ALWAYS] Prefix private/internal with `_`: `_config`, `_fetchUser`.
 - [ALWAYS] Descriptive parameters: `subscriber` not `sub`, `requestContext` not `ctx`.
-- [ALLOW] Import aliases: `Schema as S`, `Array as A`.
+- [ALLOW] Import aliases: `Schema as S`, `Array as A` (ecosystem convention).
+
+**Effect type parameter naming:**
+
+| [PARAM] | [MEANING]                           | [EXAMPLE]                           |
+| :-----: | ----------------------------------- | ----------------------------------- |
+|   `A`   | Success value                       | `Effect<A, E, R>`                   |
+|   `E`   | Error channel                       | `Effect<User, AuthError, R>`        |
+|   `R`   | Requirements (service dependencies) | `Effect<User, AuthError, UserRepo>` |
+|   `I`   | Encoded (schema input) type         | `Schema<A, I, R>`                   |
+
+**Service naming conventions:**
+
+| [SUFFIX]     | [ROLE]                             | [EXAMPLE]                        |
+| ------------ | ---------------------------------- | -------------------------------- |
+| `XxxService` | Effect.Service application service | `AuthService`, `FeatureService`  |
+| `XxxRepo`    | Data access / repository           | `UserRepo`, `AuditRepo`          |
+| `XxxAdapter` | External system integration        | `StorageAdapter`, `EmailAdapter` |
+| `XxxClient`  | External API caller                | `HttpClient`, `S3Client`         |
 
 ---
 ## [6][FILE_ORGANIZATION]
 
-**Canonical order** (omit unused): Types -> Schema -> Constants -> Errors -> Services -> Functions -> Layers -> Export.<br>
-**Domain extensions**: TABLES (after SCHEMA), REPOSITORIES (after SERVICES), GROUPS (after SCHEMA), MIDDLEWARE (after SERVICES).<br>
-**Forbidden labels**: `Helpers`, `Handlers`, `Utils`, `Config`, `Dispatch_Tables`.<br>
-**Export section**: All exports gathered in `[EXPORT]` at file end. No inline `export const`.
+**Canonical order** (omit unused): Types -> Schema -> Constants -> Errors -> Services -> Functions -> Layers -> Export.
+**Domain extensions**: TABLES (after SCHEMA), REPOSITORIES (after SERVICES), GROUPS (after SCHEMA), MIDDLEWARE (after SERVICES).
+**Forbidden labels**: `Helpers`, `Handlers`, `Utils`, `Config`, `Dispatch_Tables`. All exports gathered in `[EXPORT]` at file end -- no inline `export const`.
 
 ---
-## [7][BRANCHING_AND_CONTROL_FLOW]
+## [7][EFFECT_CONVENTIONS]
+>**Dictum:** *Services acquire resources; layers compose implementations; tracing separates concerns.*
 
-| [INDEX] | [FORBIDDEN]                          | [REPLACEMENT]                                         | [EXCEPTION]               |
-| :-----: | ------------------------------------ | ----------------------------------------------------- | ------------------------- |
-|   [1]   | Dispatch table (functions as values) | `Match.type` or `$match`                              | Pure data lookups (no fn) |
-|   [2]   | `if/else if` on `_tag`               | `Match.type().pipe(Match.tag(...), Match.exhaustive)` | None                      |
-|   [3]   | `switch` on `_tag`                   | `Match.type` + `Match.exhaustive`                     | None                      |
-|   [4]   | `switch` on primitives               | `Match.value().pipe(Match.when(...))`                 | None                      |
+[CRITICAL]: Use `Effect.Service<T>()('tag', { ... })` -- not `Context.Tag`. Three constructor modes: `succeed` (static), `effect` (deps, no cleanup), `scoped` (deps + cleanup). `dependencies` field for auto-provision.
 
----
-## [8][EFFECT_CONVENTIONS]
+[IMPORTANT]:
+- [ALWAYS] `Effect.fn('ServiceName.method')` for all service methods.
+- [ALWAYS] Dual access: instance (`R=never`) inside scoped constructors, static (`R=Service`) for external consumers.
+- [ALWAYS] Layer naming: `Default` for production, `Test` for test doubles.
+- [ALWAYS] Compose layers: Platform -> Infra -> Domain -> App via `Layer.provideMerge`.
+- [ALWAYS] `ManagedRuntime.make` at composition root.
+- [ALWAYS] `Effect.acquireRelease` for scoped resources, `using` keyword in `Effect.gen`.
 
-### Composition
+[REFERENCE] Tracing: [->composition.md](./composition.md) section 1.
 
-| [PATTERN]    | [USE WHEN]                              |
-| ------------ | --------------------------------------- |
-| `pipe()`     | Linear left-to-right composition        |
-| `Effect.gen` | 3+ dependent operations or control flow |
-| `Effect.fn`  | Service methods needing tracing spans   |
-| `Effect.all` | Aggregating independent effects         |
+**Platform services:**
 
-### Tracing
+| [CONCERN]  | [CANONICAL_SOURCE]                         | [RULE]                                            |
+| ---------- | ------------------------------------------ | ------------------------------------------------- |
+| Caching    | `packages/server/src/platform/cache.ts`    | Use CacheService; no custom cache                 |
+| Resilience | `packages/server/src/utils/resilience.ts`  | Use for retry, circuit, bulkhead, timeout         |
+| Tracing    | `packages/server/src/observe/telemetry.ts` | `Telemetry.span` for routes; `Effect.fn` internal |
+| Metrics    | `packages/server/src/observe/metrics.ts`   | Domain-specific metrics; generic as fallback      |
+| Context    | `packages/server/src/context.ts`           | Propagate `Context.Request` in all effects        |
+| Middleware | `packages/server/src/middleware.ts`        | Follow header/cookie/auth/tenant patterns         |
 
-| [CONTEXT]      | [USE]                         | [NOT]            |
-| -------------- | ----------------------------- | ---------------- |
-| Service method | `Effect.fn('Service.method')` | `Telemetry.span` |
-| Route handler  | `Telemetry.routeSpan('name')` | `Effect.fn`      |
-| Pure function  | Neither                       | Either           |
-
-### Errors
-
-- `Data.TaggedError` for internal domain errors. `Schema.TaggedError` for API/RPC boundary.
-- `Effect.catchTag` for single-variant recovery. `Effect.catchTags` for multi-variant.
-- `Effect.mapError` + `Match.exhaustive` for provably complete boundary mapping.
-
-### Services
-
-- Define via `Context.Tag`. Implement via `Layer.effect` or `Layer.succeed`.
-- Service methods: `R = never`. `Live` for production, `Test` for doubles.
-- Provide all layers at composition root via `Layer.merge` / `Layer.compose`.
+[REFERENCE] Full patterns: [->composition.md](./composition.md), [->errors-and-services.md](./errors-and-services.md)
 
 ---
-## [9][TYPE_CONVENTIONS]
+## [8][TYPE_CONVENTIONS]
+>**Dictum:** *Advanced type patterns encode domain invariants at compile time.*
 
-| [SOURCE]          | [SYNTAX]                             | [SCOPE]               |
-| ----------------- | ------------------------------------ | --------------------- |
-| Effect Schema     | `type X = typeof XSchema.Type`       | All domain types      |
-| Drizzle table     | `type X = typeof table.$inferSelect` | Database models       |
-| Branded primitive | `S.String.pipe(S.brand('UserId'))`   | Domain identifiers    |
-| Tagged enum       | `Data.taggedEnum<MyEnum>()`          | Sum types with data   |
-| Conditional type  | `T extends U ? X : Y`                | Type-level dispatch   |
-| Mapped type       | `{ [K in keyof T]: ... }`            | Type-level transforms |
+**Schema-derived types:**
 
-[CRITICAL]:
-- [NEVER] `type X = {...}` alongside a schema defining the same shape.
-- [NEVER] `string` for domain identifiers -- use branded types.
-- [NEVER] `any` -- use `unknown` at boundaries, branded types for domains.
+| [PATTERN]                | [SYNTAX]                                    | [WHEN]                       |
+| ------------------------ | ------------------------------------------- | ---------------------------- |
+| Domain type from schema  | `type X = typeof XSchema.Type`              | All domain types             |
+| Table type from Drizzle  | `type User = typeof users.$inferSelect`     | Database models              |
+| Encoded type from schema | `type XEncoded = typeof XSchema.Encoded`    | Wire format / boundary types |
+| Recursive schema         | `S.suspend(() => TreeNode)`                 | Self-referential structures  |
+| Composed schema          | `S.compose(ASchema, BSchema)`               | Transform pipeline A -> B    |
+| Transform schema         | `S.transform(From, To, { decode, encode })` | Bidirectional mapping        |
+
+[IMPORTANT]:
+- [ALWAYS] `as const satisfies T` for config objects -- literal inference + shape validation.
+- [ALWAYS] IIFE companion for branded types -- schema + operations in single binding.
+- [ALWAYS] Namespace + const merge for grouping related types and values.
+- [ALLOW] Conditional types with `infer` for discriminant/nested type extraction.
+- [ALLOW] Generic constraints for polymorphic service interfaces.
+
+[REFERENCE] Consolidation patterns: [->consolidation.md](./consolidation.md), [->adts-and-matching.md](./adts-and-matching.md)
 
 ---
-## [10][DEPENDENCY_MANAGEMENT]
+## [9][DEPENDENCY_MANAGEMENT]
 
-1. **Check catalog**: `rg my-dep pnpm-workspace.yaml`.
-2. **Add** (if missing): `my-dep: 1.2.3` (exact version).
-3. **Reference**: `"dependencies": { "my-dep": "catalog:" }`.
-4. **Install**: `pnpm install`.
-5. **Validate**: `pnpm exec nx run-many -t typecheck`.
-
-[CRITICAL]:
-- [ALWAYS] Exact versions in catalog (no `^` or `~`).
-- [NEVER] Bypass `pnpm` (no `npm install`, no `yarn add`).
+[REFERENCE] Dependency workflow: CLAUDE.md section 4.1.

@@ -10,29 +10,35 @@ alwaysApply: true
 [APPROACH] Surgical, targeted changes. Examine existing patterns before proposing. Minimal modifications.
 
 [FORBIDDEN]:
-- NEVER create wrappers adding no semantic value beyond delegation
+- NEVER create wrappers/indirection/const spam — no thin wrappers, unnecessary intermediate bindings, single-use aliases; wrappers only when truly needed
 - NEVER create barrel files (`index.ts`); consumers import directly from source
 - NEVER re-export external lib types; import directly from ts-toolbelt, ts-essentials, type-fest
 - NEVER use inline exports; declare first, export at file end
 - NEVER write comments describing what; reserve for why
 - NEVER hand-roll utilities that exist in external libs
 - NEVER duplicate type definitions; derive from schema/tables
-- NEVER declare types separately from schemas
+- NEVER declare module-level types separately from schemas; derive via `typeof XSchema.Type`
+- NEVER use `if` (including bare guards), `else if`, `switch` — use `Match.type`, `$match`, `Option.match`, `Effect.filterOrFail`
+- NEVER create helper/utility files or functions (`helpers.ts`, `*Helper`, `*Util`); colocate logic in domain module
+- NEVER proliferate functions — consolidate into fewer, polymorphic solutions
+- NEVER nest code deeper than 4 levels — extract into named Effect pipelines or flatten with `pipe`/`Effect.filterOrFail`
+- NEVER proliferate schemas/structs/branded types — one canonical schema per entity, derive variants at call site via `pick`/`omit`/`partial`/field modifiers
+- NEVER differentiate field/parameter names unnecessarily — same concept uses same name across all objects, parameters, and interfaces
 
 [REQUIRED]:
 - Replace `try/catch` with Effect error channel
 - Replace `for/while` with `.map`, `.filter`, or Effect.forEach
 - Replace `let`/`var` with `const`
 - Replace default exports with named exports (exception: `*.config.ts`)
+- Replace all `if` (including bare guards), `else if`, `switch` with `Match.type`, `$match`, `Option.match`, or `Effect.filterOrFail`
 - Derive types from schemas: `type X = typeof XSchema.Type`
 - Use `as const` for immutable config objects
 - Decode at boundaries; treat external data as `unknown`
 
 [CONDITIONAL]:
 - PREFER `Match.value().pipe(Match.when/tag..., Match.exhaustive)` for variants
-- ALLOW dispatch tables for simple key→value maps
+- ALLOW static data maps (`Record<string, string>`) for immutable key-to-value lookups — no functions/Effects as values
 - ALLOW ternary for pure value selection only (never for effects)
-- NEVER use `if` statements—use `Option.match`, `Effect.filterOrFail`, or `Match`
 
 ---
 ## [2][CONTEXT]

@@ -74,11 +74,20 @@ Operate as senior developer in bleeding-edge Nx/Vite/Effect monorepo with workfl
 - [NEVER] Re-export external lib types → import directly from source.
 - [NEVER] Inline exports → declare first, export at file end.
 - [NEVER] Hand-roll utilities that exist in external libs.
+- [NEVER] `if` (including bare guards), `else if`, `switch` → use `Match.type`, `$match`, `Option.match`, `Effect.filterOrFail`.
+- [NEVER] Module-level type declarations separate from schema → derive via `typeof XSchema.Type`.
+- [NEVER] Helper/utility files or functions (`helpers.ts`, `*Helper`, `*Util`) → colocate logic in domain module.
+- [NEVER] Wrappers/indirection/const spam → no thin wrappers, unnecessary intermediate bindings, single-use aliases; wrappers only when truly needed.
+- [NEVER] Function proliferation → consolidate into fewer, polymorphic solutions.
+- [NEVER] Comments describing "what" → reserve for "why".
+- [NEVER] Nesting deeper than 4 levels → extract into named Effect pipelines or flatten with `pipe`/`Effect.filterOrFail`.
+- [NEVER] Schema/struct/branded type proliferation → one canonical schema per entity, derive variants at call site via `pick`/`omit`/`partial`/field modifiers.
+- [NEVER] Inconsistent field/parameter naming → same concept uses same name everywhere; no unnecessary differentiation across objects.
 
 [CONDITIONAL]:
-- [PREFER] `Match.type`/`Match.value` for exhaustive variant handling.
-- [ALLOW] Dispatch tables when Match is overkill (simple key→value maps).
-- [ALLOW] Ternary for binary conditions.
+- [PREFER] `Match.type`/`Match.value`/`$match` for exhaustive variant handling.
+- [ALLOW] Static data maps (`Record<string, string>`) for immutable key-to-value lookups — no functions/Effects as values.
+- [ALLOW] Ternary for binary conditions with simple expressions.
 
 ---
 ## [3.1][EFFECT_PATTERNS]
