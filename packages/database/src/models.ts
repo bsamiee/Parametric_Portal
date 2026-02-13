@@ -163,7 +163,7 @@ class App extends Model.Class<App>('App')({
     name: S.String,
     namespace: S.String,
     settings: Model.FieldOption(AppSettingsSchema),
-    status: S.optionalWith(S.Literal('active', 'suspended', 'archived'), { default: () => 'active' as const }),
+    status: S.optionalWith(S.Literal('active', 'suspended', 'archived', 'purging'), { default: () => 'active' as const }),
     updatedAt: Model.DateTimeUpdateFromDate,
 }) {}
 

@@ -1,5 +1,5 @@
 /**
- * Resilience: bulkhead -> timeout -> hedge -> retry -> circuit -> fallback -> span
+ * Resilience: bulkhead -> timeout -> hedge -> retry -> circuit -> onExhaustion -> fallback -> span
  * Native Effect APIs: Semaphore (bulkhead), raceAll (hedge)
  */
 import { Array as A, Data, Duration, Effect, Function as F, Layer, Match, Option, Schedule, STM, TMap } from 'effect';
@@ -83,10 +83,12 @@ const _run = <A, E, R>(operation: string, eff: Effect.Effect<A, E, R>, configura
                 Effect.flatMap((circuit) => circuit.execute(t2)),
                 Effect.catchAll((error) => Circuit.is(error, 'Cancelled') ? Effect.die(error) : Effect.fail(error)),
             );
+        const onExhaust = configuration.onExhaustion;
+        const t4 = onExhaust === undefined ? t3 : t3.pipe(Effect.tapError((error) => Circuit.is(error) ? Effect.void : onExhaust(error as E | TimeoutError | BulkheadError, operation)));
         const fallback = configuration.fallback;
         const pipeline = fallback === undefined
-            ? t3
-            : t3.pipe(Effect.catchAll((error) => Circuit.is(error) ? Effect.fail(error) : Effect.zipRight(inc('fallbacks'), fallback(error as E | TimeoutError | BulkheadError))));
+            ? t4
+            : t4.pipe(Effect.catchAll((error) => Circuit.is(error) ? Effect.fail(error) : Effect.zipRight(inc('fallbacks'), fallback(error as E | TimeoutError | BulkheadError))));
         const incrementBulkheadRejection = (error: unknown) => Option.getOrElse(
             Option.liftPredicate(inc('bulkheadRejections'), F.constant(error instanceof BulkheadError)),
             F.constant(Effect.void),
@@ -162,6 +164,7 @@ namespace Resilience {
         readonly bulkheadTimeout?: Duration.Duration;
         readonly circuit?: string | false;
         readonly fallback?: (error: E | TimeoutError | BulkheadError) => Effect.Effect<A, never, R>;
+        readonly onExhaustion?: (error: E | TimeoutError | BulkheadError, operation: string) => Effect.Effect<void, never, R>;
         readonly hedge?: number | { readonly attempts: number; readonly delay: Duration.Duration } | false;
         readonly retry?: RetryMode | Schedule.Schedule<unknown, unknown, never> | false;
         readonly threshold?: number;

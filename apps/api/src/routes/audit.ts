@@ -35,21 +35,21 @@ const AuditLive = HttpApiBuilder.group(ParametricApi, 'audit', (handlers) =>
                         Effect.andThen(Context.Request.currentTenantId),
                         Effect.flatMap(() => repositories.audit.bySubject(subject, subjectId, parameters.limit, parameters.cursor, parameters)),
                         Effect.map((result) => ({ ...result, items: withDiffs(result.items, parameters.includeDiff ?? false) })),
-                        Effect.mapError((error) => HttpError.Internal.of('Audit lookup failed', error)),
+                        HttpError.mapTo('Audit lookup failed'),
                     )).pipe(Telemetry.span('audit.getByEntity')))
             .handle('getByUser', ({ path: { userId }, urlParams: parameters }) =>
                 Middleware.guarded('audit', 'getByUser', 'api', Middleware.feature('enableAuditLog').pipe(
                         Effect.andThen(Context.Request.currentTenantId),
                         Effect.flatMap(() => repositories.audit.byUser(userId, parameters.limit, parameters.cursor, parameters)),
                         Effect.map((result) => ({ ...result, items: withDiffs(result.items, parameters.includeDiff ?? false) })),
-                        Effect.mapError((error) => HttpError.Internal.of('Audit lookup failed', error)),
+                        HttpError.mapTo('Audit lookup failed'),
                     )).pipe(Telemetry.span('audit.getByUser')))
             .handle('getMine', ({ urlParams: parameters }) =>
                 Middleware.guarded('audit', 'getMine', 'api', Middleware.feature('enableAuditLog').pipe(
                         Effect.andThen(Effect.all([Context.Request.current, Context.Request.sessionOrFail])),
                         Effect.flatMap(([, session]) => repositories.audit.byUser(session.userId, parameters.limit, parameters.cursor, parameters)),
                         Effect.map((result) => ({ ...result, items: withDiffs(result.items, parameters.includeDiff ?? false) })),
-                        Effect.mapError((error) => HttpError.Internal.of('Audit lookup failed', error)),
+                        HttpError.mapTo('Audit lookup failed'),
                         Telemetry.span('audit.getMine'),
                     )));
     }),

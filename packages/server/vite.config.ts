@@ -21,6 +21,7 @@ export default defineConfig(
                 'infra/cluster': './src/infra/cluster.ts',
                 'infra/events': './src/infra/events.ts',
                 'infra/handlers/purge': './src/infra/handlers/purge.ts',
+                'infra/handlers/tenant-lifecycle': './src/infra/handlers/tenant-lifecycle.ts',
                 // Infrastructure modules
                 'infra/jobs': './src/infra/jobs.ts',
                 'infra/storage': './src/infra/storage.ts',

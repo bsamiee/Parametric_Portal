@@ -42,7 +42,7 @@ const _SCHEMA = {
 
 // --- [CLASSES] ---------------------------------------------------------------
 
-class WebhookPayload extends S.Class<WebhookPayload>('WebhookPayload')({ data: S.Unknown, id: S.String, timestamp: S.Number, type: S.String }) {}
+class WebhookPayload extends S.Class<WebhookPayload>('WebhookPayload')({ data: S.Unknown, id: S.String, schemaVersion: S.optionalWith(S.Int.pipe(S.between(1, 255)), { default: () => 1 }), timestamp: S.Number, type: S.String }) {}
 class WebhookEndpoint extends S.Class<WebhookEndpoint>('WebhookEndpoint')({ secret: S.String.pipe(S.minLength(32)), timeout: S.optionalWith(S.Number, { default: () => 5000 }), url: S.String.pipe(S.pattern(/^https:\/\/[a-zA-Z0-9]/), S.brand('WebhookUrl')) }) {}
 class WebhookError extends S.TaggedError<WebhookError>()('WebhookError', { cause: S.optional(S.Unknown), deliveryId: S.optional(S.String), reason: _SCHEMA.ErrorReason, statusCode: S.optional(S.Number) }) {
     static readonly _props = {
@@ -259,7 +259,7 @@ class WebhookService extends Effect.Service<WebhookService>()('server/Webhooks',
             )),
             Telemetry.span('webhook.deliverEvent', { metrics: false, 'webhook.tenant_id': tenantId, 'webhook.type': eventType }),
         );
-        yield* Effect.forkScoped(eventBus.subscribe('app.settings.updated', S.Struct({ _tag: S.Literal('app'), action: S.Literal('settings.updated') }), (event) => settings.invalidate(event.tenantId).pipe(Effect.ignore)).pipe(Stream.catchAll(() => Stream.empty), Stream.runDrain));
+        yield* Effect.forkScoped(eventBus.subscribe('app.settings.updated', { 1: S.Struct({ _tag: S.Literal('app'), action: S.Literal('settings.updated') }) }, (event) => settings.invalidate(event.tenantId).pipe(Effect.ignore)).pipe(Stream.catchAll(() => Stream.empty), Stream.runDrain));
         yield* Effect.logInfo('WebhookService initialized');
         return { deliverEvent, list: settings.list, register: settings.register, remove: settings.remove, retry, status, test };
         }),

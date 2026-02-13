@@ -60,21 +60,23 @@ class Serializable extends S.Class<Serializable>('server/Context.Serializable')(
 class Request extends Effect.Tag('server/RequestContext')<Request, Context.Request.Data>() {
     static readonly Id = _ID;
     static readonly Headers = {
-        appId:          'x-app-id',
-        cfConnectingIp: 'cf-connecting-ip',
-        circuitState:   'x-circuit-state',
-        forwardedFor:   'x-forwarded-for',
-        forwardedProto: 'x-forwarded-proto',
+        appId:              'x-app-id',
+        cfConnectingIp:     'cf-connecting-ip',
+        circuitState:       'x-circuit-state',
+        forwardedFor:       'x-forwarded-for',
+        forwardedProto:     'x-forwarded-proto',
+        idempotencyKey:     'idempotency-key',
+        idempotencyOutcome: 'idempotency-outcome',
         rateLimit: {
-            limit:      'x-ratelimit-limit',
-            remaining:  'x-ratelimit-remaining',
-            reset:      'x-ratelimit-reset',
-            retryAfter: 'retry-after',
+            limit:          'x-ratelimit-limit',
+            remaining:      'x-ratelimit-remaining',
+            reset:          'x-ratelimit-reset',
+            retryAfter:     'retry-after',
         },
-        realIp:         'x-real-ip',
-        requestedWith:  'x-requested-with',
-        requestId:      'x-request-id',
-        trace: [        'traceparent', 'tracestate', 'baggage'] as const,
+        realIp:             'x-real-ip',
+        requestedWith:      'x-requested-with',
+        requestId:          'x-request-id',
+        trace: [            'traceparent', 'tracestate', 'baggage'] as const,
     } as const;
     static readonly system = (requestId = crypto.randomUUID(), tenantId: Context.Request.Id = _ID.system): Context.Request.Data => ({ appNamespace: Option.none(), circuit: Option.none(), cluster: Option.none(), ipAddress: Option.none(), rateLimit: Option.none(), requestId, session: Option.none(), tenantId, userAgent: Option.none() });
     private static readonly _ref = FiberRef.unsafeMake<Context.Request.Data>(Request.system(_ID.default, _ID.unspecified));

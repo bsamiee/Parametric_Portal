@@ -19,7 +19,13 @@ const _CONFIG = {
             provider: 'openai',
             windowMs: 200,
         },
-        language: { maxTokens: 4096, model: 'gpt-4o', provider: 'openai', temperature: 1, topK: 40, topP: 1 },
+        language: { fallback: [], maxTokens: 4096, model: 'gpt-4o', provider: 'openai', temperature: 1, topK: 40, topP: 1 },
+        policy: {
+            maxRequestsPerMinute: 60,
+            maxTokensPerDay: 1_000_000,
+            maxTokensPerRequest: 16384,
+            tools: { mode: 'allow' as const, names: [] as Array<string> },
+        },
     },
     embeddingDimensions: {
         'text-embedding-3-large': 3072,
@@ -49,6 +55,7 @@ const AiRegistry = (() => {
         ),
         language: S.optionalWith(
             S.Struct({
+                fallback:        S.optionalWith(S.Array(S.Literal('anthropic', 'gemini', 'openai')), { default: () => _CONFIG.defaults.language.fallback }),
                 maxTokens:       S.optionalWith(S.Int, { default: () => _CONFIG.defaults.language.maxTokens }),
                 model:           S.optionalWith(S.String, { default: () => _CONFIG.defaults.language.model }),
                 provider:        S.optionalWith(S.Literal('anthropic', 'gemini', 'openai'), {default: () => _CONFIG.defaults.language.provider,}),
@@ -57,6 +64,18 @@ const AiRegistry = (() => {
                 topP:            S.optionalWith(S.Number, { default: () => _CONFIG.defaults.language.topP }),
             }),
             { default: () =>    _CONFIG.defaults.language },
+        ),
+        policy: S.optionalWith(
+            S.Struct({
+                maxRequestsPerMinute: S.optionalWith(S.Int, { default: () => _CONFIG.defaults.policy.maxRequestsPerMinute }),
+                maxTokensPerDay:      S.optionalWith(S.Int, { default: () => _CONFIG.defaults.policy.maxTokensPerDay }),
+                maxTokensPerRequest:  S.optionalWith(S.Int, { default: () => _CONFIG.defaults.policy.maxTokensPerRequest }),
+                tools: S.optionalWith(S.Struct({
+                    mode:  S.Literal('allow', 'deny'),
+                    names: S.Array(S.String),
+                }), { default: () => _CONFIG.defaults.policy.tools }),
+            }),
+            { default: () => _CONFIG.defaults.policy },
         ),
     });
     const AppSettingsSchema =    S.Struct({ ai: S.optional(SettingsSchema) });
@@ -170,11 +189,15 @@ const AiRegistry = (() => {
             Effect.map((settings) => settings.ai ?? _CONFIG.defaults),
             Effect.flatMap(decodeSettings),
         );
+    const fallbackLanguageLayers = (settings: S.Schema.Type<typeof SettingsSchema>) =>
+        settings.language.fallback.map((provider) => languageLayer({ ...settings.language, provider }));
     const layers = (settings: S.Schema.Type<typeof SettingsSchema>) => {
         const embedding = normalizeEmbedding(settings.embedding);
         return {
             embedding: embeddingLayer(embedding),
+            fallbackLanguage: fallbackLanguageLayers(settings),
             language: languageLayer(settings.language),
+            policy: settings.policy,
             tokenizer: tokenizerLayer(settings.language),
         } as const;
     };

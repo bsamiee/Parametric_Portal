@@ -40,6 +40,7 @@ class DomainEvent extends S.Class<DomainEvent>('DomainEvent')({
     correlationId: S.optional(S.UUID),
     eventId: S.String.pipe(S.pattern(/^\d{18,19}$/), S.brand('SnowflakeId')),
     payload: S.Unknown,
+    schemaVersion: S.optionalWith(S.Int.pipe(S.between(1, 255)), { default: () => 1 }),
     tenantId: S.String,
     }) {
         [PrimaryKey.symbol]() { return this.eventId; }
@@ -119,7 +120,7 @@ class EventBus extends Effect.Service<EventBus>()('server/EventBus', {
         );
         yield* Client.listen.raw('event_journal_notify').pipe(
             Stream.mapEffect((payload) => _CODEC.notify.decode(payload).pipe(
-                Effect.flatMap(({ eventId, sourceNodeId }) => database.eventJournal.byPrimaryKey(eventId).pipe(
+                Effect.flatMap(({ eventId, sourceNodeId }) => database.journal.entry(eventId).pipe(
                     Effect.flatMap(Option.match({
                         onNone: () => Effect.logWarning('LISTEN/NOTIFY event not found in journal', { eventId }),
                         onSome: handleNotifyEntry,
@@ -159,7 +160,7 @@ class EventBus extends Effect.Service<EventBus>()('server/EventBus', {
                             aggregateId: item.aggregateId, causationId: item.causationId,
                             correlationId,
                             eventId,
-                            payload: item.payload, tenantId: item.tenantId ?? requestContext.tenantId,
+                            payload: item.payload, schemaVersion: item.schemaVersion, tenantId: item.tenantId ?? requestContext.tenantId,
                         }),
                     });
                     const json = yield* _CODEC.envelope.encode(envelope);
@@ -190,11 +191,12 @@ class EventBus extends Effect.Service<EventBus>()('server/EventBus', {
             );
         };
         const subscribe = <T, I>(
-            eventType: string, schema: S.Schema<T, I, never>,
+            eventType: string, schemas: Readonly<Record<number, S.Schema<T, I, never>>>,
             handler: (event: DomainEvent, payload: T) => Effect.Effect<void, EventError>,
             filter?: (event: DomainEvent) => boolean,
         ) => {
             const labels = MetricsService.label({ event_type: eventType });
+            const sortedVersions = Object.keys(schemas).map(Number).sort((a, b) => a - b);
             return Stream.unwrapScoped(
                 STM.commit(TRef.updateAndGet(subscriptions, (current) => current + 1)).pipe(
                     Effect.flatMap((count) => Metric.set(metrics.events.subscriptions, count)),
@@ -202,7 +204,21 @@ class EventBus extends Effect.Service<EventBus>()('server/EventBus', {
                     Effect.map(Stream.fromQueue),
                     Effect.map(Stream.filter((envelope) => envelope.event.eventType === eventType && (filter?.(envelope.event) ?? true))),
                     Effect.map(Stream.mapEffect(Effect.fn(function*(envelope) {
-                        yield* S.validate(schema)(envelope.event.payload).pipe(
+                        const version = envelope.event.schemaVersion;
+                        const latestFallback = pipe(
+                            Option.fromNullable(sortedVersions.at(-1)),
+                            Option.filter((latest) => version > latest),
+                            Option.flatMap((latest) => Option.fromNullable(schemas[latest])),
+                        );
+                        const resolvedSchema = Option.orElse(
+                            Option.fromNullable(schemas[version]),
+                            constant(latestFallback),
+                        );
+                        const selectedSchema = yield* Option.match(resolvedSchema, {
+                            onNone: () => Effect.fail(EventError.from(envelope.event.eventId, 'ValidationFailed')),
+                            onSome: Effect.succeed,
+                        });
+                        yield* S.validate(selectedSchema)(envelope.event.payload).pipe(
                             Effect.mapError((cause) => EventError.from(envelope.event.eventId, 'ValidationFailed', cause)),
                             Effect.flatMap((payload) => Telemetry.span(handler(envelope.event, payload), 'events.handle', { 'event.type': eventType, metrics: false }).pipe(
                                 Effect.tap(constant(Metric.increment(Metric.taggedWithLabels(metrics.events.processed, labels)))),
@@ -252,7 +268,7 @@ class EventBus extends Effect.Service<EventBus>()('server/EventBus', {
             return Stream.paginateChunkEffect(initialCursor, Effect.fn('events.replay')(function*(cursor) {
                 yield* Effect.annotateCurrentSpan('replay.batch_size', batchSize);
                 yield* Effect.annotateCurrentSpan('replay.cursor', cursor);
-                const rows = yield* database.eventJournal.replay({
+                const rows = yield* database.journal.replay({
                     batchSize,
                     eventType: filter.eventType,
                     sinceSequenceId: cursor,
@@ -289,6 +305,7 @@ namespace EventBus {
             readonly aggregateId: string; readonly causationId?: string; readonly correlationId?: string;
             readonly eventId?: S.Schema.Type<typeof DomainEvent>['eventId'];
             readonly payload: { readonly _tag: string; readonly action: string } & Readonly<Record<string, unknown>>;
+            readonly schemaVersion?: number;
             readonly tenantId?: string;
         };
         export type ReplayFilter = {

@@ -133,10 +133,10 @@
       "import": "./src/infra/handlers/purge.ts",
       "default": "./src/infra/handlers/purge.ts"
     },
-    "./infra/handlers/provisioning": {
-      "types": "./src/infra/handlers/provisioning.ts",
-      "import": "./src/infra/handlers/provisioning.ts",
-      "default": "./src/infra/handlers/provisioning.ts"
+    "./infra/handlers/tenant-lifecycle": {
+      "types": "./src/infra/handlers/tenant-lifecycle.ts",
+      "import": "./src/infra/handlers/tenant-lifecycle.ts",
+      "default": "./src/infra/handlers/tenant-lifecycle.ts"
     },
     "./platform/streaming": {
       "types": "./src/platform/streaming.ts",

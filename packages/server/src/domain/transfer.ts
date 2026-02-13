@@ -75,7 +75,7 @@ const _exportAssets = (parameters: typeof TransferQuery.Type) =>
                     MetricsService.inc(metrics.transfer.exports, MetricsService.label({ app: appId, format: codec.ext })),
                     MetricsService.inc(metrics.transfer.rows, MetricsService.label({ app: appId, outcome: 'exported' }), result.count),
                 ], { discard: true })),
-                Effect.mapError((err) => HttpError.Internal.of(`${codec.ext.toUpperCase()} generation failed`, err)),
+                HttpError.mapTo(`${codec.ext.toUpperCase()} generation failed`),
                 Effect.tap((result: Transfer.BinaryResult) => auditExport(result.name, result.count)),
                 Effect.map((result: Transfer.BinaryResult) => ({ ...result, format: codec.ext })),
                 Telemetry.span(`transfer.serialize.${codec.ext}`, { metrics: false }),
@@ -104,7 +104,7 @@ const _importAssets = (parameters: typeof TransferQuery.Type) =>
         const dryRun = Option.getOrElse(parameters.dryRun, constant(false));
         const body = yield* HttpServerRequest.HttpServerRequest.pipe(
             Effect.flatMap((req) => req.arrayBuffer),
-            Effect.mapError((err) => HttpError.Internal.of('Failed to read request body', err)),
+            HttpError.mapTo('Failed to read request body'),
             Effect.filterOrFail((buffer) => buffer.byteLength > 0 && buffer.byteLength <= Transfer.limits.totalBytes, (buffer) => HttpError.Validation.of('body', buffer.byteLength === 0 ? 'Empty request body' : `Max import size: ${Transfer.limits.totalBytes} bytes`)),
         );
         const parsed = yield* Stream.runCollect(Transfer.import(codec.binary ? body : codec.content(body), { format: codec.ext })).pipe(
@@ -174,7 +174,7 @@ const _importAssets = (parameters: typeof TransferQuery.Type) =>
                     Effect.annotateCurrentSpan('transfer.inserted', inserted.length),
                     Effect.annotateCurrentSpan('transfer.db_failures', failed.length),],
                     { discard: true })),
-                Effect.mapError((err) => HttpError.Internal.of('Import processing failed', err)),
+                HttpError.mapTo('Import processing failed'),
                 Telemetry.span('transfer.insert', { metrics: false }),
             );
         yield* Effect.when(

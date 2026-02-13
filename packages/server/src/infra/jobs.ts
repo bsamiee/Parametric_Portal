@@ -115,10 +115,12 @@ const _makeDlqWatcher = (submitFn: (type: string, payload: unknown, opts?: { pri
 
 class JobPayload extends S.Class<JobPayload>('JobPayload')({
     batchId: S.optional(S.String), dedupeKey: S.optional(S.String),
-    duration: S.optionalWith(S.Literal('short', 'long'), { default: () => 'short' }),ipAddress: S.optional(S.String),
+    duration: S.optionalWith(S.Literal('short', 'long'), { default: () => 'short' }), ipAddress: S.optional(S.String),
     maxAttempts: S.optionalWith(S.Number, { default: () => 3 }),
     payload: S.Unknown,
-    priority: S.optionalWith(Job.fields.priority, { default: () => 'normal' }),requestId: S.optional(S.String), scheduledAt: S.optional(S.Number), tenantId: S.String, type: S.String,userAgent: S.optional(S.String),
+    priority: S.optionalWith(Job.fields.priority, { default: () => 'normal' }), requestId: S.optional(S.String), scheduledAt: S.optional(S.Number),
+    schemaVersion: S.optionalWith(S.Int.pipe(S.between(1, 255)), { default: () => 1 }),
+    tenantId: S.String, type: S.String, userAgent: S.optional(S.String),
 }) {}
 class JobStatusResponse extends S.Class<JobStatusResponse>('JobStatusResponse')({
     attempts: S.Number, history: S.Array(_HistoryEntry), result: S.optional(S.Unknown), status: JobStatusSchema,
@@ -452,7 +454,7 @@ const JobEntityLive = JobEntity.toLayer(Effect.gen(function* () {
     defectRetryPolicy: Resilience.schedule({ base: _CONFIG.retry.defect.base, cap: _CONFIG.retry.cap, maxAttempts: _CONFIG.retry.defect.maxAttempts }) as Schedule.Schedule<[Duration.Duration, number], unknown, never>,
     mailboxCapacity: _CONFIG.entity.mailboxCapacity,
     maxIdleTime: _CONFIG.entity.maxIdleTime,
-    spanAttributes: { 'entity.service': 'job-processing', 'entity.version': 'v2' },
+    spanAttributes: { 'entity.service': 'job-processing', 'entity.version': 'v2', 'rpc.contract_version': '1' },
 });
 // --- [SERVICES] --------------------------------------------------------------
 

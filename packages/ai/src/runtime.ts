@@ -13,10 +13,15 @@ import { AiRegistry } from './registry.ts';
 // --- [CONSTANTS] -------------------------------------------------------------
 
 const _CONFIG = {
+    budget: {
+        dailyKeyPrefix: 'ai:budget:daily:',
+        dailyTtl: Duration.hours(24),
+        rateKeyPrefix: 'ai:rate:',
+        rateTtl: Duration.minutes(1),
+    },
     cache: { settings: { capacity: 256, storeId: 'ai:settings', ttlMinutes: 5 } },
     labels: {
         operations: { embed: 'ai.embed', generateObject: 'ai.generateObject', generateText: 'ai.generateText', settings: 'ai.settings', streamText: 'ai.streamText' },
-        tokenKinds: ['input', 'output', 'total', 'reasoning', 'cached'] as const,
     },
     telemetry: { operations: { chat: 'chat', embeddings: 'embeddings' } },
 } as const;
@@ -36,24 +41,32 @@ class AiRuntimeError extends Data.TaggedError('AiRuntimeError')<{
     readonly cause: unknown;
 }> {}
 
+class AiPolicyError extends Data.TaggedError('AiPolicyError')<{
+    readonly operation: string;
+    readonly reason: string;
+    readonly tenantId: string;
+}> {}
+
 // --- [FUNCTIONS] -------------------------------------------------------------
 
 const _wrapError = (operation: string) => (cause: unknown) =>
     Match.value(cause).pipe(
         Match.when(AiError.isAiError, (error: AiError.AiError) => error),
-        Match.orElse((error) => error instanceof AiRuntimeError ? error : new AiRuntimeError({ cause: error, operation })),
+        Match.when(Match.instanceOf(AiRuntimeError), (error) => error),
+        Match.when(Match.instanceOf(AiPolicyError), (error) => error),
+        Match.orElse((error) => new AiRuntimeError({ cause: error, operation })),
     );
 
-const _tokenUsageKeys = (usage: Response.Usage) => [
-    usage.inputTokens, usage.outputTokens, usage.totalTokens,
-    usage.reasoningTokens, usage.cachedInputTokens,
+const _TOKEN_FIELDS = [
+    ['input', 'inputTokens'], ['output', 'outputTokens'], ['total', 'totalTokens'],
+    ['reasoning', 'reasoningTokens'], ['cached', 'cachedInputTokens'],
 ] as const;
 
 // --- [SERVICES] --------------------------------------------------------------
 
 class AiRuntime extends Effect.Service<AiRuntime>()('ai/Runtime', {
     effect: Effect.gen(function* () {
-        const [db, metrics] = yield* Effect.all([DatabaseService, MetricsService]);
+        const [db, metrics, cache] = yield* Effect.all([DatabaseService, MetricsService, CacheService]);
         const mapSettingsError = _wrapError(_CONFIG.labels.operations.settings);
         const annotate = (attributes: AiTelemetry.GenAITelemetryAttributeOptions) =>
             Effect.flatMap(Effect.optionFromOptional(Effect.currentSpan), Option.match({
@@ -72,13 +85,41 @@ class AiRuntime extends Effect.Service<AiRuntime>()('ai/Runtime', {
             storeId: _CONFIG.cache.settings.storeId,
             timeToLive: Duration.minutes(_CONFIG.cache.settings.ttlMinutes),
         });
+        const checkBudget = (operation: string, tenantId: string, policy: S.Schema.Type<typeof AiRegistry.schema>['policy']) =>
+            Effect.gen(function* () {
+                const [dailyUsage, rateCount] = yield* Effect.all([
+                    cache.kv.get(`${_CONFIG.budget.dailyKeyPrefix}${tenantId}`, S.Number),
+                    cache.kv.get(`${_CONFIG.budget.rateKeyPrefix}${tenantId}`, S.Number),
+                ]);
+                const dailyTokens = Option.getOrElse(dailyUsage, () => 0);
+                const currentRate = Option.getOrElse(rateCount, () => 0);
+                yield* dailyTokens < policy.maxTokensPerDay
+                    ? Effect.void
+                    : Effect.fail(new AiPolicyError({ operation, reason: `daily token budget exceeded (${dailyTokens}/${policy.maxTokensPerDay})`, tenantId }));
+                yield* currentRate < policy.maxRequestsPerMinute
+                    ? Effect.void
+                    : Effect.fail(new AiPolicyError({ operation, reason: `request rate exceeded (${currentRate}/${policy.maxRequestsPerMinute})`, tenantId }));
+            }).pipe(
+                Effect.tapError(() => MetricsService.inc(metrics.ai.policyDenials, MetricsService.label({ operation, tenant: tenantId }))),
+            );
+        const incrementBudgetCounters = (tenantId: string, totalTokens: number) =>
+            Effect.all([
+                cache.kv.get(`${_CONFIG.budget.dailyKeyPrefix}${tenantId}`, S.Number).pipe(
+                    Effect.map(Option.getOrElse(() => 0)),
+                    Effect.flatMap((current) => cache.kv.set(`${_CONFIG.budget.dailyKeyPrefix}${tenantId}`, current + totalTokens, _CONFIG.budget.dailyTtl)),
+                ),
+                cache.kv.get(`${_CONFIG.budget.rateKeyPrefix}${tenantId}`, S.Number).pipe(
+                    Effect.map(Option.getOrElse(() => 0)),
+                    Effect.flatMap((current) => cache.kv.set(`${_CONFIG.budget.rateKeyPrefix}${tenantId}`, current + 1, _CONFIG.budget.rateTtl)),
+                ),
+            ], { discard: true });
         const settingsFor = (tenantId: string) =>
             settingsCache.get(new AiSettingsKey({ tenantId })).pipe(Effect.mapError(mapSettingsError));
         const settings = () => Context.Request.currentTenantId.pipe(Effect.flatMap(settingsFor));
         const tokenUsage = (labels: Record<string, string | undefined>, usage: Response.Usage) =>
             Effect.forEach(
-                _CONFIG.labels.tokenKinds.flatMap((kind, i) => {
-                    const value = _tokenUsageKeys(usage)[i];
+                _TOKEN_FIELDS.flatMap(([kind, field]) => {
+                    const value = usage[field];
                     return value == null ? [] : [[kind, value] as const];
                 }),
                 ([kind, tokens]) => MetricsService.inc(metrics.ai.tokens, MetricsService.label({ ...labels, kind }), tokens),
@@ -113,13 +154,14 @@ class AiRuntime extends Effect.Service<AiRuntime>()('ai/Runtime', {
                     } as const;
                 }),
             );
-        function embed(input: string): Effect.Effect<readonly number[], AiError.AiError | AiRuntimeError, Resilience.State>;
-        function embed(input: readonly string[]): Effect.Effect<readonly (readonly number[])[], AiError.AiError | AiRuntimeError, Resilience.State>;
+        function embed(input: string): Effect.Effect<readonly number[], AiError.AiError | AiPolicyError | AiRuntimeError, Resilience.State>;
+        function embed(input: readonly string[]): Effect.Effect<readonly (readonly number[])[], AiError.AiError | AiPolicyError | AiRuntimeError, Resilience.State>;
         // biome-ignore lint/suspicious/noExplicitAny: overloads provide precise types to callers
         function embed(input: string | readonly string[]): any {
             return Context.Request.current.pipe(
                 Effect.bindTo('requestContext'),
                 Effect.bind('appSettings', ({ requestContext }) => settingsFor(requestContext.tenantId)),
+                Effect.tap(({ requestContext, appSettings }) => checkBudget(_CONFIG.labels.operations.embed, requestContext.tenantId, appSettings.policy)),
                 Effect.flatMap(({ requestContext, appSettings }) => {
                     const labelPairs = { dimensions: String(appSettings.embedding.dimensions), model: appSettings.embedding.model, operation: _CONFIG.labels.operations.embed, provider: appSettings.embedding.provider, tenant: requestContext.tenantId };
                     const labels = MetricsService.label(labelPairs);
@@ -132,6 +174,12 @@ class AiRuntime extends Effect.Service<AiRuntime>()('ai/Runtime', {
                         }).pipe(Effect.provide(layers.embedding)),
                     ).pipe(
                         Effect.tap((result) => MetricsService.inc(metrics.ai.embeddings, labels, Array.isArray(input) ? (result as readonly (readonly number[])[]).length : 1)),
+                        Effect.tap(() => {
+                            const estimatedTokens = Array.isArray(input)
+                                ? Math.ceil((input as ReadonlyArray<string>).reduce((accumulator, text) => accumulator + text.length, 0) / 4)
+                                : Math.ceil((input as string).length / 4);
+                            return incrementBudgetCounters(requestContext.tenantId, estimatedTokens);
+                        }),
                         Effect.ensuring(ann),
                         Telemetry.span(_CONFIG.labels.operations.embed, { kind: 'client', metrics: false }),
                     );
@@ -145,14 +193,27 @@ class AiRuntime extends Effect.Service<AiRuntime>()('ai/Runtime', {
             run: (opts: Options) => Effect.Effect<A, AiError.AiError, R>,
         ) =>
             languageContext(operation).pipe(
-                Effect.flatMap(({ appSettings, labelPairs, labels, layers, requestAnnotations }) =>
-                    track(operation, labels, run(options).pipe(Effect.provide(layers.language))).pipe(
+                Effect.tap(({ appSettings, labelPairs }) => checkBudget(operation, labelPairs.tenant, appSettings.policy)),
+                Effect.flatMap(({ appSettings, labelPairs, labels, layers, requestAnnotations }) => {
+                    const primaryAttempt = track(operation, labels, run(options).pipe(Effect.provide(layers.language)));
+                    const withFallback = layers.fallbackLanguage.reduce<Effect.Effect<A, unknown, unknown>>(
+                        (chain, fallbackLayer, index) => chain.pipe(
+                            Effect.catchIf(AiError.isAiError, constant(
+                                track(operation, MetricsService.label({ ...labelPairs, provider: appSettings.language.fallback[index] }), run(options).pipe(Effect.provide(fallbackLayer))).pipe(
+                                    Effect.tap(MetricsService.inc(metrics.ai.fallbacks, MetricsService.label({ operation, provider: appSettings.language.fallback[index], tenant: labelPairs.tenant }))),
+                                ),
+                            )),
+                        ),
+                        primaryAttempt,
+                    );
+                    return withFallback.pipe(
                         Effect.ensuring(requestAnnotations),
-                        Effect.tap((resp) => tokenUsage(labelPairs, resp.usage)),
-                        Effect.tap((resp) => annotate({ operation: { name: _CONFIG.telemetry.operations.chat }, system: appSettings.language.provider, usage: resp.usage })),
+                        Effect.tap((resp) => tokenUsage(labelPairs, (resp as { readonly usage: Response.Usage }).usage)),
+                        Effect.tap((resp) => annotate({ operation: { name: _CONFIG.telemetry.operations.chat }, system: appSettings.language.provider, usage: (resp as { readonly usage: Response.Usage }).usage })),
+                        Effect.tap((resp) => incrementBudgetCounters(labelPairs.tenant, (resp as { readonly usage: Response.Usage }).usage.totalTokens ?? 0)),
                         Telemetry.span(operation, { kind: 'client', metrics: false }),
-                    ),
-                ),
+                    );
+                }),
                 Effect.mapError(_wrapError(operation)),
             );
         const generateText = <Tools extends Record<string, Tool.Any> = {}>(
@@ -166,12 +227,17 @@ class AiRuntime extends Effect.Service<AiRuntime>()('ai/Runtime', {
         ) =>
             Stream.unwrap(
                 languageContext(_CONFIG.labels.operations.streamText).pipe(
+                    Effect.tap(({ appSettings, labelPairs }) => checkBudget(_CONFIG.labels.operations.streamText, labelPairs.tenant, appSettings.policy)),
                     Effect.map(({ appSettings, labelPairs, labels, layers, requestAnnotations, spanAttrs }) => {
                         const base = LanguageModel.streamText(options).pipe(Stream.provideLayer(layers.language));
                         const onStart = Effect.all([requestAnnotations, MetricsService.inc(metrics.ai.requests, labels, 1)], { discard: true });
                         const onFinish = (part: Response.StreamPart<Tools>) =>
                             part.type === 'finish'
-                                ? Effect.all([tokenUsage(labelPairs, part.usage), annotate({ operation: { name: _CONFIG.telemetry.operations.chat }, system: appSettings.language.provider, usage: part.usage })], { discard: true })
+                                ? Effect.all([
+                                    tokenUsage(labelPairs, part.usage),
+                                    annotate({ operation: { name: _CONFIG.telemetry.operations.chat }, system: appSettings.language.provider, usage: part.usage }),
+                                    incrementBudgetCounters(labelPairs.tenant, part.usage.totalTokens ?? 0),
+                                ], { discard: true })
                                 : Effect.void;
                         return Stream.withSpan(
                             MetricsService.trackStream(
@@ -207,4 +273,4 @@ class AiRuntime extends Effect.Service<AiRuntime>()('ai/Runtime', {
 
 // --- [EXPORT] ----------------------------------------------------------------
 
-export { AiRuntime };
+export { AiPolicyError, AiRuntime };
