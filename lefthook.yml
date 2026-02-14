@@ -14,6 +14,7 @@ pre-commit:
         - "**/node_modules/**"
         - ".github/scripts/**"
         - "tools/scripts/**"
+        - "infrastructure/**"
         - "**/suspense.ts"
         - "**/*.spec.ts"
         - "**/*.test.ts"

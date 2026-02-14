@@ -53,8 +53,7 @@ prometheus.remote_write "default" { endpoint { url = "${promUrl}/api/v1/write" }
     dockerPort: (port: number) => ({ external: port, internal: port }),
     dockerVol: (id: string, name: string, path: string) => [{ containerPath: path, volumeName: new docker.Volume(id, { name }).name }],
     fail: (message: string): never => {
-        console.error(message);
-        return process.exit(1);
+        throw new pulumi.RunError(message);
     },
     grafana: (promUrl: pulumi.Input<string>) => pulumi.interpolate`apiVersion: 1\ndatasources:\n  - name: Prometheus\n    type: prometheus\n    access: proxy\n    url: ${promUrl}\n    isDefault: true`,
     httpHealth: (path: string, port: number) => ({ interval: '10s', retries: 3, startPeriod: '30s', tests: ['CMD', 'wget', '--spider', '-q', `http://localhost:${port}${path}`], timeout: '5s' }),
