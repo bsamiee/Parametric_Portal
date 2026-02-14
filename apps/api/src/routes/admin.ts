@@ -132,12 +132,36 @@ const AdminLive = HttpApiBuilder.group(ParametricApi, 'admin', (handlers) =>
             .handle('kcache', ({ urlParams }) => _dbQuery('kcache', database.kcache(urlParams.limit), 'Database stat kcache failed'))
             .handle('qualstats', ({ urlParams }) => _dbQuery('qualstats', database.qualstats(urlParams.limit), 'Database qualstats failed'))
             .handle('waitSampling', ({ urlParams }) => _dbQuery('waitSampling', database.waitSampling(urlParams.limit), 'Database wait sampling failed'))
+            .handle('waitSamplingCurrent', ({ urlParams }) => _dbQuery('waitSamplingCurrent', database.waitSamplingCurrent(urlParams.limit), 'Database wait sampling current failed'))
+            .handle('waitSamplingHistory', ({ urlParams }) => _dbQuery('waitSamplingHistory', database.waitSamplingHistory(urlParams.limit, urlParams.sinceSeconds), 'Database wait sampling history failed'))
+            .handle('resetWaitSampling', () => Middleware.guarded('admin', 'resetWaitSampling', 'mutation', database.resetWaitSampling().pipe(
+                HttpError.mapTo('Database wait sampling reset failed'),
+                Effect.tap((reset) => audit.log('Db.resetWaitSampling', { details: { reset } })),
+                Telemetry.span('admin.resetWaitSampling'),
+            )))
             .handle('cronJobs', () => _dbQuery('cronJobs', database.cronJobs(), 'Database cron jobs failed'))
             .handle('partitionHealth', ({ urlParams }) => _dbQuery('partitionHealth', database.partitionHealth(urlParams.parentTable), 'Database partition health failed'))
+            .handle('partmanConfig', () => _dbQuery('partmanConfig', database.partmanConfig(), 'Database partman config failed'))
+            .handle('runPartmanMaintenance', () => Middleware.guarded('admin', 'runPartmanMaintenance', 'mutation', database.runPartmanMaintenance().pipe(
+                HttpError.mapTo('Database partman maintenance failed'),
+                Effect.tap((ran) => audit.log('Db.runPartmanMaintenance', { details: { ran } })),
+                Telemetry.span('admin.runPartmanMaintenance'),
+            )))
             .handle('syncCronJobs', () => Middleware.guarded('admin', 'syncCronJobs', 'mutation', database.syncCronJobs().pipe(
                 HttpError.mapTo('Database maintenance reconciliation failed'),
                 Effect.tap((result) => audit.log('Db.syncCronJobs', { details: { result } })),
                 Telemetry.span('admin.syncCronJobs'),
+            )))
+            .handle('squeezeStatus', () => _dbQuery('squeezeStatus', database.squeezeStatus(), 'Database squeeze status failed'))
+            .handle('squeezeStartWorker', () => Middleware.guarded('admin', 'squeezeStartWorker', 'mutation', database.squeezeStartWorker().pipe(
+                HttpError.mapTo('Database squeeze worker start failed'),
+                Effect.tap((started) => audit.log('Db.squeezeStartWorker', { details: { started } })),
+                Telemetry.span('admin.squeezeStartWorker'),
+            )))
+            .handle('squeezeStopWorker', ({ path }) => Middleware.guarded('admin', 'squeezeStopWorker', 'mutation', database.squeezeStopWorker(path.pid).pipe(
+                HttpError.mapTo('Database squeeze worker stop failed'),
+                Effect.tap((stopped) => audit.log('Db.squeezeStopWorker', { details: { pid: path.pid, stopped } })),
+                Telemetry.span('admin.squeezeStopWorker'),
             )))
             .handle('listPermissions', () => Middleware.guarded('admin', 'listPermissions', 'api', policy.list().pipe(
                 Effect.map(Arr.map(({ action, resource, role }) => ({ action, resource, role }))),

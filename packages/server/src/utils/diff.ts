@@ -1,6 +1,6 @@
 /**
  * On-demand JSON Patch (RFC 6902) diff computation for audit logs.
- * PG18.1: oldData/newData snapshots stored at write-time; diffs computed on-read.
+ * PG18.2: oldData/newData snapshots stored at write-time; diffs computed on-read.
  */
 import { applyPatch, createPatch, type Operation } from 'rfc6902';
 import { Array as A, Data, Effect, Option, pipe } from 'effect';

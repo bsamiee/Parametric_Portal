@@ -1,7 +1,15 @@
-import { SqlClient, SqlSchema } from '@effect/sql';
+import { SqlClient, SqlSchema, type Statement } from '@effect/sql';
 import { Client } from './client.ts';
 import { Page } from './page.ts';
-import { Data, Duration, Effect, Layer, Option, pipe, Schema as S } from 'effect';
+import { Data, Duration, Effect, Layer, Match, Option, pipe, Schema as S } from 'effect';
+
+// --- [TYPES] -----------------------------------------------------------------
+
+type _CteParams = {
+    readonly entityFilter: Statement.Fragment;
+    readonly normalizedTerm: Statement.Fragment;
+    readonly scopeFilter: Statement.Fragment;
+};
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
@@ -15,12 +23,31 @@ const _CONFIG = (() => {
         rank:       { normalization: 32 },
         refresh:    { timeoutMinutes: 5 },
         regconfig:  'parametric_search',
-        rrf:        { k: 60, weights: { fts: 0.3, fuzzy: 0.08, phonetic: 0.02, semantic: 0.2, trgmKnnSimilarity: 0.05, trgmKnnStrictWord: 0.02, trgmKnnWord: 0.03, trgmSimilarity: 0.15, trgmStrictWord: 0.05, trgmWord: 0.1 } },
+        rrf:        {
+            k: 60,
+            signals: [
+                { name: 'fts',               weight: 0.3  },
+                { name: 'trgmSimilarity',    weight: 0.15 },
+                { name: 'trgmWord',          weight: 0.1  },
+                { name: 'trgmStrictWord',    weight: 0.05 },
+                { name: 'trgmKnnSimilarity', weight: 0.05 },
+                { name: 'trgmKnnWord',       weight: 0.03 },
+                { name: 'trgmKnnStrictWord', weight: 0.02 },
+                { name: 'fuzzy',             weight: 0.08 },
+                { name: 'phonetic',          weight: 0.02 },
+                { name: 'semantic',          weight: 0.2  },
+            ] as const,
+        },
         snippet:    { ...snippet, opts: `MaxWords=${snippet.maxWords},MinWords=${snippet.minWords},MaxFragments=${snippet.maxFragments},FragmentDelimiter=${snippet.delimiter},StartSel=${snippet.startSel},StopSel=${snippet.stopSel}` },
         tables:     { documents: 'search_documents', embeddings: 'search_embeddings' },
         trigram:    { minTermLength: 2 },
+        vector:     { efSearch: 120, maxScanTuples: 40_000, mode: 'relaxed_order' as const, scanMemMultiplier: 2 },
     } as const;
 })();
+
+// --- [FUNCTIONS] -------------------------------------------------------------
+
+const _snakeCase = (name: string) => name.replaceAll(/[A-Z]/g, (char) => `_${char.toLowerCase()}`);
 
 // --- [CLASSES] ---------------------------------------------------------------
 
@@ -45,15 +72,52 @@ class SearchRepo extends Effect.Service<SearchRepo>()('database/Search', {
                     return { dimensions: input.dimensions, embeddingJson: JSON.stringify(pad <= _CONFIG.embedding.padValue ? vector : [...vector, ...Array.from({ length: pad }, () => _CONFIG.embedding.padValue)]), model: input.model };
                 }),
             );
+        const _trgmKnnOps = [
+            { distExpr: (params: _CteParams) => sql`documents.normalized_text <-> ${params.normalizedTerm}`, name: 'trgmKnnSimilarity' },
+            { distExpr: (params: _CteParams) => sql`${params.normalizedTerm} <<-> documents.normalized_text`, name: 'trgmKnnWord' },
+            { distExpr: (params: _CteParams) => sql`${params.normalizedTerm} <<<-> documents.normalized_text`, name: 'trgmKnnStrictWord' },
+        ] as const;
+        const _buildTrgmKnnCte = (spec: (typeof _trgmKnnOps)[number], params: _CteParams) => {
+            const dist = spec.distExpr(params);
+            const snake = _snakeCase(spec.name);
+            return sql`${sql.literal(snake)}_candidates AS (
+                    SELECT documents.entity_type, documents.entity_id, documents.normalized_text, ${1} - (${dist}) AS ${sql.literal(snake)}_score
+                    FROM ${sql(_CONFIG.tables.documents)} documents
+                    WHERE true ${params.scopeFilter} ${params.entityFilter}
+                        AND char_length(${params.normalizedTerm}) >= ${_CONFIG.trigram.minTermLength}
+                    ORDER BY ${dist}, documents.entity_id DESC LIMIT ${_CONFIG.limits.candidate}
+                )`;
+        };
+        const _rankedSpecs = [
+            { candidateTable: 'fts_candidates', name: 'fts', scoreCol: 'fts_score' },
+            { candidateTable: 'trgm_candidates', filterExpr: sql`trgm_similarity_match`, name: 'trgmSimilarity', scoreCol: 'trgm_similarity_score' },
+            { candidateTable: 'trgm_candidates', filterExpr: sql`trgm_word_match`, name: 'trgmWord', scoreCol: 'trgm_word_score' },
+            { candidateTable: 'trgm_candidates', filterExpr: sql`trgm_strict_word_match`, name: 'trgmStrictWord', scoreCol: 'trgm_strict_word_score' },
+            { candidateTable: 'trgm_knn_similarity_candidates', name: 'trgmKnnSimilarity', scoreCol: 'trgm_knn_similarity_score' },
+            { candidateTable: 'trgm_knn_word_candidates', name: 'trgmKnnWord', scoreCol: 'trgm_knn_word_score' },
+            { candidateTable: 'trgm_knn_strict_word_candidates', name: 'trgmKnnStrictWord', scoreCol: 'trgm_knn_strict_word_score' },
+            { candidateTable: 'fuzzy_candidates', filterExpr: sql`fuzzy_distance <= ${_CONFIG.fuzzy.maxDistance}`, name: 'fuzzy', orderDir: 'ASC' as const, scoreCol: 'fuzzy_distance' },
+            { candidateTable: 'phonetic_candidates', name: 'phonetic' },
+        ];
+        const _buildRankedCte = (spec: { readonly candidateTable: string; readonly filterExpr?: Statement.Fragment; readonly name: string; readonly orderDir?: 'ASC' | 'DESC'; readonly scoreCol?: string }) => {
+            const snake = _snakeCase(spec.name);
+            const orderFrag = Match.value(spec.scoreCol).pipe(
+                Match.when(Match.string, (col) => sql`${sql.literal(col)} ${sql.literal(spec.orderDir ?? 'DESC')} NULLS LAST, entity_id DESC`),
+                Match.orElse(() => sql`entity_id DESC`),
+            );
+            const filterFrag = spec.filterExpr ? sql` WHERE ${spec.filterExpr}` : sql``;
+            return sql`${sql.literal(snake)}_ranked AS (SELECT entity_type, entity_id, ROW_NUMBER() OVER (ORDER BY ${orderFrag}) AS ${sql.literal(snake)}_rank FROM ${sql.literal(spec.candidateTable)}${filterFrag})`;
+        };
         const _buildRankedCtes = (parameters: { readonly embeddingJson?: string; readonly dimensions?: number; readonly entityTypes: readonly string[]; readonly includeGlobal: boolean; readonly model?: string; readonly scopeId: string | null; readonly term: string }) => {
             const hasEmbedding = parameters.embeddingJson !== undefined;
             const { entityFilter, scopeFilter } = _filters(parameters);
             const normalizedTerm = sql`left(normalize_search_text(${parameters.term}, NULL, NULL), ${_CONFIG.fuzzy.maxInputLength})`;
-            const query = sql`websearch_to_tsquery(${_CONFIG.regconfig}::regconfig, unaccent(${parameters.term}))`;
+            const query = sql`websearch_to_tsquery(${_CONFIG.regconfig}::regconfig, ${parameters.term})`;
+            const cteParams: _CteParams = { entityFilter, normalizedTerm, scopeFilter };
             const semanticCte = hasEmbedding
                 ? sql`,
                 semantic_candidates AS (
-                    SELECT documents.entity_type, documents.entity_id, ${1} - (embeddings.embedding <=> (${parameters.embeddingJson})::vector) AS semantic_score
+                    SELECT documents.entity_type, documents.entity_id, ${1} - (embeddings.embedding <=> (${parameters.embeddingJson})::halfvec(${_CONFIG.embedding.maxDimensions})) AS semantic_score
                     FROM ${sql(_CONFIG.tables.embeddings)} embeddings
                     JOIN ${sql(_CONFIG.tables.documents)} documents
                         ON documents.entity_type = embeddings.entity_type
@@ -61,8 +125,10 @@ class SearchRepo extends Effect.Service<SearchRepo>()('database/Search', {
                         AND documents.document_hash = embeddings.hash
                     WHERE true ${scopeFilter} ${entityFilter}
                         AND embeddings.model = ${parameters.model} AND embeddings.dimensions = ${parameters.dimensions}
-                    ORDER BY embeddings.embedding <=> (${parameters.embeddingJson})::vector, documents.entity_id DESC LIMIT ${_CONFIG.limits.candidate}
-                ), semantic_ranked AS (SELECT entity_type, entity_id, ROW_NUMBER() OVER (ORDER BY semantic_score DESC NULLS LAST, entity_id DESC) AS semantic_rank FROM semantic_candidates)` : sql``;
+                    ORDER BY embeddings.embedding <=> (${parameters.embeddingJson})::halfvec(${_CONFIG.embedding.maxDimensions}), documents.entity_id DESC LIMIT ${_CONFIG.limits.candidate}
+                )` : sql``;
+            const trgmKnnCtes = _trgmKnnOps.map((spec) => _buildTrgmKnnCte(spec, cteParams));
+            const rankedCtes = [..._rankedSpecs, ...(hasEmbedding ? [{ candidateTable: 'semantic_candidates', name: 'semantic', scoreCol: 'semantic_score' }] : [])].map(_buildRankedCte);
             const ctes = sql`
                 fts_candidates AS (
                     SELECT documents.entity_type, documents.entity_id, ts_rank_cd(documents.search_vector, ${query}, ${_CONFIG.rank.normalization}) AS fts_score
@@ -85,92 +151,56 @@ class SearchRepo extends Effect.Service<SearchRepo>()('database/Search', {
                         AND (documents.normalized_text % ${normalizedTerm} OR ${normalizedTerm} <% documents.normalized_text OR ${normalizedTerm} <<% documents.normalized_text)
                     ORDER BY GREATEST(trgm_similarity_score, trgm_word_score, trgm_strict_word_score) DESC NULLS LAST, documents.entity_id DESC LIMIT ${_CONFIG.limits.candidate}
                 ),
-                trgm_knn_similarity_candidates AS (
-                    SELECT documents.entity_type, documents.entity_id, ${1} - (documents.normalized_text <-> ${normalizedTerm}) AS trgm_knn_similarity_score
-                    FROM ${sql(_CONFIG.tables.documents)} documents
-                    WHERE true ${scopeFilter} ${entityFilter}
-                        AND char_length(${normalizedTerm}) >= ${_CONFIG.trigram.minTermLength}
-                    ORDER BY documents.normalized_text <-> ${normalizedTerm}, documents.entity_id DESC LIMIT ${_CONFIG.limits.candidate}
-                ),
-                trgm_knn_word_candidates AS (
-                    SELECT documents.entity_type, documents.entity_id, ${1} - (${normalizedTerm} <<-> documents.normalized_text) AS trgm_knn_word_score
-                    FROM ${sql(_CONFIG.tables.documents)} documents
-                    WHERE true ${scopeFilter} ${entityFilter}
-                        AND char_length(${normalizedTerm}) >= ${_CONFIG.trigram.minTermLength}
-                    ORDER BY ${normalizedTerm} <<-> documents.normalized_text, documents.entity_id DESC LIMIT ${_CONFIG.limits.candidate}
-                ),
-                trgm_knn_strict_word_candidates AS (
-                    SELECT documents.entity_type, documents.entity_id, ${1} - (${normalizedTerm} <<<-> documents.normalized_text) AS trgm_knn_strict_word_score
-                    FROM ${sql(_CONFIG.tables.documents)} documents
-                    WHERE true ${scopeFilter} ${entityFilter}
-                        AND char_length(${normalizedTerm}) >= ${_CONFIG.trigram.minTermLength}
-                    ORDER BY ${normalizedTerm} <<<-> documents.normalized_text, documents.entity_id DESC LIMIT ${_CONFIG.limits.candidate}
-                ),
+                ${sql.csv(trgmKnnCtes)},
                 fuzzy_candidates AS (
-                    SELECT trgm.entity_type, trgm.entity_id,
+                    SELECT knn.entity_type, knn.entity_id,
                         levenshtein_less_equal(
-                            left(trgm.normalized_text, ${_CONFIG.fuzzy.maxInputLength}),
+                            left(knn.normalized_text, ${_CONFIG.fuzzy.maxInputLength}),
                             ${normalizedTerm},
                             ${_CONFIG.fuzzy.maxDistance}
                         ) AS fuzzy_distance
-                    FROM trgm_candidates trgm
+                    FROM trgm_knn_similarity_candidates knn
                     WHERE char_length(${normalizedTerm}) >= ${_CONFIG.fuzzy.minTermLength}
-                    ORDER BY fuzzy_distance ASC NULLS LAST, trgm.entity_id DESC LIMIT ${_CONFIG.limits.candidate}
+                    ORDER BY fuzzy_distance ASC NULLS LAST, knn.entity_id DESC LIMIT ${_CONFIG.limits.candidate}
                 ),
                 phonetic_candidates AS (
-                    SELECT documents.entity_type, documents.entity_id
-                    FROM ${sql(_CONFIG.tables.documents)} documents
-                    WHERE char_length(${normalizedTerm}) >= ${3}
-                        AND true ${scopeFilter} ${entityFilter}
-                        AND documents.phonetic_code = dmetaphone(${normalizedTerm})
-                    ORDER BY documents.entity_id DESC LIMIT ${_CONFIG.limits.candidate}
-                ),
-                fts_ranked AS (SELECT entity_type, entity_id, ROW_NUMBER() OVER (ORDER BY fts_score DESC NULLS LAST, entity_id DESC) AS fts_rank FROM fts_candidates),
-                trgm_similarity_ranked AS (
-                    SELECT entity_type, entity_id, ROW_NUMBER() OVER (ORDER BY trgm_similarity_score DESC NULLS LAST, entity_id DESC) AS trgm_similarity_rank
-                    FROM trgm_candidates
-                    WHERE trgm_similarity_match
-                ),
-                trgm_word_ranked AS (
-                    SELECT entity_type, entity_id, ROW_NUMBER() OVER (ORDER BY trgm_word_score DESC NULLS LAST, entity_id DESC) AS trgm_word_rank
-                    FROM trgm_candidates
-                    WHERE trgm_word_match
-                ),
-                trgm_strict_word_ranked AS (
-                    SELECT entity_type, entity_id, ROW_NUMBER() OVER (ORDER BY trgm_strict_word_score DESC NULLS LAST, entity_id DESC) AS trgm_strict_word_rank
-                    FROM trgm_candidates
-                    WHERE trgm_strict_word_match
-                ),
-                trgm_knn_similarity_ranked AS (SELECT entity_type, entity_id, ROW_NUMBER() OVER (ORDER BY trgm_knn_similarity_score DESC NULLS LAST, entity_id DESC) AS trgm_knn_similarity_rank FROM trgm_knn_similarity_candidates),
-                trgm_knn_word_ranked AS (SELECT entity_type, entity_id, ROW_NUMBER() OVER (ORDER BY trgm_knn_word_score DESC NULLS LAST, entity_id DESC) AS trgm_knn_word_rank FROM trgm_knn_word_candidates),
-                trgm_knn_strict_word_ranked AS (SELECT entity_type, entity_id, ROW_NUMBER() OVER (ORDER BY trgm_knn_strict_word_score DESC NULLS LAST, entity_id DESC) AS trgm_knn_strict_word_rank FROM trgm_knn_strict_word_candidates),
-                fuzzy_ranked AS (SELECT entity_type, entity_id, ROW_NUMBER() OVER (ORDER BY fuzzy_distance ASC NULLS LAST, entity_id DESC) AS fuzzy_rank FROM fuzzy_candidates),
-                phonetic_ranked AS (SELECT entity_type, entity_id, ROW_NUMBER() OVER (ORDER BY entity_id DESC) AS phonetic_rank FROM phonetic_candidates)
+                    SELECT metaphone.entity_type, metaphone.entity_id
+                    FROM (
+                        SELECT documents.entity_type, documents.entity_id
+                        FROM ${sql(_CONFIG.tables.documents)} documents
+                        WHERE char_length(${normalizedTerm}) >= ${3}
+                            AND true ${scopeFilter} ${entityFilter}
+                            AND documents.phonetic_code = dmetaphone(${normalizedTerm})
+                        ORDER BY documents.entity_id DESC LIMIT ${_CONFIG.limits.candidate}
+                    ) metaphone
+                    UNION
+                    SELECT daitch.entity_type, daitch.entity_id
+                    FROM (
+                        SELECT documents.entity_type, documents.entity_id
+                        FROM ${sql(_CONFIG.tables.documents)} documents
+                        WHERE char_length(${normalizedTerm}) >= ${_CONFIG.trigram.minTermLength}
+                            AND true ${scopeFilter} ${entityFilter}
+                            AND documents.phonetic_daitch && daitch_mokotoff(${normalizedTerm})
+                        ORDER BY documents.entity_id DESC LIMIT ${_CONFIG.limits.candidate}
+                    ) daitch
+                )
             ${semanticCte},
+                ${sql.csv(rankedCtes)},
             ranked AS (
-                SELECT entity_type, entity_id, 'fts' AS source, fts_rank AS rnk FROM fts_ranked
-                UNION ALL SELECT entity_type, entity_id, 'trgmSimilarity' AS source, trgm_similarity_rank AS rnk FROM trgm_similarity_ranked
-                UNION ALL SELECT entity_type, entity_id, 'trgmWord' AS source, trgm_word_rank AS rnk FROM trgm_word_ranked
-                UNION ALL SELECT entity_type, entity_id, 'trgmStrictWord' AS source, trgm_strict_word_rank AS rnk FROM trgm_strict_word_ranked
-                UNION ALL SELECT entity_type, entity_id, 'trgmKnnSimilarity' AS source, trgm_knn_similarity_rank AS rnk FROM trgm_knn_similarity_ranked
-                UNION ALL SELECT entity_type, entity_id, 'trgmKnnWord' AS source, trgm_knn_word_rank AS rnk FROM trgm_knn_word_ranked
-                UNION ALL SELECT entity_type, entity_id, 'trgmKnnStrictWord' AS source, trgm_knn_strict_word_rank AS rnk FROM trgm_knn_strict_word_ranked
-                UNION ALL SELECT entity_type, entity_id, 'fuzzy' AS source, fuzzy_rank AS rnk FROM fuzzy_ranked
-                UNION ALL SELECT entity_type, entity_id, 'phonetic' AS source, phonetic_rank AS rnk FROM phonetic_ranked
-                ${hasEmbedding ? sql`UNION ALL SELECT entity_type, entity_id, 'semantic' AS source, semantic_rank AS rnk FROM semantic_ranked` : sql``}
+                ${sql.unsafe(_CONFIG.rrf.signals
+                    .filter((signal) => signal.name !== 'semantic' || hasEmbedding)
+                    .map((signal, index) => {
+                        const snake = _snakeCase(signal.name);
+                        const prefix = index === 0 ? '' : 'UNION ALL ';
+                        return `${prefix}SELECT entity_type, entity_id, '${signal.name}' AS source, ${snake}_rank AS rnk FROM ${snake}_ranked`;
+                    })
+                    .join('\n                '))}
             ),
             scored AS (
                 SELECT entity_type, entity_id,
-                    COALESCE(SUM(1.0 / (${_CONFIG.rrf.k} + rnk)) FILTER (WHERE source = 'fts'), 0) * ${_CONFIG.rrf.weights.fts} +
-                    COALESCE(SUM(1.0 / (${_CONFIG.rrf.k} + rnk)) FILTER (WHERE source = 'trgmSimilarity'), 0) * ${_CONFIG.rrf.weights.trgmSimilarity} +
-                    COALESCE(SUM(1.0 / (${_CONFIG.rrf.k} + rnk)) FILTER (WHERE source = 'trgmWord'), 0) * ${_CONFIG.rrf.weights.trgmWord} +
-                    COALESCE(SUM(1.0 / (${_CONFIG.rrf.k} + rnk)) FILTER (WHERE source = 'trgmStrictWord'), 0) * ${_CONFIG.rrf.weights.trgmStrictWord} +
-                    COALESCE(SUM(1.0 / (${_CONFIG.rrf.k} + rnk)) FILTER (WHERE source = 'trgmKnnSimilarity'), 0) * ${_CONFIG.rrf.weights.trgmKnnSimilarity} +
-                    COALESCE(SUM(1.0 / (${_CONFIG.rrf.k} + rnk)) FILTER (WHERE source = 'trgmKnnWord'), 0) * ${_CONFIG.rrf.weights.trgmKnnWord} +
-                    COALESCE(SUM(1.0 / (${_CONFIG.rrf.k} + rnk)) FILTER (WHERE source = 'trgmKnnStrictWord'), 0) * ${_CONFIG.rrf.weights.trgmKnnStrictWord} +
-                    COALESCE(SUM(1.0 / (${_CONFIG.rrf.k} + rnk)) FILTER (WHERE source = 'fuzzy'), 0) * ${_CONFIG.rrf.weights.fuzzy} +
-                    COALESCE(SUM(1.0 / (${_CONFIG.rrf.k} + rnk)) FILTER (WHERE source = 'phonetic'), 0) * ${_CONFIG.rrf.weights.phonetic} +
-                    COALESCE(SUM(1.0 / (${_CONFIG.rrf.k} + rnk)) FILTER (WHERE source = 'semantic'), 0) * ${_CONFIG.rrf.weights.semantic}
+                    ${sql.unsafe(_CONFIG.rrf.signals
+                        .map((signal) => `COALESCE(SUM(1.0 / (${_CONFIG.rrf.k} + rnk)) FILTER (WHERE source = '${signal.name}'), 0) * ${signal.weight}`)
+                        .join(' +\n                    '))}
                     AS rank
                 FROM ranked GROUP BY entity_type, entity_id
             )`;
@@ -199,17 +229,17 @@ class SearchRepo extends Effect.Service<SearchRepo>()('database/Search', {
                 FROM totals totals LEFT JOIN filtered filtered ON true ORDER BY filtered.rank DESC NULLS LAST, filtered.entity_id DESC NULLS LAST`;
             },
             Request: S.Struct({
-                cursorId: S.optional(S.UUID), cursorRank: S.optional(S.Number), dimensions: S.optional(S.Int), embeddingJson: S.optional(S.String),
+                cursorId:    S.optional(S.UUID), cursorRank: S.optional(S.Number), dimensions: S.optional(S.Int), embeddingJson: S.optional(S.String),
                 entityTypes: S.Array(S.String), includeFacets: S.Boolean, includeGlobal: S.Boolean, includeSnippets: S.Boolean,
-                limit: S.Int.pipe(S.positive(), S.lessThanOrEqualTo(_CONFIG.limits.maxLimit)), model: S.optional(S.String),
-                scopeId: S.NullOr(S.UUID), term: S.String.pipe(S.minLength(_CONFIG.limits.termMin), S.maxLength(_CONFIG.limits.termMax)),
+                limit:       S.Int.pipe(S.positive(), S.lessThanOrEqualTo(_CONFIG.limits.maxLimit)), model: S.optional(S.String),
+                scopeId:     S.NullOr(S.UUID), term: S.String.pipe(S.minLength(_CONFIG.limits.termMin), S.maxLength(_CONFIG.limits.termMax)),
             }),
             Result: S.Struct({ displayText: S.NullOr(S.String), entityId: S.NullOr(S.UUID), entityType: S.NullOr(S.String), facets: S.NullOr(S.Record({ key: S.String, value: S.Int })), metadata: S.NullOr(S.Unknown), rank: S.NullOr(S.Number), snippet: S.NullOr(S.String), totalCount: S.Int }),
         });
         const executeSuggestions = SqlSchema.findAll({
             execute: (parameters) => sql`SELECT term, frequency::int FROM get_search_suggestions(${parameters.prefix}, ${parameters.scopeId}::uuid, ${parameters.includeGlobal}, ${parameters.limit})`,
             Request: S.Struct({ includeGlobal: S.Boolean, limit: S.Int.pipe(S.positive(), S.lessThanOrEqualTo(_CONFIG.limits.suggestLimitMax)), prefix: S.String.pipe(S.minLength(_CONFIG.limits.termMin), S.maxLength(_CONFIG.limits.termMax)), scopeId: S.NullOr(S.UUID) }),
-            Result: S.Struct({ frequency: S.Int, term: S.String }),
+            Result:  S.Struct({ frequency: S.Int, term: S.String }),
         });
         const executeEmbeddingSources = SqlSchema.findAll({
             execute: (parameters) => {
@@ -220,16 +250,16 @@ class SearchRepo extends Effect.Service<SearchRepo>()('database/Search', {
                     WHERE true ${scopeFilter} ${entityFilter} AND e.entity_id IS NULL ORDER BY d.updated_at DESC LIMIT ${parameters.limit}`;
             },
             Request: S.Struct({ dimensions: S.Int, entityTypes: S.Array(S.String), includeGlobal: S.Boolean, limit: S.Int.pipe(S.positive(), S.lessThanOrEqualTo(_CONFIG.limits.embeddingBatch)), model: S.String, scopeId: S.NullOr(S.UUID) }),
-            Result: S.Struct({ contentText: S.NullOr(S.String), displayText: S.String, documentHash: S.String, entityId: S.UUID, entityType: S.String, metadata: S.Unknown, scopeId: S.NullOr(S.UUID), updatedAt: S.DateFromSelf }),
+            Result:  S.Struct({ contentText: S.NullOr(S.String), displayText: S.String, documentHash: S.String, entityId: S.UUID, entityType: S.String, metadata: S.Unknown, scopeId: S.NullOr(S.UUID), updatedAt: S.DateFromSelf }),
         });
         const executeUpsertEmbedding = SqlSchema.single({
             execute: (parameters) => sql`
                 INSERT INTO ${sql(_CONFIG.tables.embeddings)} (entity_type, entity_id, scope_id, model, dimensions, embedding, hash)
-                VALUES (${parameters.entityType}, ${parameters.entityId}, ${parameters.scopeId}, ${parameters.model}, ${parameters.dimensions}, (${parameters.embeddingJson})::vector, ${parameters.documentHash})
+                VALUES (${parameters.entityType}, ${parameters.entityId}, ${parameters.scopeId}, ${parameters.model}, ${parameters.dimensions}, (${parameters.embeddingJson})::halfvec(${_CONFIG.embedding.maxDimensions}), ${parameters.documentHash})
                 ON CONFLICT (entity_type, entity_id) DO UPDATE SET embedding = EXCLUDED.embedding, scope_id = EXCLUDED.scope_id, model = EXCLUDED.model, dimensions = EXCLUDED.dimensions, hash = EXCLUDED.hash
                 RETURNING WITH (OLD AS old, NEW AS new) new.entity_type, new.entity_id, (old.entity_type IS NULL)::boolean AS is_new`,
             Request: S.Struct({ dimensions: S.Int, documentHash: S.String, embeddingJson: S.String, entityId: S.UUID, entityType: S.String, model: S.String, scopeId: S.NullOr(S.UUID) }),
-            Result: S.Struct({ entityId: S.UUID, entityType: S.String, isNew: S.Boolean }),
+            Result:  S.Struct({ entityId: S.UUID, entityType: S.String, isNew: S.Boolean }),
         });
         return {
             embeddingSources: Effect.fn('SearchRepo.embeddingSources')((options: { readonly dimensions: number; readonly entityTypes?: readonly string[]; readonly includeGlobal?: boolean; readonly limit?: number; readonly model: string; readonly scopeId?: string | null }) =>
@@ -265,7 +295,12 @@ class SearchRepo extends Effect.Service<SearchRepo>()('database/Search', {
                         ...(Option.isSome(embedding) ? embedding.value : {}),
                     }).pipe(Effect.mapError((cause) => new SearchError({ cause, operation: 'search' })));
                     const rows = yield* (Option.isSome(embedding)
-                        ? Client.vector.withIterativeScan('relaxed_order', searchEffect)
+                        ? Client.vector.withIterativeScan({
+                            efSearch: _CONFIG.vector.efSearch,
+                            maxScanTuples: _CONFIG.vector.maxScanTuples,
+                            mode: _CONFIG.vector.mode,
+                            scanMemMultiplier: _CONFIG.vector.scanMemMultiplier,
+                        }, searchEffect)
                         : searchEffect);
                     const totalCount = rows[0]?.totalCount ?? 0;
                     const facets = options.includeFacets ? rows[0]?.facets ?? null : null;

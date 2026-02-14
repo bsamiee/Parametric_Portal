@@ -4,9 +4,13 @@
  */
 import { SqlClient } from '@effect/sql';
 import { Clock, Effect, Option, Record as R, Schema as S } from 'effect';
-import { repo, routine, Update } from './factory.ts';
+import { repo, routine, Update, type Pred } from './factory.ts';
 import { ApiKey, App, AppSettingsDefaults, Asset, AuditLog, type AuditOperationSchema, Job, JobDlq, KvStore, MfaSecret, Notification, OauthAccount, Permission, Session, User, WebauthnCredential, AppSettingsSchema } from './models.ts';
 import { SearchRepo } from './search.ts';
+
+// --- [CONSTANTS] -------------------------------------------------------------
+
+const _LIMITS = { defaultAuditWindow: 60, defaultPage: 100 } as const;
 
 // --- [REPOSITORIES] ----------------------------------------------------------
 
@@ -59,22 +63,21 @@ const makeSessionRepo = Effect.gen(function* () {
         functions: { revoke_sessions_by_ip: { args: [{ cast: 'uuid', field: 'appId' }, { cast: 'inet', field: 'ip' }], params: S.Struct({ appId: S.UUID, ip: S.String }) } },
         purge: 'purge_sessions',
         resolve: {
-            byAccessToken: { through: { source: 'token_access', table: 'session_tokens', target: 'session_id' } },
-            byRefreshToken: { through: { source: 'token_refresh', table: 'session_tokens', target: 'session_id' } },
+            byAccessToken:  { field: 'token_access', through: { table: 'session_tokens', target: 'session_id' } },
+            byRefreshToken: { field: 'token_refresh', through: { table: 'session_tokens', target: 'session_id' } },
         },
         scoped: 'appId',
     });
     return { ...repository,
         byRefreshTokenForUpdate: (hash: string) => repository.by('byRefreshToken', hash, 'update'),
         byUser: (userId: string) => repository.find([{ field: 'user_id', value: userId }]),
-        softDelete: (id: string) => repository.drop(id),
         softDeleteByIp: (appId: string, ip: string) => repository.fn<number>('revoke_sessions_by_ip', { appId, ip }),
         touch: (id: string) => repository.set(id, { updated_at: Update.now }),
         verify: (id: string) => repository.set(id, { verified_at: Update.now }, undefined, { field: 'verified_at', op: 'null' }),
     };
 });
 const makeApiKeyRepo = Effect.gen(function* () {
-    const repository = yield* repo(ApiKey, 'api_keys', { purge: 'purge_api_keys', resolve: { byHash: 'hash', byUser: 'many:userId' } });
+    const repository = yield* repo(ApiKey, 'api_keys', { purge: 'purge_api_keys', resolve: { byHash: 'hash', byUser: { field: 'userId', many: true } } });
     return { ...repository,
         touch: (id: string) => repository.set(id, { last_used_at: Update.now }),
     };
@@ -82,7 +85,7 @@ const makeApiKeyRepo = Effect.gen(function* () {
 const makeOauthAccountRepo = Effect.gen(function* () {
     const repository = yield* repo(OauthAccount, 'oauth_accounts', {
         conflict: { keys: ['provider', 'externalId'], only: ['tokenPayload'] },
-        purge: 'purge_oauth_accounts', resolve: { byExternal: ['provider', 'externalId'], byUser: 'many:userId' },
+        purge: 'purge_oauth_accounts', resolve: { byExternal: ['provider', 'externalId'], byUser: { field: 'userId', many: true } },
     });
     return { ...repository,
         byExternal: (provider: string, externalId: string) => repository.by('byExternal', { externalId, provider }),
@@ -98,8 +101,8 @@ const makeAssetRepo = Effect.gen(function* () {
         byUserKeyset: (userId: string, limit: number, cursor?: string) => repository.page([{ field: 'user_id', value: userId }], { cursor, limit }),
         findStaleForPurge: (olderThanDays: number) => Clock.currentTimeMillis.pipe(
             Effect.andThen((now) => repository.find([
-                { field: 'deleted_at', op: 'notNull' },
-                { field: 'deleted_at', op: 'lt', value: new Date(now - olderThanDays * 24 * 60 * 60 * 1000) },
+                { field: 'deleted_at',  op: 'notNull' },
+                { field: 'deleted_at',  op: 'lt', value: new Date(now - olderThanDays * 24 * 60 * 60 * 1000) },
                 { field: 'storage_ref', op: 'notNull' },
             ])),
         ),
@@ -115,7 +118,7 @@ const makeAuditRepo = Effect.gen(function* () {
         byIp: (ip: string, limit: number, cursor?: string) => repository.page([{ field: 'context_ip', value: ip }], { cursor, limit }),
         bySubject: (type: string, id: string, limit: number, cursor?: string, { after, before, operation }: { after?: Date; before?: Date; operation?: S.Schema.Type<typeof AuditOperationSchema> } = {}) => repository.page([{ field: 'target_type', value: type }, { field: 'target_id', value: id }, ...repository.preds({ after, before, operation })], { cursor, limit }),
         byUser: (userId: string, limit: number, cursor?: string, { after, before, operation }: { after?: Date; before?: Date; operation?: S.Schema.Type<typeof AuditOperationSchema> } = {}) => repository.page(repository.preds({ after, before, operation, user_id: userId }), { cursor, limit }),
-        countByIp: (appId: string, ip: string, windowMinutes = 60) => repository.fn<number>('count_audit_by_ip', { appId, ip, windowMinutes }),
+        countByIp: (appId: string, ip: string, windowMinutes = _LIMITS.defaultAuditWindow) => repository.fn<number>('count_audit_by_ip', { appId, ip, windowMinutes }),
         log: repository.insert,
     };
 });
@@ -129,7 +132,7 @@ const makeMfaSecretRepo = Effect.gen(function* () {
     };
 });
 const makeWebauthnCredentialRepo = Effect.gen(function* () {
-    const repository = yield* repo(WebauthnCredential, 'webauthn_credentials', { resolve: { byCredentialId: 'credentialId', byUser: 'many:userId' } });
+    const repository = yield* repo(WebauthnCredential, 'webauthn_credentials', { resolve: { byCredentialId: 'credentialId', byUser: { field: 'userId', many: true } } });
     return { ...repository,
         touch: (id: string) => repository.set(id, { last_used_at: Update.now }),
         updateCounter: (id: string, counter: number) => repository.set(id, { counter, last_used_at: Update.now }),
@@ -139,19 +142,21 @@ const makeJobRepo = Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
     const repository = yield* repo(Job, 'jobs', { pk: { column: 'job_id' }, scoped: 'appId' });
     return { ...repository,
-        byDateRange: (after: Date, before: Date, options?: { limit?: number; cursor?: string }) => repository.page(repository.preds({ after, before }), { cursor: options?.cursor, limit: options?.limit ?? 100 }),
-        byStatus: (status: string, options?: { after?: Date; before?: Date; limit?: number; cursor?: string }) => repository.page([{ field: 'status', value: status }, ...repository.preds({ after: options?.after, before: options?.before })], { cursor: options?.cursor, limit: options?.limit ?? 100 }),
+        byDateRange: (after: Date, before: Date, options?: { limit?: number; cursor?: string }) => repository.page(repository.preds({ after, before }), { cursor: options?.cursor, limit: options?.limit ?? _LIMITS.defaultPage }),
+        byStatus: (status: string, options?: { after?: Date; before?: Date; limit?: number; cursor?: string }) => repository.page([{ field: 'status', value: status }, ...repository.preds({ after: options?.after, before: options?.before })], { cursor: options?.cursor, limit: options?.limit ?? _LIMITS.defaultPage }),
         countByStatuses: (...statuses: readonly string[]) => repository.count([{ field: 'status', op: 'in', values: [...statuses] }]),
         isDuplicate: (dedupeKey: string) => repository.exists([{ raw: sql`correlation->>'dedupe' = ${dedupeKey}` }, { field: 'status', op: 'in', values: ['queued', 'processing'] }]),
     };
 });
 const makeJobDlqRepo = Effect.gen(function* () {
     const repository = yield* repo(JobDlq, 'job_dlq', { purge: 'purge_job_dlq', resolve: { bySource: 'sourceId' }, scoped: 'appId' });
+    const _byType = (type?: string): readonly Pred[] =>
+        type === undefined ? [] : [{ field: 'type', op: type.includes('*') ? 'like' as const : 'eq' as const, value: type.replaceAll('*', '%') }];
     return { ...repository,
-        byErrorReason: (errorReason: string, options?: { limit?: number; cursor?: string }) => repository.page([{ field: 'error_reason', value: errorReason }], { cursor: options?.cursor, limit: options?.limit ?? 100 }),
+        byErrorReason: (errorReason: string, options?: { limit?: number; cursor?: string }) => repository.page([{ field: 'error_reason', value: errorReason }], { cursor: options?.cursor, limit: options?.limit ?? _LIMITS.defaultPage }),
         byRequest: (requestId: string) => repository.find([{ field: 'context_request_id', value: requestId }]),
-        countPending: (type?: string) => repository.count(type === undefined ? [] : [{ field: 'type', op: type.includes('*') ? 'like' as const : 'eq' as const, value: type.replaceAll('*', '%') }]),
-        listPending: (options?: { type?: string; limit?: number; cursor?: string }) => repository.page(options?.type === undefined ? [] : [{ field: 'type', op: options.type.includes('*') ? 'like' as const : 'eq' as const, value: options.type.replaceAll('*', '%') }], { cursor: options?.cursor, limit: options?.limit ?? 100 }),
+        countPending: (type?: string) => repository.count(_byType(type)),
+        listPending: (options?: { type?: string; limit?: number; cursor?: string }) => repository.page(_byType(options?.type), { cursor: options?.cursor, limit: options?.limit ?? _LIMITS.defaultPage }),
         markReplayed: (id: string) => repository.drop(id),
         unmarkReplayed: (id: string) => repository.lift(id),
     };
@@ -190,21 +195,30 @@ const makeSystemRepo = Effect.gen(function* () {
     const repository = yield* routine('database/system', {
         functions: {
             count_outbox: {},
-            get_journal_entry:     { args: ['primaryKey'], mode: 'set', params: S.Struct({ primaryKey: S.String }), schema: S.Struct({ payload: S.String }) },
-            list_cron_jobs:        { mode: 'typed', schema: S.Array(S.Unknown) },
+            get_journal_entry:     { args: ['primaryKey'],  mode: 'set', params: S.Struct({ primaryKey: S.String }), schema: S.Struct({ payload: S.String }) },
+            list_cron_jobs:        { mode: 'typed',         schema: S.Array(S.Unknown) },
             list_journal_entries:  { args: ['sinceSequenceId', 'sinceTimestamp', 'eventType', 'batchSize'], mode: 'set', params: S.Struct({ batchSize: S.Number, eventType: S.NullOr(S.String), sinceSequenceId: S.String, sinceTimestamp: S.NullOr(S.Number) }), schema: S.Struct({ payload: S.String, primaryKey: S.String }) },
             list_partition_health: { args: ['parentTable'], mode: 'typed', params: S.Struct({ parentTable: S.String }), schema: S.Array(S.Unknown) },
-            purge_journal:         { args: ['days'], params: S.Struct({ days: S.Number }) },
-            purge_tenant:          { args: ['appId'], params: S.Struct({ appId: S.UUID }) },
-            stat_cache_ratio:      { mode: 'set', schema: S.Struct({ backendType: S.String, cacheHitRatio: S.Number, hits: S.Number, ioContext: S.String, ioObject: S.String, reads: S.Number, writes: S.Number }) },
-            stat_io_config:        { mode: 'set', schema: S.Struct({ name: S.String, setting: S.String }) },
-            stat_io_detail:        { mode: 'set', schema: S.Unknown },
-            stat_kcache:           { args: ['limit'], mode: 'typed', params: S.Struct({ limit: S.Number }), schema: S.Array(S.Unknown) },
-            stat_qualstats:        { args: ['limit'], mode: 'typed', params: S.Struct({ limit: S.Number }), schema: S.Array(S.Unknown) },
-            stat_statements:       { args: ['limit'], mode: 'typed', params: S.Struct({ limit: S.Number }), schema: S.Array(S.Unknown) },
-            stat_wait_sampling:    { args: ['limit'], mode: 'typed', params: S.Struct({ limit: S.Number }), schema: S.Array(S.Unknown) },
-            stat_wal_inspect:      { args: ['limit'], mode: 'typed', params: S.Struct({ limit: S.Number }), schema: S.Array(S.Unknown) },
-            sync_cron_jobs:        { mode: 'typed', schema: S.Array(S.Unknown) },
+            purge_journal:         { args: ['days'],        params: S.Struct({ days: S.Number }) },
+            purge_tenant:          { args: ['appId'],       params: S.Struct({ appId: S.UUID }) },
+            reset_wait_sampling_profile: { mode: 'scalar', schema: S.Boolean },
+            run_partman_maintenance: { mode: 'scalar', schema: S.Boolean },
+            start_squeeze_worker:  { mode: 'scalar',        schema: S.Boolean },
+            stat_cache_ratio:      { mode: 'set',           schema: S.Struct({ backendType: S.String, cacheHitRatio: S.Number, hits: S.Number, ioContext: S.String, ioObject: S.String, reads: S.Number, writes: S.Number }) },
+            stat_io_config:        { mode: 'set',           schema: S.Struct({ name: S.String, setting: S.String }) },
+            stat_io_detail:        { mode: 'set',           schema: S.Unknown },
+            stat_kcache:           { args: ['limit'],       mode: 'typed', params: S.Struct({ limit: S.Number }), schema: S.Array(S.Unknown) },
+            stat_partman_config:   { mode: 'typed',         schema: S.Array(S.Unknown) },
+            stat_qualstats:        { args: ['limit'],       mode: 'typed', params: S.Struct({ limit: S.Number }), schema: S.Array(S.Unknown) },
+            stat_squeeze_tables:   { mode: 'typed',         schema: S.Array(S.Unknown) },
+            stat_squeeze_workers:  { mode: 'typed',         schema: S.Array(S.Unknown) },
+            stat_statements:       { args: ['limit'],       mode: 'typed', params: S.Struct({ limit: S.Number }), schema: S.Array(S.Unknown) },
+            stat_wait_sampling:    { args: ['limit'],       mode: 'typed', params: S.Struct({ limit: S.Number }), schema: S.Array(S.Unknown) },
+            stat_wait_sampling_current: { args: ['limit'], mode: 'typed', params: S.Struct({ limit: S.Number }), schema: S.Array(S.Unknown) },
+            stat_wait_sampling_history: { args: ['limit', 'sinceSeconds'], mode: 'typed', params: S.Struct({ limit: S.Number, sinceSeconds: S.Number }), schema: S.Array(S.Unknown) },
+            stat_wal_inspect:      { args: ['limit'],       mode: 'typed', params: S.Struct({ limit: S.Number }), schema: S.Array(S.Unknown) },
+            stop_squeeze_worker:   { args: ['pid'],         mode: 'scalar', params: S.Struct({ pid: S.Number }), schema: S.Boolean },
+            sync_cron_jobs:        { mode: 'typed',         schema: S.Array(S.Unknown) },
         },
     });
     return {
@@ -220,15 +234,26 @@ const makeSystemRepo = Effect.gen(function* () {
             sinceSequenceId: input.sinceSequenceId,
             sinceTimestamp: Option.getOrNull(Option.fromNullable(input.sinceTimestamp)),
         }),
-        kcache: (limit = 100) => repository.fn<readonly unknown[]>('stat_kcache', { limit }),
+        kcache: (limit = _LIMITS.defaultPage) => repository.fn<readonly unknown[]>('stat_kcache', { limit }),
         outboxCount: () => repository.fn<number>('count_outbox', {}),
         partitionHealth: (parentTable = 'public.sessions') => repository.fn<readonly unknown[]>('list_partition_health', { parentTable }),
-        qualstats: (limit = 100) => repository.fn<readonly unknown[]>('stat_qualstats', { limit }),
-        statements: (limit = 100) => repository.fn<readonly unknown[]>('stat_statements', { limit }),
+        partmanConfig: () => repository.fn<readonly unknown[]>('stat_partman_config', {}),
+        qualstats: (limit = _LIMITS.defaultPage) => repository.fn<readonly unknown[]>('stat_qualstats', { limit }),
+        resetWaitSampling: () => repository.fn<boolean>('reset_wait_sampling_profile', {}),
+        runPartmanMaintenance: () => repository.fn<boolean>('run_partman_maintenance', {}),
+        squeezeStartWorker: () => repository.fn<boolean>('start_squeeze_worker', {}),
+        squeezeStatus: () => Effect.all({
+            tables: repository.fn<readonly unknown[]>('stat_squeeze_tables', {}),
+            workers: repository.fn<readonly unknown[]>('stat_squeeze_workers', {}),
+        }),
+        squeezeStopWorker: (pid: number) => repository.fn<boolean>('stop_squeeze_worker', { pid }),
+        statements: (limit = _LIMITS.defaultPage) => repository.fn<readonly unknown[]>('stat_statements', { limit }),
         syncCronJobs: () => repository.fn<readonly unknown[]>('sync_cron_jobs', {}),
         tenantPurge: (appId: string) => repository.fn<number>('purge_tenant', { appId }),
-        waitSampling: (limit = 100) => repository.fn<readonly unknown[]>('stat_wait_sampling', { limit }),
-        walInspect: (limit = 100) => repository.fn<readonly unknown[]>('stat_wal_inspect', { limit }),
+        waitSampling: (limit = _LIMITS.defaultPage) => repository.fn<readonly unknown[]>('stat_wait_sampling', { limit }),
+        waitSamplingCurrent: (limit = _LIMITS.defaultPage) => repository.fn<readonly unknown[]>('stat_wait_sampling_current', { limit }),
+        waitSamplingHistory: (limit = _LIMITS.defaultPage, sinceSeconds = _LIMITS.defaultAuditWindow) => repository.fn<readonly unknown[]>('stat_wait_sampling_history', { limit, sinceSeconds }),
+        walInspect: (limit = _LIMITS.defaultPage) => repository.fn<readonly unknown[]>('stat_wal_inspect', { limit }),
     };
 });
 
@@ -255,18 +280,26 @@ class DatabaseService extends Effect.Service<DatabaseService>()('database/Databa
                 purge: (olderThanDays: number) => system.journalPurge(olderThanDays),
                 replay: (input: { batchSize: number; eventType?: string; sinceSequenceId: string; sinceTimestamp?: number }) => system.journalReplay(input),
             },
-            kcache: Effect.fn('db.kcache')((limit = 100) => system.kcache(limit)),kvStore,
+            kcache: Effect.fn('db.kcache')((limit = _LIMITS.defaultPage) => system.kcache(limit)), kvStore,
             mfaSecrets,
             monitoring, notifications, oauthAccounts, outbox: { count: system.outboxCount() },
-            partitionHealth: Effect.fn('db.partitionHealth')((parentTable = 'public.sessions') => system.partitionHealth(parentTable)),permissions,
-            qualstats: Effect.fn('db.qualstats')((limit = 100) => system.qualstats(limit)),
+            partitionHealth: Effect.fn('db.partitionHealth')((parentTable = 'public.sessions') => system.partitionHealth(parentTable)), 
+            partmanConfig: Effect.fn('db.partmanConfig')(() => system.partmanConfig()),permissions,
+            qualstats: Effect.fn('db.qualstats')((limit = _LIMITS.defaultPage) => system.qualstats(limit)),
+            resetWaitSampling: Effect.fn('db.resetWaitSampling')(() => system.resetWaitSampling()),
+            runPartmanMaintenance: Effect.fn('db.runPartmanMaintenance')(() => system.runPartmanMaintenance()),
             search: searchRepo, sessions,
-            statements: Effect.fn('db.statements')((limit = 100) => system.statements(limit)),
+            squeezeStartWorker: Effect.fn('db.squeezeStartWorker')(() => system.squeezeStartWorker()),
+            squeezeStatus: Effect.fn('db.squeezeStatus')(() => system.squeezeStatus()),
+            squeezeStopWorker: Effect.fn('db.squeezeStopWorker')((pid: number) => system.squeezeStopWorker(pid)),
+            statements: Effect.fn('db.statements')((limit = _LIMITS.defaultPage) => system.statements(limit)),
             syncCronJobs: Effect.fn('db.syncCronJobs')(() => system.syncCronJobs()),
             system: { tenantPurge: (appId: string) => system.tenantPurge(appId) },
             users,
-            waitSampling: Effect.fn('db.waitSampling')((limit = 100) => system.waitSampling(limit)),
-            walInspect: Effect.fn('db.walInspect')((limit = 100) => system.walInspect(limit)),webauthnCredentials, withTransaction: sqlClient.withTransaction,
+            waitSampling: Effect.fn('db.waitSampling')((limit = _LIMITS.defaultPage) => system.waitSampling(limit)),
+            waitSamplingCurrent: Effect.fn('db.waitSamplingCurrent')((limit = _LIMITS.defaultPage) => system.waitSamplingCurrent(limit)),
+            waitSamplingHistory: Effect.fn('db.waitSamplingHistory')((limit = _LIMITS.defaultPage, sinceSeconds = _LIMITS.defaultAuditWindow) => system.waitSamplingHistory(limit, sinceSeconds)),
+            walInspect: Effect.fn('db.walInspect')((limit = _LIMITS.defaultPage) => system.walInspect(limit)), webauthnCredentials, withTransaction: sqlClient.withTransaction,
         };
     }),
 }) {}

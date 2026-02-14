@@ -4,7 +4,7 @@ import { ClusterService } from '@parametric-portal/server/infra/cluster';
 import { AuditService } from '@parametric-portal/server/observe/audit';
 import { MetricsService } from '@parametric-portal/server/observe/metrics';
 import { Telemetry } from '@parametric-portal/server/observe/telemetry';
-import { Array as A, Cron, Data, Effect, Match, Option, pipe } from 'effect';
+import { Array as A, Cron, Data, Effect, Option, pipe } from 'effect';
 import { constant } from 'effect/Function';
 import { AiRuntime } from './runtime.ts';
 
@@ -49,18 +49,24 @@ class SearchService extends Effect.Service<SearchService>()('ai/Search', {
             MetricsService,
             AiRuntime,
         ]);
-        const userId = (ctx: Context.Request.Data, fallback: string) =>
-            pipe(
-                ctx.session,
-                Option.map((session) => session.userId),
-                Option.getOrElse(constant(fallback)),
-            );
+        const _observe = (
+            operation: string,
+            details: Record<string, unknown>,
+            metric: Parameters<typeof MetricsService.inc>[0],
+            subjectId: string,
+            tenantId: string,
+            labels?: Record<string, string>,
+        ) =>
+            Effect.all([
+                audit.log(operation, { details, subjectId }),
+                MetricsService.inc(metric, MetricsService.label({ tenant: tenantId, ...labels })),
+            ], { discard: true });
         const requestContext = (fallback: string) =>
             Context.Request.current.pipe(
                 Effect.map((ctx) => ({
                     ctx,
                     scopeId: ctx.tenantId === Context.Request.Id.system ? null : ctx.tenantId,
-                    subjectId: userId(ctx, fallback),
+                    subjectId: pipe(ctx.session, Option.map((session) => session.userId), Option.getOrElse(constant(fallback))),
                 })),
             );
         const query = (
@@ -102,20 +108,7 @@ class SearchService extends Effect.Service<SearchService>()('ai/Search', {
                     },
                     pagination,
                 );
-                yield* Effect.all(
-                    [
-                        audit.log('Search.read', {
-                            details: {
-                                entityTypes: options.entityTypes,
-                                resultCount: result.total,
-                                term: options.term,
-                            },
-                            subjectId,
-                        }),
-                        MetricsService.inc(metrics.search.queries, MetricsService.label({ tenant: ctx.tenantId })),
-                    ],
-                    { discard: true },
-                );
+                yield* _observe('Search.read', { entityTypes: options.entityTypes, resultCount: result.total, term: options.term }, metrics.search.queries, subjectId, ctx.tenantId);
                 return result;
             }).pipe(Telemetry.span('search.query', { 'search.term': options.term }));
         const suggest = (options: {
@@ -125,29 +118,14 @@ class SearchService extends Effect.Service<SearchService>()('ai/Search', {
             Effect.gen(function* () {
                 const { ctx, scopeId, subjectId } = yield* requestContext(_CONFIG.users.anonymous);
                 const result = yield* database.search.suggest({ ...options, scopeId });
-                yield* Effect.all(
-                    [
-                        audit.log('Search.list', {
-                            details: { prefix: options.prefix, resultCount: result.length },
-                            subjectId,
-                        }),
-                        MetricsService.inc(metrics.search.suggestions, MetricsService.label({ tenant: ctx.tenantId })),
-                    ],
-                    { discard: true },
-                );
+                yield* _observe('Search.list', { prefix: options.prefix, resultCount: result.length }, metrics.search.suggestions, subjectId, ctx.tenantId);
                 return result;
             }).pipe(Telemetry.span('search.suggest', { 'search.prefix': options.prefix }));
         const refresh = (includeGlobal = false) =>
             Effect.gen(function* () {
                 const { ctx, scopeId, subjectId } = yield* requestContext(_CONFIG.users.system);
                 yield* database.search.refresh(scopeId, includeGlobal);
-                yield* Effect.all(
-                    [
-                        audit.log('Search.refresh', { details: { includeGlobal, kind: 'index', scopeId }, subjectId }),
-                        MetricsService.inc(metrics.search.refreshes, MetricsService.label({ tenant: ctx.tenantId })),
-                    ],
-                    { discard: true },
-                );
+                yield* _observe('Search.refresh', { includeGlobal, kind: 'index', scopeId }, metrics.search.refreshes, subjectId, ctx.tenantId);
             }).pipe(Telemetry.span('search.refresh', { 'search.includeGlobal': includeGlobal }));
         const refreshEmbeddings = (options?: {
             readonly entityTypes?: readonly string[];
@@ -167,17 +145,9 @@ class SearchService extends Effect.Service<SearchService>()('ai/Search', {
                 });
                 const texts = A.map(sources, _sourceText);
                 const embeddings = yield* ai.embed(texts);
-                yield* Match.value(embeddings.length === sources.length).pipe(
-                    Match.when(true, () => Effect.void),
-                    Match.orElse(() =>
-                        Effect.fail(
-                            new AiSearchError({
-                                cause: { actual: embeddings.length, expected: sources.length },
-                                operation: 'refreshEmbeddings',
-                            }),
-                        ),
-                    ),
-                );
+                yield* embeddings.length === sources.length
+                    ? Effect.void
+                    : Effect.fail(new AiSearchError({ cause: { actual: embeddings.length, expected: sources.length }, operation: 'refreshEmbeddings' }));
                 yield* Effect.forEach(
                     A.zip(sources, embeddings),
                     ([source, embedding]) =>
@@ -192,19 +162,7 @@ class SearchService extends Effect.Service<SearchService>()('ai/Search', {
                         }),
                     { discard: true },
                 );
-                yield* Effect.all(
-                    [
-                        audit.log('Search.refresh', {
-                            details: { count: sources.length, includeGlobal: options?.includeGlobal ?? false, kind: _CONFIG.labels.embeddings, scopeId },
-                            subjectId,
-                        }),
-                        MetricsService.inc(
-                            metrics.search.refreshes,
-                            MetricsService.label({ kind: _CONFIG.labels.embeddings, tenant: ctx.tenantId }),
-                        ),
-                    ],
-                    { discard: true },
-                );
+                yield* _observe('Search.refresh', { count: sources.length, includeGlobal: options?.includeGlobal ?? false, kind: _CONFIG.labels.embeddings, scopeId }, metrics.search.refreshes, subjectId, ctx.tenantId, { kind: _CONFIG.labels.embeddings });
                 return { count: sources.length };
             }).pipe(Telemetry.span('search.refreshEmbeddings', { 'search.includeGlobal': options?.includeGlobal ?? false }),);
         return { query, refresh, refreshEmbeddings, suggest };
