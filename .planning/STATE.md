@@ -9,28 +9,28 @@ See: .planning/PROJECT.md (updated 2026-02-13)
 
 ## Current Position
 
-Phase: 1 of 9 (Foundation Hardening)
-Plan: 1 of 2 in current phase
-Status: Executing
-Last activity: 2026-02-14 -- Completed 01-01-PLAN.md (infra hardening: RunError, image pinning, Garage, Redis 8.x)
+Phase: 1 of 9 (Foundation Hardening) -- COMPLETE
+Plan: 2 of 2 in current phase
+Status: Phase Complete
+Last activity: 2026-02-14 -- Completed 01-02-PLAN.md (stack-prefixed Pulumi resource logical names)
 
-Progress: [#░░░░░░░░░] 5%
+Progress: [##░░░░░░░░] 11%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 1
-- Average duration: 4min
-- Total execution time: 0.07 hours
+- Total plans completed: 2
+- Average duration: 4.5min
+- Total execution time: 0.15 hours
 
 **By Phase:**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
-| 01-foundation-hardening | 1/2 | 4min | 4min |
+| 01-foundation-hardening | 2/2 | 9min | 4.5min |
 
 **Recent Trend:**
-- Last 5 plans: 01-01 (4min)
+- Last 5 plans: 01-01 (4min), 01-02 (5min)
 - Trend: --
 
 *Updated after each plan completion*
@@ -52,6 +52,9 @@ Recent decisions affecting current work:
 - [Phase 1]: Alloy pinned to v1.13.0 (v1.13.1 does not exist)
 - [Phase 1-01]: Excluded infrastructure/ from lefthook imperatives hook -- Pulumi code requires throw/if patterns banned in Effect codebase
 - [Phase 1-01]: Added @pulumi/command to onlyBuiltDependencies for pnpm build script approval
+- [Phase 1-02]: All Pulumi logical names prefixed with ${args.stack}- for multi-stack URN uniqueness
+- [Phase 1-02]: Docker container name properties (hostnames) and K8s metadata names left unprefixed -- physical/DNS names, not Pulumi logical names
+- [Phase 1-02]: S3 bucket physical name scoped to parametric-assets-${stack} for multi-account safety
 - [Phase 3]: Email env passthrough + Postgres SSL + Redis TLS CA gaps deferred to Phase 3 (shared config schema)
 - [Phase 4]: Traefik replaces nginx-ingress for cloud K8s mode (NGINX Ingress EOL March 2026)
 - [Phase 6]: DNS record automation added (External DNS or Pulumi DNS provider)
@@ -75,5 +78,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-02-14
-Stopped at: Completed 01-01-PLAN.md, ready for 01-02-PLAN.md
+Stopped at: Completed 01-02-PLAN.md -- Phase 1 (Foundation Hardening) complete, ready for Phase 2
 Resume file: None
