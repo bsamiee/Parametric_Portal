@@ -1,8 +1,10 @@
 import * as aws from '@pulumi/aws';
 import * as awsx from '@pulumi/awsx';
+import * as command from '@pulumi/command';
 import * as docker from '@pulumi/docker';
 import * as k8s from '@pulumi/kubernetes';
 import * as pulumi from '@pulumi/pulumi';
+import * as random from '@pulumi/random';
 import { identity, Match } from 'effect';
 import { RuntimeEnv } from './runtime-env.ts';
 
@@ -11,7 +13,7 @@ import { RuntimeEnv } from './runtime-env.ts';
 const _CONFIG = {
     aws: { backupRetentionDays: 7, bucketVersionRetentionDays: 90, cidr: '10.0.0.0/16', redisClusters: 2 },
     docker: { health: { interval: '10s', retries: 5, timeout: '5s' }, restart: 'unless-stopped' },
-    images: { alloy: 'grafana/alloy:latest', grafana: 'grafana/grafana:latest', minio: 'minio/minio:latest', postgres: 'postgres:18.2-alpine', prometheus: 'prom/prometheus:latest', redis: 'redis:7-alpine', traefik: 'traefik:v3' },
+    images: { alloy: 'grafana/alloy:v1.13.0', garage: 'dxflrs/garage:v2.2.0', grafana: 'grafana/grafana:12.3.3', postgres: 'postgres:18.2-alpine', prometheus: 'prom/prometheus:v3.5.1', redis: 'redis:8.6.0-alpine', traefik: 'traefik:v3.6.8' },
     k8s: {
         ingress: { 'kubernetes.io/ingress.class': 'nginx', 'nginx.ingress.kubernetes.io/proxy-body-size': '50m', 'nginx.ingress.kubernetes.io/proxy-read-timeout': '60', 'nginx.ingress.kubernetes.io/ssl-redirect': 'true' },
         labels: { app: 'parametric-api' },
@@ -19,7 +21,7 @@ const _CONFIG = {
         probes: { live: { failureThreshold: 3, httpGet: { path: '/api/health/liveness', port: 4000 }, periodSeconds: 10 }, ready: { failureThreshold: 3, httpGet: { path: '/api/health/readiness', port: 4000 }, periodSeconds: 5 }, startup: { failureThreshold: 30, httpGet: { path: '/api/health/liveness', port: 4000 }, periodSeconds: 5 } },
     },
     names: { bucket: 'parametric', computeDeployment: 'compute-deploy', network: 'parametric', stack: 'parametric' },
-    ports: { alloyGrpc: 4317, alloyHttp: 4318, alloyMetrics: 12345, api: 4000, grafana: 3000, minioApi: 9000, minioConsole: 9001, postgres: 5432, prometheus: 9090, redis: 6379, traefikHttp: 80, traefikHttps: 443 },
+    ports: { alloyGrpc: 4317, alloyHttp: 4318, alloyMetrics: 12345, api: 4000, garageAdmin: 3903, garageRpc: 3901, garageS3: 3900, grafana: 3000, postgres: 5432, prometheus: 9090, redis: 6379, traefikHttp: 80, traefikHttps: 443 },
     traefik: { volumes: [{ containerPath: '/var/run/docker.sock', hostPath: '/var/run/docker.sock', readOnly: true }, { containerPath: '/letsencrypt', hostPath: '/var/lib/parametric/letsencrypt' }] },
 } as const;
 
@@ -55,6 +57,22 @@ prometheus.remote_write "default" { endpoint { url = "${promUrl}/api/v1/write" }
     fail: (message: string): never => {
         throw new pulumi.RunError(message);
     },
+    garageConfig: (rpcSecret: pulumi.Input<string>, adminToken: pulumi.Input<string>) => pulumi.interpolate`metadata_dir = "/data/meta"
+data_dir = "/data/blocks"
+db_engine = "lmdb"
+replication_factor = 1
+
+rpc_bind_addr = "[::]:${_CONFIG.ports.garageRpc}"
+rpc_public_addr = "127.0.0.1:${_CONFIG.ports.garageRpc}"
+rpc_secret = "${rpcSecret}"
+
+[s3_api]
+s3_region = "us-east-1"
+api_bind_addr = "[::]:${_CONFIG.ports.garageS3}"
+
+[admin]
+api_bind_addr = "[::]:${_CONFIG.ports.garageAdmin}"
+admin_token = "${adminToken}"`,
     grafana: (promUrl: pulumi.Input<string>) => pulumi.interpolate`apiVersion: 1\ndatasources:\n  - name: Prometheus\n    type: prometheus\n    access: proxy\n    url: ${promUrl}\n    isDefault: true`,
     httpHealth: (path: string, port: number) => ({ interval: '10s', retries: 3, startPeriod: '30s', tests: ['CMD', 'wget', '--spider', '-q', `http://localhost:${port}${path}`], timeout: '5s' }),
     k8sEnv: [{ name: 'K8S_CONTAINER_NAME', value: 'api' }, { name: 'K8S_DEPLOYMENT_NAME', value: _CONFIG.names.computeDeployment }, { name: 'K8S_NAMESPACE', valueFrom: { fieldRef: { fieldPath: 'metadata.namespace' } } }, { name: 'K8S_NODE_NAME', valueFrom: { fieldRef: { fieldPath: 'spec.nodeName' } } }, { name: 'K8S_POD_NAME', valueFrom: { fieldRef: { fieldPath: 'metadata.name' } } }],
@@ -200,8 +218,16 @@ const _DEPLOY = {
             volumes: _Ops.dockerVol('data-db-vol', 'data-db-data', '/var/lib/postgresql/data'),
         });
         const redis = new docker.Container('data-redis', { command: pulumi.output(_Ops.optionalSecret(args.env, 'REDIS_PASSWORD')).apply((password) => password ? ['redis-server', '--appendonly', 'yes', '--requirepass', password] : ['redis-server', '--appendonly', 'yes']), healthcheck: _Ops.dockerHealth(['CMD', 'redis-cli', 'ping']), image: _CONFIG.images.redis, name: 'data-redis', networksAdvanced: nets, ports: [_Ops.dockerPort(_CONFIG.ports.redis)], restart: _CONFIG.docker.restart, volumes: _Ops.dockerVol('data-cache-vol', 'data-cache-data', '/data') });
-        const minio = new docker.Container('data-minio', { command: ['server', '/data', '--console-address', `:${_CONFIG.ports.minioConsole}`], envs: [pulumi.interpolate`MINIO_ROOT_USER=${_Ops.secret(args.env, 'STORAGE_ACCESS_KEY_ID')}`, pulumi.interpolate`MINIO_ROOT_PASSWORD=${_Ops.secret(args.env, 'STORAGE_SECRET_ACCESS_KEY')}`], healthcheck: _Ops.dockerHealth(['CMD', 'mc', 'ready', 'local']), image: _CONFIG.images.minio, name: 'data-minio', networksAdvanced: nets, ports: [_Ops.dockerPort(_CONFIG.ports.minioApi), _Ops.dockerPort(_CONFIG.ports.minioConsole)], restart: _CONFIG.docker.restart, volumes: _Ops.dockerVol('data-s3-vol', 'data-s3-data', '/data') });
-        const data = { bucketName: pulumi.output(_CONFIG.names.bucket), cacheEndpoint: pulumi.interpolate`${redis.name}:${_CONFIG.ports.redis}`, cacheHost: redis.name, cachePort: pulumi.output(_CONFIG.ports.redis), dbEndpoint: pulumi.interpolate`${postgres.name}:${_CONFIG.ports.postgres}`, dbHost: postgres.name, dbPort: pulumi.output(_CONFIG.ports.postgres), storageEndpoint: pulumi.interpolate`http://${minio.name}:${_CONFIG.ports.minioApi}`, storageRegion: pulumi.output('us-east-1') };
+        const garageRpcSecret = new random.RandomString('garage-rpc-secret', { length: 64, special: false });
+        const garageAdminToken = new random.RandomString('garage-admin-token', { length: 64, special: false });
+        const garage = new docker.Container('data-garage', { healthcheck: _Ops.dockerHealth(['CMD', 'curl', '-sf', `http://localhost:${_CONFIG.ports.garageAdmin}/health`]), image: _CONFIG.images.garage, name: 'data-garage', networksAdvanced: nets, ports: [_Ops.dockerPort(_CONFIG.ports.garageS3), _Ops.dockerPort(_CONFIG.ports.garageAdmin)], restart: _CONFIG.docker.restart, uploads: [{ content: _Ops.garageConfig(garageRpcSecret.result, garageAdminToken.result), file: '/etc/garage.toml' }], volumes: _Ops.dockerVol('data-s3-vol', 'data-s3-data', '/data') });
+        new command.local.Command('garage-setup', { create: pulumi.interpolate`sleep 5 && \
+docker exec ${garage.name} garage layout assign -z dc1 -c 1G $(docker exec ${garage.name} garage node id -q | cut -d@ -f1) && \
+docker exec ${garage.name} garage layout apply --version 1 && \
+docker exec ${garage.name} garage key import -n parametric ${_Ops.secret(args.env, 'STORAGE_ACCESS_KEY_ID')} ${_Ops.secret(args.env, 'STORAGE_SECRET_ACCESS_KEY')} && \
+docker exec ${garage.name} garage bucket create ${_CONFIG.names.bucket} && \
+docker exec ${garage.name} garage bucket allow --read --write --owner ${_CONFIG.names.bucket} --key parametric`, environment: { GARAGE_ADMIN_TOKEN: garageAdminToken.result } }, { dependsOn: [garage] });
+        const data = { bucketName: pulumi.output(_CONFIG.names.bucket), cacheEndpoint: pulumi.interpolate`${redis.name}:${_CONFIG.ports.redis}`, cacheHost: redis.name, cachePort: pulumi.output(_CONFIG.ports.redis), dbEndpoint: pulumi.interpolate`${postgres.name}:${_CONFIG.ports.postgres}`, dbHost: postgres.name, dbPort: pulumi.output(_CONFIG.ports.postgres), storageEndpoint: pulumi.interpolate`http://${garage.name}:${_CONFIG.ports.garageS3}`, storageRegion: pulumi.output('us-east-1') };
         const observe = { collectorEndpoint: pulumi.interpolate`http://${_Ops.names.alloy}:${_CONFIG.ports.alloyHttp}`, grafanaEndpoint: pulumi.output(`http://localhost:${_CONFIG.ports.grafana}`), prometheusEndpoint: pulumi.output(`http://localhost:${_CONFIG.ports.prometheus}`) };
         new docker.Container('observe-alloy', { command: ['run', '/etc/alloy/config.alloy'], image: _CONFIG.images.alloy, name: _Ops.names.alloy, networksAdvanced: nets, ports: [_Ops.dockerPort(_CONFIG.ports.alloyGrpc), _Ops.dockerPort(_CONFIG.ports.alloyHttp), _Ops.dockerPort(_CONFIG.ports.alloyMetrics)], uploads: [{ content: _Ops.alloy(pulumi.interpolate`http://${_Ops.names.prometheus}:${_CONFIG.ports.prometheus}`), file: '/etc/alloy/config.alloy' }] });
         new docker.Container('observe-prometheus', { command: ['--config.file=/etc/prometheus/prometheus.yml', '--storage.tsdb.path=/prometheus', '--web.enable-remote-write-receiver', `--storage.tsdb.retention.time=${input.observe.retentionDays}d`], image: _CONFIG.images.prometheus, name: _Ops.names.prometheus, networksAdvanced: nets, ports: [_Ops.dockerPort(_CONFIG.ports.prometheus)], uploads: [{ content: _Ops.prometheus(_Ops.names.alloy), file: '/etc/prometheus/prometheus.yml' }], volumes: _Ops.dockerVol('observe-prom-vol', 'observe-prom-data', '/prometheus') });
