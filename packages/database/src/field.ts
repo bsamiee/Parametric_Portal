@@ -76,7 +76,7 @@ const _REGISTRY = (<const T extends Record<string, _RawEntry>>(table: T) => Obje
     searchVector:     { col: 'search_vector',      sql: 'TSVECTOR',    ts: 'S.Unknown',         mark: false,       gen: 'stored', null: false, ref: false,      wrap: [_WRAP_META.Generated]                                  },
     model:            { col: 'model',              sql: 'TEXT',        ts: 'S.String',          mark: false,       gen: false,    null: false, ref: false,      wrap: false                                                  },
     dimensions:       { col: 'dimensions',         sql: 'INTEGER',     ts: 'S.Number',          mark: false,       gen: false,    null: false, ref: false,      wrap: false                                                  },
-    embedding:        { col: 'embedding',          sql: 'VECTOR',      ts: 'S.Unknown',         mark: false,       gen: false,    null: false, ref: false,      wrap: false                                                  },
+    embedding:        { col: 'embedding',          sql: 'HALFVEC',     ts: 'S.Unknown',         mark: false,       gen: false,    null: false, ref: false,      wrap: false                                                  },
     jobId:            { col: 'job_id',             sql: 'TEXT',        ts: 'S.String',          mark: 'pk',        gen: false,    null: false, ref: false,      wrap: false                                                  },
     priority:         { col: 'priority',           sql: 'TEXT',        ts: 'S.String',          mark: false,       gen: false,    null: false, ref: false,      wrap: false                                                  },
     payload:          { col: 'payload',            sql: 'JSONB',       ts: 'S.Unknown',         mark: false,       gen: false,    null: false, ref: false,      wrap: false                                                  },
@@ -171,12 +171,12 @@ type _DimHandlers<D extends _DispatchDim, R> = { none: (entry: _Entry, field: _F
 // --- [CACHE_BUILDER] ---------------------------------------------------------
 
 type _CacheIndex = { byField: Record<string, _Resolved>; byCol: Record<string, _Resolved>; cols: _Col[]; marks: _Mark[]; wraps: _Wrap[]; query: Record<string, _Field[]>; entries: Record<string, _Resolved[]>; wrapByCat: Record<string, _WrapName[]> };
-const _addCap = (index: _CacheIndex, key: string | false | undefined, field: _Field, resolved: _Resolved): void => {
-    // biome-ignore lint/suspicious/noAssignInExpressions: Builder pattern with nullish coalescing assignment
-    key && (index.query[key] ??= []).push(field);
-    // biome-ignore lint/suspicious/noAssignInExpressions: Builder pattern with nullish coalescing assignment
-    key && (index.entries[key] ??= []).push(resolved);
-};
+const _addCap = (index: _CacheIndex, key: string | false | undefined, field: _Field, resolved: _Resolved): void =>
+    Match.value(key).pipe(
+        // biome-ignore lint/suspicious/noAssignInExpressions: cache builder ??= pattern
+        Match.when(Match.string, (k) => { (index.query[k] ??= []).push(field); (index.entries[k] ??= []).push(resolved); }),
+        Match.orElse(() => undefined),
+    );
 const _indexField = (index: _CacheIndex, field: _Field): void => {
     const meta = _REGISTRY[field];
     const resolved = { ...meta, field } as _Resolved<typeof field>;

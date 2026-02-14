@@ -1,7 +1,7 @@
 /**
  * Polymorphic audit logging with operation-driven behavior inference.
  * Single log() API handles business and security events with dead-letter replay.
- * PG18.1: Uses old_data/new_data columns for full before/after snapshots.
+ * PG18.2: Uses old_data/new_data columns for full before/after snapshots.
  */
 import { DatabaseService } from '@parametric-portal/database/repos';
 import { AuditLog, AuditOperationSchema, type JobDlq } from '@parametric-portal/database/models';

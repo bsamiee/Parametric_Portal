@@ -812,6 +812,28 @@ const _AdminGroup = HttpApiGroup.make('admin')
             .annotate(OpenApi.Summary, 'Wait event distribution (pg_wait_sampling)'),
     )
     .add(
+        HttpApiEndpoint.get('waitSamplingCurrent', '/db/wait-sampling/current')
+            .setUrlParams(S.Struct({
+                limit: S.optionalWith(HttpApiSchema.param('limit', S.NumberFromString.pipe(S.int(), S.between(1, 500))), { default: () => 100 }),
+            }))
+            .addSuccess(S.Array(S.Unknown))
+            .annotate(OpenApi.Summary, 'Current wait events (pg_wait_sampling_current)'),
+    )
+    .add(
+        HttpApiEndpoint.get('waitSamplingHistory', '/db/wait-sampling/history')
+            .setUrlParams(S.Struct({
+                limit: S.optionalWith(HttpApiSchema.param('limit', S.NumberFromString.pipe(S.int(), S.between(1, 500))), { default: () => 100 }),
+                sinceSeconds: S.optionalWith(HttpApiSchema.param('sinceSeconds', S.NumberFromString.pipe(S.int(), S.between(1, 3600))), { default: () => 60 }),
+            }))
+            .addSuccess(S.Array(S.Unknown))
+            .annotate(OpenApi.Summary, 'Recent wait sampling history'),
+    )
+    .add(
+        HttpApiEndpoint.post('resetWaitSampling', '/db/wait-sampling/reset')
+            .addSuccess(S.Boolean)
+            .annotate(OpenApi.Summary, 'Reset wait sampling profile counters'),
+    )
+    .add(
         HttpApiEndpoint.get('cronJobs', '/db/cron-jobs')
             .addSuccess(S.Array(S.Unknown))
             .annotate(OpenApi.Summary, 'Database cron jobs'),
@@ -825,9 +847,35 @@ const _AdminGroup = HttpApiGroup.make('admin')
             .annotate(OpenApi.Summary, 'Partition metadata and bounds'),
     )
     .add(
+        HttpApiEndpoint.get('partmanConfig', '/db/partman/config')
+            .addSuccess(S.Array(S.Unknown))
+            .annotate(OpenApi.Summary, 'pg_partman parent configuration'),
+    )
+    .add(
+        HttpApiEndpoint.post('runPartmanMaintenance', '/db/partman/run-maintenance')
+            .addSuccess(S.Boolean)
+            .annotate(OpenApi.Summary, 'Run pg_partman maintenance'),
+    )
+    .add(
         HttpApiEndpoint.post('syncCronJobs', '/db/reconcile-maintenance')
             .addSuccess(S.Array(S.Unknown))
             .annotate(OpenApi.Summary, 'Reconcile database maintenance cron jobs'),
+    )
+    .add(
+        HttpApiEndpoint.get('squeezeStatus', '/db/squeeze/status')
+            .addSuccess(S.Struct({ tables: S.Array(S.Unknown), workers: S.Array(S.Unknown) }))
+            .annotate(OpenApi.Summary, 'pg_squeeze table/worker status'),
+    )
+    .add(
+        HttpApiEndpoint.post('squeezeStartWorker', '/db/squeeze/workers/start')
+            .addSuccess(S.Boolean)
+            .annotate(OpenApi.Summary, 'Start pg_squeeze background worker'),
+    )
+    .add(
+        HttpApiEndpoint.post('squeezeStopWorker', '/db/squeeze/workers/:pid/stop')
+            .setPath(S.Struct({ pid: S.NumberFromString.pipe(S.int(), S.positive()) }))
+            .addSuccess(S.Boolean)
+            .annotate(OpenApi.Summary, 'Stop a pg_squeeze background worker'),
     )
     .add(
         HttpApiEndpoint.get('listPermissions', '/permissions')

@@ -11,7 +11,7 @@ import { RuntimeEnv } from './runtime-env.ts';
 const _CONFIG = {
     aws: { backupRetentionDays: 7, bucketVersionRetentionDays: 90, cidr: '10.0.0.0/16', redisClusters: 2 },
     docker: { health: { interval: '10s', retries: 5, timeout: '5s' }, restart: 'unless-stopped' },
-    images: { alloy: 'grafana/alloy:latest', grafana: 'grafana/grafana:latest', minio: 'minio/minio:latest', postgres: 'postgres:18.1-alpine', prometheus: 'prom/prometheus:latest', redis: 'redis:7-alpine', traefik: 'traefik:v3' },
+    images: { alloy: 'grafana/alloy:latest', grafana: 'grafana/grafana:latest', minio: 'minio/minio:latest', postgres: 'postgres:18.2-alpine', prometheus: 'prom/prometheus:latest', redis: 'redis:7-alpine', traefik: 'traefik:v3' },
     k8s: {
         ingress: { 'kubernetes.io/ingress.class': 'nginx', 'nginx.ingress.kubernetes.io/proxy-body-size': '50m', 'nginx.ingress.kubernetes.io/proxy-read-timeout': '60', 'nginx.ingress.kubernetes.io/ssl-redirect': 'true' },
         labels: { app: 'parametric-api' },
@@ -133,8 +133,17 @@ const _DEPLOY = {
         const ns = new k8s.core.v1.Namespace('parametric-ns', { metadata: { name: _CONFIG.k8s.namespace } });
         const vpc = new awsx.ec2.Vpc('data-vpc', { cidrBlock: _CONFIG.aws.cidr, enableDnsHostnames: true, enableDnsSupport: true, natGateways: { strategy: 'Single' }, numberOfAvailabilityZones: input.azCount, tags: { Name: 'data-vpc' } });
         const dbSubnet = new aws.rds.SubnetGroup('data-db-subnets', { subnetIds: vpc.privateSubnetIds });
-        const dbParams = new aws.rds.ParameterGroup('data-db-params', { family: 'postgres18', parameters: [{ applyMethod: 'pending-reboot', name: 'app.current_tenant', value: '' }] });
-        const rds = new aws.rds.Instance('data-rds', { allocatedStorage: input.db.dbStorageGi, backupRetentionPeriod: _CONFIG.aws.backupRetentionDays, dbName: 'parametric', dbSubnetGroupName: dbSubnet.name, engine: 'postgres', engineVersion: '18.1', finalSnapshotIdentifier: 'data-final', instanceClass: input.db.dbClass, parameterGroupName: dbParams.name, password: _Ops.secret(args.env, 'POSTGRES_PASSWORD'), skipFinalSnapshot: false, storageEncrypted: true, username: 'postgres', vpcSecurityGroupIds: [_Ops.securityGroup('data-db-sg', _CONFIG.ports.postgres, vpc.vpcId).id] });
+        const cloudPreloadLibraries = args.env['CLOUD_POSTGRES_SHARED_PRELOAD_LIBRARIES'];
+        const dbParams = new aws.rds.ParameterGroup('data-db-params', {
+            family: 'postgres18',
+            parameters: [
+                { applyMethod: 'pending-reboot', name: 'app.current_tenant', value: '' },
+                { applyMethod: 'pending-reboot', name: 'max_replication_slots', value: '10' },
+                { applyMethod: 'pending-reboot', name: 'wal_level', value: 'logical' },
+                ...(cloudPreloadLibraries ? [{ applyMethod: 'pending-reboot', name: 'shared_preload_libraries', value: cloudPreloadLibraries }] : []),
+            ],
+        });
+        const rds = new aws.rds.Instance('data-rds', { allocatedStorage: input.db.dbStorageGi, backupRetentionPeriod: _CONFIG.aws.backupRetentionDays, dbName: 'parametric', dbSubnetGroupName: dbSubnet.name, engine: 'postgres', engineVersion: '18.2', finalSnapshotIdentifier: 'data-final', instanceClass: input.db.dbClass, parameterGroupName: dbParams.name, password: _Ops.secret(args.env, 'POSTGRES_PASSWORD'), skipFinalSnapshot: false, storageEncrypted: true, username: 'postgres', vpcSecurityGroupIds: [_Ops.securityGroup('data-db-sg', _CONFIG.ports.postgres, vpc.vpcId).id] });
         const cacheSubnet = new aws.elasticache.SubnetGroup('data-cache-subnets', { subnetIds: vpc.privateSubnetIds });
         const redis = new aws.elasticache.ReplicationGroup('data-redis', { atRestEncryptionEnabled: true, authToken: _Ops.secret(args.env, 'REDIS_PASSWORD'), automaticFailoverEnabled: true, description: 'parametric redis', engine: 'redis', engineVersion: '7.1', nodeType: input.db.cacheNodeType, numCacheClusters: _CONFIG.aws.redisClusters, port: _CONFIG.ports.redis, securityGroupIds: [_Ops.securityGroup('data-cache-sg', _CONFIG.ports.redis, vpc.vpcId).id], subnetGroupName: cacheSubnet.name, transitEncryptionEnabled: true });
         const bucket = new aws.s3.Bucket('data-bucket', { bucket: 'parametric-assets', forceDestroy: false });
@@ -179,7 +188,18 @@ const _DEPLOY = {
         const input = _Ops.selfhosted(args.env);
         const network = new docker.Network('data-net', { name: _CONFIG.names.network });
         const nets = _Ops.dockerNets(network.id);
-        const postgres = new docker.Container('data-pg', { envs: [pulumi.interpolate`POSTGRES_PASSWORD=${_Ops.secret(args.env, 'POSTGRES_PASSWORD')}`, 'POSTGRES_DB=parametric', 'POSTGRES_USER=postgres'], healthcheck: _Ops.dockerHealth(['CMD-SHELL', 'pg_isready -U postgres']), image: _CONFIG.images.postgres, name: 'data-postgres', networksAdvanced: nets, ports: [_Ops.dockerPort(_CONFIG.ports.postgres)], restart: _CONFIG.docker.restart, volumes: _Ops.dockerVol('data-db-vol', 'data-db-data', '/var/lib/postgresql/data') });
+        const selfhostedPreloadLibraries = args.env['SELFHOSTED_POSTGRES_SHARED_PRELOAD_LIBRARIES'];
+        const postgres = new docker.Container('data-pg', {
+            command: ['postgres', '-c', 'max_replication_slots=10', '-c', 'wal_level=logical', ...(selfhostedPreloadLibraries ? ['-c', `shared_preload_libraries=${selfhostedPreloadLibraries}`] : [])],
+            envs: [pulumi.interpolate`POSTGRES_PASSWORD=${_Ops.secret(args.env, 'POSTGRES_PASSWORD')}`, 'POSTGRES_DB=parametric', 'POSTGRES_USER=postgres'],
+            healthcheck: _Ops.dockerHealth(['CMD-SHELL', 'pg_isready -U postgres']),
+            image: _CONFIG.images.postgres,
+            name: 'data-postgres',
+            networksAdvanced: nets,
+            ports: [_Ops.dockerPort(_CONFIG.ports.postgres)],
+            restart: _CONFIG.docker.restart,
+            volumes: _Ops.dockerVol('data-db-vol', 'data-db-data', '/var/lib/postgresql/data'),
+        });
         const redis = new docker.Container('data-redis', { command: pulumi.output(_Ops.optionalSecret(args.env, 'REDIS_PASSWORD')).apply((password) => password ? ['redis-server', '--appendonly', 'yes', '--requirepass', password] : ['redis-server', '--appendonly', 'yes']), healthcheck: _Ops.dockerHealth(['CMD', 'redis-cli', 'ping']), image: _CONFIG.images.redis, name: 'data-redis', networksAdvanced: nets, ports: [_Ops.dockerPort(_CONFIG.ports.redis)], restart: _CONFIG.docker.restart, volumes: _Ops.dockerVol('data-cache-vol', 'data-cache-data', '/data') });
         const minio = new docker.Container('data-minio', { command: ['server', '/data', '--console-address', `:${_CONFIG.ports.minioConsole}`], envs: [pulumi.interpolate`MINIO_ROOT_USER=${_Ops.secret(args.env, 'STORAGE_ACCESS_KEY_ID')}`, pulumi.interpolate`MINIO_ROOT_PASSWORD=${_Ops.secret(args.env, 'STORAGE_SECRET_ACCESS_KEY')}`], healthcheck: _Ops.dockerHealth(['CMD', 'mc', 'ready', 'local']), image: _CONFIG.images.minio, name: 'data-minio', networksAdvanced: nets, ports: [_Ops.dockerPort(_CONFIG.ports.minioApi), _Ops.dockerPort(_CONFIG.ports.minioConsole)], restart: _CONFIG.docker.restart, volumes: _Ops.dockerVol('data-s3-vol', 'data-s3-data', '/data') });
         const data = { bucketName: pulumi.output(_CONFIG.names.bucket), cacheEndpoint: pulumi.interpolate`${redis.name}:${_CONFIG.ports.redis}`, cacheHost: redis.name, cachePort: pulumi.output(_CONFIG.ports.redis), dbEndpoint: pulumi.interpolate`${postgres.name}:${_CONFIG.ports.postgres}`, dbHost: postgres.name, dbPort: pulumi.output(_CONFIG.ports.postgres), storageEndpoint: pulumi.interpolate`http://${minio.name}:${_CONFIG.ports.minioApi}`, storageRegion: pulumi.output('us-east-1') };

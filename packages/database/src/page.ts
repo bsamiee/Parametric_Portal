@@ -1,5 +1,5 @@
 /**
- * Implement keyset and offset pagination for PostgreSQL 18.1 + @effect/sql.
+ * Implement keyset and offset pagination for PostgreSQL 18.2 + @effect/sql.
  * Polymorphic cursor encoding; fetch LIMIT+1 for accurate hasNext detection.
  */
 import { Effect, Option, Schema as S } from 'effect';

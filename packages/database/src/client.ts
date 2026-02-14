@@ -1,12 +1,12 @@
 /**
- * Provide PostgreSQL 18.1 connection pooling via @effect/sql-pg.
+ * Provide PostgreSQL 18.2 connection pooling via @effect/sql-pg.
  * Layer configuration, health check, statement statistics, tenant context for RLS.
  */
 import { PgClient } from '@effect/sql-pg';
 import { SqlClient } from '@effect/sql';
 import { readFileSync } from 'node:fs';
 import type { SecureVersion } from 'node:tls';
-import { Config, Duration, Effect, FiberRef, Function as F, Layer, Option, Redacted, Schema as Sch, Stream, String as S } from 'effect';
+import { Config, Duration, Effect, FiberRef, Function as F, Layer, Match, Option, Redacted, Schema as Sch, Stream, String as S } from 'effect';
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
@@ -105,27 +105,35 @@ const _layer = Layer.unwrapEffect(Effect.gen(function* () {
 
 const Client = (() => {
     const sql = SqlClient.SqlClient;
+    const _health = (name: string, queryFn: (db: SqlClient.SqlClient) => Effect.Effect<unknown, unknown>) =>
+        Effect.fn(name)(function* () {
+            const db = yield* sql;
+            const [duration, healthy] = yield* queryFn(db).pipe(
+                Effect.as(true),
+                Effect.timeout(_CONFIG.health.timeout),
+                Effect.orElseSucceed(() => false),
+                Effect.timed,
+            );
+            return { healthy, latencyMs: Duration.toMillis(duration) };
+        });
+    const _LOCK_OPS = {
+        acquire:        { fn: 'pg_advisory_xact_lock',     yields: false },
+        sessionAcquire: { fn: 'pg_advisory_lock',          yields: false },
+        sessionRelease: { fn: 'pg_advisory_unlock',         yields: 'released' },
+        sessionTry:     { fn: 'pg_try_advisory_lock',       yields: 'acquired' },
+        try:            { fn: 'pg_try_advisory_xact_lock',  yields: 'acquired' },
+    } as const;
+    const _lockOp = (spec: { readonly fn: string; readonly yields: string | false }) => {
+        const suffix = Match.value(spec.yields).pipe(Match.when(false, () => ''), Match.orElse((alias) => ` AS ${alias}`));
+        return Effect.fn(`db.lock.${spec.fn}`)(function* (key: bigint) {
+            const db = yield* sql;
+            const rows = yield* db.unsafe(`SELECT ${spec.fn}($1)${suffix}`, [key]);
+            return Match.value(spec.yields).pipe(Match.when(false, () => undefined), Match.orElse((alias) => (rows[0] as Record<string, boolean>)?.[alias] ?? false));
+        });
+    };
     return {
-        health: Effect.fn('db.checkHealth')(function* () {
-            const db = yield* sql;
-            const [duration, healthy] = yield* db`SELECT 1`.pipe(
-                Effect.as(true),
-                Effect.timeout(_CONFIG.health.timeout),
-                Effect.orElseSucceed(() => false),
-                Effect.timed,
-            );
-            return { healthy, latencyMs: Duration.toMillis(duration) };
-        }),
-        healthDeep: Effect.fn('db.checkHealthDeep')(function* () {
-            const db = yield* sql;
-            const [duration, healthy] = yield* db.withTransaction(db`SELECT 1`).pipe(
-                Effect.as(true),
-                Effect.timeout(_CONFIG.health.timeout),
-                Effect.orElseSucceed(() => false),
-                Effect.timed,
-            );
-            return { healthy, latencyMs: Duration.toMillis(duration) };
-        }),
+        health: _health('db.checkHealth', (db) => db`SELECT 1`),
+        healthDeep: _health('db.checkHealthDeep', (db) => db.withTransaction(db`SELECT 1`)),
         layer: _layer,
         listen: {
             raw: (channel: string) => Stream.unwrap(Effect.map(PgClient.PgClient, (pgClient) => pgClient.listen(channel))),
@@ -136,13 +144,13 @@ const Client = (() => {
                 ))),
         },
         lock: {
-            acquire: (key: bigint) => sql.pipe(Effect.flatMap((db) => db`SELECT pg_advisory_xact_lock(${key})`)),
+            acquire: _lockOp(_LOCK_OPS.acquire),
             session: {
-                acquire: (key: bigint) => sql.pipe(Effect.flatMap((db) => db`SELECT pg_advisory_lock(${key})`)),
-                release: (key: bigint) => sql.pipe(Effect.flatMap((db) => db<{ released: boolean }>`SELECT pg_advisory_unlock(${key}) AS released`.pipe(Effect.map(([r]) => r?.released ?? false)))),
-                try: (key: bigint) => sql.pipe(Effect.flatMap((db) => db<{ acquired: boolean }>`SELECT pg_try_advisory_lock(${key}) AS acquired`.pipe(Effect.map(([r]) => r?.acquired ?? false)))),
+                acquire: _lockOp(_LOCK_OPS.sessionAcquire),
+                release: _lockOp(_LOCK_OPS.sessionRelease),
+                try: _lockOp(_LOCK_OPS.sessionTry),
             },
-            try: (key: bigint) => sql.pipe(Effect.flatMap((db) => db<{ acquired: boolean }>`SELECT pg_try_advisory_xact_lock(${key}) AS acquired`.pipe(Effect.map(([r]) => r?.acquired ?? false)))),
+            try: _lockOp(_LOCK_OPS.try),
         },
         notify: (channel: string, payload: string) => sql.pipe(Effect.flatMap((db) => db`SELECT pg_notify(${channel}, ${payload})`)),
         tenant: (() => {
@@ -180,9 +188,15 @@ const Client = (() => {
                 return yield* db<{ name: string; setting: string }>`SELECT name, setting FROM pg_settings WHERE name LIKE 'hnsw.%'`;
             }),
             indexStats: (tableName: string, indexName: string) => sql.pipe(Effect.flatMap((db) => db<{ idxScan: bigint; idxTupFetch: bigint; idxTupRead: bigint }>`SELECT idx_scan, idx_tup_read, idx_tup_fetch FROM pg_stat_user_indexes WHERE relname = ${tableName} AND indexrelname = ${indexName}`)),
-            withIterativeScan: <A, E, R>(mode: 'relaxed_order' | 'strict_order' | 'off', effect: Effect.Effect<A, E, R>) => sql.pipe(
+            withIterativeScan: <A, E, R>(
+                config: { mode: 'relaxed_order' | 'strict_order' | 'off'; efSearch?: number; maxScanTuples?: number; scanMemMultiplier?: number },
+                effect: Effect.Effect<A, E, R>,
+            ) => sql.pipe(
                 Effect.flatMap((db) => db.withTransaction(
-                    db`SET LOCAL hnsw.iterative_scan = ${mode}`.pipe(
+                    db`SET LOCAL hnsw.iterative_scan = ${config.mode}`.pipe(
+                        Effect.andThen(db`SET LOCAL hnsw.ef_search = ${config.efSearch ?? 120}`),
+                        Effect.andThen(db`SET LOCAL hnsw.max_scan_tuples = ${config.maxScanTuples ?? 40_000}`),
+                        Effect.andThen(db`SET LOCAL hnsw.scan_mem_multiplier = ${config.scanMemMultiplier ?? 2}`),
                         Effect.andThen(effect),
                         Effect.provideService(SqlClient.SqlClient, db),
                     ),

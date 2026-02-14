@@ -65,7 +65,7 @@ Zero-YAML infrastructure-as-code using Pulumi + Doppler.
 
 | Cloud Service    | Self-Hosted Alternative | Container Image                          |
 | ---------------- | ----------------------- | ---------------------------------------- |
-| RDS PostgreSQL   | PostgreSQL 18.1         | `postgres:18.1-alpine`                   |
+| RDS PostgreSQL   | PostgreSQL 18.2         | `postgres:18.2-alpine`                   |
 | ElastiCache      | Redis                   | `redis:7-alpine`                         |
 | S3               | MinIO                   | `minio/minio:latest`                     |
 | CloudWatch       | Prometheus + Grafana    | `prom/prometheus`, `grafana/grafana`     |
@@ -102,7 +102,7 @@ main: src/platform.ts
 ┌───────────────────────────────────────────────────────────────────────────┐
 │                        SHARED INFRASTRUCTURE                              │
 ├───────────────────────────────────────────────────────────────────────────┤
-│  PostgreSQL 18.1 (1 RDS instance)                                         │
+│  PostgreSQL 18.2 (1 RDS instance)                                         │
 │  ├── RLS via app.current_tenant GUC                                       │
 │  └── All tables scoped by app_id FK                                       │
 │                                                                           │
@@ -142,7 +142,7 @@ const secrets = {
 };
 
 // ═══════════════════════════════════════════════════════════════════════════
-// DATABASE: RDS PostgreSQL 18.1 with all supporting resources
+// DATABASE: RDS PostgreSQL 18.2 with all supporting resources
 // ═══════════════════════════════════════════════════════════════════════════
 class Database extends pulumi.ComponentResource {
     readonly endpoint: pulumi.Output<string>;
@@ -157,7 +157,7 @@ class Database extends pulumi.ComponentResource {
         }, { parent: this });
 
         const instance = new aws.rds.Instance(`${name}-rds`, {
-            engine: 'postgres', engineVersion: '18.1', instanceClass: cfg.dbClass,
+            engine: 'postgres', engineVersion: '18.2', instanceClass: cfg.dbClass,
             allocatedStorage: cfg.dbStorage, dbName: 'parametric',
             username: 'postgres', password: pulumi.secret(secrets.dbPassword),
             dbSubnetGroupName: subnetGroup.name, vpcSecurityGroupIds: [sg.id],

@@ -17,21 +17,20 @@ import { JobService } from '../jobs.ts';
 // --- [SCHEMA] ----------------------------------------------------------------
 
 const _ProvisionPayload = S.Struct({
-    name: S.NonEmptyTrimmedString,
+    name:      S.NonEmptyTrimmedString,
     namespace: S.NonEmptyTrimmedString.pipe(S.pattern(/^[a-z0-9][a-z0-9-]{1,62}[a-z0-9]$/)),
-    settings: S.optional(AppSettingsSchema),
+    settings:  S.optional(AppSettingsSchema),
 });
 const _TransitionCommand = S.Union(
     S.Struct({ _tag: S.Literal('provision'), name: _ProvisionPayload.fields.name, namespace: _ProvisionPayload.fields.namespace, settings: _ProvisionPayload.fields.settings }),
-    S.Struct({ _tag: S.Literal('suspend'), tenantId: S.UUID }),
-    S.Struct({ _tag: S.Literal('resume'), tenantId: S.UUID }),
-    S.Struct({ _tag: S.Literal('archive'), tenantId: S.UUID }),
-    S.Struct({ _tag: S.Literal('purge'), tenantId: S.UUID }),
+    S.Struct({ _tag: S.Literal('suspend'),   tenantId: S.UUID }),
+    S.Struct({ _tag: S.Literal('resume'),    tenantId: S.UUID }),
+    S.Struct({ _tag: S.Literal('archive'),   tenantId: S.UUID }),
+    S.Struct({ _tag: S.Literal('purge'),     tenantId: S.UUID }),
 );
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
-// Why: purging is intentionally terminal — the purge job cascade hard-deletes the tenant row after data removal completes
 const _TRANSITIONS: Partial<Record<typeof App.Type.status, ReadonlySet<typeof App.Type.status>>> = {
     active:    new Set<typeof App.Type.status>(['suspended']),
     archived:  new Set<typeof App.Type.status>(['purging']),
@@ -63,17 +62,16 @@ class TenantLifecycleService extends Effect.Service<TenantLifecycleService>()('s
         // The `when` predicate adds `WHERE status = $current` so a concurrent transition causes a no-op update instead of silently overwriting the other transition's result.
         const _statusGuard = (currentStatus: typeof App.Type.status) => ({ field: 'status', value: currentStatus }) as const;
         const _applyTransition = (tenantId: string, target: typeof App.Type.status, action: string, errorLabel: string) =>
-            _lookupTenant(tenantId).pipe(
-                Effect.flatMap((app) => _validateTransition(app, target).pipe(
-                    Effect.flatMap(() => database.apps.set(tenantId, { status: target }, undefined, _statusGuard(app.status)).pipe(
-                        Effect.filterOrFail(Option.isSome, () => HttpError.Conflict.of('tenant', 'Status changed concurrently')),
-                        HttpError.mapTo(errorLabel),
-                        Effect.as(app),
-                    )),
-                )),
-                Effect.tap((app) => _emitAndAudit(tenantId, action, app.status, target)),
-                Effect.as({ success: true as const }),
-            );
+            Effect.gen(function* () {
+                const app = yield* _lookupTenant(tenantId);
+                yield* _validateTransition(app, target);
+                yield* database.apps.set(tenantId, { status: target }, undefined, _statusGuard(app.status)).pipe(
+                    Effect.filterOrFail(Option.isSome, () => HttpError.Conflict.of('tenant', 'Status changed concurrently')),
+                    HttpError.mapTo(errorLabel),
+                );
+                yield* _emitAndAudit(tenantId, action, app.status, target);
+                return { success: true as const };
+            });
         const _provision = Effect.fn('TenantLifecycleService.provision')((payload: typeof _ProvisionPayload.Type) => database.apps.byNamespace(payload.namespace).pipe(
             HttpError.mapTo('Tenant namespace lookup failed'),
             Effect.filterOrFail(Option.isNone, () => HttpError.Conflict.of('tenant', `Namespace '${payload.namespace}' already exists`)),
@@ -109,25 +107,20 @@ class TenantLifecycleService extends Effect.Service<TenantLifecycleService>()('s
                     Match.tag('suspend', ({ tenantId }) => _applyTransition(tenantId, 'suspended', 'suspended', 'Tenant suspension failed')),
                     Match.tag('resume', ({ tenantId }) => _applyTransition(tenantId, 'active', 'resumed', 'Tenant resume failed')),
                     Match.tag('archive', ({ tenantId }) => _applyTransition(tenantId, 'archived', 'archived', 'Tenant archive failed')),
-                    Match.tag('purge', ({ tenantId }) => _lookupTenant(tenantId).pipe(
-                        Effect.flatMap((app) => _validateTransition(app, 'purging').pipe(
-                            Effect.flatMap(() => database.apps.set(tenantId, { status: 'purging' }, undefined, _statusGuard(app.status)).pipe(
-                                Effect.filterOrFail(Option.isSome, () => HttpError.Conflict.of('tenant', 'Status changed concurrently')),
-                                HttpError.mapTo('Tenant purge status update failed'),
-                                Effect.as(app),
-                            )),
-                        )),
-                        Effect.flatMap((app) => Context.Request.withinSync(tenantId, jobs.submit('purge-tenant-data', null)).pipe(
+                    Match.tag('purge', ({ tenantId }) => Effect.gen(function* () {
+                        const app = yield* _lookupTenant(tenantId);
+                        yield* _validateTransition(app, 'purging');
+                        yield* database.apps.set(tenantId, { status: 'purging' }, undefined, _statusGuard(app.status)).pipe(
+                            Effect.filterOrFail(Option.isSome, () => HttpError.Conflict.of('tenant', 'Status changed concurrently')),
+                            HttpError.mapTo('Tenant purge status update failed'),
+                        );
+                        yield* Context.Request.withinSync(tenantId, jobs.submit('purge-tenant-data', null)).pipe(
                             HttpError.mapTo('Tenant purge job submission failed'),
-                            Effect.catchAll((jobError) => database.apps.set(tenantId, { status: app.status }, undefined, _statusGuard('purging')).pipe(
-                                Effect.ignore,
-                                Effect.andThen(Effect.fail(jobError)),
-                            )),
-                            Effect.as(app),
-                        )),
-                        Effect.tap((app) => _emitAndAudit(tenantId, 'purging', app.status, 'purging')),
-                        Effect.as({ success: true as const }),
-                    )),
+                            Effect.tapError(() => database.apps.set(tenantId, { status: app.status }, undefined, _statusGuard('purging')).pipe(Effect.ignore)),
+                        );
+                        yield* _emitAndAudit(tenantId, 'purging', app.status, 'purging');
+                        return { success: true as const };
+                    })),
                     Match.exhaustive,
                 )(command).pipe(Effect.provideService(SqlClient.SqlClient, sql)),
             ),
