@@ -101,7 +101,7 @@ class TenantLifecycleService extends Effect.Service<TenantLifecycleService>()('s
             Effect.tap((inserted) => audit.log('tenant.create', { after: { name: payload.name, namespace: payload.namespace }, subjectId: inserted.id })),
         ));
         return {
-            transition: Effect.fn('TenantLifecycleService.transition')(
+            transition: Effect.fn('TenantLifecycleService.transition')((command: typeof _TransitionCommand.Type) =>
                 Match.type<typeof _TransitionCommand.Type>().pipe(
                     Match.tag('provision', (payload) => _provision(payload)),
                     Match.tag('suspend', ({ tenantId }) => _applyTransition(tenantId, 'suspended', 'suspended', 'Tenant suspension failed')),
@@ -122,8 +122,7 @@ class TenantLifecycleService extends Effect.Service<TenantLifecycleService>()('s
                         return { success: true as const };
                     })),
                     Match.exhaustive,
-                ),
-                (effect) => effect.pipe(Effect.provideService(SqlClient.SqlClient, sql)),
+                )(command).pipe(Effect.provideService(SqlClient.SqlClient, sql)),
             ),
         };
     }),

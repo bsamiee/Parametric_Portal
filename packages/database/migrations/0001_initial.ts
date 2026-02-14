@@ -546,10 +546,10 @@ export default Effect.gen(function* () {
         CREATE OR REPLACE FUNCTION stat_qualstats(p_limit INT DEFAULT 100) RETURNS JSONB LANGUAGE sql STABLE AS $$
             SELECT _query_extension_json('pg_qualstats',
                 'WITH advisor_queryids AS ( '
-                'SELECT DISTINCT qid.value::double precision AS queryid '
+                'SELECT DISTINCT (qid.value)::text::double precision AS queryid '
                 'FROM jsonb_array_elements(COALESCE((pg_qualstats_index_advisor(min_filter => 1000, min_selectivity => 30, forbidden_am => ARRAY[''hash'']))::jsonb->''indexes'',''[]''::jsonb)) idx(item) '
-                'CROSS JOIN LATERAL jsonb_array_elements_text(COALESCE(idx.item->''queryids'',''[]''::jsonb)) qid(value) '
-                'WHERE qid.value ~ ''^-?[0-9]+$'' '
+                'CROSS JOIN LATERAL jsonb_array_elements(COALESCE(idx.item->''queryids'',''[]''::jsonb)) qid(value) '
+                'WHERE jsonb_typeof(qid.value) = ''number'' '
                 '), ranked AS ( '
                 'SELECT bq.queryid::double precision, bq.uniquequalnodeid::double precision, bq.qualnodeid::double precision, '
                 'bq.userid::double precision, bq.dbid::double precision, '
