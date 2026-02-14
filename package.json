@@ -22,6 +22,7 @@
         "nx:typecheck": "nx run-many -t typecheck",
         "prepare": "lefthook install",
         "quality": "pnpm exec nx run-many -t typecheck,check,infra:lint && knip && sherif",
+        "check:ts-standards": "bash ./.claude/skills/ts-standards/scripts/validate-ts-standards.sh --mode check",
         "quality:affected": "pnpm exec nx affected -t typecheck,check,infra:lint --base=origin/main && knip && sherif",
         "reset": "pnpm clean && pnpm install && pnpm nx:build:libs",
         "sonar": "pnpm nx affected -t test -- --coverage && npx @sonar/scan",

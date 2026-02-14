@@ -158,11 +158,167 @@ const AdminLive = HttpApiBuilder.group(ParametricApi, 'admin', (handlers) =>
                 Effect.tap((started) => audit.log('Db.squeezeStartWorker', { details: { started } })),
                 Telemetry.span('admin.squeezeStartWorker'),
             )))
-            .handle('squeezeStopWorker', ({ path }) => Middleware.guarded('admin', 'squeezeStopWorker', 'mutation', database.squeezeStopWorker(path.pid).pipe(
-                HttpError.mapTo('Database squeeze worker stop failed'),
-                Effect.tap((stopped) => audit.log('Db.squeezeStopWorker', { details: { pid: path.pid, stopped } })),
-                Telemetry.span('admin.squeezeStopWorker'),
-            )))
+            .handle('squeezeStopWorker', ({ path }) => Middleware.guarded(
+                'admin', 'squeezeStopWorker', 'mutation',
+                database.squeezeStopWorker(path.pid).pipe(
+                    HttpError.mapTo('Database squeeze worker stop failed'),
+                    Effect.tap((stopped) => audit.log(
+                        'Db.squeezeStopWorker',
+                        { details: { pid: path.pid, stopped } },
+                    )),
+                    Telemetry.span('admin.squeezeStopWorker'),
+                ),
+            ))
+            .handle('deadTuples', ({ urlParams }) => _dbQuery(
+                'deadTuples',
+                database.deadTuples(urlParams.limit),
+                'Dead tuple stats failed',
+            ))
+            .handle('tableBloat', ({ urlParams }) => _dbQuery(
+                'tableBloat',
+                database.tableBloat(urlParams.limit),
+                'Table bloat stats failed',
+            ))
+            .handle('indexBloat', ({ urlParams }) => _dbQuery(
+                'indexBloat',
+                database.indexBloat(urlParams.limit),
+                'Index bloat stats failed',
+            ))
+            .handle('lockContention', ({ urlParams }) => _dbQuery(
+                'lockContention',
+                database.lockContention(urlParams.limit),
+                'Lock contention query failed',
+            ))
+            .handle('longRunningQueries', ({ urlParams }) => _dbQuery(
+                'longRunningQueries',
+                database.longRunningQueries(
+                    urlParams.limit, urlParams.minSeconds,
+                ),
+                'Long-running queries failed',
+            ))
+            .handle('connectionStats', ({ urlParams }) => _dbQuery(
+                'connectionStats',
+                database.connectionStats(urlParams.limit),
+                'Connection stats failed',
+            ))
+            .handle('replicationLag', ({ urlParams }) => _dbQuery(
+                'replicationLag',
+                database.replicationLag(urlParams.limit),
+                'Replication lag query failed',
+            ))
+            .handle('indexUsage', ({ urlParams }) => _dbQuery(
+                'indexUsage',
+                database.indexUsage(urlParams.limit),
+                'Index usage query failed',
+            ))
+            .handle('tableSizes', ({ urlParams }) => _dbQuery(
+                'tableSizes',
+                database.tableSizes(urlParams.limit),
+                'Table sizes query failed',
+            ))
+            .handle('unusedIndexes', ({ urlParams }) => _dbQuery(
+                'unusedIndexes',
+                database.unusedIndexes(urlParams.limit),
+                'Unused indexes query failed',
+            ))
+            .handle('seqScanHeavy', ({ urlParams }) => _dbQuery(
+                'seqScanHeavy',
+                database.seqScanHeavy(urlParams.limit),
+                'Sequential scan stats failed',
+            ))
+            .handle('indexAdvisor', ({ urlParams }) => _dbQuery(
+                'indexAdvisor',
+                database.indexAdvisor(
+                    urlParams.minFilter, urlParams.minSelectivity,
+                ),
+                'Index advisor query failed',
+            ))
+            .handle('hypotheticalIndexes', () => _dbQuery(
+                'hypotheticalIndexes',
+                database.hypotheticalIndexes(),
+                'Hypothetical indexes query failed',
+            ))
+            .handle('createHypotheticalIndex', ({ payload }) =>
+                Middleware.guarded(
+                    'admin', 'createHypotheticalIndex', 'mutation',
+                    database.createHypotheticalIndex(
+                        payload.statement,
+                    ).pipe(
+                        HttpError.mapTo(
+                            'Hypothetical index creation failed',
+                        ),
+                        Effect.tap((result) => audit.log(
+                            'Db.createHypotheticalIndex',
+                            { details: { result, statement: payload.statement } },
+                        )),
+                        Telemetry.span('admin.createHypotheticalIndex'),
+                    ),
+                ),
+            )
+            .handle('resetHypotheticalIndexes', () =>
+                Middleware.guarded(
+                    'admin', 'resetHypotheticalIndexes', 'mutation',
+                    database.resetHypotheticalIndexes().pipe(
+                        HttpError.mapTo(
+                            'Hypothetical indexes reset failed',
+                        ),
+                        Effect.tap(() => audit.log(
+                            'Db.resetHypotheticalIndexes',
+                        )),
+                        Effect.as({ success: true as const }),
+                        Telemetry.span('admin.resetHypotheticalIndexes'),
+                    ),
+                ),
+            )
+            .handle('visibility', ({ urlParams }) => _dbQuery(
+                'visibility',
+                database.visibility(urlParams.limit),
+                'Visibility map query failed',
+            ))
+            .handle('cronHistory', ({ urlParams }) => _dbQuery(
+                'cronHistory',
+                database.cronHistory(
+                    urlParams.limit,
+                    urlParams.jobName ?? null,
+                ),
+                'Cron history query failed',
+            ))
+            .handle('cronFailures', ({ urlParams }) => _dbQuery(
+                'cronFailures',
+                database.cronFailures(urlParams.hours),
+                'Cron failures query failed',
+            ))
+            .handle('buffercacheSummary', () => _dbQuery(
+                'buffercacheSummary',
+                database.buffercacheSummary(),
+                'Buffercache summary failed',
+            ))
+            .handle('buffercacheUsage', () => _dbQuery(
+                'buffercacheUsage',
+                database.buffercacheUsage(),
+                'Buffercache usage failed',
+            ))
+            .handle('buffercacheTop', ({ urlParams }) => _dbQuery(
+                'buffercacheTop',
+                database.buffercacheTop(urlParams.limit),
+                'Buffercache top failed',
+            ))
+            .handle('prewarmRelation', ({ payload }) =>
+                Middleware.guarded(
+                    'admin', 'prewarmRelation', 'mutation',
+                    database.prewarmRelation(
+                        payload.relation, payload.mode,
+                    ).pipe(
+                        HttpError.mapTo('Prewarm relation failed'),
+                        Effect.map((blocks) => ({ blocks })),
+                        Effect.tap((result) => audit.log(
+                            'Db.prewarmRelation',
+                            { details: { ...result, mode: payload.mode, relation: payload.relation } },
+                        )),
+                        Telemetry.span('admin.prewarmRelation'),
+                    ),
+                ),
+            )
             .handle('listPermissions', () => Middleware.guarded('admin', 'listPermissions', 'api', policy.list().pipe(
                 Effect.map(Arr.map(({ action, resource, role }) => ({ action, resource, role }))),
                 Telemetry.span('admin.listPermissions'),

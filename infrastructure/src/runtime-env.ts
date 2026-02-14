@@ -28,8 +28,7 @@ const _Ops = {
         Object.entries(env)
             .filter((entry): entry is [string, string] => typeof entry[1] === 'string' && entry[1] !== ''),
     fail: (message: string): never => {
-        console.error(message);
-        return process.exit(1);
+        throw new pulumi.RunError(message);
     },
     isAllowed: (name: string, allow: readonly string[], prefixes: readonly string[]) => allow.includes(name) || prefixes.some((prefix) => name.startsWith(prefix)),
     secret: (env: NodeJS.ProcessEnv, name: string) => pulumi.secret(env[name] && env[name] !== '' ? env[name] : _Ops.fail(`[MISSING_ENV] ${name} is required`)),
