@@ -758,7 +758,15 @@ const _AdminGroup = HttpApiGroup.make('admin')
     )
     .add(
         HttpApiEndpoint.get('ioDetail', '/db/io-stats')
-            .addSuccess(S.Array(S.Unknown))
+            .addSuccess(S.Array(S.Struct({
+                backendType: S.String, evictions: S.Number, extendBytes: S.Number,extends: S.Number, 
+                extendTime: S.Number, 
+                fsyncs: S.Number, fsyncTime: S.Number,hits: S.Number, ioContext: S.String,
+                ioObject: S.String, readBytes: S.Number, 
+                reads: S.Number, readTime: S.Number,reuses: S.Number, statsReset: S.NullOr(S.String),
+                writeBytes: S.Number, 
+                writebacks: S.Number, writebackTime: S.Number,writes: S.Number,writeTime: S.Number, 
+            })))
             .annotate(OpenApi.Summary, 'Database IO statistics'),
     )
     .add(
@@ -771,12 +779,30 @@ const _AdminGroup = HttpApiGroup.make('admin')
             .setUrlParams(S.Struct({
                 limit: S.optionalWith(HttpApiSchema.param('limit', S.NumberFromString.pipe(S.int(), S.between(1, 500))), { default: () => 100 }),
             }))
-            .addSuccess(S.Array(S.Unknown))
+            .addSuccess(S.Array(S.Struct({
+                blkReadTime: S.Number, blkWriteTime: S.Number,
+                calls: S.Number, dbid: S.Number, dealloc: S.Number,
+                meanExecTime: S.Number, meanPlanTime: S.Number,
+                parallelWorkersLaunched: S.Number, parallelWorkersToLaunch: S.Number,
+                plans: S.Number, query: S.String, queryid: S.Number,
+                rows: S.Number, sharedBlksDirtied: S.Number,
+                sharedBlksHit: S.Number, sharedBlksRead: S.Number,
+                sharedBlksWritten: S.Number, statsReset: S.NullOr(S.String),
+                tempBlksRead: S.Number, tempBlksWritten: S.Number,
+                toplevel: S.Boolean, totalExecTime: S.Number,
+                totalPlanTime: S.Number, userid: S.Number,
+                walBuffersFull: S.Number, walBytes: S.Number,
+                walFpi: S.Number, walRecords: S.Number,
+            })))
             .annotate(OpenApi.Summary, 'Database statement statistics'),
     )
     .add(
         HttpApiEndpoint.get('cacheRatio', '/db/cache-hit-ratio')
-            .addSuccess(S.Array(S.Unknown))
+            .addSuccess(S.Array(S.Struct({
+                backendType: S.String, cacheHitRatio: S.Number, hits: S.Number,
+                ioContext: S.String, ioObject: S.String,
+                reads: S.Number, writes: S.Number,
+            })))
             .annotate(OpenApi.Summary, 'Database cache hit ratio'),
     )
     .add(
@@ -784,7 +810,13 @@ const _AdminGroup = HttpApiGroup.make('admin')
             .setUrlParams(S.Struct({
                 limit: S.optionalWith(HttpApiSchema.param('limit', S.NumberFromString.pipe(S.int(), S.between(1, 500))), { default: () => 100 }),
             }))
-            .addSuccess(S.Array(S.Unknown))
+            .addSuccess(S.Array(S.Struct({
+                blockRef: S.NullOr(S.String), description: S.NullOr(S.String),
+                endLsn: S.String, fpiLength: S.Number,
+                mainDataLength: S.Number, recordLength: S.Number,
+                recordType: S.NullOr(S.String), resourceManager: S.String,
+                startLsn: S.String,
+            })))
             .annotate(OpenApi.Summary, 'WAL inspection snapshot'),
     )
     .add(
@@ -792,7 +824,18 @@ const _AdminGroup = HttpApiGroup.make('admin')
             .setUrlParams(S.Struct({
                 limit: S.optionalWith(HttpApiSchema.param('limit', S.NumberFromString.pipe(S.int(), S.between(1, 500))), { default: () => 100 }),
             }))
-            .addSuccess(S.Array(S.Unknown))
+            .addSuccess(S.Array(S.Struct({
+                calls: S.Number, datname: S.String,
+                execReads: S.Number, execSystemTime: S.Number,
+                execUserTime: S.Number, execWrites: S.Number,
+                meanExecTime: S.Number, planReads: S.Number,
+                planSystemTime: S.Number, planUserTime: S.Number,
+                planWrites: S.Number, query: S.String,
+                queryid: S.Number, readsPerCall: S.NullOr(S.Number),
+                rolname: S.String, statsSince: S.NullOr(S.String),
+                top: S.Boolean, totalExecTime: S.Number,
+                writesPerCall: S.NullOr(S.Number),
+            })))
             .annotate(OpenApi.Summary, 'Per-query filesystem IO attribution'),
     )
     .add(
@@ -800,7 +843,14 @@ const _AdminGroup = HttpApiGroup.make('admin')
             .setUrlParams(S.Struct({
                 limit: S.optionalWith(HttpApiSchema.param('limit', S.NumberFromString.pipe(S.int(), S.between(1, 500))), { default: () => 100 }),
             }))
-            .addSuccess(S.Array(S.Unknown))
+            .addSuccess(S.Array(S.Struct({
+                constvalues: S.NullOr(S.Array(S.String)), dbid: S.Number,
+                exampleQuery: S.NullOr(S.String), executionCount: S.Number,
+                filterRatioPct: S.Number, nbfiltered: S.Number,
+                occurences: S.Number, qualnodeid: S.Number,
+                quals: S.Unknown, queryid: S.Number,
+                uniquequalnodeid: S.Number, userid: S.Number,
+            })))
             .annotate(OpenApi.Summary, 'Qualifying query statistics (pg_qualstats)'),
     )
     .add(
@@ -808,7 +858,9 @@ const _AdminGroup = HttpApiGroup.make('admin')
             .setUrlParams(S.Struct({
                 limit: S.optionalWith(HttpApiSchema.param('limit', S.NumberFromString.pipe(S.int(), S.between(1, 500))), { default: () => 100 }),
             }))
-            .addSuccess(S.Array(S.Unknown))
+            .addSuccess(S.Array(S.Struct({
+                event: S.String, eventType: S.String, totalCount: S.Number,
+            })))
             .annotate(OpenApi.Summary, 'Wait event distribution (pg_wait_sampling)'),
     )
     .add(
@@ -816,7 +868,10 @@ const _AdminGroup = HttpApiGroup.make('admin')
             .setUrlParams(S.Struct({
                 limit: S.optionalWith(HttpApiSchema.param('limit', S.NumberFromString.pipe(S.int(), S.between(1, 500))), { default: () => 100 }),
             }))
-            .addSuccess(S.Array(S.Unknown))
+            .addSuccess(S.Array(S.Struct({
+                event: S.String, eventType: S.String,
+                pid: S.Number, queryid: S.NullOr(S.Number),
+            })))
             .annotate(OpenApi.Summary, 'Current wait events (pg_wait_sampling_current)'),
     )
     .add(
@@ -825,7 +880,11 @@ const _AdminGroup = HttpApiGroup.make('admin')
                 limit: S.optionalWith(HttpApiSchema.param('limit', S.NumberFromString.pipe(S.int(), S.between(1, 500))), { default: () => 100 }),
                 sinceSeconds: S.optionalWith(HttpApiSchema.param('sinceSeconds', S.NumberFromString.pipe(S.int(), S.between(1, 3600))), { default: () => 60 }),
             }))
-            .addSuccess(S.Array(S.Unknown))
+            .addSuccess(S.Array(S.Struct({
+                event: S.String, eventType: S.String,
+                pid: S.Number, queryid: S.NullOr(S.Number),
+                sampleTs: S.String,
+            })))
             .annotate(OpenApi.Summary, 'Recent wait sampling history'),
     )
     .add(
@@ -835,7 +894,12 @@ const _AdminGroup = HttpApiGroup.make('admin')
     )
     .add(
         HttpApiEndpoint.get('cronJobs', '/db/cron-jobs')
-            .addSuccess(S.Array(S.Unknown))
+            .addSuccess(S.Array(S.Struct({
+                active: S.Boolean, command: S.String, database: S.String,
+                jobid: S.Number, jobname: S.NullOr(S.String),
+                nodename: S.String, nodeport: S.Number,
+                schedule: S.String, username: S.String,
+            })))
             .annotate(OpenApi.Summary, 'Database cron jobs'),
     )
     .add(
@@ -843,12 +907,19 @@ const _AdminGroup = HttpApiGroup.make('admin')
             .setUrlParams(S.Struct({
                 parentTable: S.optionalWith(HttpApiSchema.param('parentTable', S.Literal('public.sessions')), { default: () => 'public.sessions' as const }),
             }))
-            .addSuccess(S.Array(S.Unknown))
+            .addSuccess(S.Array(S.Struct({
+                bound: S.NullOr(S.String), isLeaf: S.Boolean,
+                level: S.Number, partition: S.String,
+            })))
             .annotate(OpenApi.Summary, 'Partition metadata and bounds'),
     )
     .add(
         HttpApiEndpoint.get('partmanConfig', '/db/partman/config')
-            .addSuccess(S.Array(S.Unknown))
+            .addSuccess(S.Array(S.Struct({
+                control: S.String, infiniteTimePartitions: S.Boolean,
+                parentTable: S.String, partitionInterval: S.String,
+                premake: S.Number, retention: S.NullOr(S.String),
+            })))
             .annotate(OpenApi.Summary, 'pg_partman parent configuration'),
     )
     .add(
@@ -858,12 +929,22 @@ const _AdminGroup = HttpApiGroup.make('admin')
     )
     .add(
         HttpApiEndpoint.post('syncCronJobs', '/db/reconcile-maintenance')
-            .addSuccess(S.Array(S.Unknown))
+            .addSuccess(S.Array(S.Struct({
+                error: S.optional(S.String), name: S.String,
+                schedule: S.String, status: S.Literal('created', 'error', 'unchanged', 'updated'),
+            })))
             .annotate(OpenApi.Summary, 'Reconcile database maintenance cron jobs'),
     )
     .add(
         HttpApiEndpoint.get('squeezeStatus', '/db/squeeze/status')
-            .addSuccess(S.Struct({ tables: S.Array(S.Unknown), workers: S.Array(S.Unknown) }))
+            .addSuccess(S.Struct({
+                tables: S.Array(S.Struct({
+                    active: S.Boolean, freeSpaceExtra: S.Number,
+                    maxRetry: S.Number, relation: S.String,
+                    schedule: S.String, vacuumMaxAge: S.Number,
+                })),
+                workers: S.Array(S.Struct({ pid: S.Number })),
+            }))
             .annotate(OpenApi.Summary, 'pg_squeeze table/worker status'),
     )
     .add(
@@ -888,7 +969,15 @@ const _AdminGroup = HttpApiGroup.make('admin')
                     { default: () => 100 },
                 ),
             }))
-            .addSuccess(S.Array(S.Unknown))
+            .addSuccess(S.Array(S.Struct({
+                analyzeCount: S.Number, autoanalyzeCount: S.Number,
+                autovacuumCount: S.Number, deadPct: S.Number,
+                lastAnalyze: S.NullOr(S.String), lastAutoanalyze: S.NullOr(S.String),
+                lastAutovacuum: S.NullOr(S.String), lastVacuum: S.NullOr(S.String),
+                nDeadTup: S.Number, nLiveTup: S.Number,
+                relname: S.String, schemaname: S.String,
+                vacuumCount: S.Number,
+            })))
             .annotate(OpenApi.Summary, 'Dead tuple counts per table'),
     )
     .add(
@@ -902,7 +991,12 @@ const _AdminGroup = HttpApiGroup.make('admin')
                     { default: () => 100 },
                 ),
             }))
-            .addSuccess(S.Array(S.Unknown))
+            .addSuccess(S.Array(S.Struct({
+                indexBytes: S.Number, overheadBytes: S.Number,
+                schemaname: S.String, tableBytes: S.Number,tablename: S.String,
+                tableSize: S.String, 
+                totalBytes: S.Number, totalSize: S.String,
+            })))
             .annotate(OpenApi.Summary, 'Table bloat and size breakdown'),
     )
     .add(
@@ -916,7 +1010,12 @@ const _AdminGroup = HttpApiGroup.make('admin')
                     { default: () => 100 },
                 ),
             }))
-            .addSuccess(S.Array(S.Unknown))
+            .addSuccess(S.Array(S.Struct({
+                idxScan: S.Number, idxTupFetch: S.Number,
+                idxTupRead: S.Number, indexBytes: S.Number,indexname: S.String,
+                indexSize: S.String, 
+                schemaname: S.String, tablename: S.String,
+            })))
             .annotate(OpenApi.Summary, 'Index size and scan statistics'),
     )
     .add(
@@ -930,7 +1029,13 @@ const _AdminGroup = HttpApiGroup.make('admin')
                     { default: () => 100 },
                 ),
             }))
-            .addSuccess(S.Array(S.Unknown))
+            .addSuccess(S.Array(S.Struct({
+                blockedDuration: S.String, blockedPid: S.Number,
+                blockedQuery: S.String, blockedUser: S.String,
+                blockingPid: S.Number, blockingQuery: S.String,
+                blockingState: S.String, blockingUser: S.String,
+                waitEvent: S.NullOr(S.String), waitEventType: S.NullOr(S.String),
+            })))
             .annotate(OpenApi.Summary, 'Active lock contention'),
     )
     .add(
@@ -951,7 +1056,14 @@ const _AdminGroup = HttpApiGroup.make('admin')
                     { default: () => 5 },
                 ),
             }))
-            .addSuccess(S.Array(S.Unknown))
+            .addSuccess(S.Array(S.Struct({
+                datname: S.String, duration: S.String,
+                durationSeconds: S.Number, pid: S.Number,
+                query: S.String, queryStart: S.String,
+                state: S.String, stateChange: S.String,
+                usename: S.String, waitEvent: S.NullOr(S.String),
+                waitEventType: S.NullOr(S.String),
+            })))
             .annotate(OpenApi.Summary, 'Long-running active queries'),
     )
     .add(
@@ -965,7 +1077,12 @@ const _AdminGroup = HttpApiGroup.make('admin')
                     { default: () => 100 },
                 ),
             }))
-            .addSuccess(S.Array(S.Unknown))
+            .addSuccess(S.Array(S.Struct({
+                clientAddr: S.NullOr(S.String), cnt: S.Number,
+                datname: S.NullOr(S.String), newestQuery: S.NullOr(S.String),
+                oldestBackend: S.NullOr(S.String), state: S.NullOr(S.String),
+                usename: S.NullOr(S.String),
+            })))
             .annotate(OpenApi.Summary, 'Connection pool statistics'),
     )
     .add(
@@ -979,7 +1096,15 @@ const _AdminGroup = HttpApiGroup.make('admin')
                     { default: () => 100 },
                 ),
             }))
-            .addSuccess(S.Array(S.Unknown))
+            .addSuccess(S.Array(S.Struct({
+                applicationName: S.String, clientAddr: S.NullOr(S.String),
+                flushLag: S.NullOr(S.String), flushLsn: S.NullOr(S.String),
+                replayLag: S.NullOr(S.String), replayLagBytes: S.NullOr(S.Number),
+                replayLsn: S.NullOr(S.String), sentLsn: S.NullOr(S.String),
+                state: S.String, syncPriority: S.Number,
+                syncState: S.String, writeLag: S.NullOr(S.String),
+                writeLsn: S.NullOr(S.String),
+            })))
             .annotate(OpenApi.Summary, 'Streaming replication lag'),
     )
     .add(
@@ -993,7 +1118,12 @@ const _AdminGroup = HttpApiGroup.make('admin')
                     { default: () => 100 },
                 ),
             }))
-            .addSuccess(S.Array(S.Unknown))
+            .addSuccess(S.Array(S.Struct({
+                idxScan: S.Number, idxTupFetch: S.Number,
+                idxTupRead: S.Number, indexBytes: S.Number,indexrelname: S.String,
+                indexSize: S.String, 
+                relname: S.String, schemaname: S.String,
+            })))
             .annotate(OpenApi.Summary, 'Index usage ranked by scans'),
     )
     .add(
@@ -1007,7 +1137,14 @@ const _AdminGroup = HttpApiGroup.make('admin')
                     { default: () => 100 },
                 ),
             }))
-            .addSuccess(S.Array(S.Unknown))
+            .addSuccess(S.Array(S.Struct({
+                idxScan: S.Number, idxTupFetch: S.Number,
+                indexBytes: S.Number, nDeadTup: S.Number,
+                nLiveTup: S.Number, relname: S.String,
+                schemaname: S.String, seqScan: S.Number,
+                seqTupRead: S.Number, tableBytes: S.Number,
+                totalBytes: S.Number, totalSize: S.String,
+            })))
             .annotate(OpenApi.Summary, 'Table sizes with live/dead tuples'),
     )
     .add(
@@ -1021,7 +1158,11 @@ const _AdminGroup = HttpApiGroup.make('admin')
                     { default: () => 100 },
                 ),
             }))
-            .addSuccess(S.Array(S.Unknown))
+            .addSuccess(S.Array(S.Struct({
+                idxScan: S.Number, indexBytes: S.Number,indexrelname: S.String,
+                indexSize: S.String, 
+                relname: S.String, schemaname: S.String,
+            })))
             .annotate(OpenApi.Summary, 'Indexes with zero scans'),
     )
     .add(
@@ -1035,7 +1176,12 @@ const _AdminGroup = HttpApiGroup.make('admin')
                     { default: () => 100 },
                 ),
             }))
-            .addSuccess(S.Array(S.Unknown))
+            .addSuccess(S.Array(S.Struct({
+                idxScan: S.Number, nLiveTup: S.Number,
+                relname: S.String, schemaname: S.String,
+                seqPct: S.Number, seqScan: S.Number,
+                seqTupRead: S.Number, totalBytes: S.Number,
+            })))
             .annotate(
                 OpenApi.Summary,
                 'Tables with high sequential scan ratio',
@@ -1059,7 +1205,10 @@ const _AdminGroup = HttpApiGroup.make('admin')
                     { default: () => 30 },
                 ),
             }))
-            .addSuccess(S.Array(S.Unknown))
+            .addSuccess(S.Array(S.Struct({
+                accessMethod: S.NullOr(S.String),
+                indexDdl: S.String, queryids: S.Unknown,
+            })))
             .annotate(
                 OpenApi.Summary,
                 'pg_qualstats index advisor recommendations',
@@ -1067,7 +1216,11 @@ const _AdminGroup = HttpApiGroup.make('admin')
     )
     .add(
         HttpApiEndpoint.get('hypotheticalIndexes', '/db/hypothetical-indexes')
-            .addSuccess(S.Array(S.Unknown))
+            .addSuccess(S.Array(S.Struct({
+                amname: S.String, indexname: S.String,
+                indexrelid: S.Number, nspname: S.String,
+                relname: S.String,
+            })))
             .annotate(OpenApi.Summary, 'List hypothetical indexes (hypopg)'),
     )
     .add(
@@ -1110,7 +1263,11 @@ const _AdminGroup = HttpApiGroup.make('admin')
                     { default: () => 100 },
                 ),
             }))
-            .addSuccess(S.Array(S.Unknown))
+            .addSuccess(S.Array(S.Struct({
+                allFrozen: S.Number, allVisible: S.Number,relkind: S.String,
+                relname: S.String,
+                relSize: S.Number, 
+            })))
             .annotate(OpenApi.Summary, 'Visibility map summary per table'),
     )
     .add(
@@ -1127,7 +1284,14 @@ const _AdminGroup = HttpApiGroup.make('admin')
                     { default: () => 100 },
                 ),
             }))
-            .addSuccess(S.Array(S.Unknown))
+            .addSuccess(S.Array(S.Struct({
+                command: S.String, database: S.String,
+                durationSeconds: S.NullOr(S.Number), endTime: S.NullOr(S.String),jobname: S.String,
+                jobPid: S.Number, 
+                returnMessage: S.NullOr(S.String), runid: S.Number,
+                startTime: S.NullOr(S.String), status: S.String,
+                username: S.String,
+            })))
             .annotate(OpenApi.Summary, 'Cron job execution history'),
     )
     .add(
@@ -1141,17 +1305,28 @@ const _AdminGroup = HttpApiGroup.make('admin')
                     { default: () => 24 },
                 ),
             }))
-            .addSuccess(S.Array(S.Unknown))
+            .addSuccess(S.Array(S.Struct({
+                endTime: S.NullOr(S.String), jobname: S.String,
+                returnMessage: S.NullOr(S.String), runid: S.Number,
+                startTime: S.NullOr(S.String), status: S.String,
+            })))
             .annotate(OpenApi.Summary, 'Recent cron job failures'),
     )
     .add(
         HttpApiEndpoint.get('buffercacheSummary', '/db/buffercache/summary')
-            .addSuccess(S.Array(S.Unknown))
+            .addSuccess(S.Array(S.Struct({
+                buffersDirty: S.Number, buffersPinned: S.Number,
+                buffersUnused: S.Number, buffersUsed: S.Number,
+                usagecountAvg: S.Number,
+            })))
             .annotate(OpenApi.Summary, 'Buffer cache summary'),
     )
     .add(
         HttpApiEndpoint.get('buffercacheUsage', '/db/buffercache/usage')
-            .addSuccess(S.Array(S.Unknown))
+            .addSuccess(S.Array(S.Struct({
+                buffers: S.Number, dirty: S.Number,
+                pinned: S.Number, usageCount: S.Number,
+            })))
             .annotate(OpenApi.Summary, 'Buffer cache usage counts'),
     )
     .add(
@@ -1165,7 +1340,11 @@ const _AdminGroup = HttpApiGroup.make('admin')
                     { default: () => 50 },
                 ),
             }))
-            .addSuccess(S.Array(S.Unknown))
+            .addSuccess(S.Array(S.Struct({
+                buffers: S.Number, pct: S.Number,
+                relkind: S.String, relname: S.String,
+                size: S.String,
+            })))
             .annotate(
                 OpenApi.Summary,
                 'Top relations in buffer cache by buffers',

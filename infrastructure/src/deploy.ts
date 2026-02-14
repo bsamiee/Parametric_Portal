@@ -221,12 +221,19 @@ const _DEPLOY = {
         const garageRpcSecret = new random.RandomString(`${args.stack}-garage-rpc-secret`, { length: 64, special: false });
         const garageAdminToken = new random.RandomString(`${args.stack}-garage-admin-token`, { length: 64, special: false });
         const garage = new docker.Container(`${args.stack}-data-garage`, { healthcheck: _Ops.dockerHealth(['CMD', 'curl', '-sf', `http://localhost:${_CONFIG.ports.garageAdmin}/health`]), image: _CONFIG.images.garage, name: 'data-garage', networksAdvanced: nets, ports: [_Ops.dockerPort(_CONFIG.ports.garageS3), _Ops.dockerPort(_CONFIG.ports.garageAdmin)], restart: _CONFIG.docker.restart, uploads: [{ content: _Ops.garageConfig(garageRpcSecret.result, garageAdminToken.result), file: '/etc/garage.toml' }], volumes: _Ops.dockerVol(args.stack, 'data-s3-vol', 'data-s3-data', '/data') });
-        new command.local.Command(`${args.stack}-garage-setup`, { create: pulumi.interpolate`sleep 5 && \
+        new command.local.Command(`${args.stack}-garage-setup`, {
+            create: pulumi.interpolate`until docker exec ${garage.name} garage node id -q >/dev/null 2>&1; do sleep 1; done && \
 docker exec ${garage.name} garage layout assign -z dc1 -c 1G $(docker exec ${garage.name} garage node id -q | cut -d@ -f1) && \
 docker exec ${garage.name} garage layout apply --version 1 && \
-docker exec ${garage.name} garage key import -n parametric ${_Ops.secret(args.env, 'STORAGE_ACCESS_KEY_ID')} ${_Ops.secret(args.env, 'STORAGE_SECRET_ACCESS_KEY')} && \
+docker exec -e STORAGE_ACCESS_KEY_ID -e STORAGE_SECRET_ACCESS_KEY ${garage.name} garage key import -n parametric \$STORAGE_ACCESS_KEY_ID \$STORAGE_SECRET_ACCESS_KEY && \
 docker exec ${garage.name} garage bucket create ${_CONFIG.names.bucket} && \
-docker exec ${garage.name} garage bucket allow --read --write --owner ${_CONFIG.names.bucket} --key parametric`, environment: { GARAGE_ADMIN_TOKEN: garageAdminToken.result } }, { dependsOn: [garage] });
+docker exec ${garage.name} garage bucket allow --read --write --owner ${_CONFIG.names.bucket} --key parametric`,
+            environment: {
+                GARAGE_ADMIN_TOKEN: garageAdminToken.result,
+                STORAGE_ACCESS_KEY_ID: _Ops.secret(args.env, 'STORAGE_ACCESS_KEY_ID'),
+                STORAGE_SECRET_ACCESS_KEY: _Ops.secret(args.env, 'STORAGE_SECRET_ACCESS_KEY'),
+            },
+        }, { dependsOn: [garage] });
         const data = { bucketName: pulumi.output(_CONFIG.names.bucket), cacheEndpoint: pulumi.interpolate`${redis.name}:${_CONFIG.ports.redis}`, cacheHost: redis.name, cachePort: pulumi.output(_CONFIG.ports.redis), dbEndpoint: pulumi.interpolate`${postgres.name}:${_CONFIG.ports.postgres}`, dbHost: postgres.name, dbPort: pulumi.output(_CONFIG.ports.postgres), storageEndpoint: pulumi.interpolate`http://${garage.name}:${_CONFIG.ports.garageS3}`, storageRegion: pulumi.output('us-east-1') };
         const observe = { collectorEndpoint: pulumi.interpolate`http://${_Ops.names.alloy}:${_CONFIG.ports.alloyHttp}`, grafanaEndpoint: pulumi.output(`http://localhost:${_CONFIG.ports.grafana}`), prometheusEndpoint: pulumi.output(`http://localhost:${_CONFIG.ports.prometheus}`) };
         new docker.Container(`${args.stack}-observe-alloy`, { command: ['run', '/etc/alloy/config.alloy'], image: _CONFIG.images.alloy, name: _Ops.names.alloy, networksAdvanced: nets, ports: [_Ops.dockerPort(_CONFIG.ports.alloyGrpc), _Ops.dockerPort(_CONFIG.ports.alloyHttp), _Ops.dockerPort(_CONFIG.ports.alloyMetrics)], uploads: [{ content: _Ops.alloy(pulumi.interpolate`http://${_Ops.names.prometheus}:${_CONFIG.ports.prometheus}`), file: '/etc/alloy/config.alloy' }] });

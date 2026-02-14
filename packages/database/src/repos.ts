@@ -38,7 +38,7 @@ const makePermissionRepo = Effect.gen(function* () {
                 role: payload.role,
                 updatedAt: undefined,
             }),
-        lookupImmv: (role: string, resource: string, action: string) => sql<{ appId: string }>`SELECT app_id FROM permission_lookups WHERE role = ${role} AND resource = ${resource} AND action = ${action}`.pipe(Effect.map((rows) => rows.length > 0),),
+        lookupImmv: (appId: string, role: string, resource: string, action: string) => sql`SELECT app_id FROM permission_lookups WHERE app_id = ${appId} AND role = ${role} AND resource = ${resource} AND action = ${action}`.pipe(Effect.map((rows) => rows.length > 0)),
         revoke: (role: string, resource: string, action: string) =>
             repository.drop([
                 { field: 'role', value: role },
@@ -147,7 +147,7 @@ const makeJobRepo = Effect.gen(function* () {
         byDateRange: (after: Date, before: Date, options?: { limit?: number; cursor?: string }) => repository.page(repository.preds({ after, before }), { cursor: options?.cursor, limit: options?.limit ?? _LIMITS.defaultPage }),
         byStatus: (status: string, options?: { after?: Date; before?: Date; limit?: number; cursor?: string }) => repository.page([{ field: 'status', value: status }, ...repository.preds({ after: options?.after, before: options?.before })], { cursor: options?.cursor, limit: options?.limit ?? _LIMITS.defaultPage }),
         countByStatuses: (...statuses: readonly string[]) => repository.count([{ field: 'status', op: 'in', values: [...statuses] }]),
-        countByStatusesImmv: (...statuses: readonly string[]) => sql<{ status: string; cnt: number }>`SELECT status, cnt FROM job_status_counts WHERE status IN ${sql.in([...statuses])}`.pipe(Effect.map((rows) => Object.fromEntries(rows.map((row) => [row.status, row.cnt])) as Record<string, number>),),
+        countByStatusesImmv: (...statuses: readonly string[]) => sql`SELECT status, cnt FROM job_status_counts WHERE status IN ${sql.in([...statuses])}`.pipe(Effect.map((rows) => Object.fromEntries((rows as readonly { status: string; cnt: number }[]).map((row) => [row.status, row.cnt])) as Record<string, number>)),
         isDuplicate: (dedupeKey: string) => repository.exists([{ raw: sql`correlation->>'dedupe' = ${dedupeKey}` }, { field: 'status', op: 'in', values: ['queued', 'processing'] }]),
     };
 });
@@ -266,25 +266,69 @@ const makeSystemRepo = Effect.gen(function* () {
     const _stat = <T = readonly unknown[]>(name: string, limit = _LIMITS.defaultPage, extra: Record<string, unknown> | null = null) =>
         repository.fn<T>('stat', { extra: extra ? JSON.stringify(extra) : null, limit, name });
     return {
-        buffercacheSummary: () => _stat('buffercache_summary'),
-        buffercacheTop: (limit = _LIMITS.defaultPage) => _stat('buffercache_top', limit),
-        buffercacheUsage: () => _stat('buffercache_usage'),
+        buffercacheSummary: () => _stat<readonly {
+            buffersDirty: number; buffersPinned: number;
+            buffersUnused: number; buffersUsed: number;
+            usagecountAvg: number;
+        }[]>('buffercache_summary'),
+        buffercacheTop: (limit = _LIMITS.defaultPage) => _stat<readonly {
+            buffers: number; pct: number;
+            relkind: string; relname: string;
+            size: string;
+        }[]>('buffercache_top', limit),
+        buffercacheUsage: () => _stat<readonly {
+            buffers: number; dirty: number;
+            pinned: number; usageCount: number;
+        }[]>('buffercache_usage'),
         cacheRatio: () => _stat<readonly {
             backendType: string; cacheHitRatio: number; hits: number;
             ioContext: string; ioObject: string; reads: number; writes: number;
         }[]>('cache_ratio'),
-        connectionStats: (limit = _LIMITS.defaultPage) => _stat('connection_stats', limit),
+        connectionStats: (limit = _LIMITS.defaultPage) => _stat<readonly {
+            clientAddr: string | null; cnt: number;
+            datname: string | null; newestQuery: string | null;
+            oldestBackend: string | null; state: string | null;
+            usename: string | null;
+        }[]>('connection_stats', limit),
         createHypotheticalIndex: (statement: string) => repository.fn<readonly {
             indexrelid: number; indexname: string;
         }[]>('create_hypothetical_index', { statement }),
-        cronFailures: (hours = 24) => _stat('cron_failures', _LIMITS.defaultPage, { hours }),
+        cronFailures: (hours = 24) => _stat<readonly {
+            endTime: string | null; jobname: string;
+            returnMessage: string | null; runid: number;
+            startTime: string | null; status: string;
+        }[]>('cron_failures', _LIMITS.defaultPage, { hours }),
         cronHistory: (limit = _LIMITS.defaultPage, jobName: string | null = null) =>
-            _stat('cron_history', limit, jobName ? { job_name: jobName } : null),
-        cronJobs: () => _stat('cron_jobs'),
-        deadTuples: (limit = _LIMITS.defaultPage) => _stat('dead_tuples', limit),
+            _stat<readonly {
+                command: string; database: string;
+                durationSeconds: number | null; endTime: string | null; jobname: string;
+                jobPid: number;
+                returnMessage: string | null; runid: number;
+                startTime: string | null; status: string;
+                username: string;
+            }[]>('cron_history', limit, jobName ? { job_name: jobName } : null),
+        cronJobs: () => _stat<readonly {
+            active: boolean; command: string; database: string;
+            jobid: number; jobname: string | null;
+            nodename: string; nodeport: number;
+            schedule: string; username: string;
+        }[]>('cron_jobs'),
+        deadTuples: (limit = _LIMITS.defaultPage) => _stat<readonly {
+            analyzeCount: number; autoanalyzeCount: number;
+            autovacuumCount: number; deadPct: number;
+            lastAnalyze: string | null; lastAutoanalyze: string | null;
+            lastAutovacuum: string | null; lastVacuum: string | null;
+            nDeadTup: number; nLiveTup: number;
+            relname: string; schemaname: string;
+            vacuumCount: number;
+        }[]>('dead_tuples', limit),
         heapForceFreeze: (relation: string, block = 0) =>
-            repository.fn<number>('heap_force_freeze', { block, relation }),
-        hypotheticalIndexes: () => _stat('hypothetical_indexes'),
+            repository.fn<void>('heap_force_freeze', { block, relation }),
+        hypotheticalIndexes: () => _stat<readonly {
+            amname: string; indexname: string;
+            indexrelid: number; nspname: string;
+            relname: string;
+        }[]>('hypothetical_indexes'),
         immvJobStatusCounts: () =>
             sql<{ appId: string; status: string; cnt: number }>`
                 SELECT app_id, status, cnt
@@ -295,13 +339,34 @@ const makeSystemRepo = Effect.gen(function* () {
                 FROM permission_lookups
                 ORDER BY app_id, role, resource, action`,
         indexAdvisor: (minFilter = 1000, minSelectivity = 30) =>
-            _stat('index_advisor', _LIMITS.defaultPage, {
+            _stat<readonly {
+                accessMethod: string | null;
+                indexDdl: string; queryids: unknown;
+            }[]>('index_advisor', _LIMITS.defaultPage, {
                 min_filter: minFilter, min_selectivity: minSelectivity,
             }),
-        indexBloat: (limit = _LIMITS.defaultPage) => _stat('index_bloat', limit),
-        indexUsage: (limit = _LIMITS.defaultPage) => _stat('index_usage', limit),
+        indexBloat: (limit = _LIMITS.defaultPage) => _stat<readonly {
+            idxScan: number; idxTupFetch: number;
+            idxTupRead: number; indexBytes: number; indexname: string;
+            indexSize: string;
+            schemaname: string; tablename: string;
+        }[]>('index_bloat', limit),
+        indexUsage: (limit = _LIMITS.defaultPage) => _stat<readonly {
+            idxScan: number; idxTupFetch: number;
+            idxTupRead: number; indexBytes: number; indexrelname: string;
+            indexSize: string;
+            relname: string; schemaname: string;
+        }[]>('index_usage', limit),
         ioConfig: () => _stat<readonly { name: string; setting: string }[]>('io_config'),
-        ioDetail: () => _stat('io_detail'),
+        ioDetail: () => _stat<readonly {
+            backendType: string; evictions: number; extendBytes: number; extends: number;
+            extendTime: number;
+            fsyncs: number; fsyncTime: number; hits: number; ioContext: string;
+            ioObject: string; readBytes: number;
+            reads: number; readTime: number; reuses: number; statsReset: string | null;
+            writeBytes: number;
+            writebacks: number; writebackTime: number; writes: number; writeTime: number;
+        }[]>('io_detail'),
         journalEntry: (primaryKey: string) =>
             repository.fn<readonly { payload: string }[]>(
                 'get_journal_entry', { primaryKey },
@@ -320,25 +385,76 @@ const makeSystemRepo = Effect.gen(function* () {
                 ),
             },
         ),
-        kcache: (limit = _LIMITS.defaultPage) => _stat('kcache', limit),
-        lockContention: (limit = _LIMITS.defaultPage) => _stat('lock_contention', limit),
+        kcache: (limit = _LIMITS.defaultPage) => _stat<readonly {
+            calls: number; datname: string;
+            execReads: number; execSystemTime: number;
+            execUserTime: number; execWrites: number;
+            meanExecTime: number; planReads: number;
+            planSystemTime: number; planUserTime: number;
+            planWrites: number; query: string;
+            queryid: number; readsPerCall: number | null;
+            rolname: string; statsSince: string | null;
+            top: boolean; totalExecTime: number;
+            writesPerCall: number | null;
+        }[]>('kcache', limit),
+        lockContention: (limit = _LIMITS.defaultPage) => _stat<readonly {
+            blockedDuration: string; blockedPid: number;
+            blockedQuery: string; blockedUser: string;
+            blockingPid: number; blockingQuery: string;
+            blockingState: string; blockingUser: string;
+            waitEvent: string | null; waitEventType: string | null;
+        }[]>('lock_contention', limit),
         longRunningQueries: (limit = _LIMITS.defaultPage, minSeconds = 5) =>
-            _stat('long_running_queries', limit, { min_seconds: minSeconds }),
+            _stat<readonly {
+                datname: string; duration: string;
+                durationSeconds: number; pid: number;
+                query: string; queryStart: string;
+                state: string; stateChange: string;
+                usename: string; waitEvent: string | null;
+                waitEventType: string | null;
+            }[]>('long_running_queries', limit, { min_seconds: minSeconds }),
         outboxCount: () => repository.fn<number>('count_outbox', {}),
         partitionHealth: (parentTable = 'public.sessions') =>
-            repository.fn<readonly unknown[]>('list_partition_health', { parentTable }),
-        partmanConfig: () => _stat('partman_config'),
+            repository.fn<readonly {
+                bound: string | null; isLeaf: boolean;
+                level: number; partition: string;
+            }[]>('list_partition_health', { parentTable }),
+        partmanConfig: () => _stat<readonly {
+            control: string; infiniteTimePartitions: boolean;
+            parentTable: string; partitionInterval: string;
+            premake: number; retention: string | null;
+        }[]>('partman_config'),
         prewarmRelation: (relation: string, mode = 'buffer') =>
             repository.fn<number>('prewarm_relation', { mode, relation }),
-        qualstats: (limit = _LIMITS.defaultPage) => _stat('qualstats', limit),
-        replicationLag: (limit = _LIMITS.defaultPage) => _stat('replication_lag', limit),
+        qualstats: (limit = _LIMITS.defaultPage) => _stat<readonly {
+            constvalues: readonly string[] | null; dbid: number;
+            exampleQuery: string | null; executionCount: number;
+            filterRatioPct: number; nbfiltered: number;
+            occurences: number; qualnodeid: number;
+            quals: unknown; queryid: number;
+            uniquequalnodeid: number; userid: number;
+        }[]>('qualstats', limit),
+        replicationLag: (limit = _LIMITS.defaultPage) => _stat<readonly {
+            applicationName: string; clientAddr: string | null;
+            flushLag: string | null; flushLsn: string | null;
+            replayLag: string | null; replayLagBytes: number | null;
+            replayLsn: string | null; sentLsn: string | null;
+            state: string; syncPriority: number;
+            syncState: string; writeLag: string | null;
+            writeLsn: string | null;
+        }[]>('replication_lag', limit),
         resetHypotheticalIndexes: () =>
             repository.fn<void>('reset_hypothetical_indexes', {}),
         resetWaitSampling: () =>
             repository.fn<boolean>('reset_wait_sampling_profile', {}),
         runPartmanMaintenance: () =>
             repository.fn<boolean>('run_partman_maintenance', {}),
-        seqScanHeavy: (limit = _LIMITS.defaultPage) => _stat('seq_scan_heavy', limit),
+        seqScanHeavy: (limit = _LIMITS.defaultPage) => _stat<readonly {
+            idxScan: number; nLiveTup: number;
+            relname: string; schemaname: string;
+            seqPct: number; seqScan: number;
+            seqTupRead: number; totalBytes: number;
+        }[]>('seq_scan_heavy', limit),
         squeezeStartWorker: () => repository.fn<boolean>('start_squeeze_worker', {}),
         squeezeStatus: () => Effect.all({
             tables: _stat('squeeze_tables'),
@@ -346,21 +462,73 @@ const makeSystemRepo = Effect.gen(function* () {
         }),
         squeezeStopWorker: (pid: number) =>
             repository.fn<boolean>('stop_squeeze_worker', { pid }),
-        statements: (limit = _LIMITS.defaultPage) => _stat('statements', limit),
-        syncCronJobs: () => repository.fn<readonly unknown[]>('sync_cron_jobs', {}),
-        tableBloat: (limit = _LIMITS.defaultPage) => _stat('table_bloat', limit),
-        tableSizes: (limit = _LIMITS.defaultPage) => _stat('table_sizes', limit),
+        statements: (limit = _LIMITS.defaultPage) => _stat<readonly {
+            blkReadTime: number; blkWriteTime: number;
+            calls: number; dbid: number; dealloc: number;
+            meanExecTime: number; meanPlanTime: number;
+            parallelWorkersLaunched: number; parallelWorkersToLaunch: number;
+            plans: number; query: string; queryid: number;
+            rows: number; sharedBlksDirtied: number;
+            sharedBlksHit: number; sharedBlksRead: number;
+            sharedBlksWritten: number; statsReset: string | null;
+            tempBlksRead: number; tempBlksWritten: number;
+            toplevel: boolean; totalExecTime: number;
+            totalPlanTime: number; userid: number;
+            walBuffersFull: number; walBytes: number;
+            walFpi: number; walRecords: number;
+        }[]>('statements', limit),
+        syncCronJobs: () => repository.fn<readonly {
+            error?: string; name: string;
+            schedule: string; status: 'created' | 'error' | 'unchanged' | 'updated';
+        }[]>('sync_cron_jobs', {}),
+        tableBloat: (limit = _LIMITS.defaultPage) => _stat<readonly {
+            indexBytes: number; overheadBytes: number;
+            schemaname: string; tableBytes: number; tablename: string;
+            tableSize: string;
+            totalBytes: number; totalSize: string;
+        }[]>('table_bloat', limit),
+        tableSizes: (limit = _LIMITS.defaultPage) => _stat<readonly {
+            idxScan: number; idxTupFetch: number;
+            indexBytes: number; nDeadTup: number;
+            nLiveTup: number; relname: string;
+            schemaname: string; seqScan: number;
+            seqTupRead: number; tableBytes: number;
+            totalBytes: number; totalSize: string;
+        }[]>('table_sizes', limit),
         tenantPurge: (appId: string) => repository.fn<number>('purge_tenant', { appId }),
-        unusedIndexes: (limit = _LIMITS.defaultPage) => _stat('unused_indexes', limit),
-        visibility: (limit = _LIMITS.defaultPage) => _stat('visibility', limit),
-        waitSampling: (limit = _LIMITS.defaultPage) => _stat('wait_sampling', limit),
+        unusedIndexes: (limit = _LIMITS.defaultPage) => _stat<readonly {
+            idxScan: number; indexBytes: number; indexrelname: string;
+            indexSize: string;
+            relname: string; schemaname: string;
+        }[]>('unused_indexes', limit),
+        visibility: (limit = _LIMITS.defaultPage) => _stat<readonly {
+            allFrozen: number; allVisible: number; relkind: string;
+            relname: string;
+            relSize: number;
+        }[]>('visibility', limit),
+        waitSampling: (limit = _LIMITS.defaultPage) => _stat<readonly {
+            event: string; eventType: string; totalCount: number;
+        }[]>('wait_sampling', limit),
         waitSamplingCurrent: (limit = _LIMITS.defaultPage) =>
-            _stat('wait_sampling_current', limit),
+            _stat<readonly {
+                event: string; eventType: string;
+                pid: number; queryid: number | null;
+            }[]>('wait_sampling_current', limit),
         waitSamplingHistory: (
             limit = _LIMITS.defaultPage,
             sinceSeconds = _LIMITS.defaultAuditWindow,
-        ) => _stat('wait_sampling_history', limit, { since_seconds: sinceSeconds }),
-        walInspect: (limit = _LIMITS.defaultPage) => _stat('wal_inspect', limit),
+        ) => _stat<readonly {
+            event: string; eventType: string;
+            pid: number; queryid: number | null;
+            sampleTs: string;
+        }[]>('wait_sampling_history', limit, { since_seconds: sinceSeconds }),
+        walInspect: (limit = _LIMITS.defaultPage) => _stat<readonly {
+            blockRef: string | null; description: string | null;
+            endLsn: string; fpiLength: number;
+            mainDataLength: number; recordLength: number;
+            recordType: string | null; resourceManager: string;
+            startLsn: string;
+        }[]>('wal_inspect', limit),
     };
 });
 
@@ -451,9 +619,10 @@ class DatabaseService extends Effect.Service<DatabaseService>()('database/Databa
                 () => system.resetWaitSampling()),
             runPartmanMaintenance: Effect.fn('db.runPartmanMaintenance')(
                 () => system.runPartmanMaintenance()),
-            search: searchRepo, 
+            search: searchRepo,
             seqScanHeavy: Effect.fn('db.seqScanHeavy')(
-                (limit = _LIMITS.defaultPage) => system.seqScanHeavy(limit)),sessions,
+                (limit = _LIMITS.defaultPage) => system.seqScanHeavy(limit)),
+            sessions,
             squeezeStartWorker: Effect.fn('db.squeezeStartWorker')(
                 () => system.squeezeStartWorker()),
             squeezeStatus: Effect.fn('db.squeezeStatus')(

@@ -185,7 +185,7 @@ const Client = (() => {
         vector: {
             getConfig: Effect.fn('db.vectorConfig')(function* () {
                 const db = yield* sql;
-                return yield* db<{ name: string; setting: string }>`SELECT name, setting FROM pg_settings WHERE name LIKE 'hnsw.%' OR name LIKE 'diskann.%'`;
+                return yield* db<{ name: string; setting: string }>`SELECT name, setting FROM pg_settings WHERE name LIKE 'hnsw.%' OR name LIKE 'diskann.%' OR name LIKE 'vectorscale.%'`;
             }),
             indexStats: (tableName: string, indexName: string) => sql.pipe(Effect.flatMap((db) => db<{ idxScan: bigint; idxTupFetch: bigint; idxTupRead: bigint }>`SELECT idx_scan, idx_tup_read, idx_tup_fetch FROM pg_stat_user_indexes WHERE relname = ${tableName} AND indexrelname = ${indexName}`)),
             withIterativeScan: <A, E, R>(
