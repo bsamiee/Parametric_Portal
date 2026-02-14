@@ -1,180 +1,91 @@
 # [H1][ERRORS_AND_SERVICES]
->**Dictum:** *Errors are values. Services declare interfaces; Layers provide implementations.*
+>**Dictum:** *Typed errors constrain failure surfaces; compact services constrain public APIs.*
 
 <br>
+
+Use this reference to keep service interfaces small and error boundaries exhaustive.
 
 ---
 ## [1][ERROR_TAXONOMY]
->**Dictum:** *Two error types: `Data.TaggedError` for domain, `Schema.TaggedError` for boundaries.*
+>**Dictum:** *Domain and boundary errors have different responsibilities.*
 
 <br>
 
-| [INDEX] | [TYPE]               | [WHEN]                                    | [KEY_PROPERTY]                  |
-| :-----: | -------------------- | ----------------------------------------- | ------------------------------- |
-|   [1]   | `Data.TaggedError`   | Internal domain errors, `catchTag`        | Lightweight, not serializable   |
-|   [2]   | `Schema.TaggedError` | Boundary errors (HTTP, RPC, wire)         | Schema-backed, HTTP-annotated   |
-|   [3]   | `Effect.die`         | Unrecoverable programmer errors (defects) | Not in `E`, surfaces in `Cause` |
-
-Namespace merge for error grouping:
-
-```typescript
-class Auth extends S.TaggedError<Auth>()('Auth', {
-    reason: S.String,
-}, { status: 401 }) {}
-
-class NotFound extends S.TaggedError<NotFound>()('NotFound', {
-    resource: S.String,
-    id: S.String,
-}, { status: 404 }) {}
-
-const HttpError = { Auth, NotFound } as const;
-namespace HttpError { export type Any = Auth | NotFound; }
-export { HttpError };
-```
+| [INDEX] | [TYPE]               | [WHEN]                           |
+| :-----: | -------------------- | -------------------------------- |
+|   [1]   | `Data.TaggedError`   | internal/domain orchestration    |
+|   [2]   | `Schema.TaggedError` | boundary/network serialization   |
+|   [3]   | `Effect.die`         | defects/programmer invariants    |
 
 [CRITICAL]:
-- [NEVER] More than 3-5 error variants per service boundary.
-- [NEVER] String errors, generic `Error`, or `try/catch` in Effect code.
-- [NEVER] `Data.TaggedError` across network boundaries -- use `Schema.TaggedError`.
-- [ALWAYS] `namespace XError { export type Any = ... }` for error union access.
+- [NEVER] string errors or generic `Error` in Effect domain flows.
+- [NEVER] leak broad internal unions to HTTP/RPC edges.
 
 ---
-## [2][ERROR_COMPOSITION]
->**Dictum:** *Boundary mapping is provably complete. Recovery is per-tag.*
+## [2][BOUNDARY_COLLAPSE]
+>**Dictum:** *Map internal unions into boundary-safe unions exhaustively.*
 
-**Boundary mapping** via `Effect.mapError` + `Match.exhaustive`:
+<br>
 
-```typescript
-const toHttpError = <A, R>(
-    program: Effect.Effect<A, TenantNotFound | TenantDbError | PermissionDenied, R>,
-): Effect.Effect<A, HttpError.Any, R> =>
-    program.pipe(Effect.mapError((error) => Match.value(error).pipe(
-        Match.tag('TenantNotFound', (e) => HttpError.NotFound.of('tenant', e.tenantId)),
-        Match.tag('TenantDbError', (e) => HttpError.Internal.of(`DB: ${e.operation}`, e.cause)),
-        Match.tag('PermissionDenied', (e) => HttpError.Auth.of(e.details)),
-        Match.exhaustive,
-    )));
-```
+Use [SNIP-05](./snippets.md#snip-05boundary_error_collapse).
 
-**Per-tag recovery** via `Effect.catchTags`:
+[IMPORTANT]:
+- [ALWAYS] map with `Match.exhaustive`.
+- [ALWAYS] collapse to small, documented boundary variants.
 
-```typescript
-const withRecovery = <A, R>(program: Effect.Effect<A, NotFound | CacheError | DbError, R>) =>
-    program.pipe(Effect.catchTags({
-        NotFound: ({ id }) => fetchFromFallback(id),
-        CacheError: ({ operation }) => Effect.logWarning(`Cache miss: ${operation}`).pipe(
-            Effect.andThen(fetchFromDb(operation))),
-    }));
-// DbError remains in the error channel -- not caught
-```
+---
+## [3][SERVICE_SURFACE_COMPRESSION]
+>**Dictum:** *A service should expose capabilities, not implementation detail sprawl.*
 
-**Additional patterns:**
+<br>
 
-| [INDEX] | [PATTERN]              | [API]                                                    |
-| :-----: | ---------------------- | -------------------------------------------------------- |
-|   [1]   | Error accumulation     | `Effect.partition(items, fn)` -> `[failures, successes]` |
-|   [2]   | Full cause inspection  | `Effect.catchAllCause` + `Cause.match`                   |
-|   [3]   | Defect (unrecoverable) | `Effect.die` -- not tracked in `E`                       |
-|   [4]   | Typed timeout          | `Effect.timeoutFail(new TimeoutError(...))`              |
-|   [5]   | Error union collapse   | `Effect.mapError` at boundary to reduce variants         |
+Use [SNIP-03](./snippets.md#snip-03capability_groups).
+
+[IMPORTANT]:
+- [ALWAYS] expose grouped capabilities (`read`, `write`, `admin`) when method count grows.
+- [ALWAYS] keep public method count stable while extending internal behavior.
 
 [CRITICAL]:
-- [NEVER] Non-exhaustive error mapping at boundaries -- `Match.exhaustive` is mandatory.
-- [NEVER] Silently drop errors from parallel operations -- use `Effect.partition`.
+- [NEVER] append one new top-level method per new behavior variant.
 
 ---
-## [3][SERVICE_DEFINITION]
->**Dictum:** *`Effect.Service` declares interface + tag + layer in one class.*
+## [4][SERVICE_DEFINITION]
+>**Dictum:** *`Effect.Service` centralizes tag, constructor mode, and layer generation.*
+
+<br>
 
 ```typescript
-class TenantService extends Effect.Service<TenantService>()('app/TenantService', {
-    dependencies: [DatabaseService.Default, CacheService.Default],
-    scoped: Effect.gen(function* () {
+class FeatureService extends Effect.Service<FeatureService>()('app/FeatureService', {
+    dependencies: [DatabaseService.Default],
+    effect: Effect.gen(function* () {
         const db = yield* DatabaseService;
-        const cache = yield* CacheService;
-
-        const findById = Effect.fn('TenantService.findById')((id: string) =>
-            cache.kv.get(`tenant:${id}`).pipe(
-                Effect.flatMap(Option.match({
-                    onNone: () => db.tenants.one([{ field: 'id', value: id }]).pipe(
-                        Effect.flatMap(Option.match({
-                            onNone: () => Effect.fail(new TenantNotFound({ id })),
-                            onSome: (tenant) => cache.kv.set(`tenant:${id}`, tenant, '5 minutes').pipe(
-                                Effect.as(tenant)),
-                        }))),
-                    onSome: Effect.succeed,
-                }))));
-
-        return { findById } as const;
+        const run = Effect.fn('FeatureService.run')((command: Command) => execute(db, command));
+        return { run } as const;
     }),
 }) {}
 ```
 
-**Three constructors:**
-
-| [INDEX] | [MODE]    | [WHEN]                             | [SIGNATURE]                        |
-| :-----: | --------- | ---------------------------------- | ---------------------------------- |
-|   [1]   | `succeed` | Static namespace (no dependencies) | `succeed: { method1, method2 }`    |
-|   [2]   | `effect`  | Needs deps but no scoped resources | `effect: Effect.gen(function* ())` |
-|   [3]   | `scoped`  | Acquires resources needing cleanup | `scoped: Effect.gen(function* ())` |
-
-[IMPORTANT]:
-- [ALWAYS] `Effect.Service<T>()('tag', { ... })` -- NOT `Context.Tag`.
-- [ALWAYS] `Effect.fn('ServiceName.method')` for all service methods.
-- [ALWAYS] `dependencies` field for auto-provision of layer deps.
-- [ALWAYS] Service methods return `Effect<Success, Error, never>` -- no dependency leakage in `R`.
-- [ALWAYS] Instance access (`R=never`) inside scoped constructors for zero-requirement methods.
-- [ALWAYS] Static access (`R=Service`) from external consumers requiring the service tag in `R`.
+| [INDEX] | [MODE]    | [WHEN]                               |
+| :-----: | --------- | ------------------------------------ |
+|   [1]   | `succeed` | static implementation, no deps       |
+|   [2]   | `effect`  | deps, no resource cleanup required   |
+|   [3]   | `scoped`  | resource acquisition + cleanup       |
 
 ---
-## [4][LAYER_COMPOSITION]
->**Dictum:** *Compose in dependency order: Platform -> Infra -> Domain -> App.*
+## [5][LAYER_AND_RESOURCE_DISCIPLINE]
+>**Dictum:** *Acquire resources in scoped services and compose layers by dependency direction.*
+
+<br>
 
 ```typescript
-const PlatformLayer = Layer.mergeAll(HttpClient.layer, StorageAdapter.layer);
-const InfraLayer = Layer.mergeAll(
-    CacheService.Default, DatabaseService.Default, MetricsService.Default,
-).pipe(Layer.provideMerge(PlatformLayer));
-const AppLayer = Layer.mergeAll(
-    TenantService.Default, AuthService.Default,
-).pipe(Layer.provideMerge(InfraLayer));
+const AppLayer = Layer.mergeAll(AuthService.Default, FeatureService.Default)
+    .pipe(Layer.provideMerge(DatabaseService.Default));
 ```
-
-**Advanced layer patterns:**
-
-| [INDEX] | [PATTERN]             | [API]                                      |
-| :-----: | --------------------- | ------------------------------------------ |
-|   [1]   | Runtime-config layers | `Layer.unwrapEffect`                       |
-|   [2]   | Fire-and-forget init  | `Layer.effectDiscard`                      |
-|   [3]   | Composition root      | `ManagedRuntime.make(AppLayer)`            |
-|   [4]   | Test doubles          | `Layer.succeed(ServiceTag, mockImpl)`      |
-|   [5]   | Layer naming          | `Default` for production, `Test` for mocks |
-
-[IMPORTANT]:
-- [ALWAYS] `Layer.provideMerge` to inject dependencies downward.
-- [ALWAYS] `ManagedRuntime.make` at composition root for clean lifecycle.
-- [ALWAYS] `Layer.mergeAll` for sibling services at the same tier.
-
----
-## [5][RESOURCE_MANAGEMENT]
->**Dictum:** *Resources are scoped. Cleanup is guaranteed.*
 
 ```typescript
-const redis = yield* Effect.acquireRelease(
-    Effect.sync(() => config.connect()),
-    (connection) => Effect.promise(() => connection.quit()),
-);
-
-// In Effect.gen -- deterministic cleanup via `using`
-using handle = yield* acquireFileHandle(path);
-
-// Scope-bound cleanup registration
-yield* Effect.addFinalizer((exit) =>
-    Effect.sync(() => { cleanup(exit); }));
+const resource = Effect.acquireRelease(open(), (handle) => close(handle));
 ```
 
-[IMPORTANT]:
-- [ALWAYS] `Effect.acquireRelease` for resources requiring cleanup in scoped constructors.
-- [ALWAYS] `using` keyword in `Effect.gen` for deterministic resource disposal.
-- [ALWAYS] `Effect.addFinalizer` for registering cleanup to current scope.
-- [REFERENCE] Concurrency patterns: [->composition.md](./composition.md)
+[CRITICAL]:
+- [NEVER] leave cleanup outside scope semantics.
+- [NEVER] flatten all concerns into one mega-layer with implicit ordering.

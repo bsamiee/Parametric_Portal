@@ -25,9 +25,9 @@ Progress: [##░░░░░░░░] 11%
 
 **By Phase:**
 
-| Phase | Plans | Total | Avg/Plan |
-|-------|-------|-------|----------|
-| 01-foundation-hardening | 2/2 | 9min | 4.5min |
+| Phase                   | Plans | Total | Avg/Plan |
+| ----------------------- | ----- | ----- | -------- |
+| 01-foundation-hardening | 2/2   | 9min  | 4.5min   |
 
 **Recent Trend:**
 - Last 5 plans: 01-01 (4min), 01-02 (5min)

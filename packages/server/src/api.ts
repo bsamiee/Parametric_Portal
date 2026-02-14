@@ -878,8 +878,318 @@ const _AdminGroup = HttpApiGroup.make('admin')
             .annotate(OpenApi.Summary, 'Stop a pg_squeeze background worker'),
     )
     .add(
+        HttpApiEndpoint.get('deadTuples', '/db/dead-tuples')
+            .setUrlParams(S.Struct({
+                limit: S.optionalWith(
+                    HttpApiSchema.param(
+                        'limit',
+                        S.NumberFromString.pipe(S.int(), S.between(1, 500)),
+                    ),
+                    { default: () => 100 },
+                ),
+            }))
+            .addSuccess(S.Array(S.Unknown))
+            .annotate(OpenApi.Summary, 'Dead tuple counts per table'),
+    )
+    .add(
+        HttpApiEndpoint.get('tableBloat', '/db/table-bloat')
+            .setUrlParams(S.Struct({
+                limit: S.optionalWith(
+                    HttpApiSchema.param(
+                        'limit',
+                        S.NumberFromString.pipe(S.int(), S.between(1, 500)),
+                    ),
+                    { default: () => 100 },
+                ),
+            }))
+            .addSuccess(S.Array(S.Unknown))
+            .annotate(OpenApi.Summary, 'Table bloat and size breakdown'),
+    )
+    .add(
+        HttpApiEndpoint.get('indexBloat', '/db/index-bloat')
+            .setUrlParams(S.Struct({
+                limit: S.optionalWith(
+                    HttpApiSchema.param(
+                        'limit',
+                        S.NumberFromString.pipe(S.int(), S.between(1, 500)),
+                    ),
+                    { default: () => 100 },
+                ),
+            }))
+            .addSuccess(S.Array(S.Unknown))
+            .annotate(OpenApi.Summary, 'Index size and scan statistics'),
+    )
+    .add(
+        HttpApiEndpoint.get('lockContention', '/db/lock-contention')
+            .setUrlParams(S.Struct({
+                limit: S.optionalWith(
+                    HttpApiSchema.param(
+                        'limit',
+                        S.NumberFromString.pipe(S.int(), S.between(1, 500)),
+                    ),
+                    { default: () => 100 },
+                ),
+            }))
+            .addSuccess(S.Array(S.Unknown))
+            .annotate(OpenApi.Summary, 'Active lock contention'),
+    )
+    .add(
+        HttpApiEndpoint.get('longRunningQueries', '/db/long-running-queries')
+            .setUrlParams(S.Struct({
+                limit: S.optionalWith(
+                    HttpApiSchema.param(
+                        'limit',
+                        S.NumberFromString.pipe(S.int(), S.between(1, 500)),
+                    ),
+                    { default: () => 100 },
+                ),
+                minSeconds: S.optionalWith(
+                    HttpApiSchema.param(
+                        'minSeconds',
+                        S.NumberFromString.pipe(S.int(), S.between(1, 3600)),
+                    ),
+                    { default: () => 5 },
+                ),
+            }))
+            .addSuccess(S.Array(S.Unknown))
+            .annotate(OpenApi.Summary, 'Long-running active queries'),
+    )
+    .add(
+        HttpApiEndpoint.get('connectionStats', '/db/connection-stats')
+            .setUrlParams(S.Struct({
+                limit: S.optionalWith(
+                    HttpApiSchema.param(
+                        'limit',
+                        S.NumberFromString.pipe(S.int(), S.between(1, 500)),
+                    ),
+                    { default: () => 100 },
+                ),
+            }))
+            .addSuccess(S.Array(S.Unknown))
+            .annotate(OpenApi.Summary, 'Connection pool statistics'),
+    )
+    .add(
+        HttpApiEndpoint.get('replicationLag', '/db/replication-lag')
+            .setUrlParams(S.Struct({
+                limit: S.optionalWith(
+                    HttpApiSchema.param(
+                        'limit',
+                        S.NumberFromString.pipe(S.int(), S.between(1, 500)),
+                    ),
+                    { default: () => 100 },
+                ),
+            }))
+            .addSuccess(S.Array(S.Unknown))
+            .annotate(OpenApi.Summary, 'Streaming replication lag'),
+    )
+    .add(
+        HttpApiEndpoint.get('indexUsage', '/db/index-usage')
+            .setUrlParams(S.Struct({
+                limit: S.optionalWith(
+                    HttpApiSchema.param(
+                        'limit',
+                        S.NumberFromString.pipe(S.int(), S.between(1, 500)),
+                    ),
+                    { default: () => 100 },
+                ),
+            }))
+            .addSuccess(S.Array(S.Unknown))
+            .annotate(OpenApi.Summary, 'Index usage ranked by scans'),
+    )
+    .add(
+        HttpApiEndpoint.get('tableSizes', '/db/table-sizes')
+            .setUrlParams(S.Struct({
+                limit: S.optionalWith(
+                    HttpApiSchema.param(
+                        'limit',
+                        S.NumberFromString.pipe(S.int(), S.between(1, 500)),
+                    ),
+                    { default: () => 100 },
+                ),
+            }))
+            .addSuccess(S.Array(S.Unknown))
+            .annotate(OpenApi.Summary, 'Table sizes with live/dead tuples'),
+    )
+    .add(
+        HttpApiEndpoint.get('unusedIndexes', '/db/unused-indexes')
+            .setUrlParams(S.Struct({
+                limit: S.optionalWith(
+                    HttpApiSchema.param(
+                        'limit',
+                        S.NumberFromString.pipe(S.int(), S.between(1, 500)),
+                    ),
+                    { default: () => 100 },
+                ),
+            }))
+            .addSuccess(S.Array(S.Unknown))
+            .annotate(OpenApi.Summary, 'Indexes with zero scans'),
+    )
+    .add(
+        HttpApiEndpoint.get('seqScanHeavy', '/db/seq-scan-heavy')
+            .setUrlParams(S.Struct({
+                limit: S.optionalWith(
+                    HttpApiSchema.param(
+                        'limit',
+                        S.NumberFromString.pipe(S.int(), S.between(1, 500)),
+                    ),
+                    { default: () => 100 },
+                ),
+            }))
+            .addSuccess(S.Array(S.Unknown))
+            .annotate(
+                OpenApi.Summary,
+                'Tables with high sequential scan ratio',
+            ),
+    )
+    .add(
+        HttpApiEndpoint.get('indexAdvisor', '/db/index-advisor')
+            .setUrlParams(S.Struct({
+                minFilter: S.optionalWith(
+                    HttpApiSchema.param(
+                        'minFilter',
+                        S.NumberFromString.pipe(S.int(), S.positive()),
+                    ),
+                    { default: () => 1000 },
+                ),
+                minSelectivity: S.optionalWith(
+                    HttpApiSchema.param(
+                        'minSelectivity',
+                        S.NumberFromString.pipe(S.int(), S.between(1, 100)),
+                    ),
+                    { default: () => 30 },
+                ),
+            }))
+            .addSuccess(S.Array(S.Unknown))
+            .annotate(
+                OpenApi.Summary,
+                'pg_qualstats index advisor recommendations',
+            ),
+    )
+    .add(
+        HttpApiEndpoint.get('hypotheticalIndexes', '/db/hypothetical-indexes')
+            .addSuccess(S.Array(S.Unknown))
+            .annotate(OpenApi.Summary, 'List hypothetical indexes (hypopg)'),
+    )
+    .add(
+        HttpApiEndpoint.post(
+            'createHypotheticalIndex', '/db/hypothetical-indexes',
+        )
+            .setPayload(S.Struct({
+                statement: S.NonEmptyTrimmedString.annotations({
+                    description: 'CREATE INDEX statement to simulate',
+                }),
+            }))
+            .addSuccess(S.Array(S.Struct({
+                indexname: S.String,
+                indexrelid: S.Number,
+            })))
+            .annotate(
+                OpenApi.Summary,
+                'Create hypothetical index (hypopg)',
+            ),
+    )
+    .add(
+        HttpApiEndpoint.post(
+            'resetHypotheticalIndexes',
+            '/db/hypothetical-indexes/reset',
+        )
+            .addSuccess(_Success)
+            .annotate(
+                OpenApi.Summary,
+                'Reset all hypothetical indexes (hypopg)',
+            ),
+    )
+    .add(
+        HttpApiEndpoint.get('visibility', '/db/visibility')
+            .setUrlParams(S.Struct({
+                limit: S.optionalWith(
+                    HttpApiSchema.param(
+                        'limit',
+                        S.NumberFromString.pipe(S.int(), S.between(1, 500)),
+                    ),
+                    { default: () => 100 },
+                ),
+            }))
+            .addSuccess(S.Array(S.Unknown))
+            .annotate(OpenApi.Summary, 'Visibility map summary per table'),
+    )
+    .add(
+        HttpApiEndpoint.get('cronHistory', '/db/cron-history')
+            .setUrlParams(S.Struct({
+                jobName: S.optional(
+                    HttpApiSchema.param('jobName', S.String),
+                ),
+                limit: S.optionalWith(
+                    HttpApiSchema.param(
+                        'limit',
+                        S.NumberFromString.pipe(S.int(), S.between(1, 500)),
+                    ),
+                    { default: () => 100 },
+                ),
+            }))
+            .addSuccess(S.Array(S.Unknown))
+            .annotate(OpenApi.Summary, 'Cron job execution history'),
+    )
+    .add(
+        HttpApiEndpoint.get('cronFailures', '/db/cron-failures')
+            .setUrlParams(S.Struct({
+                hours: S.optionalWith(
+                    HttpApiSchema.param(
+                        'hours',
+                        S.NumberFromString.pipe(S.int(), S.between(1, 168)),
+                    ),
+                    { default: () => 24 },
+                ),
+            }))
+            .addSuccess(S.Array(S.Unknown))
+            .annotate(OpenApi.Summary, 'Recent cron job failures'),
+    )
+    .add(
+        HttpApiEndpoint.get('buffercacheSummary', '/db/buffercache/summary')
+            .addSuccess(S.Array(S.Unknown))
+            .annotate(OpenApi.Summary, 'Buffer cache summary'),
+    )
+    .add(
+        HttpApiEndpoint.get('buffercacheUsage', '/db/buffercache/usage')
+            .addSuccess(S.Array(S.Unknown))
+            .annotate(OpenApi.Summary, 'Buffer cache usage counts'),
+    )
+    .add(
+        HttpApiEndpoint.get('buffercacheTop', '/db/buffercache/top')
+            .setUrlParams(S.Struct({
+                limit: S.optionalWith(
+                    HttpApiSchema.param(
+                        'limit',
+                        S.NumberFromString.pipe(S.int(), S.between(1, 100)),
+                    ),
+                    { default: () => 50 },
+                ),
+            }))
+            .addSuccess(S.Array(S.Unknown))
+            .annotate(
+                OpenApi.Summary,
+                'Top relations in buffer cache by buffers',
+            ),
+    )
+    .add(
+        HttpApiEndpoint.post('prewarmRelation', '/db/prewarm')
+            .setPayload(S.Struct({
+                mode: S.optionalWith(
+                    S.Literal('buffer', 'read', 'prefetch'),
+                    { default: () => 'buffer' as const },
+                ),
+                relation: S.NonEmptyTrimmedString,
+            }))
+            .addSuccess(S.Struct({ blocks: S.Int }))
+            .annotate(OpenApi.Summary, 'Prewarm a relation into buffer cache'),
+    )
+    .add(
         HttpApiEndpoint.get('listPermissions', '/permissions')
-            .addSuccess(S.Array(S.Struct({ action: Permission.fields.action, resource: Permission.fields.resource, role: Permission.fields.role })))
+            .addSuccess(S.Array(S.Struct({
+                action: Permission.fields.action,
+                resource: Permission.fields.resource,
+                role: Permission.fields.role,
+            })))
             .annotate(OpenApi.Summary, 'List tenant permissions'),
     )
     .add(

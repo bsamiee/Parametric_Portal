@@ -1,224 +1,109 @@
 # [H1][COMPOSITION]
->**Dictum:** *Consistent combinator selection. Advanced APIs eliminate hand-rolled infrastructure.*
+>**Dictum:** *Compose effects in stable layers; integrate internals automatically.*
 
 <br>
+
+Use compositional patterns that keep public APIs minimal while making internal functionality self-integrating.
 
 ---
 ## [1][COMBINATOR_SELECTION]
->**Dictum:** *Each combinator communicates intent. Choose precisely.*
+>**Dictum:** *Each combinator communicates intent; choose explicitly.*
 
 <br>
 
-| [INDEX] | [COMBINATOR]     | [WHEN]                                                 |
-| :-----: | ---------------- | ------------------------------------------------------ |
-|   [1]   | `pipe()`         | Linear left-to-right composition                       |
-|   [2]   | `Effect.map`     | Sync transform of success value (A -> B)               |
-|   [3]   | `Effect.flatMap` | Chain Effect-returning functions (A -> Effect\<B\>)    |
-|   [4]   | `Effect.andThen` | Mixed input (value, Promise, Effect, Option, Either)   |
-|   [5]   | `Effect.tap`     | Side effects without changing value                    |
-|   [6]   | `Effect.all`     | Aggregate independent effects into struct/tuple        |
-|   [7]   | `Effect.gen`     | 3+ dependent operations or control flow                |
-|   [8]   | `Effect.fn`      | Named function with automatic tracing span             |
-|   [9]   | `Effect.iterate` | Type-safe recursive computation (replaces while loops) |
+| [INDEX] | [COMBINATOR]     | [WHEN]                                       |
+| :-----: | ---------------- | -------------------------------------------- |
+|   [1]   | `pipe()`         | linear composition                           |
+|   [2]   | `Effect.map`     | sync transform (`A -> B`)                    |
+|   [3]   | `Effect.flatMap` | dependent effect chaining                    |
+|   [4]   | `Effect.andThen` | mixed source chaining                        |
+|   [5]   | `Effect.all`     | independent effect aggregation               |
+|   [6]   | `Effect.gen`     | multi-step dependent orchestration           |
+|   [7]   | `Effect.fn`      | named service methods (tracing + readability) |
 
 [CRITICAL]:
-- [NEVER] Mix `async/await` with Effect -- use `Effect.promise` for interop.
-- [NEVER] Wrap pure `A -> B` functions in Effect -- Effect orchestrates, domain computes.
-
-**Tracing rule:**
-
-| [INDEX] | [CONTEXT]      | [USE]                         | [NOT]            |
-| :-----: | -------------- | ----------------------------- | ---------------- |
-|   [1]   | Service method | `Effect.fn('Service.method')` | `Telemetry.span` |
-|   [2]   | Route handler  | `Telemetry.routeSpan('name')` | `Effect.fn`      |
-|   [3]   | Pure function  | Neither                       | Either           |
+- [NEVER] mix `async/await` in Effect code paths.
+- [NEVER] wrap pure transformations in Effect.
 
 ---
-## [2][STM_AND_TMAP]
->**Dictum:** *Composable atomic transactions replace locks and manual coordination.*
+## [2][LAYER_TOPOLOGY]
+>**Dictum:** *Platform -> Infra -> Domain -> App remains the composition backbone.*
 
 <br>
 
-STM provides lock-free composable transactions. Multiple TMap operations compose into single atomic commit -- no mutexes, no deadlocks, no manual rollback.
+```typescript
+const PlatformLayer = Layer.mergeAll(Client.layer, StorageAdapter.S3ClientLayer);
+const InfraLayer = Layer.mergeAll(DatabaseService.Default, MetricsService.Default)
+    .pipe(Layer.provideMerge(PlatformLayer));
+const AppLayer = Layer.mergeAll(AuthService.Default, FeatureService.Default)
+    .pipe(Layer.provideMerge(InfraLayer));
+```
+
+[IMPORTANT]:
+- [ALWAYS] Put registration layers inside the owning service module.
+- [ALWAYS] Prefer `Layer.mergeAll` + `Layer.provideMerge` for deterministic assembly.
+
+---
+## [3][AUTO_REGISTRATION_COMPOSITION]
+>**Dictum:** *Registries reduce manual composition edits and drift.*
+
+<br>
+
+Use [SNIP-02](./snippets.md#snip-02auto_integration_registry) as the default registration form.
+
+[IMPORTANT]:
+- [ALWAYS] Keep the registry readonly and local to module scope.
+- [ALWAYS] Perform registration in `Layer.effectDiscard`.
+- [ALWAYS] Iterate registry keys with `Effect.forEach`.
+
+---
+## [4][CONCURRENCY_PRIMITIVES]
+>**Dictum:** *Use Effect concurrency modules instead of ad hoc state machines.*
+
+<br>
+
+| [INDEX] | [CONCERN]                 | [API]                        |
+| :-----: | ------------------------- | ---------------------------- |
+|   [1]   | transactional shared map  | `STM.commit(TMap.*)`         |
+|   [2]   | keyed background work     | `FiberMap.make/run/remove`   |
+|   [3]   | buffered stream pipelines | `Stream.buffer`              |
+|   [4]   | time-window batching      | `Stream.groupedWithin`       |
+|   [5]   | async retry policy        | `Schedule` composition       |
+
+[CRITICAL]:
+- [NEVER] maintain manual `Map<string, Fiber>` lifecycle logic.
+- [NEVER] hand-roll transactional lock layers around mutable maps.
+
+---
+## [5][NO_IF_BRANCHING]
+>**Dictum:** *Closed control flow uses algebraic matchers and options, not `if`.*
+
+<br>
 
 ```typescript
-scoped: Effect.gen(function* () {
-    const registry = yield* STM.commit(TMap.empty<string, Instance>());
-    const lastAccess = yield* STM.commit(TMap.empty<string, number>());
-
-    const getOrCreate = (name: string, factory: Effect.Effect<Instance>) =>
-        STM.commit(TMap.get(registry, name)).pipe(
-            Effect.flatMap(Option.match({
-                onNone: () => factory.pipe(Effect.tap((inst) =>
-                    STM.commit(STM.all([
-                        TMap.set(registry, name, inst),
-                        TMap.set(lastAccess, name, Date.now()),
-                    ])))),
-                onSome: (inst) => STM.commit(TMap.set(lastAccess, name, Date.now())).pipe(
-                    Effect.as(inst)),
-            })));
-
-    const gc = (maxAgeMs: number) => Effect.gen(function* () {
-        const now = Date.now();
-        const entries = yield* STM.commit(TMap.toArray(lastAccess));
-        const stale = A.filterMap(entries, ([key, ts]) =>
-            now - ts > maxAgeMs ? Option.some(key) : Option.none());
-        yield* STM.commit(A.reduce(stale, STM.void, (transaction, key) =>
-            transaction.pipe(
-                STM.zipRight(TMap.remove(registry, key)),
-                STM.zipRight(TMap.remove(lastAccess, key)),
-            )));
+const classify = (value: Option.Option<string>) =>
+    Option.match(value, {
+        onNone: () => 'missing',
+        onSome: (text) => text,
     });
-    // ...
-})
 ```
-
-**Key STM APIs:**
-
-| [INDEX] | [API]            | [REPLACES]                                      |
-| :-----: | ---------------- | ----------------------------------------------- |
-|   [1]   | `STM.commit`     | Materializes transaction into Effect            |
-|   [2]   | `STM.all`        | Composes multiple STM ops atomically            |
-|   [3]   | `STM.zipRight`   | Sequential composition (discard left result)    |
-|   [4]   | `STM.check`      | Blocks until predicate holds (replaces polling) |
-|   [5]   | `STM.retry`      | Blocks until referenced TRef values change      |
-|   [6]   | `STM.gen`        | Generator syntax for multi-step transactions    |
-|   [7]   | `TMap.takeFirst` | Blocks until matching entry appears             |
-|   [8]   | `TRef`           | Single transactional mutable reference          |
-|   [9]   | `TQueue`         | Bounded/unbounded transactional queue           |
-
-[CRITICAL]:
-- [NEVER] `new Map()` + manual locks -- use `TMap` via STM.
-- [NEVER] Polling loops for condition waits -- use `STM.check` or `TMap.takeFirst`.
-
----
-## [3][FIBER_AND_CONCURRENCY]
->**Dictum:** *FiberMap manages keyed background work. Scope handles lifecycle.*
-
-<br>
-
-**FiberMap** -- keyed fiber registry with auto-cleanup:
 
 ```typescript
-const runningJobs = yield* FiberMap.make<string>();
-// Fork + store + auto-interrupt-existing + auto-remove-on-complete
-yield* FiberMap.run(runningJobs, jobId)(executeWorkflow(jobId));
-// Cancel = interrupt + remove
-yield* FiberMap.remove(runningJobs, jobId);
-// Shutdown: automatic via Scope
-yield* Effect.addFinalizer(() => FiberMap.join(runningJobs).pipe(Effect.ignore));
+const route = (event: Event) => Match.type<Event>().pipe(
+    Match.tag('Started', () => onStarted),
+    Match.tag('Stopped', () => onStopped),
+    Match.exhaustive,
+)(event);
 ```
 
-**Related patterns:**
-
-| [INDEX] | [API]                      | [REPLACES]                                       |
-| :-----: | -------------------------- | ------------------------------------------------ |
-|   [1]   | `FiberMap.make/run/remove` | `Map<string, Fiber>` + manual lifecycle          |
-|   [2]   | `FiberSet.make/run`        | `Set<Fiber>` + cleanup for anonymous tasks       |
-|   [3]   | `FiberHandle.make/run`     | `let fiber: Fiber \| null` + replacement logic   |
-|   [4]   | `Effect.acquireRelease`    | `try/finally` for resource cleanup               |
-|   [5]   | `Effect.addFinalizer`      | Scope-bound cleanup registration                 |
-|   [6]   | `Mailbox`                  | Bounded async fiber communication                |
-|   [7]   | `Effect.serviceOption`     | Optional dependency injection (returns `Option`) |
-|   [8]   | `Semaphore.withPermits(n)` | Manual concurrency limiting                      |
-|   [9]   | `Pool.make/makeWithTTL`    | Connection pool with auto-sizing                 |
-
 [CRITICAL]:
-- [NEVER] `Map<string, Fiber>` + manual interrupt/cleanup -- use `FiberMap`.
-- [NEVER] Manual `AbortController` -- use `Fiber.interrupt` or scope-based interruption.
+- [NEVER] `if (...)` for variant dispatch.
+- [NEVER] `Effect.if(...)`.
 
 ---
-## [4][SCHEDULE_COMPOSITION]
->**Dictum:** *Schedules are composable values. Each combinator adds exactly one concern.*
+## [6][SURFACE_STABILITY]
+>**Dictum:** *Composition should increase behavior, not public method count.*
 
 <br>
 
-```typescript
-const _mkSchedule = (config: {
-    readonly base: Duration.DurationInput;
-    readonly maxAttempts: number;
-    readonly factor?: number;
-    readonly cap?: Duration.DurationInput;
-}) => Schedule.exponential(config.base, config.factor ?? 2).pipe(
-    Schedule.jittered,
-    Schedule.intersect(Schedule.recurs(Math.max(0, config.maxAttempts - 1))),
-    ...(config.cap !== undefined ? [Schedule.upTo(config.cap)] : []),
-);
-```
-
-**Composition operators:**
-
-| [INDEX] | [OPERATOR]             | [SEMANTICS]                                   |
-| :-----: | ---------------------- | --------------------------------------------- |
-|   [1]   | `intersect(a, b)`      | Both must continue; takes longer delay        |
-|   [2]   | `union(a, b)`          | Either can continue; takes shorter delay      |
-|   [3]   | `andThen(a, b)`        | Run first schedule, then second sequentially  |
-|   [4]   | `compose(a, b)`        | First output feeds second input               |
-|   [5]   | `whileInput(pred)`     | Continue while input satisfies predicate      |
-|   [6]   | `upTo(duration)`       | Cap total elapsed time                        |
-|   [7]   | `tapOutput(f)`         | Side-effect on each schedule output (metrics) |
-|   [8]   | `resetAfter(duration)` | Reset state after idle period                 |
-
-**Cron:** `Schedule.cron('0 */6 * * *')` replaces `node-cron`. Also: `dayOfMonth`, `dayOfWeek`, `hourOfDay`, `minuteOfHour`.
-
-[CRITICAL]:
-- [NEVER] Manual `setTimeout` + counter + jitter calculation -- use `Schedule` combinators.
-- [NEVER] `node-cron` -- use `Schedule.cron`.
-
----
-## [5][STREAM_PATTERNS]
->**Dictum:** *Streams are lazy, backpressured, composable sequences. Use for unbounded or reactive data.*
-
-<br>
-
-```typescript
-const eventStream = Stream.fromPubSub(eventBus).pipe(
-    Stream.filter((event) => event._tag === 'DataChanged'),
-    Stream.throttle({ cost: () => 1, duration: '500 millis', strategy: 'enforce' }),
-    Stream.tap((event) => processEvent(event)),
-    Stream.catchTag('ProcessError', () => Stream.empty),
-);
-```
-
-**Key patterns:**
-
-| [INDEX] | [PATTERN]                       | [API]                                                  |
-| :-----: | ------------------------------- | ------------------------------------------------------ |
-|   [1]   | Heartbeat + data interleaving   | `Stream.merge` with halt strategy                      |
-|   [2]   | Fan-out to multiple consumers   | `Stream.broadcast`                                     |
-|   [3]   | Partitioned parallel processing | `Stream.groupByKey`                                    |
-|   [4]   | External source ingestion       | `Stream.fromReadableStream` / `fromAsyncIterable`      |
-|   [5]   | Backpressure control            | `Stream.buffer({ capacity: 16, strategy: 'sliding' })` |
-|   [6]   | Time-windowed batching          | `Stream.groupedWithin(100, '5 seconds')`               |
-|   [7]   | Debounced processing            | `Stream.debounce('300 millis')`                        |
-|   [8]   | Text line processing            | `Stream.splitLines` / `Stream.decodeText`              |
-
-[CRITICAL]:
-- [NEVER] Eager `Array<Effect>` for unbounded data -- use `Stream`.
-- [NEVER] RxJS or EventEmitter for server-side reactive -- use `PubSub` + `Stream`.
-
----
-## [6][EFFECT_UTILITIES]
->**Dictum:** *Know the one-liner. Effect's utility belt prevents hand-rolling.*
-
-<br>
-
-| [INDEX] | [API]                            | [REPLACES]                                    |
-| :-----: | -------------------------------- | --------------------------------------------- |
-|   [1]   | `Effect.cached`                  | Manual memoization with closure variable      |
-|   [2]   | `Effect.cachedWithTTL`           | Timed cache invalidation                      |
-|   [3]   | `Effect.once`                    | At-most-one execution guard                   |
-|   [4]   | `Effect.partition`               | `[failures, successes]` without short-circuit |
-|   [5]   | `Effect.iterate`                 | Recursive computation (replaces `while`)      |
-|   [6]   | `Effect.serviceOption`           | Optional dependency (returns `Option`)        |
-|   [7]   | `Effect.annotateCurrentSpan`     | Add attributes to active tracing span         |
-|   [8]   | `Effect.withSpan`                | Wrap effect in named span                     |
-|   [9]   | `Effect.timeoutFail`             | Fail with typed error on timeout              |
-|  [10]   | `Queue.bounded/sliding/dropping` | Back-pressure async queue                     |
-|  [11]   | `Deferred`                       | One-shot synchronization primitive            |
-|  [12]   | `Semaphore`                      | Permit-based concurrency control              |
-|  [13]   | `Latch`                          | Gate synchronization (open/close/await)       |
-|  [14]   | `SubscriptionRef`                | Ref with reactive `changes` stream            |
-|  [15]   | `SynchronizedRef`                | Ref with effectful `updateEffect`             |
-
-[REFERENCE] Consolidation patterns: [->consolidation.md](./consolidation.md).
+Use [SNIP-03](./snippets.md#snip-03capability_groups) for stable capability facades while evolving internals through registrations and command variants.

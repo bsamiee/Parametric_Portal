@@ -59,13 +59,13 @@ Pulumi was chosen because it enables pure TypeScript IaC — no HCL, no YAML, no
 
 ## Key Decisions
 
-| Decision | Rationale | Outcome |
-|----------|-----------|---------|
-| Pulumi over Terraform/Helm | Pure TypeScript, same ecosystem as codebase, real composition | -- Pending |
-| Shared Effect schema for config | Single source of truth eliminates config fragmentation across packages | -- Pending |
+| Decision                        | Rationale                                                                  | Outcome    |
+| ------------------------------- | -------------------------------------------------------------------------- | ---------- |
+| Pulumi over Terraform/Helm      | Pure TypeScript, same ecosystem as codebase, real composition              | -- Pending |
+| Shared Effect schema for config | Single source of truth eliminates config fragmentation across packages     | -- Pending |
 | Variant-driven resource factory | One polymorphic function replaces N resource files — matches FP philosophy | -- Pending |
-| Self-hosted K8s over managed | Full control, cost efficiency at scale with hundreds of tenants | -- Pending |
-| GitHub Actions for CI/CD | Already in ecosystem, native Pulumi integration available | -- Pending |
+| Self-hosted K8s over managed    | Full control, cost efficiency at scale with hundreds of tenants            | -- Pending |
+| GitHub Actions for CI/CD        | Already in ecosystem, native Pulumi integration available                  | -- Pending |
 
 ---
 *Last updated: 2026-02-13 after initialization*

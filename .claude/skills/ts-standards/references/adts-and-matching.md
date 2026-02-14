@@ -1,158 +1,99 @@
 # [H1][ADTS_AND_MATCHING]
->**Dictum:** *ADTs encode domain variants. Exhaustive matching guarantees completeness.*
+>**Dictum:** *ADTs define closed behavior sets; exhaustive matches guarantee coverage.*
 
 <br>
+
+Use this reference for variant modeling, exhaustive dispatch, and advanced type-level polymorphism.
 
 ---
 ## [1][SUM_TYPES]
->**Dictum:** *`Data.TaggedEnum` for closed unions. `$match` for exhaustive inline dispatch. `$is` for type narrowing.*
+>**Dictum:** *Use tagged unions for behavior-bearing variants.*
 
 <br>
 
-**Basic sum type:**
-
 ```typescript
-type ConnectionState = Data.TaggedEnum<{
-    readonly Disconnected: { readonly reason: Option.Option<string> };
-    readonly Connecting: {};
-    readonly Connected: { readonly latencyMs: number };
-    readonly Reconnecting: { readonly attempt: number };
-}>;
-const { Disconnected, Connecting, Connected, Reconnecting, $is, $match } =
-    Data.taggedEnum<ConnectionState>();
-```
-
-**Generic sum type** with `WithGenerics`:
-
-```typescript
-type AsyncState<A = unknown, E = unknown> = Data.TaggedEnum<{
+type Connection = Data.TaggedEnum<{
     readonly Idle: {};
     readonly Loading: {};
-    readonly Success: { readonly data: A };
-    readonly Failure: { readonly error: E };
+    readonly Ready: { readonly data: unknown };
+    readonly Failed: { readonly message: string };
 }>;
-interface AsyncStateDef extends Data.TaggedEnum.WithGenerics<2> {
-    readonly taggedEnum: AsyncState<this['A'], this['B']>;
-}
-const { $is, $match, Idle, Loading, Success, Failure } = Data.taggedEnum<AsyncStateDef>();
 
-const AsyncState = { $is, $match, Idle, Loading, Success, Failure } as const;
-namespace AsyncState { export type Of<A, E = never> = AsyncState<A, E>; }
-export { AsyncState };
+const { Idle, Loading, Ready, Failed } = Data.taggedEnum<Connection>();
 ```
 
+[CRITICAL]:
+- [NEVER] model data-carrying variants as plain string unions.
+- [NEVER] rely on ad hoc type guards for closed unions.
+
+---
+## [2][EXHAUSTIVE_MATCHING]
+>**Dictum:** *`Match.exhaustive` is mandatory for closed unions.*
+
+<br>
+
+Use [SNIP-01](./snippets.md#snip-01command_algebra) for canonical exhaustive service dispatch.
+
 [IMPORTANT]:
-- [ALWAYS] Use `WithGenerics<N>` for polymorphic variants -- bind `N` to enforce arity.
-- [ALWAYS] Apply namespace merge for exported sum types: `const X = { ... } as const; namespace X { ... }`.
-
-[CRITICAL]:
-- [NEVER] String literal unions for variants carrying data -- use `Data.TaggedEnum`.
-- [NEVER] Manual type guards `isX(v): v is X` -- use `$is('Tag')` or `S.is(XSchema)`.
+- [ALWAYS] use `Match.type<T>()` for reusable matchers.
+- [ALWAYS] use `Match.value(x)` for inline value dispatch.
+- [ALWAYS] use `Match.exhaustive` for closed variants.
 
 ---
-## [2][PHANTOM_AND_RECURSIVE]
->**Dictum:** *Phantom types encode protocol at zero runtime cost. Recursive schemas encode structure.*
+## [3][TYPE_LEVEL_POLYMORPHISM]
+>**Dictum:** *Advanced typing preserves precision while keeping APIs small.*
 
 <br>
 
-**Phantom types** -- branded `never` fields for compile-time state tracking:
-- `Builder<Draft>` vs `Builder<Validated>` -- methods gate on phantom parameter, no runtime cost.
-- State transitions return new branded types: `validate(b: Builder<Draft>): Builder<Validated>`.
+Use [SNIP-04](./snippets.md#snip-04advanced_polymorphic_types).
 
-**Recursive types** -- self-referential schemas:
-- `Schema.suspend(() => TreeNodeSchema)` for recursive structure definitions.
-- Pair with `Effect.iterate` for recursive computation over the structure.
-
-[CRITICAL]:
-- [NEVER] Boolean flags (`isValidated: boolean`) for state tracking -- use phantom types.
-- [NEVER] Flat unions (`string | Expr[]`) for recursive structures -- use recursive `Data.TaggedEnum`.
+| [INDEX] | [PATTERN]              | [PURPOSE]                              |
+| :-----: | ---------------------- | -------------------------------------- |
+|   [1]   | `const` type parameter | preserve literal identity              |
+|   [2]   | `NoInfer<T>`           | control inference source direction     |
+|   [3]   | variadic tuples        | typed flexible parameter composition   |
+|   [4]   | conditional `infer`    | structural type extraction             |
+|   [5]   | `as const satisfies`   | literal retention with shape checking  |
 
 ---
-## [3][PATTERN_MATCHING]
->**Dictum:** *`Match.exhaustive` makes missing cases a compile error.*
+## [4][STATE_PROTOCOL_TYPES]
+>**Dictum:** *Phantom typing encodes protocol legality at compile time.*
 
 <br>
-
-**`Match.type` -- reusable matcher over discriminated unions:**
 
 ```typescript
-const toMessage = Match.type<ProvisionEvent>().pipe(
-    Match.withReturnType<string>(),
-    Match.tag('Requested', ({ tenantId }) => `Provision requested: ${tenantId}`),
-    Match.tag('Approved', 'Denied', ({ tenantId, by }) => `${tenantId} ${by}`),
-    Match.tag('Completed', ({ tenantId, duration }) => `Done: ${tenantId} in ${duration}ms`),
-    Match.tag('Failed', ({ tenantId, error }) => `Failed: ${tenantId}: ${error}`),
-    Match.exhaustive,
+type Draft = { readonly _state: 'draft' };
+type Valid = { readonly _state: 'valid' };
+
+type Builder<S> = { readonly value: string; readonly _s: S };
+
+const validate = (b: Builder<Draft>): Builder<Valid> => ({ ...b, _s: { _state: 'valid' } });
+```
+
+[CRITICAL]:
+- [NEVER] represent protocol states with mutable booleans.
+
+---
+## [5][NO_IF_CONTROL_FLOW]
+>**Dictum:** *Branching should remain algebraic and explicit.*
+
+<br>
+
+```typescript
+const normalize = (input: Option.Option<string>) =>
+    Option.match(input, {
+        onNone: () => 'unknown',
+        onSome: (value) => value.trim(),
+    });
+```
+
+```typescript
+const classify = (n: number) => Match.value(n).pipe(
+    Match.when((value) => value < 0, () => 'neg'),
+    Match.when(0, () => 'zero'),
+    Match.orElse(() => 'pos'),
 );
 ```
 
-**`Match.value` -- inline dispatch on concrete values:**
-
-```typescript
-const classify = (input: string | number | boolean) =>
-    Match.value(input).pipe(
-        Match.when(Predicate.isString, (s) => `str:${s.length}`),
-        Match.when(Predicate.isNumber, (n) => `num:${n}`),
-        Match.when(Match.is(true), () => 'yes'),
-        Match.orElse(() => 'no'),
-    );
-```
-
-**Advanced matching:**
-
-| [INDEX] | [TECHNIQUE]                   | [API]                                              |
-| :-----: | ----------------------------- | -------------------------------------------------- |
-|   [1]   | Multi-tag with shared handler | `Match.tag('A', 'B', handler)`                     |
-|   [2]   | Multi-field discrimination    | `Match.discriminatorsExhaustive('_tag', 'status')` |
-|   [3]   | Class-based matching          | `Match.when(Match.instanceOf(MyClass), ...)`       |
-|   [4]   | Nested discriminated matching | Outer `Match.tag` -> inner `Match.value`           |
-|   [5]   | Predicate-based narrowing     | `Match.when(Predicate.isString, ...)`              |
-
-[IMPORTANT]:
-- [ALWAYS] Use `Match.type<T>()` for reusable matchers (function value).
-- [ALWAYS] Use `Match.value(x)` for inline dispatch on concrete values.
-- [ALWAYS] Use `Match.withReturnType<R>()` when constraining return type.
-- [ALWAYS] Use `Match.tag('A', 'B', handler)` when variants share behavior.
-
----
-## [4][MATCH_FINALIZERS]
->**Dictum:** *Choose finalizer that encodes completeness guarantee.*
-
-<br>
-
-| [INDEX] | [FINALIZER]        | [BEHAVIOR]                                  |
-| :-----: | ------------------ | ------------------------------------------- |
-|   [1]   | `Match.exhaustive` | Compile error if any variant unhandled      |
-|   [2]   | `Match.orElse`     | Fallback for unmatched (non-exhaustive)     |
-|   [3]   | `Match.option`     | `Option.some` on match, `Option.none` else  |
-|   [4]   | `Match.either`     | `Either.right` on match, `Either.left` else |
-
-[IMPORTANT]:
-- [ALWAYS] Prefer `Match.exhaustive` -- compile-time safety over runtime fallbacks.
-- [ALWAYS] Use `Match.orElse` only when input type is genuinely open (e.g., `unknown`, union with unbounded members).
-
----
-## [5][TYPE_LEVEL_PATTERNS]
->**Dictum:** *Type system is compile-time programming language.*
-
-<br>
-
-| [INDEX] | [PATTERN]                    | [SYNTAX]                                                                  |
-| :-----: | ---------------------------- | ------------------------------------------------------------------------- |
-|   [1]   | Conditional + `infer`        | `type Unwrap<T> = T extends { data: infer D } ? D : never`                |
-|   [2]   | Template literal types       | `type Event<T extends string> = \`on${Capitalize<T>}\``                   |
-|   [3]   | `DeepReadonly<T>`            | From `ts-essentials` -- recursive deep freeze at type level               |
-|   [4]   | Non-distribution             | `[T] extends [U] ? X : Y` -- prevents union distribution                  |
-|   [5]   | Variadic tuples              | `type Concat<A extends unknown[], B extends unknown[]> = [...A, ...B]`    |
-|   [6]   | Mapped + `as` for key rename | `{ [K in keyof T as K extends Old ? New : K]: T[K] }`                     |
-|   [7]   | `as const satisfies T`       | Literal inference preserved, shape validated at declaration site          |
-|   [8]   | Const type parameters        | `function f<const T extends string>(role: T): T` -- preserves literal     |
-|   [9]   | `NoInfer<T>`                 | `f<T>(source: T, fallback: NoInfer<T>)` -- forces inference from `source` |
-|  [10]   | `using` in Effect.gen        | `using handle = yield* resource` -- TS 6.0 deterministic cleanup          |
-
-[IMPORTANT]:
-- [ALWAYS] Use `as const satisfies T` for config objects -- typos caught, literals preserved.
-- [ALWAYS] Use `NoInfer<T>` to control inference direction when multiple params contribute to `T`.
-- [ALWAYS] Use `[T] extends [U]` to prevent unintended union distribution.
-
-[REFERENCE] Consolidation patterns: [->consolidation.md](./consolidation.md).
+[CRITICAL]:
+- [NEVER] use `if (...)` for variant/state dispatch in standard scope.

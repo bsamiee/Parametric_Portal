@@ -1,187 +1,94 @@
 # [H1][CONSOLIDATION]
->**Dictum:** *One polymorphic object replaces ten loose definitions.*
+>**Dictum:** *One polymorphic module beats ten scattered helpers.*
 
 <br>
 
-Dense code through unified objects, namespace merges, IIFE companions, and polymorphic design. Restructure and optimize logic to reduce complexity -- never extract or add helpers.
+Consolidate APIs around stable capability surfaces and snippet-backed composition patterns.
 
 ---
-## [1][NAMESPACE_MERGE]
->**Dictum:** *`const X` holds runtime values, `namespace X` holds companion types, single `export { X }` unifies both.*
+## [1][COMMAND_FIRST]
+>**Dictum:** *Command algebras replace sibling method clusters.*
 
 <br>
 
-Group related schemas, errors, functions, and types under ONE import. Write `Tenant.findById()`, `Tenant.Shape`, `Tenant.Error` -- never scattered imports.
-
-```typescript
-// --- [SCHEMA] ----------------------------------------------------------------
-const _schema = S.Struct({
-    id: S.String.pipe(S.brand('TenantId')),
-    name: S.String,
-    status: S.Literal('active', 'inactive'),
-});
-
-// --- [ERRORS] ----------------------------------------------------------------
-class NotFound extends Data.TaggedError('NotFound')<{ readonly id: string }> {}
-class Conflict extends Data.TaggedError('Conflict')<{ readonly name: string }> {}
-
-// --- [FUNCTIONS] -------------------------------------------------------------
-const findById = Effect.fn('Tenant.findById')((id: string) =>
-    Effect.gen(function* () { /* ... */ }));
-
-const create = Effect.fn('Tenant.create')((input: typeof _schema.Type) =>
-    Effect.gen(function* () { /* ... */ }));
-
-// --- [EXPORT] ----------------------------------------------------------------
-const Tenant = { schema: _schema, findById, create, NotFound, Conflict } as const;
-namespace Tenant {
-    export type Shape = typeof _schema.Type;
-    export type Encoded = typeof _schema.Encoded;
-    export type Error = NotFound | Conflict;
-}
-export { Tenant };
-```
+Use [SNIP-01](./snippets.md#snip-01command_algebra) for closed operation families.
 
 [IMPORTANT]:
-- [ALWAYS] Place `[EXPORT]` section at file end only -- no inline `export const`.
-- [ALWAYS] Provide ONE import giving consumers `X.method()`, `X.Type`, `X.Error`.
-- [ALWAYS] Group errors under namespace: `const XError = { A, B } as const; namespace XError { export type Any = A | B; }`.
+- [ALWAYS] Model operations as discriminated variants.
+- [ALWAYS] Dispatch with `Match.type(...).pipe(..., Match.exhaustive)`.
+- [ALWAYS] Keep the public method count small; widen the command type, not the exported API.
 
 [CRITICAL]:
-- [NEVER] Scattered exports per function/type -- merge into single namespace object.
-- [NEVER] Re-export individual members -- consumers import namespace.
-
-[REFERENCE] Error patterns: [->errors-and-services.md](./errors-and-services.md).
+- [NEVER] Add one method per action when action shape is variant-compatible.
+- [NEVER] Use fallback dispatch for closed command unions.
 
 ---
-## [2][IIFE_COMPANION]
->**Dictum:** *Branded primitives bundle schema + operations in a single binding.*
+## [2][AUTO_INTEGRATION]
+>**Dictum:** *Internal logic is integrated through registries and layers, not public methods.*
 
 <br>
 
-Apply IIFE for EVERY branded domain primitive. IIFE produces `const` + `type` merge -- write `Timestamp` for both value access and type annotation.
-
-```typescript
-const Timestamp = (() => {
-    const schema = S.Number.pipe(S.positive(), S.brand('Timestamp'));
-    const now = Effect.sync(() => Date.now() as typeof schema.Type);
-    const nowSync = () => Date.now() as typeof schema.Type;
-    const add = (base: typeof schema.Type, delta: number) =>
-        (base + delta) as typeof schema.Type;
-    const isExpired = (ts: typeof schema.Type, ttlMs: number) =>
-        Date.now() - ts > ttlMs;
-    return { schema, now, nowSync, add, isExpired } as const;
-})();
-type Timestamp = typeof Timestamp.schema.Type;
-export { Timestamp };
-```
+Use [SNIP-02](./snippets.md#snip-02auto_integration_registry).
 
 [IMPORTANT]:
-- [ALWAYS] IIFE for branded types -- schema + factory + predicates + arithmetic in one object.
-- [ALWAYS] `type X = typeof X.schema.Type` immediately after the IIFE.
+- [ALWAYS] Register handlers by iterating an internal readonly registry.
+- [ALWAYS] Keep registration in one layer-producing location.
+- [ALWAYS] Treat new registry entries as automatic feature activation.
+
+[CRITICAL]:
+- [NEVER] Require composition-root edits for each new internal handler.
+- [NEVER] Export handler internals to force integration.
 
 ---
-## [3][NO_HAND_ROLLING]
->**Dictum:** *Effect ships 30+ modules. Use them.*
+## [3][CAPABILITY_FACADES]
+>**Dictum:** *Capability groups reduce cognitive load and accidental API growth.*
 
 <br>
 
-| [INDEX] | [HAND_ROLLED]                    | [EFFECT_MODULE]   | [KEY_APIS]                                         |
-| :-----: | -------------------------------- | ----------------- | -------------------------------------------------- |
-|   [1]   | `arr.filter().map()`             | `Array`           | `filterMap`, `groupBy`, `dedupe`, `intersection`   |
-|   [2]   | `Object.keys().reduce()`         | `Record`          | `map`, `filter`, `collect`, `fromEntries`          |
-|   [3]   | `x != null`                      | `Option`          | `fromNullable`, `map`, `flatMap`, `getOrElse`      |
-|   [4]   | `pred1 && pred2`                 | `Predicate`       | `and`, `or`, `not`, `compose`                      |
-|   [5]   | `if/switch`                      | `Match`           | `type`, `value`, `tag`, `when`, `exhaustive`       |
-|   [6]   | `new Map()` + locks              | `TMap` via `STM`  | `empty`, `get`, `set`, `takeFirst`, `merge`        |
-|   [7]   | `Map<K, Fiber>` + cleanup        | `FiberMap`        | `make`, `run`, `remove`, `join`, `awaitEmpty`      |
-|   [8]   | Manual retry loops               | `Schedule`        | `exponential`, `jittered`, `intersect`, `upTo`     |
-|   [9]   | `EventEmitter`                   | `PubSub`+`Stream` | `fromPubSub`, `broadcast`, `groupByKey`            |
-|  [10]   | `let cache; if (!cache)`         | `Effect`          | `cached`, `cachedWithTTL`, `once`                  |
-|  [11]   | `Array.find` returns `undefined` | `Array`           | `findFirst` returns `Option<A>`                    |
-|  [12]   | Manual `structuredClone`         | `Data`            | `Data.struct`, `Data.tagged` (structural equality) |
+Use [SNIP-03](./snippets.md#snip-03capability_groups).
 
-Schedule composition replaces manual retry:
-
-```typescript
-const retryPolicy = Schedule.exponential('100 millis', 2).pipe(
-    Schedule.jittered,
-    Schedule.intersect(Schedule.recurs(4)),
-    Schedule.upTo('30 seconds'),
-    Schedule.whileInput((error: ServiceError) => error._tag !== 'Fatal'),
-);
-// One expression replaces 40 lines of manual setTimeout + counter + jitter + cap logic
-```
+[IMPORTANT]:
+- [ALWAYS] Group methods by capability (`read`, `write`, `admin`).
+- [ALWAYS] Keep grouped surface stable, evolve internals behind it.
+- [ALWAYS] Prefer nested capability objects over flat method sprawl.
 
 [CRITICAL]:
-- [NEVER] Hand-roll what Effect provides -- `Array`, `Record`, `Option`, `Predicate`, `Match`, `TMap`, `FiberMap`, `Schedule`, `PubSub`, `Stream`, `Queue`, `Deferred`, `Semaphore`, `Pool`.
-
-[REFERENCE] Advanced APIs: [->composition.md](./composition.md).
+- [NEVER] Return giant flat service objects with unrelated concerns mixed.
 
 ---
-## [4][POLYMORPHISM]
->**Dictum:** *Fewer functions, more overloads. Discriminated config preserves exhaustive type safety.*
-
-<br>
-
-**Pattern 1:** Config-driven polymorphism via discriminated config:
-
-```typescript
-const _handle = Effect.fn('Breaker.handle')((
-    config: { readonly _tag: 'consecutive'; readonly threshold: number }
-         | { readonly _tag: 'sampling'; readonly rate: number; readonly window: Duration.DurationInput },
-) => Match.value(config).pipe(
-    Match.tag('consecutive', ({ threshold }) => /* ... */),
-    Match.tag('sampling', ({ rate, window }) => /* ... */),
-    Match.exhaustive,
-));
-```
-
-**Pattern 2:** Discriminated config with `Match.value` branching:
-
-```typescript
-const _sendNotification = Effect.fn('Notify.send')((
-    config: { readonly _tag: 'email'; readonly to: string; readonly subject: string }
-          | { readonly _tag: 'sms'; readonly phone: string }
-          | { readonly _tag: 'push'; readonly deviceToken: string; readonly badge: number },
-    body: string,
-) => Match.value(config).pipe(
-    Match.tag('email', ({ to, subject }) =>
-        emailClient.send({ to, subject, body })),
-    Match.tag('sms', ({ phone }) =>
-        smsGateway.deliver({ phone, body: body.slice(0, 160) })),
-    Match.tag('push', ({ deviceToken, badge }) =>
-        pushService.dispatch({ deviceToken, badge, body })),
-    Match.exhaustive,
-));
-```
-
-[CRITICAL]:
-- [NEVER] Extract helpers to reduce complexity -- restructure and optimize the logic itself.
-- [NEVER] Proliferate functions with similar signatures -- consolidate with discriminated config.
-- [NEVER] Create wrapper/indirection layers -- every function must justify its existence.
-
----
-## [5][SCHEMA_CONSOLIDATION]
->**Dictum:** *One canonical schema per entity. Derive variants at call site.*
+## [4][SCHEMA_AND_TYPE_CONSOLIDATION]
+>**Dictum:** *One canonical schema per entity, variants derived at call site.*
 
 <br>
 
 ```typescript
 const UserSchema = S.Struct({
     id: S.String.pipe(S.brand('UserId')),
-    name: S.String,
-    email: S.String.pipe(S.pattern(/@/)),
+    email: S.String,
     role: S.Literal('admin', 'member', 'viewer'),
-    createdAt: S.DateTimeUtc,
 });
 
-// Derive variants inline -- NO separate CreateUserSchema / UpdateUserSchema
-const decode = S.decodeUnknown(UserSchema.pipe(S.pick('name', 'email', 'role')));
-const patch = S.decodeUnknown(UserSchema.pipe(S.pick('name', 'email'), S.partial));
+const decodeCreate = S.decodeUnknown(UserSchema.pipe(S.pick('email', 'role')));
+const decodePatch = S.decodeUnknown(UserSchema.pipe(S.pick('email', 'role'), S.partial));
 ```
 
 [CRITICAL]:
-- [NEVER] Parallel `XCreateSchema`, `XUpdateSchema`, `XPatchSchema` -- derive via `pick`/`omit`/`partial` at call site.
-- [NEVER] Duplicate schema fields across multiple definitions.
+- [NEVER] Maintain parallel `Create/Update/Patch` schemas when `pick/omit/partial` derives variants.
+- [NEVER] Duplicate type aliases separate from schema definitions.
 
+---
+## [5][NO_HAND_ROLLING_MAP]
+>**Dictum:** *Use existing Effect modules before authoring custom helpers.*
+
+<br>
+
+| [INDEX] | [HAND_ROLLED]        | [EFFECT_REPLACEMENT]      |
+| :-----: | -------------------- | ------------------------- |
+|   [1]   | variant branching    | `Match.type` / `Match.tag` |
+|   [2]   | null checks          | `Option.fromNullable`     |
+|   [3]   | retry loops          | `Schedule` composition    |
+|   [4]   | lock + Map           | `STM` + `TMap`            |
+|   [5]   | fiber registry       | `FiberMap`                |
+|   [6]   | ad hoc stream buffer | `Stream.buffer/groupedWithin` |
+
+[REFERENCE] Compose with [composition.md](./composition.md) and snippets catalog [snippets.md](./snippets.md).

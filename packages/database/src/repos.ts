@@ -22,6 +22,7 @@ const makeUserRepo = Effect.gen(function* () {
     };
 });
 const makePermissionRepo = Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
     const repository = yield* repo(Permission, 'permissions', {
         conflict: { keys: ['appId', 'role', 'resource', 'action'], only: ['deletedAt'] },
         scoped: 'appId',
@@ -37,6 +38,7 @@ const makePermissionRepo = Effect.gen(function* () {
                 role: payload.role,
                 updatedAt: undefined,
             }),
+        lookupImmv: (role: string, resource: string, action: string) => sql<{ appId: string }>`SELECT app_id FROM permission_lookups WHERE role = ${role} AND resource = ${resource} AND action = ${action}`.pipe(Effect.map((rows) => rows.length > 0),),
         revoke: (role: string, resource: string, action: string) =>
             repository.drop([
                 { field: 'role', value: role },
@@ -145,6 +147,7 @@ const makeJobRepo = Effect.gen(function* () {
         byDateRange: (after: Date, before: Date, options?: { limit?: number; cursor?: string }) => repository.page(repository.preds({ after, before }), { cursor: options?.cursor, limit: options?.limit ?? _LIMITS.defaultPage }),
         byStatus: (status: string, options?: { after?: Date; before?: Date; limit?: number; cursor?: string }) => repository.page([{ field: 'status', value: status }, ...repository.preds({ after: options?.after, before: options?.before })], { cursor: options?.cursor, limit: options?.limit ?? _LIMITS.defaultPage }),
         countByStatuses: (...statuses: readonly string[]) => repository.count([{ field: 'status', op: 'in', values: [...statuses] }]),
+        countByStatusesImmv: (...statuses: readonly string[]) => sql<{ status: string; cnt: number }>`SELECT status, cnt FROM job_status_counts WHERE status IN ${sql.in([...statuses])}`.pipe(Effect.map((rows) => Object.fromEntries(rows.map((row) => [row.status, row.cnt])) as Record<string, number>),),
         isDuplicate: (dedupeKey: string) => repository.exists([{ raw: sql`correlation->>'dedupe' = ${dedupeKey}` }, { field: 'status', op: 'in', values: ['queued', 'processing'] }]),
     };
 });
@@ -192,68 +195,172 @@ const makeKvStoreRepo = Effect.gen(function* () {
     };
 });
 const makeSystemRepo = Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
     const repository = yield* routine('database/system', {
         functions: {
             count_outbox: {},
-            get_journal_entry:     { args: ['primaryKey'],  mode: 'set', params: S.Struct({ primaryKey: S.String }), schema: S.Struct({ payload: S.String }) },
-            list_cron_jobs:        { mode: 'typed',         schema: S.Array(S.Unknown) },
-            list_journal_entries:  { args: ['sinceSequenceId', 'sinceTimestamp', 'eventType', 'batchSize'], mode: 'set', params: S.Struct({ batchSize: S.Number, eventType: S.NullOr(S.String), sinceSequenceId: S.String, sinceTimestamp: S.NullOr(S.Number) }), schema: S.Struct({ payload: S.String, primaryKey: S.String }) },
-            list_partition_health: { args: ['parentTable'], mode: 'typed', params: S.Struct({ parentTable: S.String }), schema: S.Array(S.Unknown) },
-            purge_journal:         { args: ['days'],        params: S.Struct({ days: S.Number }) },
-            purge_tenant:          { args: ['appId'],       params: S.Struct({ appId: S.UUID }) },
+            create_hypothetical_index: {
+                args: ['statement'], mode: 'set',
+                params: S.Struct({ statement: S.String }),
+                schema: S.Struct({ indexname: S.String, indexrelid: S.Number }),
+            },
+            get_journal_entry: {
+                args: ['primaryKey'], mode: 'set',
+                params: S.Struct({ primaryKey: S.String }),
+                schema: S.Struct({ payload: S.String }),
+            },
+            heap_force_freeze: {
+                args: ['relation', 'block'],
+                params: S.Struct({ block: S.Number, relation: S.String }),
+            },
+            list_journal_entries: {
+                args: ['sinceSequenceId', 'sinceTimestamp', 'eventType', 'batchSize'],
+                mode: 'set',
+                params: S.Struct({
+                    batchSize: S.Number,
+                    eventType: S.NullOr(S.String),
+                    sinceSequenceId: S.String,
+                    sinceTimestamp: S.NullOr(S.Number),
+                }),
+                schema: S.Struct({ payload: S.String, primaryKey: S.String }),
+            },
+            list_partition_health: {
+                args: ['parentTable'], mode: 'typed',
+                params: S.Struct({ parentTable: S.String }),
+                schema: S.Array(S.Unknown),
+            },
+            prewarm_relation: {
+                args: ['relation', 'mode'],
+                params: S.Struct({ mode: S.String, relation: S.String }),
+            },
+            purge_journal: {
+                args: ['days'],
+                params: S.Struct({ days: S.Number }),
+            },
+            purge_tenant: {
+                args: ['appId'],
+                params: S.Struct({ appId: S.UUID }),
+            },
+            reset_hypothetical_indexes: { mode: 'scalar', schema: S.Void },
             reset_wait_sampling_profile: { mode: 'scalar', schema: S.Boolean },
             run_partman_maintenance: { mode: 'scalar', schema: S.Boolean },
-            start_squeeze_worker:  { mode: 'scalar',        schema: S.Boolean },
-            stat_cache_ratio:      { mode: 'set',           schema: S.Struct({ backendType: S.String, cacheHitRatio: S.Number, hits: S.Number, ioContext: S.String, ioObject: S.String, reads: S.Number, writes: S.Number }) },
-            stat_io_config:        { mode: 'set',           schema: S.Struct({ name: S.String, setting: S.String }) },
-            stat_io_detail:        { mode: 'set',           schema: S.Unknown },
-            stat_kcache:           { args: ['limit'],       mode: 'typed', params: S.Struct({ limit: S.Number }), schema: S.Array(S.Unknown) },
-            stat_partman_config:   { mode: 'typed',         schema: S.Array(S.Unknown) },
-            stat_qualstats:        { args: ['limit'],       mode: 'typed', params: S.Struct({ limit: S.Number }), schema: S.Array(S.Unknown) },
-            stat_squeeze_tables:   { mode: 'typed',         schema: S.Array(S.Unknown) },
-            stat_squeeze_workers:  { mode: 'typed',         schema: S.Array(S.Unknown) },
-            stat_statements:       { args: ['limit'],       mode: 'typed', params: S.Struct({ limit: S.Number }), schema: S.Array(S.Unknown) },
-            stat_wait_sampling:    { args: ['limit'],       mode: 'typed', params: S.Struct({ limit: S.Number }), schema: S.Array(S.Unknown) },
-            stat_wait_sampling_current: { args: ['limit'], mode: 'typed', params: S.Struct({ limit: S.Number }), schema: S.Array(S.Unknown) },
-            stat_wait_sampling_history: { args: ['limit', 'sinceSeconds'], mode: 'typed', params: S.Struct({ limit: S.Number, sinceSeconds: S.Number }), schema: S.Array(S.Unknown) },
-            stat_wal_inspect:      { args: ['limit'],       mode: 'typed', params: S.Struct({ limit: S.Number }), schema: S.Array(S.Unknown) },
-            stop_squeeze_worker:   { args: ['pid'],         mode: 'scalar', params: S.Struct({ pid: S.Number }), schema: S.Boolean },
-            sync_cron_jobs:        { mode: 'typed',         schema: S.Array(S.Unknown) },
+            start_squeeze_worker: { mode: 'scalar', schema: S.Boolean },
+            stat: {
+                args: ['name', 'limit', { cast: 'jsonb', field: 'extra' }],
+                mode: 'typed',
+                params: S.Struct({
+                    extra: S.NullOr(S.String),
+                    limit: S.Number,
+                    name: S.String,
+                }),
+                schema: S.Array(S.Unknown),
+            },
+            stop_squeeze_worker: {
+                args: ['pid'], mode: 'scalar',
+                params: S.Struct({ pid: S.Number }),
+                schema: S.Boolean,
+            },
+            sync_cron_jobs: { mode: 'typed', schema: S.Array(S.Unknown) },
         },
     });
+    const _stat = <T = readonly unknown[]>(name: string, limit = _LIMITS.defaultPage, extra: Record<string, unknown> | null = null) =>
+        repository.fn<T>('stat', { extra: extra ? JSON.stringify(extra) : null, limit, name });
     return {
-        cacheRatio: () => repository.fn<readonly { backendType: string; cacheHitRatio: number; hits: number; ioContext: string; ioObject: string; reads: number; writes: number }[]>('stat_cache_ratio', {}),
-        cronJobs: () => repository.fn<readonly unknown[]>('list_cron_jobs', {}),
-        ioConfig: () => repository.fn<readonly { name: string; setting: string }[]>('stat_io_config', {}),
-        ioDetail: () => repository.fn<readonly unknown[]>('stat_io_detail', {}),
-        journalEntry: (primaryKey: string) => repository.fn<readonly { payload: string }[]>('get_journal_entry', { primaryKey }).pipe(Effect.map((rows) => Option.fromNullable(rows[0]))),
+        buffercacheSummary: () => _stat('buffercache_summary'),
+        buffercacheTop: (limit = _LIMITS.defaultPage) => _stat('buffercache_top', limit),
+        buffercacheUsage: () => _stat('buffercache_usage'),
+        cacheRatio: () => _stat<readonly {
+            backendType: string; cacheHitRatio: number; hits: number;
+            ioContext: string; ioObject: string; reads: number; writes: number;
+        }[]>('cache_ratio'),
+        connectionStats: (limit = _LIMITS.defaultPage) => _stat('connection_stats', limit),
+        createHypotheticalIndex: (statement: string) => repository.fn<readonly {
+            indexrelid: number; indexname: string;
+        }[]>('create_hypothetical_index', { statement }),
+        cronFailures: (hours = 24) => _stat('cron_failures', _LIMITS.defaultPage, { hours }),
+        cronHistory: (limit = _LIMITS.defaultPage, jobName: string | null = null) =>
+            _stat('cron_history', limit, jobName ? { job_name: jobName } : null),
+        cronJobs: () => _stat('cron_jobs'),
+        deadTuples: (limit = _LIMITS.defaultPage) => _stat('dead_tuples', limit),
+        heapForceFreeze: (relation: string, block = 0) =>
+            repository.fn<number>('heap_force_freeze', { block, relation }),
+        hypotheticalIndexes: () => _stat('hypothetical_indexes'),
+        immvJobStatusCounts: () =>
+            sql<{ appId: string; status: string; cnt: number }>`
+                SELECT app_id, status, cnt
+                FROM job_status_counts ORDER BY app_id, status`,
+        immvPermissionLookups: () =>
+            sql<{ appId: string; role: string; resource: string; action: string }>`
+                SELECT app_id, role, resource, action
+                FROM permission_lookups
+                ORDER BY app_id, role, resource, action`,
+        indexAdvisor: (minFilter = 1000, minSelectivity = 30) =>
+            _stat('index_advisor', _LIMITS.defaultPage, {
+                min_filter: minFilter, min_selectivity: minSelectivity,
+            }),
+        indexBloat: (limit = _LIMITS.defaultPage) => _stat('index_bloat', limit),
+        indexUsage: (limit = _LIMITS.defaultPage) => _stat('index_usage', limit),
+        ioConfig: () => _stat<readonly { name: string; setting: string }[]>('io_config'),
+        ioDetail: () => _stat('io_detail'),
+        journalEntry: (primaryKey: string) =>
+            repository.fn<readonly { payload: string }[]>(
+                'get_journal_entry', { primaryKey },
+            ).pipe(Effect.map((rows) => Option.fromNullable(rows[0]))),
         journalPurge: (days: number) => repository.fn<number>('purge_journal', { days }),
-        journalReplay: (input: { batchSize: number; eventType?: string; sinceSequenceId: string; sinceTimestamp?: number }) => repository.fn<readonly { payload: string; primaryKey: string }[]>('list_journal_entries', {
-            batchSize: input.batchSize,
-            eventType: Option.getOrNull(Option.fromNullable(input.eventType)),
-            sinceSequenceId: input.sinceSequenceId,
-            sinceTimestamp: Option.getOrNull(Option.fromNullable(input.sinceTimestamp)),
-        }),
-        kcache: (limit = _LIMITS.defaultPage) => repository.fn<readonly unknown[]>('stat_kcache', { limit }),
+        journalReplay: (input: {
+            batchSize: number; eventType?: string;
+            sinceSequenceId: string; sinceTimestamp?: number;
+        }) => repository.fn<readonly { payload: string; primaryKey: string }[]>(
+            'list_journal_entries', {
+                batchSize: input.batchSize,
+                eventType: Option.getOrNull(Option.fromNullable(input.eventType)),
+                sinceSequenceId: input.sinceSequenceId,
+                sinceTimestamp: Option.getOrNull(
+                    Option.fromNullable(input.sinceTimestamp),
+                ),
+            },
+        ),
+        kcache: (limit = _LIMITS.defaultPage) => _stat('kcache', limit),
+        lockContention: (limit = _LIMITS.defaultPage) => _stat('lock_contention', limit),
+        longRunningQueries: (limit = _LIMITS.defaultPage, minSeconds = 5) =>
+            _stat('long_running_queries', limit, { min_seconds: minSeconds }),
         outboxCount: () => repository.fn<number>('count_outbox', {}),
-        partitionHealth: (parentTable = 'public.sessions') => repository.fn<readonly unknown[]>('list_partition_health', { parentTable }),
-        partmanConfig: () => repository.fn<readonly unknown[]>('stat_partman_config', {}),
-        qualstats: (limit = _LIMITS.defaultPage) => repository.fn<readonly unknown[]>('stat_qualstats', { limit }),
-        resetWaitSampling: () => repository.fn<boolean>('reset_wait_sampling_profile', {}),
-        runPartmanMaintenance: () => repository.fn<boolean>('run_partman_maintenance', {}),
+        partitionHealth: (parentTable = 'public.sessions') =>
+            repository.fn<readonly unknown[]>('list_partition_health', { parentTable }),
+        partmanConfig: () => _stat('partman_config'),
+        prewarmRelation: (relation: string, mode = 'buffer') =>
+            repository.fn<number>('prewarm_relation', { mode, relation }),
+        qualstats: (limit = _LIMITS.defaultPage) => _stat('qualstats', limit),
+        replicationLag: (limit = _LIMITS.defaultPage) => _stat('replication_lag', limit),
+        resetHypotheticalIndexes: () =>
+            repository.fn<void>('reset_hypothetical_indexes', {}),
+        resetWaitSampling: () =>
+            repository.fn<boolean>('reset_wait_sampling_profile', {}),
+        runPartmanMaintenance: () =>
+            repository.fn<boolean>('run_partman_maintenance', {}),
+        seqScanHeavy: (limit = _LIMITS.defaultPage) => _stat('seq_scan_heavy', limit),
         squeezeStartWorker: () => repository.fn<boolean>('start_squeeze_worker', {}),
         squeezeStatus: () => Effect.all({
-            tables: repository.fn<readonly unknown[]>('stat_squeeze_tables', {}),
-            workers: repository.fn<readonly unknown[]>('stat_squeeze_workers', {}),
+            tables: _stat('squeeze_tables'),
+            workers: _stat('squeeze_workers'),
         }),
-        squeezeStopWorker: (pid: number) => repository.fn<boolean>('stop_squeeze_worker', { pid }),
-        statements: (limit = _LIMITS.defaultPage) => repository.fn<readonly unknown[]>('stat_statements', { limit }),
+        squeezeStopWorker: (pid: number) =>
+            repository.fn<boolean>('stop_squeeze_worker', { pid }),
+        statements: (limit = _LIMITS.defaultPage) => _stat('statements', limit),
         syncCronJobs: () => repository.fn<readonly unknown[]>('sync_cron_jobs', {}),
+        tableBloat: (limit = _LIMITS.defaultPage) => _stat('table_bloat', limit),
+        tableSizes: (limit = _LIMITS.defaultPage) => _stat('table_sizes', limit),
         tenantPurge: (appId: string) => repository.fn<number>('purge_tenant', { appId }),
-        waitSampling: (limit = _LIMITS.defaultPage) => repository.fn<readonly unknown[]>('stat_wait_sampling', { limit }),
-        waitSamplingCurrent: (limit = _LIMITS.defaultPage) => repository.fn<readonly unknown[]>('stat_wait_sampling_current', { limit }),
-        waitSamplingHistory: (limit = _LIMITS.defaultPage, sinceSeconds = _LIMITS.defaultAuditWindow) => repository.fn<readonly unknown[]>('stat_wait_sampling_history', { limit, sinceSeconds }),
-        walInspect: (limit = _LIMITS.defaultPage) => repository.fn<readonly unknown[]>('stat_wal_inspect', { limit }),
+        unusedIndexes: (limit = _LIMITS.defaultPage) => _stat('unused_indexes', limit),
+        visibility: (limit = _LIMITS.defaultPage) => _stat('visibility', limit),
+        waitSampling: (limit = _LIMITS.defaultPage) => _stat('wait_sampling', limit),
+        waitSamplingCurrent: (limit = _LIMITS.defaultPage) =>
+            _stat('wait_sampling_current', limit),
+        waitSamplingHistory: (
+            limit = _LIMITS.defaultPage,
+            sinceSeconds = _LIMITS.defaultAuditWindow,
+        ) => _stat('wait_sampling_history', limit, { since_seconds: sinceSeconds }),
+        walInspect: (limit = _LIMITS.defaultPage) => _stat('wal_inspect', limit),
     };
 });
 
@@ -269,37 +376,117 @@ class DatabaseService extends Effect.Service<DatabaseService>()('database/Databa
         ]);
         const monitoring = {
             cacheRatio: Effect.fn('db.cacheRatio')(system.cacheRatio),
+            immvJobStatusCounts: Effect.fn('db.immvJobStatusCounts')(system.immvJobStatusCounts),
+            immvPermissionLookups: Effect.fn('db.immvPermissionLookups')(system.immvPermissionLookups),
             ioConfig: Effect.fn('db.ioConfig')(system.ioConfig),
             ioDetail: Effect.fn('db.ioDetail')(system.ioDetail),
         } as const;
         return {
             apiKeys, apps, assets, audit,
+            buffercacheSummary: Effect.fn('db.buffercacheSummary')(
+                () => system.buffercacheSummary()),
+            buffercacheTop: Effect.fn('db.buffercacheTop')(
+                (limit = _LIMITS.defaultPage) => system.buffercacheTop(limit)),
+            buffercacheUsage: Effect.fn('db.buffercacheUsage')(
+                () => system.buffercacheUsage()),
+            connectionStats: Effect.fn('db.connectionStats')(
+                (limit = _LIMITS.defaultPage) => system.connectionStats(limit)),
+            createHypotheticalIndex: Effect.fn('db.createHypotheticalIndex')(
+                (statement: string) => system.createHypotheticalIndex(statement)),
+            cronFailures: Effect.fn('db.cronFailures')(
+                (hours = 24) => system.cronFailures(hours)),
+            cronHistory: Effect.fn('db.cronHistory')(
+                (limit = _LIMITS.defaultPage, jobName: string | null = null) =>
+                    system.cronHistory(limit, jobName)),
             cronJobs: Effect.fn('db.cronJobs')(() => system.cronJobs()),
+            deadTuples: Effect.fn('db.deadTuples')(
+                (limit = _LIMITS.defaultPage) => system.deadTuples(limit)),
+            heapForceFreeze: Effect.fn('db.heapForceFreeze')(
+                (relation: string, block = 0) =>
+                    system.heapForceFreeze(relation, block)),
+            hypotheticalIndexes: Effect.fn('db.hypotheticalIndexes')(
+                () => system.hypotheticalIndexes()),
+            indexAdvisor: Effect.fn('db.indexAdvisor')(
+                (minFilter = 1000, minSelectivity = 30) =>
+                    system.indexAdvisor(minFilter, minSelectivity)),
+            indexBloat: Effect.fn('db.indexBloat')(
+                (limit = _LIMITS.defaultPage) => system.indexBloat(limit)),
+            indexUsage: Effect.fn('db.indexUsage')(
+                (limit = _LIMITS.defaultPage) => system.indexUsage(limit)),
             jobDlq, jobs, journal: {
                 entry: (primaryKey: string) => system.journalEntry(primaryKey),
                 purge: (olderThanDays: number) => system.journalPurge(olderThanDays),
-                replay: (input: { batchSize: number; eventType?: string; sinceSequenceId: string; sinceTimestamp?: number }) => system.journalReplay(input),
+                replay: (input: {
+                    batchSize: number; eventType?: string;
+                    sinceSequenceId: string; sinceTimestamp?: number;
+                }) => system.journalReplay(input),
             },
-            kcache: Effect.fn('db.kcache')((limit = _LIMITS.defaultPage) => system.kcache(limit)), kvStore,
+            kcache: Effect.fn('db.kcache')(
+                (limit = _LIMITS.defaultPage) => system.kcache(limit)),
+            kvStore,
+            lockContention: Effect.fn('db.lockContention')(
+                (limit = _LIMITS.defaultPage) => system.lockContention(limit)),
+            longRunningQueries: Effect.fn('db.longRunningQueries')(
+                (limit = _LIMITS.defaultPage, minSeconds = 5) =>
+                    system.longRunningQueries(limit, minSeconds)),
             mfaSecrets,
-            monitoring, notifications, oauthAccounts, outbox: { count: system.outboxCount() },
-            partitionHealth: Effect.fn('db.partitionHealth')((parentTable = 'public.sessions') => system.partitionHealth(parentTable)), 
-            partmanConfig: Effect.fn('db.partmanConfig')(() => system.partmanConfig()),permissions,
-            qualstats: Effect.fn('db.qualstats')((limit = _LIMITS.defaultPage) => system.qualstats(limit)),
-            resetWaitSampling: Effect.fn('db.resetWaitSampling')(() => system.resetWaitSampling()),
-            runPartmanMaintenance: Effect.fn('db.runPartmanMaintenance')(() => system.runPartmanMaintenance()),
-            search: searchRepo, sessions,
-            squeezeStartWorker: Effect.fn('db.squeezeStartWorker')(() => system.squeezeStartWorker()),
-            squeezeStatus: Effect.fn('db.squeezeStatus')(() => system.squeezeStatus()),
-            squeezeStopWorker: Effect.fn('db.squeezeStopWorker')((pid: number) => system.squeezeStopWorker(pid)),
-            statements: Effect.fn('db.statements')((limit = _LIMITS.defaultPage) => system.statements(limit)),
-            syncCronJobs: Effect.fn('db.syncCronJobs')(() => system.syncCronJobs()),
+            monitoring, notifications, oauthAccounts,
+            outbox: { count: system.outboxCount() },
+            partitionHealth: Effect.fn('db.partitionHealth')(
+                (parentTable = 'public.sessions') =>
+                    system.partitionHealth(parentTable)),
+            partmanConfig: Effect.fn('db.partmanConfig')(
+                () => system.partmanConfig()),
+            permissions,
+            prewarmRelation: Effect.fn('db.prewarmRelation')(
+                (relation: string, mode = 'buffer') =>
+                    system.prewarmRelation(relation, mode)),
+            qualstats: Effect.fn('db.qualstats')(
+                (limit = _LIMITS.defaultPage) => system.qualstats(limit)),
+            replicationLag: Effect.fn('db.replicationLag')(
+                (limit = _LIMITS.defaultPage) => system.replicationLag(limit)),
+            resetHypotheticalIndexes: Effect.fn('db.resetHypotheticalIndexes')(
+                () => system.resetHypotheticalIndexes()),
+            resetWaitSampling: Effect.fn('db.resetWaitSampling')(
+                () => system.resetWaitSampling()),
+            runPartmanMaintenance: Effect.fn('db.runPartmanMaintenance')(
+                () => system.runPartmanMaintenance()),
+            search: searchRepo, 
+            seqScanHeavy: Effect.fn('db.seqScanHeavy')(
+                (limit = _LIMITS.defaultPage) => system.seqScanHeavy(limit)),sessions,
+            squeezeStartWorker: Effect.fn('db.squeezeStartWorker')(
+                () => system.squeezeStartWorker()),
+            squeezeStatus: Effect.fn('db.squeezeStatus')(
+                () => system.squeezeStatus()),
+            squeezeStopWorker: Effect.fn('db.squeezeStopWorker')(
+                (pid: number) => system.squeezeStopWorker(pid)),
+            statements: Effect.fn('db.statements')(
+                (limit = _LIMITS.defaultPage) => system.statements(limit)),
+            syncCronJobs: Effect.fn('db.syncCronJobs')(
+                () => system.syncCronJobs()),
             system: { tenantPurge: (appId: string) => system.tenantPurge(appId) },
+            tableBloat: Effect.fn('db.tableBloat')(
+                (limit = _LIMITS.defaultPage) => system.tableBloat(limit)),
+            tableSizes: Effect.fn('db.tableSizes')(
+                (limit = _LIMITS.defaultPage) => system.tableSizes(limit)),
+            unusedIndexes: Effect.fn('db.unusedIndexes')(
+                (limit = _LIMITS.defaultPage) => system.unusedIndexes(limit)),
             users,
-            waitSampling: Effect.fn('db.waitSampling')((limit = _LIMITS.defaultPage) => system.waitSampling(limit)),
-            waitSamplingCurrent: Effect.fn('db.waitSamplingCurrent')((limit = _LIMITS.defaultPage) => system.waitSamplingCurrent(limit)),
-            waitSamplingHistory: Effect.fn('db.waitSamplingHistory')((limit = _LIMITS.defaultPage, sinceSeconds = _LIMITS.defaultAuditWindow) => system.waitSamplingHistory(limit, sinceSeconds)),
-            walInspect: Effect.fn('db.walInspect')((limit = _LIMITS.defaultPage) => system.walInspect(limit)), webauthnCredentials, withTransaction: sqlClient.withTransaction,
+            visibility: Effect.fn('db.visibility')(
+                (limit = _LIMITS.defaultPage) => system.visibility(limit)),
+            waitSampling: Effect.fn('db.waitSampling')(
+                (limit = _LIMITS.defaultPage) => system.waitSampling(limit)),
+            waitSamplingCurrent: Effect.fn('db.waitSamplingCurrent')(
+                (limit = _LIMITS.defaultPage) =>
+                    system.waitSamplingCurrent(limit)),
+            waitSamplingHistory: Effect.fn('db.waitSamplingHistory')(
+                (limit = _LIMITS.defaultPage,
+                    sinceSeconds = _LIMITS.defaultAuditWindow) =>
+                    system.waitSamplingHistory(limit, sinceSeconds)),
+            walInspect: Effect.fn('db.walInspect')(
+                (limit = _LIMITS.defaultPage) => system.walInspect(limit)),
+            webauthnCredentials,
+            withTransaction: sqlClient.withTransaction,
         };
     }),
 }) {}
