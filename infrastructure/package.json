@@ -5,9 +5,11 @@
 	"dependencies": {
 		"@pulumi/aws": "catalog:",
 		"@pulumi/awsx": "catalog:",
+		"@pulumi/command": "catalog:",
 		"@pulumi/docker": "catalog:",
 		"@pulumi/kubernetes": "catalog:",
 		"@pulumi/pulumi": "catalog:",
+		"@pulumi/random": "catalog:",
 		"effect": "catalog:"
 	},
 	"devDependencies": {
