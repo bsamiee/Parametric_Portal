@@ -170,6 +170,7 @@
     "@aws-sdk/client-s3": "catalog:",
     "@aws-sdk/client-sesv2": "catalog:",
     "@aws-sdk/s3-request-presigner": "catalog:",
+    "@dopplerhq/node-sdk": "catalog:",
     "@effect-aws/client-s3": "catalog:",
     "@effect/cluster": "catalog:",
     "@effect/experimental": "catalog:",
