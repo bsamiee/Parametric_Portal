@@ -50,6 +50,11 @@ class MetricsService extends Effect.Service<MetricsService>()('server/Metrics', 
             ioReads: Metric.gauge('database_io_reads_total'),
             ioWrites: Metric.gauge('database_io_writes_total'),
             vectorIndexScans: Metric.gauge('database_vector_index_scans_total') },
+        doppler: {
+            cacheSize: Metric.gauge('doppler_cache_size'),
+            refreshDuration: Metric.timerWithBoundaries('doppler_refresh_duration_seconds', [0.1, 0.5, 1, 2.5, 5, 10]),
+            refreshes: Metric.counter('doppler_refreshes_total'),
+            refreshFailures: Metric.counter('doppler_refresh_failures_total') },
         errors: Metric.frequency('errors_total'),
         events: {
             deadLettered: Metric.counter('events_dead_lettered_total'),

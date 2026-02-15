@@ -11,7 +11,8 @@ import { ClusterService } from '@parametric-portal/server/infra/cluster';
 import { PollingService } from '@parametric-portal/server/observe/polling';
 import { Telemetry } from '@parametric-portal/server/observe/telemetry';
 import { CacheService } from '@parametric-portal/server/platform/cache';
-import { Effect, Match, pipe } from 'effect';
+import { DopplerService } from '@parametric-portal/server/platform/doppler';
+import { Effect, Match, Option, pipe } from 'effect';
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
@@ -23,15 +24,18 @@ const _readiness = (polling: PollingService) => pipe(
     Effect.all({
         cache: CacheService.health(),
         db: Client.healthDeep(),
+        doppler: DopplerService.health().pipe(Effect.orElseSucceed(() => ({ consecutiveFailures: 0, lastError: Option.none(), lastRefreshAt: 0 }))),
         pollingHealth: polling.refresh().pipe(Effect.andThen(polling.getHealth())),
         vectorConfig: Client.vector.getConfig().pipe(Effect.map((cfg) => cfg.length > 0), Effect.orElseSucceed(() => false)),
     }),
     Effect.let('critical', ({ pollingHealth }) => pollingHealth.alerts.filter((alert) => alert.severity === 'critical')),
-    Effect.tap(({ cache, critical, db, pollingHealth, vectorConfig }) => Effect.all([
+    Effect.tap(({ cache, critical, db, doppler, pollingHealth, vectorConfig }) => Effect.all([
         Effect.annotateCurrentSpan('health.db.healthy', db.healthy),
         Effect.annotateCurrentSpan('health.db.latencyMs', db.latencyMs),
         Effect.annotateCurrentSpan('health.cache.connected', cache.connected),
         Effect.annotateCurrentSpan('health.cache.latencyMs', cache.latencyMs),
+        Effect.annotateCurrentSpan('health.doppler.consecutiveFailures', doppler.consecutiveFailures),
+        Effect.annotateCurrentSpan('health.doppler.lastRefreshAt', doppler.lastRefreshAt),
         Effect.annotateCurrentSpan('health.alerts.total', pollingHealth.alerts.length),
         Effect.annotateCurrentSpan('health.alerts.critical', critical.length),
         Effect.annotateCurrentSpan('health.polling.stale', pollingHealth.stale),

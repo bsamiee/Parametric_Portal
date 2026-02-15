@@ -59,6 +59,23 @@ _main() {
                 --project "${PROJECT}" --config "${config}"
         }
     done
+    # -- [SERVICE_TOKENS] ------------------------------------------------------
+    local token_name existing_tokens
+    for stack in "${!STACK_CONFIG[@]}"; do
+        config="${STACK_CONFIG[${stack}]}"
+        token_name="runtime-${config}"
+        existing_tokens="$(doppler configs tokens --project "${PROJECT}" --config "${config}" --json 2>/dev/null || printf '[]')"
+        printf '%s' "${existing_tokens}" | grep -q "\"name\":\"${token_name}\"" \
+            && _log "[SKIP]" "service token [${token_name}] (exists)" || {
+            _log "[RUN]" "create service token [${token_name}]"
+            local svc_token
+            svc_token="$(doppler configs tokens create \
+                --project "${PROJECT}" --config "${config}" \
+                --name "${token_name}" --plain 2>/dev/null)" \
+                && _log "[OK]" "Set DOPPLER_TOKEN=${svc_token} in your .env.local or deployment config [${config}]" \
+                || _log "[FAIL]" "could not create service token [${token_name}]"
+        }
+    done
     # -- [PULUMI_BACKEND] ------------------------------------------------------
     mkdir -p "${STATE_DIR}"
     _log "[RUN]" "pulumi login file://${STATE_DIR}"
