@@ -2,3 +2,6 @@ name: parametric
 runtime: nodejs
 main: src/platform.ts
 description: Parametric Portal infrastructure — zero-YAML IAC
+
+backend:
+  url: file://~/.pulumi-state
