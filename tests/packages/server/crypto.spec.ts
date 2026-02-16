@@ -153,15 +153,25 @@ it.effect.prop('P12: key rotation', { x: _nonempty }, ({ x }) => Context.Request
     expect(rotated[0]).toBe(2);
     expect(yield* Crypto.decrypt(rotated).pipe(Effect.provide(_layer(_multiKeyEnv)))).toBe(x);
 })), { fastCheck: { numRuns: 50 } });
-// P13: Service init errors - no keys, bad JSON, bad base64
+// P13: Service init errors - no keys, bad JSON, bad base64, empty list, invalid active version
 it.effect('P13: service init errors', () => {
     const fail = (env: Map<string, string>) => Effect.scoped(Layer.launch(_layer(env))).pipe(Effect.flip);
     return Effect.all([
         fail(new Map([..._testEnv].filter(([key]) => key !== 'ENCRYPTION_KEY'))),
         fail(new Map([..._testEnv, ['ENCRYPTION_KEYS', '{bad']])),
         fail(new Map([..._testEnv, ['ENCRYPTION_KEYS', JSON.stringify([{ key: '!!!', version: 1 }])]])),
+        fail(new Map([..._testEnv, ['ENCRYPTION_KEYS', '[]']])),
+        fail(new Map([..._testEnv, ['ENCRYPTION_KEY_VERSION', '0']])),
+        fail(new Map([..._testEnv, ['ENCRYPTION_KEY_VERSION', '2']])),
     ]).pipe(Effect.tap((errors) => {
         const typed = errors as ReadonlyArray<CryptoError>;
-        expect(typed.map((error) => [error.code, error.op])).toEqual([['KEY_NOT_FOUND', 'key'], ['INVALID_FORMAT', 'key'], ['INVALID_FORMAT', 'key']]);
+        expect(typed.map((error) => [error.code, error.op])).toEqual([
+            ['KEY_NOT_FOUND', 'key'],
+            ['INVALID_FORMAT', 'key'],
+            ['INVALID_FORMAT', 'key'],
+            ['INVALID_FORMAT', 'key'],
+            ['INVALID_FORMAT', 'key'],
+            ['KEY_NOT_FOUND', 'key'],
+        ]);
     }), Effect.asVoid);
 });

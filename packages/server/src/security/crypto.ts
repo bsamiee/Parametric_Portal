@@ -21,6 +21,7 @@ const _CONFIG = {
     minBytes: 14,
     version: { max: 255, min: 1 },
 } as const;
+const _isNonEmpty = <A>(values: ReadonlyArray<A>): values is readonly [A, ...A[]] => values.length > 0;
 
 // --- [ERRORS] ----------------------------------------------------------------
 
@@ -46,11 +47,22 @@ class Service extends Effect.Service<Service>()('server/CryptoService', {
                 Effect.mapError((error) => new CryptoError({ cause: error, code: 'INVALID_FORMAT', op: 'key', tenantId: Context.Request.Id.system })),
             ),
         });
-        const currentVersion = Option.getOrElse(
-            env.security.encryptionKeyVersion,
-            () => parsed.reduce<number>((max, entry) => Math.max(entry.version, max), 0),
+        const parsedEntries = yield* Effect.filterOrFail(
+            Effect.succeed(parsed),
+            _isNonEmpty,
+            () => new CryptoError({ code: 'INVALID_FORMAT', op: 'key', tenantId: Context.Request.Id.system }),
         );
-        const imported = yield* Effect.forEach(parsed, (entry) =>
+        const currentVersion = yield* Effect.filterOrFail(
+            Effect.succeed(
+                Option.getOrElse(
+                    env.security.encryptionKeyVersion,
+                    () => parsedEntries.reduce<number>((max, entry) => Math.max(entry.version, max), 0),
+                ),
+            ),
+            (version) => Number.isInteger(version) && version >= _CONFIG.version.min && version <= _CONFIG.version.max,
+            () => new CryptoError({ code: 'INVALID_FORMAT', op: 'key', tenantId: Context.Request.Id.system }),
+        );
+        const imported = yield* Effect.forEach(parsedEntries, (entry) =>
             Either.match(Encoding.decodeBase64(entry.key), {
                 onLeft: () => Effect.fail(new CryptoError({ code: 'INVALID_FORMAT', op: 'key', tenantId: Context.Request.Id.system })),
                 onRight: (bytes) => Effect.tryPromise({
@@ -60,6 +72,11 @@ class Service extends Effect.Service<Service>()('server/CryptoService', {
             }),
         );
         const keys = HashMap.fromIterable(imported);
+        yield* Effect.filterOrFail(
+            Effect.succeed(HashMap.has(keys, currentVersion)),
+            Boolean,
+            () => new CryptoError({ code: 'KEY_NOT_FOUND', op: 'key', tenantId: Context.Request.Id.system }),
+        );
         const tenantKeyCache = yield* Cache.make({
             capacity: _CONFIG.cache.capacity,
             lookup: (compositeKey: string) => Effect.gen(function* () {

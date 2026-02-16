@@ -50,6 +50,20 @@ class EmailAdapter extends Effect.Service<EmailAdapter>()('server/EmailAdapter',
         const provider = env.email.provider;
         const from = env.email.from;
         const timeoutMs = env.email.timeoutMs;
+        // why: reuse TCP/TLS connection across sends — createTransport is expensive per-call
+        const smtpTransport = Match.value(env.email).pipe(
+            Match.when({ provider: 'smtp' }, ({ smtp }) => Nodemailer.createTransport({
+                auth: Option.getOrUndefined(Option.map(
+                    Option.all({ pass: smtp.pass, user: smtp.user }),
+                    ({ pass, user }) => ({ pass: Redacted.value(pass), user }),
+                )),
+                host:       smtp.host,
+                port:       smtp.port,
+                requireTLS: smtp.requireTls,
+                secure:     smtp.secure,
+            })),
+            Match.orElse(() => undefined),
+        );
         const send = Effect.fn('email.send')(function* (raw: S.Schema.Encoded<typeof EmailRequest>) {
             const input = yield* S.decodeUnknown(EmailRequest)(raw);
             return yield* Match.value(env.email).pipe(
@@ -101,28 +115,21 @@ class EmailAdapter extends Effect.Service<EmailAdapter>()('server/EmailAdapter',
                         })),
                     }),
                 ),
-                Match.when({ provider: 'smtp' }, ({ smtp }) => Effect.tryPromise({
-                    catch: (cause) => EmailError.from('ProviderError', 'smtp', { cause }),
-                    try: () => {
-                        const auth = Option.map(
-                            Option.all({ pass: smtp.pass, user: smtp.user }),
-                            ({ pass, user }) => ({ pass: Redacted.value(pass), user }),
-                        );
-                        return Nodemailer.createTransport({
-                            auth:       Option.getOrUndefined(auth),
-                            host:       smtp.host,
-                            port:       smtp.port,
-                            requireTLS: smtp.requireTls,
-                            secure:     smtp.secure,
-                        }).sendMail({
-                            from,
-                            headers: { 'X-Notification-Id': input.notificationId, 'X-Tenant-Id': input.tenantId },
-                            subject: input.template,
-                            text:    JSON.stringify(input.vars),
-                            to:      input.to,
-                        });
-                    },
-                })),
+                Match.when({ provider: 'smtp' }, () => Option.fromNullable(smtpTransport).pipe(
+                    Option.match({
+                        onNone: () => Effect.fail(EmailError.from('MissingConfig', 'smtp')),
+                        onSome: (transport) => Effect.tryPromise({
+                            catch: (cause) => EmailError.from('ProviderError', 'smtp', { cause }),
+                            try: () => transport.sendMail({
+                                from,
+                                headers: { 'X-Notification-Id': input.notificationId, 'X-Tenant-Id': input.tenantId },
+                                subject: input.template,
+                                text:    JSON.stringify(input.vars),
+                                to:      input.to,
+                            }),
+                        }),
+                    }),
+                )),
                 Match.exhaustive,
             );
         },

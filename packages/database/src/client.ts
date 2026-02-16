@@ -37,6 +37,24 @@ const _readSslFile = (pathOpt: Option.Option<string>) =>
         onNone: () => Effect.succeed<string | undefined>(undefined),
         onSome: (path) => Effect.try(() => readFileSync(path, 'utf8')),
     });
+const _parsePgOptions = (options: string) =>
+    Array.from(options.matchAll(_CONFIG.pgOptions.extractPattern), (m) => m[0])
+        .map((token) => token.replace(_CONFIG.pgOptions.replacePattern, '').split('=', 2))
+        .filter((parts): parts is [string, string] => (parts[0] ?? '') !== '' && (parts[1] ?? '') !== '');
+const _isValidTrigramThreshold = (value: unknown): value is number =>
+    typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 1;
+const _isValidTrigramThresholds = (values: {
+    readonly similarity: unknown;
+    readonly strictWordSimilarity: unknown;
+    readonly wordSimilarity: unknown;
+}): values is {
+    readonly similarity: number;
+    readonly strictWordSimilarity: number;
+    readonly wordSimilarity: number;
+} =>
+    _isValidTrigramThreshold(values['similarity'])
+    && _isValidTrigramThreshold(values['wordSimilarity'])
+    && _isValidTrigramThreshold(values['strictWordSimilarity']);
 
 // --- [LAYERS] ----------------------------------------------------------------
 
@@ -62,13 +80,27 @@ const layerFromConfig = (cfg: Record<string, unknown>) =>
                 )
                 : undefined;
             const parsedUrl = new URL(Redacted.value(cfg['connectionUrl'] as Redacted.Redacted<string>));
-            const normalizedPgOptions = Array.from((cfg['options'] as string).matchAll(_CONFIG.pgOptions.extractPattern), (m) => m[0])
-                .map((token) => token.replace(_CONFIG.pgOptions.replacePattern, '').split('=', 2))
-                .filter((parts): parts is [string, string] => (parts[0] ?? '') !== '' && (parts[1] ?? '') !== '');
+            const normalizedPgOptions = [
+                ..._parsePgOptions(parsedUrl.searchParams.get('options') ?? ''),
+                ..._parsePgOptions(cfg['options'] as string),
+            ];
             const timeoutPgOptions = _CONFIG.pgOptions.timeouts.map(([key, timeoutKey]) => [key, String(timeouts[timeoutKey] as number)] as const);
+            const trigramValues = yield* Effect.filterOrFail(
+                Effect.succeed({
+                    similarity: trigramThresholds['similarity'],
+                    strictWordSimilarity: trigramThresholds['strictWordSimilarity'],
+                    wordSimilarity: trigramThresholds['wordSimilarity'],
+                } as const),
+                _isValidTrigramThresholds,
+                (values) =>
+                    new Error(
+                        `Invalid trigram thresholds: expected similarity, wordSimilarity, and strictWordSimilarity to be numbers in [0,1], got ${JSON.stringify(values)}`,
+                    ),
+            );
+            const trigramThresholdValues = [trigramValues.similarity, trigramValues.wordSimilarity, trigramValues.strictWordSimilarity] as const;
             const trigramPgOptions = _CONFIG.pgOptions.trigramThresholds.map(([, optionName], index) => [
                 optionName,
-                String(([trigramThresholds['similarity'] as number, trigramThresholds['wordSimilarity'] as number, trigramThresholds['strictWordSimilarity'] as number] as const)[index]),
+                String(trigramThresholdValues[index]),
             ] as const);
             parsedUrl.searchParams.set(
                 'options',

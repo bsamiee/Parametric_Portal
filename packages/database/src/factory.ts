@@ -149,10 +149,14 @@ const repo = <M extends Model.AnyNoContext, const C extends Config<M>>(model: M,
             const col = $wrap ? sql`${sql.literal($wrap)}(${sql(resolvedCol)})` : sql`${sql(resolvedCol)}`;
             return (_ops[op] ?? _ops.eq)({ $cast, col, value, values });
         };
+        const _isRawPred = (pred: Pred): pred is { raw: Statement.Fragment } => typeof pred === 'object' && !Array.isArray(pred) && pred !== null && 'raw' in pred;
+        const _isTuplePred = (pred: Pred): pred is [string, unknown] => Array.isArray(pred);
         const $pred = (predicate: Pred): Statement.Fragment =>
-            'raw' in predicate ? (predicate as { raw: Statement.Fragment }).raw
-            : Array.isArray(predicate) ? sql`${sql(_toCol((predicate)[0]))} = ${(predicate)[1]}`
-            : _handleObj(predicate as Parameters<typeof _handleObj>[0]);
+            Match.value(predicate).pipe(
+                Match.when(_isRawPred, (pred) => pred.raw),
+                Match.when(_isTuplePred, (pred) => sql`${sql(_toCol(pred[0]))} = ${pred[1]}`),
+                Match.orElse((p) => _handleObj(p as Parameters<typeof _handleObj>[0])),
+            ) as Statement.Fragment;
         const $where = (pred: Pred | readonly Pred[]): Statement.Fragment => {
             const predicates = Array.isArray(pred) && !(pred.length === 2 && typeof pred[0] === 'string') ? pred as readonly Pred[] : [pred as Pred];
             return predicates.length ? sql.and(predicates.map($pred)) : sql`TRUE`;
@@ -269,8 +273,8 @@ const repo = <M extends Model.AnyNoContext, const C extends Config<M>>(model: M,
             const schema = when === undefined ? SqlSchema.single : SqlSchema.findOne;
             const entriesNonEmpty = A.isNonEmptyArray(entries);
             const effect = Match.value({ entriesNonEmpty, single }).pipe(
-                Match.when({ entriesNonEmpty: true, single: true }, () => schema({ execute: () => sql`UPDATE ${sql(table)} SET ${sql.csv(entries)}${$touch} WHERE ${$p}${$s}${$active}${$guard} RETURNING *`, Request: S.Void, Result: model })(undefined)),
-                Match.when({ entriesNonEmpty: true, single: false }, () => sql`UPDATE ${sql(table)} SET ${sql.csv(entries)}${$touch} WHERE ${$p}${$s}${$active}${$guard} RETURNING 1`.pipe(Effect.map(rows => rows.length))),
+                Match.when({ entriesNonEmpty: true,  single: true }, () => schema({ execute: () => sql`UPDATE ${sql(table)} SET ${sql.csv(entries)}${$touch} WHERE ${$p}${$s}${$active}${$guard} RETURNING *`, Request: S.Void, Result: model })(undefined)),
+                Match.when({ entriesNonEmpty: true,  single: false }, () => sql`UPDATE ${sql(table)} SET ${sql.csv(entries)}${$touch} WHERE ${$p}${$s}${$active}${$guard} RETURNING 1`.pipe(Effect.map(rows => rows.length))),
                 Match.when({ entriesNonEmpty: false, single: true }, () => schema({ execute: () => sql`SELECT * FROM ${sql(table)} WHERE ${$p}${$s}${$active}${$guard}`, Request: S.Void, Result: model })(undefined)),
                 Match.when({ entriesNonEmpty: false, single: false }, () => sql`SELECT COUNT(*)::int AS count FROM ${sql(table)} WHERE ${$p}${$s}${$active}${$guard}`.pipe(Effect.map((rows): number => (rows[0] as { count: number }).count))),
                 Match.exhaustive,

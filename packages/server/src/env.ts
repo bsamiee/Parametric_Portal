@@ -327,7 +327,7 @@ const _DeployConfig = _DeployRawConfig.pipe(
 const _Projection = {
     requiredSecrets: {
         cloud: [] as const,
-        common: ['ANTHROPIC_API_KEY', 'GEMINI_API_KEY', 'OPENAI_API_KEY', 'POSTGRES_PASSWORD', 'REDIS_PASSWORD', 'RESEND_API_KEY', 'STORAGE_ACCESS_KEY_ID', 'STORAGE_SECRET_ACCESS_KEY'] as const,
+        common: ['ANTHROPIC_API_KEY', 'GEMINI_API_KEY', 'OPENAI_API_KEY', 'POSTGRES_PASSWORD', 'REDIS_PASSWORD', 'STORAGE_ACCESS_KEY_ID', 'STORAGE_SECRET_ACCESS_KEY'] as const,
         selfhosted: ['GRAFANA_ADMIN_PASSWORD'] as const,
     },
     runtimeConfigKeys: ['API_BASE_URL', 'APP_NAME', 'CORS_ORIGINS', 'DEPLOYMENT_MODE', 'DOPPLER_CONFIG', 'DOPPLER_PROJECT', 'HOSTNAME', 'LOG_LEVEL', 'MAX_SESSIONS_PER_USER', 'NODE_ENV', 'OTEL_EXPORTER_OTLP_ENDPOINT', 'OTEL_LOGS_EXPORTER', 'OTEL_METRICS_EXPORTER', 'OTEL_TRACES_EXPORTER', 'PORT', 'POSTMARK_ENDPOINT', 'PROXY_HOPS', 'RATE_LIMIT_PREFIX', 'RATE_LIMIT_STORE', 'RESEND_ENDPOINT', 'TRUST_PROXY', 'POSTGRES_OPTIONS'] as const,
@@ -351,9 +351,20 @@ const Env = {
             Object.entries(env).flatMap(([key, value]) =>
                 typeof value === 'string' && value !== '' ? ([[key, value]] as const) : []),
         );
+        const emailProviderSecretNames = Match.value(entryMap.get('EMAIL_PROVIDER') ?? 'resend').pipe(
+            Match.when('postmark', () => ['POSTMARK_TOKEN'] as const),
+            Match.when('resend', () => ['RESEND_API_KEY'] as const),
+            Match.orElse(() => [] as const),
+        );
+        const encryptionSecretNames = Match.value(entryMap.has('ENCRYPTION_KEYS')).pipe(
+            Match.when(true, () => ['ENCRYPTION_KEYS'] as const),
+            Match.orElse(() => ['ENCRYPTION_KEY'] as const),
+        );
         const secretNames = Array.from(new Set([
             ..._Projection.requiredSecrets.common,
             ..._Projection.requiredSecrets[mode],
+            ...emailProviderSecretNames,
+            ...encryptionSecretNames,
             ..._Projection.runtimeSecretKeys.filter((name) => entryMap.has(name)),
         ]));
         const secretNameSet = new Set<string>(secretNames);
