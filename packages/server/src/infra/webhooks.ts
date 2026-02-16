@@ -6,10 +6,11 @@ import { ClusterWorkflowEngine } from '@effect/cluster';
 import { Activity, Workflow } from '@effect/workflow';
 import { FetchHttpClient, HttpClient, HttpClientError, HttpClientRequest } from '@effect/platform';
 import { SqlClient } from '@effect/sql';
-import { Cause, Clock, Config, Duration, Effect, Function as F, Layer, Match, Metric, Option, PrimaryKey, Array as Arr, Schema as S, STM, Stream, TMap } from 'effect';
+import { Cause, Clock, Duration, Effect, Function as F, Layer, Match, Metric, Option, PrimaryKey, Array as Arr, Schema as S, STM, Stream, TMap } from 'effect';
 import type { JobDlq } from '@parametric-portal/database/models';
 import { DatabaseService } from '@parametric-portal/database/repos';
 import { Context } from '../context.ts';
+import { Env } from '../env.ts';
 import { MetricsService } from '../observe/metrics.ts';
 import { Telemetry } from '../observe/telemetry.ts';
 import { CacheService } from '../platform/cache.ts';
@@ -24,10 +25,6 @@ const _CONFIG = {
     retry: { maxAttempts: 5 },
     settings: { cacheTtl: Duration.minutes(5) },
     signature: { format: (digest: string) => `sha256=${digest}`, header: 'X-Webhook-Signature' },
-    verification: Config.all({
-        maxRetries: Config.integer('WEBHOOK_VERIFY_MAX_RETRIES').pipe(Config.withDefault(3)),
-        timeoutMs:  Config.integer('WEBHOOK_VERIFY_TIMEOUT_MS').pipe(Config.withDefault(10_000))
-    }),
 } as const;
 
 // --- [SCHEMA] ----------------------------------------------------------------
@@ -77,7 +74,8 @@ const _httpDeliver = (endpoint: WebhookEndpoint, payload: WebhookPayload, delive
 });
 const _verifyOwnership = (endpoint: WebhookEndpoint) => Effect.gen(function* () {
     const baseClient = yield* HttpClient.HttpClient;
-    const { maxRetries, timeoutMs } = yield* _CONFIG.verification;
+    const env = yield* Env.Service;
+    const { verifyMaxRetries: maxRetries, verifyTimeoutMs: timeoutMs } = env.webhook;
     const challenge = crypto.randomUUID();
     const request = HttpClientRequest.post(endpoint.url).pipe(HttpClientRequest.bodyUnsafeJson({ challenge, type: 'webhook.verification' }), HttpClientRequest.setHeaders({ 'Content-Type': 'application/json' }));
     const response = yield* baseClient.pipe(HttpClient.filterStatusOk, HttpClient.withTracerPropagation(true)).execute(request).pipe(

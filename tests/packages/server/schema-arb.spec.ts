@@ -11,12 +11,12 @@ import { expect } from 'vitest';
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
-const _email = Arbitrary.make(Email);
-const _hex64 = Arbitrary.make(Hex64.schema);
-const _index = Arbitrary.make(Index);
-const _slug = Arbitrary.make(Slug);
+const _email =     Arbitrary.make(Email);
+const _hex64 =     Arbitrary.make(Hex64.schema);
+const _index =     Arbitrary.make(Index);
+const _slug =      Arbitrary.make(Slug);
 const _timestamp = Arbitrary.make(Timestamp.schema);
-const _uuidv7 = Arbitrary.make(Uuidv7.schema);
+const _uuidv7 =    Arbitrary.make(Uuidv7.schema);
 
 // --- [ALGEBRAIC: SCHEMA ROUNDTRIP] ------------------------------------------
 
@@ -29,7 +29,6 @@ it.effect.prop('P1: branded roundtrip', { email: _email, hex: _hex64, idx: _inde
     expect(S.decodeUnknownSync(Timestamp.schema)(ts)).toBe(ts);
     expect(S.decodeUnknownSync(Uuidv7.schema)(uuid)).toBe(uuid);
 }), { fastCheck: { numRuns: 100 } });
-
 // P2: Schema constraints produce structurally valid values
 it.effect.prop('P2: structural validity', { email: _email, hex: _hex64, slug: _slug, uuid: _uuidv7 }, ({ email, hex, slug, uuid }) => Effect.sync(() => {
     expect(email).toMatch(/@/);
@@ -37,7 +36,6 @@ it.effect.prop('P2: structural validity', { email: _email, hex: _hex64, slug: _s
     expect(slug).toMatch(/^[a-z0-9-]+$/);
     expect(uuid).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[47][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
 }), { fastCheck: { numRuns: 100 } });
-
 // P3: Numeric branded types respect bounds
 it.effect.prop('P3: numeric bounds', { idx: _index, ts: _timestamp }, ({ idx, ts }) => Effect.sync(() => {
     expect(idx).toBeGreaterThanOrEqual(0);
@@ -54,14 +52,12 @@ it.effect.prop('P6: hash determinism', { hex: _hex64, uuid: _uuidv7 }, ({ hex, u
     expect(h3).toBe(h4);
     expect(S.decodeUnknownSync(Hex64.schema)(h1)).toBe(h1);
 }), { fastCheck: { numRuns: 50 } });
-
 // P7: Diff.create identity law with schema-derived structs
 it.effect.prop('P7: diff identity', { email: _email, idx: _index, slug: _slug }, ({ email, idx, slug }) => Effect.sync(() => {
     const obj = { email, idx, slug };
     expect(Diff.create(obj, obj)).toBeNull();
     expect(Diff.create(obj, { ...obj, slug: `${slug}x` })).not.toBeNull();
 }), { fastCheck: { numRuns: 100 } });
-
 // P8: Diff roundtrip with schema-derived values
 it.effect.prop('P8: diff roundtrip', { a: _slug, b: _slug }, ({ a, b }) => {
     const before = { value: a };
@@ -71,7 +67,6 @@ it.effect.prop('P8: diff roundtrip', { a: _slug, b: _slug }, ({ a, b }) => {
         ? Diff.apply(before, patch).pipe(Effect.tap((result) => { expect(result).toEqual(after); }), Effect.asVoid)
         : Effect.sync(() => { expect(a).toBe(b); });
 }, { fastCheck: { numRuns: 100 } });
-
 // P9: fromSnapshots with schema-derived Option values
 it.effect.prop('P9: fromSnapshots', { a: _index, b: _index }, ({ a, b }) => Effect.sync(() => {
     const result = Diff.fromSnapshots(Option.some({ value: a }), Option.some({ value: b }));

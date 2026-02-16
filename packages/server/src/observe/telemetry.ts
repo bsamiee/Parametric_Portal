@@ -4,9 +4,10 @@
  */
 import { OtlpLogger, OtlpMetrics, OtlpSerialization, OtlpTracer } from '@effect/opentelemetry';
 import { FetchHttpClient, HttpClient } from '@effect/platform';
-import { Array as A, Cause, Clock, Config, Duration, Effect, FiberId, HashSet, Layer, Logger, LogLevel, Match, Option, Record, pipe, type Tracer } from 'effect';
+import { Array as A, Cause, Clock, Duration, Effect, FiberId, HashSet, Layer, Logger, LogLevel, Match, Option, Record, pipe, type Tracer } from 'effect';
 import { dual } from 'effect/Function';
 import { Context } from '../context.ts';
+import { Env } from '../env.ts';
 import { MetricsService } from './metrics.ts';
 
 // --- [CONSTANTS] -------------------------------------------------------------
@@ -77,32 +78,48 @@ const _span: {
 
 // --- [LAYERS] ----------------------------------------------------------------
 
-const _telemetryConfig = Config.all({
-    baseEndpoint:       Config.string('OTEL_EXPORTER_OTLP_ENDPOINT').pipe(Config.option),
-    environment:        Config.string('NODE_ENV').pipe(Config.withDefault('development'), Config.map((env): 'production' | 'development' => (env === 'production' ? 'production' : 'development'))),
-    headers:            Config.string('OTEL_EXPORTER_OTLP_HEADERS').pipe(Config.withDefault(''), Config.map((raw) => pipe(raw.split(','), A.filterMap((segment) => { const [key = '', value = ''] = segment.split('=', 2).map((part) => part.trim()); return key !== '' && value !== '' ? Option.some([key, value] as const) : Option.none(); }), Record.fromEntries,))),
-    instanceId:         Config.string('HOSTNAME').pipe(Config.withDefault(crypto.randomUUID())),
-    k8sContainerName:   Config.string('K8S_CONTAINER_NAME').pipe(Config.withDefault('')),
-    k8sDeploymentName:  Config.string('K8S_DEPLOYMENT_NAME').pipe(Config.withDefault('')),
-    k8sNamespace:       Config.string('K8S_NAMESPACE').pipe(Config.withDefault('parametric')),
-    k8sNodeName:        Config.string('K8S_NODE_NAME').pipe(Config.withDefault('')),
-    k8sPodName:         Config.string('K8S_POD_NAME').pipe(Config.withDefault('')),
-    logLevel:           Config.logLevel('LOG_LEVEL').pipe(Config.withDefault(LogLevel.Info)),
-    logsEndpoint:       Config.string('OTEL_EXPORTER_OTLP_LOGS_ENDPOINT').pipe(Config.option),
-    logsExporter:       Config.string('OTEL_LOGS_EXPORTER').pipe(Config.withDefault('otlp'), Config.map((raw) => Match.value(raw.toLowerCase().replaceAll(' ', '')).pipe(
-        Match.when('none', () =>            ({ console: false,  otlp: false })),    Match.when('otlp', () =>            ({ console: false,  otlp: true })),
-        Match.when('console', () =>         ({ console: true,   otlp: false })),    Match.when('console,otlp', () =>    ({ console: true,   otlp: true })),
-        Match.when('otlp,console', () =>    ({ console: true,   otlp: true })),     Match.orElse(() =>                  ({ console: false,  otlp: true })),
-    ))),
-    metricsEndpoint:    Config.string('OTEL_EXPORTER_OTLP_METRICS_ENDPOINT').pipe(Config.option),
-    metricsExporter:    Config.literal('none', 'otlp')('OTEL_METRICS_EXPORTER').pipe(Config.withDefault('otlp' as const)),
-    protocol:           Config.literal('http/protobuf', 'http/json')('OTEL_EXPORTER_OTLP_PROTOCOL').pipe(Config.withDefault('http/protobuf' as const)),
-    serviceName:        Config.string('OTEL_SERVICE_NAME').pipe(Config.withDefault('api')),
-    serviceVersion:     Config.string('OTEL_SERVICE_VERSION').pipe(Config.withDefault('0.0.0')),
-    tracesEndpoint:     Config.string('OTEL_EXPORTER_OTLP_TRACES_ENDPOINT').pipe(Config.option),
-    tracesExporter:     Config.literal('none', 'otlp')('OTEL_TRACES_EXPORTER').pipe(Config.withDefault('otlp' as const)),
-});
-const _collectorEndpoints = (cfg: Config.Config.Success<typeof _telemetryConfig>) => {
+const _telemetryConfig = Env.Service.pipe(Effect.map((env) => {
+    const headers = pipe(
+        env.telemetry.headers.split(','),
+        A.filterMap((segment) => {
+            const [key = '', value = ''] = segment.split('=', 2).map((part) => part.trim());
+            return key !== '' && value !== '' ? Option.some([key, value] as const) : Option.none();
+        }),
+        Record.fromEntries,
+    );
+    const logsExporter = Match.value(env.telemetry.logsExporter.toLowerCase().replaceAll(' ', '')).pipe(
+        Match.when('none', () => ({ console: false, otlp: false })),
+        Match.when('otlp', () => ({ console: false, otlp: true })),
+        Match.when('console', () => ({ console: true, otlp: false })),
+        Match.when('console,otlp', () => ({ console: true, otlp: true })),
+        Match.when('otlp,console', () => ({ console: true, otlp: true })),
+        Match.orElse(() => ({ console: false, otlp: true })),
+    );
+    const environment = env.app.nodeEnv === 'production' ? 'production' : 'development';
+    const logLevel = Option.getOrElse(env.app.logLevel, () => LogLevel.Info);
+    return {
+        baseEndpoint: env.telemetry.baseEndpoint,
+        environment,
+        headers,
+        instanceId: Option.getOrElse(env.app.hostname, () => crypto.randomUUID()),
+        k8sContainerName: env.telemetry.k8sContainerName,
+        k8sDeploymentName: env.telemetry.k8sDeploymentName,
+        k8sNamespace: env.telemetry.k8sNamespace,
+        k8sNodeName: env.telemetry.k8sNodeName,
+        k8sPodName: env.telemetry.k8sPodName,
+        logLevel,
+        logsEndpoint: env.telemetry.logsEndpoint,
+        logsExporter,
+        metricsEndpoint: env.telemetry.metricsEndpoint,
+        metricsExporter: env.telemetry.metricsExporter,
+        protocol: env.telemetry.protocol,
+        serviceName: env.telemetry.serviceName,
+        serviceVersion: env.telemetry.serviceVersion,
+        tracesEndpoint: env.telemetry.tracesEndpoint,
+        tracesExporter: env.telemetry.tracesExporter,
+    } as const;
+}));
+const _collectorEndpoints = (cfg: Effect.Effect.Success<typeof _telemetryConfig>) => {
     const baseEndpoint = Option.getOrElse(cfg.baseEndpoint, () => cfg.environment === 'production' ? 'https://alloy.monitoring.svc.cluster.local:4318' : 'http://127.0.0.1:4318');
     return {
         logs:           _resolveEndpoint(baseEndpoint, '/v1/logs', cfg.logsEndpoint),
@@ -152,7 +169,7 @@ const _Default = Layer.unwrapEffect(
 
 // biome-ignore lint/correctness/noUnusedVariables: const+namespace merge pattern
 const Telemetry = {
-    collectorConfig:    _telemetryConfig.pipe(Config.map((cfg) => ({
+    collectorConfig:    _telemetryConfig.pipe(Effect.map((cfg) => ({
         endpoints:      _collectorEndpoints(cfg),
         headers:        cfg.headers,
         protocol:       cfg.protocol,
@@ -164,7 +181,7 @@ const Telemetry = {
 // --- [NAMESPACE] -------------------------------------------------------------
 
 namespace Telemetry {
-    export type Config = Config.Config.Success<typeof _telemetryConfig>;
+    export type Config = Effect.Effect.Success<typeof _telemetryConfig>;
     export type SpanOpts = Tracer.SpanOptions['attributes'] & { readonly captureStackTrace?: false; readonly kind?: Tracer.SpanKind; readonly metrics?: false };
 }
 

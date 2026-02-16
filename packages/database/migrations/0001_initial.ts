@@ -2,12 +2,10 @@
  * PostgreSQL 18.2 -- Multi-tenant auth/search/jobs platform.
  * PG18.2: uuidv7, uuid_extract_timestamp, casefold, VIRTUAL generated, jsonb_strip_nulls(,t),
  *   NOT ENFORCED FK, B-tree skip scan, async I/O, MERGE RETURNING, CREATE STATISTICS, VACUUM BUFFER_USAGE_LIMIT.
- * Extensions: pg_trgm btree_gin fuzzystrmatch unaccent vector(0.8+) vectorscale pg_stat_statements pgaudit
- *   pg_stat_kcache pg_walinspect pg_cron pg_partman hypopg pg_qualstats pg_wait_sampling pg_squeeze pg_ivm pg_buffercache pg_prewarm pg_surgery pg_visibility.
+ * Extensions: pg_trgm btree_gin fuzzystrmatch unaccent vector pg_partman.
  * Partitions: sessions(created_at), audit_logs(id), notifications(id) monthly via pg_partman.
- * IMMVs: job_status_counts, permission_lookups (pg_ivm). Fillfactor: jobs=70, sessions=80, kv_store=70, notifications=80.
  * Multivariate stats: users/permissions(app_id,role), jobs(app_id,status), audit_logs(app_id,target_type),
- *   notifications(app_id,status,channel), search_documents(scope_id,entity_type). Squeeze: jobs, kv_store, session_tokens.
+ *   notifications(app_id,status,channel), search_documents(scope_id,entity_type).
  */
 import { SqlClient } from '@effect/sql';
 import { Effect } from 'effect';
@@ -15,32 +13,29 @@ import { Effect } from 'effect';
 export default Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
     // --- [EXTENSIONS] ----------------------------------------------------------------
-    yield* sql.unsafe(String.raw`DO $$ DECLARE _ext text; _kv record; BEGIN
+    yield* sql.unsafe(String.raw`DO $$
+    DECLARE _ext text; _cfg record;
+    BEGIN
         FOR _ext IN SELECT unnest(ARRAY[
-            'pg_trgm','btree_gin','fuzzystrmatch','unaccent','vector',
-            'pg_stat_statements','pgaudit','pg_stat_kcache','pg_walinspect','pg_cron',
-            'pg_partman','hypopg','pg_qualstats','pg_wait_sampling','pg_squeeze','pg_ivm',
-            'pg_buffercache','pg_prewarm','pg_surgery','pg_visibility'
-        ]) LOOP EXECUTE format('CREATE EXTENSION IF NOT EXISTS %I', _ext); END LOOP;
-        CREATE EXTENSION IF NOT EXISTS vectorscale CASCADE;
-        IF current_setting('server_version_num')::int < 180002 THEN RAISE EXCEPTION 'PostgreSQL 18.2+ required, got %', current_setting('server_version'); END IF;
-        IF current_setting('hnsw.iterative_scan', true) IS NULL THEN RAISE EXCEPTION 'pgvector 0.8+ required (missing hnsw.iterative_scan)'; END IF;
-        FOR _kv IN SELECT * FROM (VALUES
-            ('compute_query_id','on'),('track_io_timing','on'),('track_wal_io_timing','on'),
-            ('pg_stat_statements.track','all'),('pg_stat_statements.track_utility','on'),
-            ('pg_stat_statements.track_planning','on'),('pg_stat_statements.save','on'),
-            ('pg_stat_kcache.track','all'),('pg_stat_kcache.track_planning','on'),
-            ('pg_qualstats.enabled','on'),('pg_qualstats.track_constants','on'),
-            ('pg_qualstats.track_pg_catalog','on'),('pg_qualstats.sample_rate','1.0'),
-            ('pgaudit.log','ddl, role, write'),('pgaudit.log_relation','on'),('pgaudit.log_rows','on'),
-            ('pgaudit.log_catalog','off'),('pgaudit.log_parameter','off'),('pgaudit.log_statement_once','on'),
-            ('auto_explain.log_min_duration','500'),('auto_explain.log_analyze','on'),('auto_explain.log_buffers','on'),
-            ('auto_explain.log_timing','on'),('auto_explain.log_triggers','on'),('auto_explain.log_format','json'),
-            ('auto_explain.sample_rate','0.01'),('pg_prewarm.autoprewarm','on'),('pg_prewarm.autoprewarm_interval','300')
+            'pg_trgm','btree_gin','fuzzystrmatch','unaccent','vector','pg_partman'
+        ]) LOOP
+            EXECUTE format('CREATE EXTENSION IF NOT EXISTS %I', _ext);
+        END LOOP;
+        IF current_setting('server_version_num')::int < 180002 THEN
+            RAISE EXCEPTION 'PostgreSQL 18.2+ required, got %', current_setting('server_version');
+        END IF;
+        IF current_setting('hnsw.iterative_scan', true) IS NULL THEN
+            RAISE EXCEPTION 'pgvector 0.8+ required (missing hnsw.iterative_scan)';
+        END IF;
+        FOR _cfg IN SELECT * FROM (VALUES
+            ('compute_query_id','on'),('track_io_timing','on'),('track_wal_io_timing','on')
         ) AS t(name, val) LOOP
-            IF EXISTS (SELECT 1 FROM pg_settings WHERE name = _kv.name) THEN EXECUTE format('ALTER DATABASE %I SET %s = %L', current_database(), _kv.name, _kv.val); END IF;
+            IF EXISTS (SELECT 1 FROM pg_settings WHERE name = _cfg.name) THEN
+                EXECUTE format('ALTER DATABASE %I SET %I = %L', current_database(), _cfg.name, _cfg.val);
+            END IF;
         END LOOP;
     END $$`);
+
     // --- [FUNCTIONS] -----------------------------------------------------------------
     yield* sql.unsafe(String.raw`
         CREATE COLLATION IF NOT EXISTS case_insensitive (provider = icu, locale = 'und-u-ks-level2', deterministic = false);
@@ -388,265 +383,152 @@ export default Effect.gen(function* () {
         CREATE OR REPLACE FUNCTION delete_kv_by_prefix(p_prefix TEXT) RETURNS INT LANGUAGE sql VOLATILE AS $$
             WITH deleted AS (DELETE FROM kv_store WHERE starts_with(key, p_prefix) RETURNING 1) SELECT COUNT(*)::int FROM deleted $$;
         CREATE OR REPLACE FUNCTION count_audit_by_ip(p_app_id UUID, p_ip INET, p_window_minutes INT DEFAULT 60) RETURNS INT LANGUAGE sql STABLE PARALLEL SAFE AS $$
-            SELECT COUNT(*)::int FROM audit_logs WHERE app_id = p_app_id AND context_ip = p_ip AND uuid_extract_timestamp(id) > NOW() - make_interval(mins => p_window_minutes) $$`);
+            SELECT COUNT(*)::int FROM audit_logs WHERE app_id = p_app_id AND context_ip = p_ip AND uuid_extract_timestamp(id) > NOW() - make_interval(mins => p_window_minutes) $$;
+        CREATE OR REPLACE FUNCTION outbox_count() RETURNS INT LANGUAGE sql STABLE PARALLEL SAFE AS $$
+            SELECT COUNT(*)::int FROM effect_event_remotes $$;
+        `);
     // --- [STAT_FUNCTION] -------------------------------------------------------------
     yield* sql.unsafe(String.raw`
-        CREATE OR REPLACE FUNCTION stat(p_name TEXT, p_limit INT DEFAULT 100, p_extra JSONB DEFAULT NULL) RETURNS JSONB LANGUAGE plpgsql STABLE AS $fn$
-        DECLARE _lim TEXT := GREATEST(1, LEAST(p_limit, 500))::text; _result JSONB; _sql TEXT;
-        BEGIN _sql := CASE p_name
-            WHEN 'io_config' THEN 'SELECT name, setting FROM pg_settings WHERE name = ANY(ARRAY[' ||
-                '''io_method'',''io_workers'',''effective_io_concurrency'',''io_combine_limit'',' ||
-                '''compute_query_id'',''track_io_timing'',''track_wal_io_timing'',' ||
-                '''pg_stat_statements.track'',''pg_stat_statements.track_utility'',' ||
-                '''pg_stat_statements.track_planning'',''pg_stat_statements.save'',' ||
-                '''pg_stat_kcache.track'',''pg_stat_kcache.track_planning'',' ||
-                '''pg_qualstats.enabled'',''pg_qualstats.track_constants'',' ||
-                '''pg_qualstats.track_pg_catalog'',''pg_qualstats.sample_rate'',' ||
-                '''pgaudit.log'',''pgaudit.log_relation'',''pgaudit.log_rows'',' ||
-                '''pgaudit.log_catalog'',''pgaudit.log_parameter'',''pgaudit.log_statement_once'',' ||
-                '''auto_explain.log_min_duration'',''auto_explain.log_analyze'',' ||
-                '''auto_explain.log_buffers'',''auto_explain.log_format'',''auto_explain.sample_rate'',' ||
-                '''pg_prewarm.autoprewarm'',''pg_prewarm.autoprewarm_interval''']) ORDER BY name'
-            WHEN 'cache_ratio' THEN 'SELECT backend_type, object AS io_object, context AS io_context,' ||
-                ' SUM(hits)::float8 AS hits, SUM(reads)::float8 AS reads, SUM(writes)::float8 AS writes,' ||
-                ' CASE WHEN SUM(hits)+SUM(reads)>0 THEN SUM(hits)::float8/(SUM(hits)::float8+SUM(reads)::float8)*100 ELSE 0 END AS cache_hit_ratio' ||
-                ' FROM pg_stat_io WHERE object=''relation'' AND context=''normal'' GROUP BY backend_type, object, context'
-            WHEN 'io_detail' THEN 'SELECT backend_type, object AS io_object, context AS io_context,' ||
-                ' reads, read_time, read_bytes, writes, write_time, write_bytes, writebacks, writeback_time,' ||
-                ' extends, extend_time, extend_bytes, hits, evictions, reuses, fsyncs, fsync_time, stats_reset FROM pg_stat_io'
-            WHEN 'statements' THEN 'WITH info AS (SELECT dealloc::float8 AS dealloc, stats_reset FROM pg_stat_statements_info)' ||
-                ' SELECT s.queryid::float8, s.userid::float8, s.dbid::float8, s.toplevel, s.calls::float8, s.plans::float8,' ||
-                ' s.total_plan_time, s.mean_plan_time, s.total_exec_time, s.mean_exec_time, s.rows::float8,' ||
-                ' s.shared_blks_hit::float8, s.shared_blks_read::float8, s.shared_blks_dirtied::float8, s.shared_blks_written::float8,' ||
-                ' s.temp_blks_read::float8, s.temp_blks_written::float8, s.blk_read_time, s.blk_write_time,' ||
-                ' s.wal_records::float8, s.wal_fpi::float8, s.wal_bytes::float8,' ||
-                ' s.parallel_workers_to_launch::float8, s.parallel_workers_launched::float8, s.wal_buffers_full::float8,' ||
-                ' i.dealloc, i.stats_reset, s.query FROM pg_stat_statements s CROSS JOIN info i' ||
-                ' ORDER BY s.total_exec_time DESC NULLS LAST LIMIT ' || _lim
-            WHEN 'wal_inspect' THEN 'SELECT * FROM pg_get_wal_record_info(pg_current_wal_lsn()) LIMIT ' || _lim
-            WHEN 'kcache' THEN 'SELECT k.queryid::float8, d.datname, r.rolname, k.top, s.calls::float8,' ||
-                ' s.total_exec_time, s.mean_exec_time, k.plan_user_time, k.plan_system_time,' ||
-                ' k.plan_reads::float8, k.plan_writes::float8, k.exec_user_time, k.exec_system_time,' ||
-                ' k.exec_reads::float8, k.exec_writes::float8,' ||
-                ' CASE WHEN s.calls > 0 THEN k.exec_reads::float8 / s.calls::float8 END AS reads_per_call,' ||
-                ' CASE WHEN s.calls > 0 THEN k.exec_writes::float8 / s.calls::float8 END AS writes_per_call,' ||
-                ' k.stats_since, s.query FROM pg_stat_kcache() k' ||
-                ' JOIN pg_stat_statements s ON s.queryid=k.queryid AND s.userid=k.userid AND s.dbid=k.dbid' ||
-                ' JOIN pg_database d ON d.oid=k.dbid JOIN pg_roles r ON r.oid=k.userid' ||
-                ' ORDER BY k.exec_reads DESC NULLS LAST LIMIT ' || _lim
-            WHEN 'qualstats' THEN 'WITH advisor_queryids AS (' ||
-                ' SELECT DISTINCT (qid.value)::text::float8 AS queryid FROM jsonb_array_elements(' ||
-                ' COALESCE((pg_qualstats_index_advisor(min_filter => 1000, min_selectivity => 30,' ||
-                ' forbidden_am => ARRAY[''hash'']))::jsonb->''indexes'', ''[]''::jsonb)) idx(item)' ||
-                ' CROSS JOIN LATERAL jsonb_array_elements(COALESCE(idx.item->''queryids'', ''[]''::jsonb)) qid(value)' ||
-                ' WHERE jsonb_typeof(qid.value)=''number''),' ||
-                ' ranked AS (SELECT bq.queryid::float8, bq.uniquequalnodeid::float8, bq.qualnodeid::float8,' ||
-                ' bq.userid::float8, bq.dbid::float8, bq.occurences::float8, bq.execution_count::float8, bq.nbfiltered::float8,' ||
-                ' CASE WHEN bq.execution_count > 0 THEN (bq.nbfiltered::float8 / bq.execution_count::float8) * 100 ELSE 0 END AS filter_ratio_pct,' ||
-                ' bq.constvalues::text[], to_jsonb(bq.quals) AS quals, pg_qualstats_example_query(bq.queryid::bigint) AS example_query,' ||
-                ' CASE WHEN aq.queryid IS NULL THEN 0 ELSE 1 END AS advisor_rank' ||
-                ' FROM pg_qualstats_by_query bq LEFT JOIN advisor_queryids aq ON aq.queryid = bq.queryid::float8)' ||
-                ' SELECT queryid, uniquequalnodeid, qualnodeid, userid, dbid, occurences, execution_count,' ||
-                ' nbfiltered, filter_ratio_pct, constvalues, quals, example_query FROM ranked' ||
-                ' ORDER BY advisor_rank DESC, execution_count DESC NULLS LAST, nbfiltered DESC NULLS LAST LIMIT ' || _lim
-            WHEN 'index_advisor' THEN 'SELECT idx.item->>''index'' AS index_ddl, idx.item->''queryids'' AS queryids,' ||
-                ' idx.item->>''am'' AS access_method FROM jsonb_array_elements(COALESCE((' ||
-                ' pg_qualstats_index_advisor(min_filter => ' || COALESCE((p_extra->>'min_filter')::int, 1000)::text ||
-                ', min_selectivity => ' || COALESCE((p_extra->>'min_selectivity')::int, 30)::text ||
-                ', forbidden_am => ARRAY[''hash'']))::jsonb->''indexes'', ''[]''::jsonb)) idx(item)'
-            WHEN 'wait_sampling' THEN 'SELECT event_type, event, SUM(count)::bigint AS total_count' ||
-                ' FROM pg_wait_sampling_profile GROUP BY event_type, event ORDER BY total_count DESC NULLS LAST LIMIT ' || _lim
-            WHEN 'wait_sampling_current' THEN 'SELECT pid::bigint, event_type, event, queryid::float8' ||
-                ' FROM pg_wait_sampling_current ORDER BY pid DESC LIMIT ' || _lim
-            WHEN 'wait_sampling_history' THEN 'SELECT ts AS sample_ts, pid::bigint, event_type, event, queryid::float8' ||
-                ' FROM pg_wait_sampling_history WHERE ts >= now() - make_interval(secs => GREATEST(1, LEAST(' ||
-                COALESCE((p_extra->>'since_seconds')::int, 60)::text || ', 3600))) ORDER BY ts DESC LIMIT ' || _lim
-            WHEN 'buffercache_summary' THEN 'SELECT buffers_used::bigint, buffers_unused::bigint, buffers_dirty::bigint,' ||
-                ' buffers_pinned::bigint, usagecount_avg::float8 FROM pg_buffercache_summary()'
-            WHEN 'buffercache_usage' THEN 'SELECT usage_count::int, buffers::bigint, dirty::bigint, pinned::bigint' ||
-                ' FROM pg_buffercache_usage_counts() ORDER BY usage_count'
-            WHEN 'buffercache_top' THEN 'SELECT c.relname::text, c.relkind::text, count(*)::bigint AS buffers,' ||
-                ' pg_size_pretty(count(*)::bigint * current_setting(''block_size'')::bigint) AS size,' ||
-                ' round(100.0 * count(*) / NULLIF((SELECT buffers_used FROM pg_buffercache_summary()),0), 2)::float8 AS pct' ||
-                ' FROM pg_buffercache b JOIN pg_class c ON c.relfilenode = b.relfilenode' ||
-                ' WHERE b.reldatabase = (SELECT oid FROM pg_database WHERE datname = current_database())' ||
-                ' GROUP BY c.relname, c.relkind ORDER BY buffers DESC LIMIT GREATEST(1, LEAST(' || _lim || ', 100))'
-            WHEN 'visibility' THEN 'SELECT c.relname::text, c.relkind::text, v.all_visible::bigint, v.all_frozen::bigint,' ||
-                ' pg_relation_size(c.oid)::bigint AS rel_size FROM pg_class c' ||
-                ' CROSS JOIN LATERAL pg_visibility_map_summary(c.oid) v' ||
-                ' WHERE c.relkind IN (''r'',''m'') AND c.relnamespace = ''public''::regnamespace' ||
-                ' ORDER BY pg_relation_size(c.oid) DESC LIMIT ' || _lim
-            WHEN 'hypothetical_indexes' THEN 'SELECT indexrelid::bigint, indexname, nspname, relname, amname FROM hypopg_list_indexes'
-            WHEN 'cron_history' THEN 'SELECT d.runid::bigint, j.jobname, d.job_pid::bigint, d.database, d.username,' ||
-                ' d.command, d.status, d.return_message, d.start_time, d.end_time,' ||
-                ' EXTRACT(EPOCH FROM (d.end_time - d.start_time))::float8 AS duration_seconds' ||
-                ' FROM cron.job_run_details d JOIN cron.job j ON j.jobid = d.jobid WHERE (' ||
-                COALESCE(quote_literal(p_extra->>'job_name'), 'NULL') || ' IS NULL OR j.jobname = ' ||
-                COALESCE(quote_literal(p_extra->>'job_name'), 'NULL') || ') ORDER BY d.runid DESC LIMIT ' || _lim
-            WHEN 'cron_failures' THEN 'SELECT d.runid::bigint, j.jobname, d.status, d.return_message, d.start_time, d.end_time' ||
-                ' FROM cron.job_run_details d JOIN cron.job j ON j.jobid = d.jobid' ||
-                ' WHERE d.status = ''failed'' AND d.start_time > now() - make_interval(hours => GREATEST(1, LEAST(' ||
-                COALESCE((p_extra->>'hours')::int, 24)::text || ', 168))) ORDER BY d.runid DESC'
-            WHEN 'cron_jobs' THEN 'SELECT * FROM cron.job ORDER BY jobid'
-            WHEN 'partman_config' THEN 'SELECT parent_table, control, partition_interval, premake, retention, infinite_time_partitions' ||
-                ' FROM partman.part_config ORDER BY parent_table'
-            WHEN 'squeeze_tables' THEN 'SELECT relation::text, schedule, free_space_extra, vacuum_max_age, max_retry, active' ||
-                ' FROM squeeze.tables ORDER BY relation::text'
-            WHEN 'squeeze_workers' THEN 'SELECT pid::int FROM squeeze.get_active_workers() pid ORDER BY pid'
-            WHEN 'dead_tuples' THEN 'SELECT schemaname, relname, n_live_tup::bigint, n_dead_tup::bigint,' ||
-                ' CASE WHEN n_live_tup > 0 THEN round(100.0 * n_dead_tup / (n_live_tup + n_dead_tup), 2) ELSE 0 END::float8 AS dead_pct,' ||
-                ' last_vacuum, last_autovacuum, last_analyze, last_autoanalyze,' ||
-                ' vacuum_count::bigint, autovacuum_count::bigint, analyze_count::bigint, autoanalyze_count::bigint' ||
-                ' FROM pg_stat_user_tables WHERE n_dead_tup > 0 ORDER BY n_dead_tup DESC NULLS LAST LIMIT ' || _lim
-            WHEN 'table_bloat' THEN 'SELECT schemaname, tablename,' ||
-                ' pg_total_relation_size((schemaname||''.''||tablename)::regclass)::bigint AS total_bytes,' ||
-                ' pg_table_size((schemaname||''.''||tablename)::regclass)::bigint AS table_bytes,' ||
-                ' pg_indexes_size((schemaname||''.''||tablename)::regclass)::bigint AS index_bytes,' ||
-                ' pg_total_relation_size((schemaname||''.''||tablename)::regclass)::bigint' ||
-                ' - pg_relation_size((schemaname||''.''||tablename)::regclass)::bigint AS overhead_bytes,' ||
-                ' pg_size_pretty(pg_total_relation_size((schemaname||''.''||tablename)::regclass)) AS total_size,' ||
-                ' pg_size_pretty(pg_table_size((schemaname||''.''||tablename)::regclass)) AS table_size' ||
-                ' FROM pg_tables WHERE schemaname = ''public''' ||
-                ' ORDER BY pg_total_relation_size((schemaname||''.''||tablename)::regclass) DESC LIMIT ' || _lim
-            WHEN 'index_bloat' THEN 'SELECT schemaname, tablename, indexname,' ||
-                ' pg_relation_size(indexrelid)::bigint AS index_bytes,' ||
-                ' pg_size_pretty(pg_relation_size(indexrelid)) AS index_size,' ||
-                ' idx_scan::bigint, idx_tup_read::bigint, idx_tup_fetch::bigint' ||
-                ' FROM pg_stat_user_indexes ORDER BY pg_relation_size(indexrelid) DESC NULLS LAST LIMIT ' || _lim
-            WHEN 'lock_contention' THEN 'SELECT blocked.pid::bigint AS blocked_pid,' ||
-                ' blocked_activity.usename AS blocked_user, blocked_activity.query AS blocked_query,' ||
-                ' blocked_activity.wait_event_type, blocked_activity.wait_event,' ||
-                ' blocking.pid::bigint AS blocking_pid, blocking_activity.usename AS blocking_user,' ||
-                ' blocking_activity.query AS blocking_query, blocking_activity.state AS blocking_state,' ||
-                ' now() - blocked_activity.query_start AS blocked_duration' ||
-                ' FROM pg_catalog.pg_locks blocked' ||
-                ' JOIN pg_catalog.pg_stat_activity blocked_activity ON blocked_activity.pid = blocked.pid' ||
-                ' JOIN pg_catalog.pg_locks blocking ON blocking.locktype = blocked.locktype' ||
-                ' AND blocking.database IS NOT DISTINCT FROM blocked.database' ||
-                ' AND blocking.relation IS NOT DISTINCT FROM blocked.relation' ||
-                ' AND blocking.page IS NOT DISTINCT FROM blocked.page' ||
-                ' AND blocking.tuple IS NOT DISTINCT FROM blocked.tuple' ||
-                ' AND blocking.virtualxid IS NOT DISTINCT FROM blocked.virtualxid' ||
-                ' AND blocking.transactionid IS NOT DISTINCT FROM blocked.transactionid' ||
-                ' AND blocking.classid IS NOT DISTINCT FROM blocked.classid' ||
-                ' AND blocking.objid IS NOT DISTINCT FROM blocked.objid' ||
-                ' AND blocking.objsubid IS NOT DISTINCT FROM blocked.objsubid' ||
-                ' AND blocking.pid <> blocked.pid' ||
-                ' JOIN pg_catalog.pg_stat_activity blocking_activity ON blocking_activity.pid = blocking.pid' ||
-                ' WHERE NOT blocked.granted ORDER BY blocked_duration DESC NULLS LAST LIMIT ' || _lim
-            WHEN 'long_running_queries' THEN 'SELECT pid::bigint, usename, datname, state, wait_event_type, wait_event, query,' ||
-                ' now() - query_start AS duration, EXTRACT(EPOCH FROM now() - query_start)::float8 AS duration_seconds,' ||
-                ' query_start, state_change FROM pg_stat_activity' ||
-                ' WHERE state <> ''idle'' AND pid <> pg_backend_pid() AND query_start < now() - make_interval(secs => GREATEST(1, LEAST(' ||
-                COALESCE((p_extra->>'min_seconds')::int, 5)::text || ', 3600))) ORDER BY query_start ASC LIMIT ' || _lim
-            WHEN 'connection_stats' THEN 'SELECT datname, usename, client_addr::text, state, count(*)::bigint AS cnt,' ||
-                ' min(backend_start) AS oldest_backend, max(query_start) AS newest_query FROM pg_stat_activity' ||
-                ' WHERE backend_type = ''client backend'' GROUP BY datname, usename, client_addr, state ORDER BY cnt DESC LIMIT ' || _lim
-            WHEN 'replication_lag' THEN 'SELECT client_addr::text, application_name, state,' ||
-                ' sent_lsn::text, write_lsn::text, flush_lsn::text, replay_lsn::text,' ||
-                ' (pg_wal_lsn_diff(sent_lsn, replay_lsn))::bigint AS replay_lag_bytes,' ||
-                ' write_lag, flush_lag, replay_lag, sync_state, sync_priority::int' ||
-                ' FROM pg_stat_replication ORDER BY replay_lag_bytes DESC NULLS LAST LIMIT ' || _lim
-            WHEN 'index_usage' THEN 'SELECT schemaname, relname, indexrelname, idx_scan::bigint,' ||
-                ' idx_tup_read::bigint, idx_tup_fetch::bigint,' ||
-                ' pg_relation_size(indexrelid)::bigint AS index_bytes, pg_size_pretty(pg_relation_size(indexrelid)) AS index_size' ||
-                ' FROM pg_stat_user_indexes ORDER BY idx_scan ASC, pg_relation_size(indexrelid) DESC NULLS LAST LIMIT ' || _lim
-            WHEN 'table_sizes' THEN 'SELECT schemaname, relname, n_live_tup::bigint, n_dead_tup::bigint,' ||
-                ' pg_total_relation_size(relid)::bigint AS total_bytes, pg_table_size(relid)::bigint AS table_bytes,' ||
-                ' pg_indexes_size(relid)::bigint AS index_bytes, pg_size_pretty(pg_total_relation_size(relid)) AS total_size,' ||
-                ' seq_scan::bigint, seq_tup_read::bigint, idx_scan::bigint, idx_tup_fetch::bigint' ||
-                ' FROM pg_stat_user_tables ORDER BY pg_total_relation_size(relid) DESC LIMIT ' || _lim
-            WHEN 'unused_indexes' THEN 'SELECT schemaname, relname, indexrelname, idx_scan::bigint,' ||
-                ' pg_relation_size(indexrelid)::bigint AS index_bytes, pg_size_pretty(pg_relation_size(indexrelid)) AS index_size' ||
-                ' FROM pg_stat_user_indexes WHERE idx_scan = 0 AND indexrelname NOT LIKE ''%_pkey''' ||
-                ' ORDER BY pg_relation_size(indexrelid) DESC LIMIT ' || _lim
-            WHEN 'seq_scan_heavy' THEN 'SELECT schemaname, relname, seq_scan::bigint, seq_tup_read::bigint, idx_scan::bigint,' ||
-                ' CASE WHEN seq_scan + idx_scan > 0 THEN round(100.0 * seq_scan / (seq_scan + idx_scan), 2) ELSE 0 END::float8 AS seq_pct,' ||
-                ' pg_total_relation_size(relid)::bigint AS total_bytes, n_live_tup::bigint' ||
-                ' FROM pg_stat_user_tables WHERE seq_scan > 0 AND n_live_tup > 1000 ORDER BY seq_scan DESC LIMIT ' || _lim
-            ELSE NULL END;
-        IF _sql IS NULL THEN RETURN NULL; END IF;
-        EXECUTE 'SELECT COALESCE(jsonb_agg(to_jsonb(r)),''[]''::jsonb) FROM (' || _sql || ') r' INTO _result;
-        RETURN _result;
-        END $fn$;
-        CREATE OR REPLACE FUNCTION stat_batch(p_names TEXT[], p_limit INT DEFAULT 100, p_extra JSONB DEFAULT NULL)
-            RETURNS JSONB LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_catalog AS $fn$
-            DECLARE _result JSONB := '{}'::jsonb; _name TEXT;
-            BEGIN FOREACH _name IN ARRAY p_names LOOP
-                _result := _result || jsonb_build_object(_name, stat(_name, p_limit, p_extra));
-            END LOOP;
-            RETURN _result;
-            END $fn$;
-        CREATE OR REPLACE FUNCTION prewarm_relation(p_relation TEXT, p_mode TEXT DEFAULT 'buffer')
-            RETURNS INT LANGUAGE plpgsql VOLATILE AS $$ BEGIN
-                IF NOT EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'public' AND c.relname = p_relation) THEN
-                    RAISE EXCEPTION 'Relation % not found in public schema', p_relation;
-                END IF;
-                RETURN pg_prewarm(('public.' || p_relation)::regclass, p_mode);
-            END $$;
-        CREATE OR REPLACE FUNCTION heap_force_freeze(p_relation TEXT, p_block BIGINT DEFAULT 0) RETURNS void
-            LANGUAGE sql VOLATILE AS $$ SELECT pg_surgery.heap_force_freeze(p_relation::regclass, ARRAY[ROW(p_block,0)::tid]) $$;
-        CREATE OR REPLACE FUNCTION create_hypothetical_index(p_statement TEXT)
-            RETURNS TABLE(indexrelid bigint, indexname text) LANGUAGE plpgsql VOLATILE AS $$ BEGIN
-                IF p_statement !~* '^\s*CREATE\s+(UNIQUE\s+)?INDEX\s' THEN RAISE EXCEPTION 'Only CREATE INDEX statements are accepted'; END IF;
-                RETURN QUERY SELECT * FROM hypopg_create_index(p_statement);
-            END $$;
-        CREATE OR REPLACE FUNCTION reset_hypothetical_indexes() RETURNS void LANGUAGE sql VOLATILE AS $$ SELECT hypopg_reset() $$;
-        CREATE OR REPLACE FUNCTION exec_delegate(p_name TEXT, p_args JSONB DEFAULT '{}') RETURNS BOOLEAN LANGUAGE plpgsql VOLATILE AS $$
-        DECLARE _result BOOLEAN;
-        BEGIN EXECUTE CASE p_name
-            WHEN 'reset_wait_sampling' THEN 'SELECT pg_wait_sampling_reset_profile() IS NOT NULL'
-            WHEN 'run_partman'         THEN 'SELECT partman.run_maintenance(p_analyze := false) IS NOT NULL'
-            WHEN 'start_squeeze'       THEN 'SELECT squeeze.start_worker() IS NOT NULL'
-            WHEN 'stop_squeeze'        THEN format('SELECT squeeze.stop_worker(%s) IS NOT NULL', (p_args->>'pid')::int)
-            ELSE 'SELECT FALSE'
-        END INTO _result;
-        RETURN COALESCE(_result, FALSE);
-        END $$;
-        CREATE OR REPLACE FUNCTION list_partition_health(p_parent_table TEXT) RETURNS JSONB LANGUAGE sql STABLE AS $$
-            SELECT COALESCE(jsonb_agg(jsonb_build_object('partition', (tree.relid::regclass)::text, 'level', tree.level,
-                'isLeaf', tree.isleaf, 'bound', pg_get_expr(cls.relpartbound, cls.oid)) ORDER BY tree.level, (tree.relid::regclass)::text), '[]'::jsonb)
-            FROM pg_partition_tree(p_parent_table::regclass) tree JOIN pg_class cls ON cls.oid = tree.relid $$`);
-    // --- [CRON_SYNC] -----------------------------------------------------------------
-    yield* sql.unsafe(String.raw`
-        CREATE OR REPLACE FUNCTION sync_cron_jobs() RETURNS JSONB LANGUAGE plpgsql VOLATILE AS $$
-        DECLARE _job record; _existing_command TEXT; _existing_jobid BIGINT; _existing_schedule TEXT; _result JSONB := '[]'::jsonb; BEGIN
-            FOR _job IN SELECT * FROM (VALUES
-                ('maintenance-partman','5 * * * *','SELECT partman.run_maintenance(p_analyze := false)'),
-                ('maintenance-purge-sessions','15 1 * * *','SELECT purge_sessions(30)'),
-                ('maintenance-purge-api-keys','20 3 * * 0','SELECT purge_table(''api_keys'',''deleted_at'',365)'),
-                ('maintenance-purge-oauth-accounts','20 5 * * 0','SELECT purge_table(''oauth_accounts'',''deleted_at'',90)'),
-                ('maintenance-purge-mfa-secrets','20 4 * * 0','SELECT purge_table(''mfa_secrets'',''deleted_at'',90)'),
-                ('maintenance-purge-assets','30 2 * * *','SELECT purge_table(''assets'',''deleted_at'',30)'),
-                ('maintenance-purge-kv-store','20 0 * * 0','SELECT purge_table(''kv_store'',''expires_at'',90)'),
-                ('maintenance-purge-event-journal','20 2 * * *','SELECT purge_journal(30)'),
-                ('maintenance-purge-job-dlq','25 2 * * *','SELECT purge_table(''job_dlq'',''replayed_at'',30)'),
-                ('maintenance-vacuum-jobs','0 4 * * *','VACUUM (BUFFER_USAGE_LIMIT ''256MB'', ANALYZE) jobs'),
-                ('maintenance-vacuum-sessions','10 4 * * *','VACUUM (BUFFER_USAGE_LIMIT ''256MB'', ANALYZE) sessions'),
-                ('maintenance-vacuum-notifications','20 4 * * *','VACUUM (BUFFER_USAGE_LIMIT ''256MB'', ANALYZE) notifications'),
-                ('maintenance-vacuum-audit-logs','30 4 * * *','VACUUM (BUFFER_USAGE_LIMIT ''256MB'', ANALYZE) audit_logs'),
-                ('maintenance-reindex-sessions','0 5 * * 0','REINDEX INDEX CONCURRENTLY idx_sessions_app_user_active'),
-                ('maintenance-reindex-jobs','10 5 * * 0','REINDEX INDEX CONCURRENTLY idx_jobs_app_status'),
-                ('maintenance-reindex-notifications','20 5 * * 0','REINDEX INDEX CONCURRENTLY idx_notifications_app_status'),
-                ('maintenance-purge-cron-history','40 3 * * *','DELETE FROM cron.job_run_details WHERE end_time < now() - interval ''7 days'''),
-                ('maintenance-stat-statements-reset','0 0 * * 1','SELECT pg_stat_statements_reset()')
-            ) AS t(name, schedule, command) LOOP BEGIN
-                SELECT j.jobid, j.schedule, j.command INTO _existing_jobid, _existing_schedule, _existing_command
-                    FROM cron.job j WHERE j.jobname = _job.name ORDER BY j.jobid DESC LIMIT 1;
-                IF _existing_jobid IS NOT NULL AND _existing_schedule = _job.schedule AND _existing_command = _job.command THEN
-                    _result := _result || jsonb_build_array(jsonb_build_object('name', _job.name, 'schedule', _job.schedule, 'status', 'unchanged'));
-                ELSE
-                    IF _existing_jobid IS NOT NULL THEN PERFORM cron.unschedule(_existing_jobid); END IF;
-                    PERFORM cron.schedule(_job.name, _job.schedule, _job.command);
-                    _result := _result || jsonb_build_array(jsonb_build_object(
-                        'name', _job.name, 'schedule', _job.schedule,
-                        'status', CASE WHEN _existing_jobid IS NULL THEN 'created' ELSE 'updated' END));
-                END IF;
-            EXCEPTION WHEN OTHERS THEN
-                _result := _result || jsonb_build_array(jsonb_build_object(
-                    'name', _job.name, 'schedule', _job.schedule, 'status', 'error', 'error', SQLERRM));
-            END; END LOOP; RETURN _result;
-        END $$`);
+        CREATE OR REPLACE FUNCTION query_db_observability(p_sections JSONB, p_limit INT DEFAULT 100)
+            RETURNS JSONB LANGUAGE plpgsql STABLE AS $$
+            DECLARE _item JSONB; _name TEXT; _options JSONB;
+                _lim INT := GREATEST(1, LEAST(p_limit, 500));
+                _result JSONB := '{}'::jsonb;
+                _payload JSONB := '[]'::jsonb;
+            BEGIN
+                FOR _item IN SELECT value FROM jsonb_array_elements(COALESCE(p_sections, '[]'::jsonb)) LOOP
+                    _name := _item->>'name';
+                    _options := COALESCE(_item->'options', '{}'::jsonb);
+                    _payload := CASE _name
+                        WHEN 'io' THEN (
+                            SELECT jsonb_build_object(
+                                'summary', jsonb_build_object(
+                                    'hits', COALESCE(SUM(hits)::float8, 0),
+                                    'reads', COALESCE(SUM(reads)::float8, 0),
+                                    'writes', COALESCE(SUM(writes)::float8, 0),
+                                    'cacheHitRatio', CASE
+                                        WHEN COALESCE(SUM(hits), 0) + COALESCE(SUM(reads), 0) > 0
+                                            THEN COALESCE(SUM(hits)::float8, 0) / (COALESCE(SUM(hits)::float8, 0) + COALESCE(SUM(reads)::float8, 0)) * 100
+                                        ELSE 0 END
+                                ),
+                                'byBackend', COALESCE((
+                                    SELECT jsonb_agg(to_jsonb(r)) FROM (
+                                        SELECT backend_type, object AS io_object, context AS io_context,
+                                            SUM(hits)::float8 AS hits, SUM(reads)::float8 AS reads, SUM(writes)::float8 AS writes
+                                        FROM pg_stat_io
+                                        WHERE object = 'relation' AND context = 'normal'
+                                        GROUP BY backend_type, object, context
+                                        ORDER BY backend_type ASC
+                                    ) r
+                                ), '[]'::jsonb)
+                            )
+                            FROM pg_stat_io
+                            WHERE object = 'relation' AND context = 'normal'
+                        )
+                        WHEN 'activity' THEN jsonb_build_object(
+                            'longRunning', COALESCE((
+                                SELECT jsonb_agg(to_jsonb(r)) FROM (
+                                    SELECT pid::bigint, usename, datname, state, wait_event_type, wait_event,
+                                        EXTRACT(EPOCH FROM now() - query_start)::float8 AS duration_seconds,
+                                        query_start, query
+                                    FROM pg_stat_activity
+                                    WHERE state <> 'idle'
+                                        AND pid <> pg_backend_pid()
+                                        AND query_start < now() - make_interval(secs => GREATEST(1, LEAST(COALESCE((_options->>'minSeconds')::int, 5), 3600)))
+                                    ORDER BY query_start ASC
+                                    LIMIT _lim
+                                ) r
+                            ), '[]'::jsonb),
+                            'locks', COALESCE((
+                                SELECT jsonb_agg(to_jsonb(r)) FROM (
+                                    SELECT blocked.pid::bigint AS blocked_pid, blocking.pid::bigint AS blocking_pid,
+                                        blocked_activity.usename AS blocked_user, blocking_activity.usename AS blocking_user,
+                                        now() - blocked_activity.query_start AS blocked_duration
+                                    FROM pg_catalog.pg_locks blocked
+                                    JOIN pg_catalog.pg_stat_activity blocked_activity ON blocked_activity.pid = blocked.pid
+                                    JOIN pg_catalog.pg_locks blocking ON blocking.locktype = blocked.locktype
+                                        AND blocking.database IS NOT DISTINCT FROM blocked.database
+                                        AND blocking.relation IS NOT DISTINCT FROM blocked.relation
+                                        AND blocking.page IS NOT DISTINCT FROM blocked.page
+                                        AND blocking.tuple IS NOT DISTINCT FROM blocked.tuple
+                                        AND blocking.virtualxid IS NOT DISTINCT FROM blocked.virtualxid
+                                        AND blocking.transactionid IS NOT DISTINCT FROM blocked.transactionid
+                                        AND blocking.classid IS NOT DISTINCT FROM blocked.classid
+                                        AND blocking.objid IS NOT DISTINCT FROM blocked.objid
+                                        AND blocking.objsubid IS NOT DISTINCT FROM blocked.objsubid
+                                        AND blocking.pid <> blocked.pid
+                                    JOIN pg_catalog.pg_stat_activity blocking_activity ON blocking_activity.pid = blocking.pid
+                                    WHERE NOT blocked.granted
+                                    ORDER BY blocked_duration DESC NULLS LAST
+                                    LIMIT _lim
+                                ) r
+                            ), '[]'::jsonb),
+                            'connections', COALESCE((
+                                SELECT jsonb_agg(to_jsonb(r)) FROM (
+                                    SELECT datname, usename, client_addr::text, state, count(*)::bigint AS cnt
+                                    FROM pg_stat_activity
+                                    WHERE backend_type = 'client backend'
+                                    GROUP BY datname, usename, client_addr, state
+                                    ORDER BY cnt DESC
+                                    LIMIT _lim
+                                ) r
+                            ), '[]'::jsonb)
+                        )
+                        WHEN 'storage' THEN jsonb_build_object(
+                            'tableSizes', COALESCE((
+                                SELECT jsonb_agg(to_jsonb(r)) FROM (
+                                    SELECT schemaname, relname, n_live_tup::bigint, n_dead_tup::bigint,
+                                        pg_total_relation_size(relid)::bigint AS total_bytes
+                                    FROM pg_stat_user_tables
+                                    ORDER BY pg_total_relation_size(relid) DESC
+                                    LIMIT _lim
+                                ) r
+                            ), '[]'::jsonb),
+                            'deadTuples', COALESCE((
+                                SELECT jsonb_agg(to_jsonb(r)) FROM (
+                                    SELECT schemaname, relname, n_live_tup::bigint, n_dead_tup::bigint
+                                    FROM pg_stat_user_tables
+                                    WHERE n_dead_tup > 0
+                                    ORDER BY n_dead_tup DESC NULLS LAST
+                                    LIMIT _lim
+                                ) r
+                            ), '[]'::jsonb),
+                            'unusedIndexes', COALESCE((
+                                SELECT jsonb_agg(to_jsonb(r)) FROM (
+                                    SELECT schemaname, relname, indexrelname, idx_scan::bigint,
+                                        pg_relation_size(indexrelid)::bigint AS index_bytes
+                                    FROM pg_stat_user_indexes
+                                    WHERE idx_scan = 0 AND indexrelname NOT LIKE '%_pkey'
+                                    ORDER BY pg_relation_size(indexrelid) DESC
+                                    LIMIT _lim
+                                ) r
+                            ), '[]'::jsonb)
+                        )
+                        WHEN 'partitions' THEN jsonb_build_object(
+                            'config', COALESCE((
+                                SELECT jsonb_agg(to_jsonb(r)) FROM (
+                                    SELECT parent_table, control, partition_interval, premake, retention, infinite_time_partitions
+                                    FROM partman.part_config
+                                    ORDER BY parent_table
+                                ) r
+                            ), '[]'::jsonb),
+                            'tree', COALESCE((
+                                SELECT jsonb_agg(to_jsonb(r)) FROM (
+                                    SELECT (tree.relid::regclass)::text AS partition, tree.level, tree.isleaf,
+                                        pg_get_expr(cls.relpartbound, cls.oid) AS bound
+                                    FROM pg_partition_tree(COALESCE(_options->>'parentTable', 'public.sessions')::regclass) tree
+                                    JOIN pg_class cls ON cls.oid = tree.relid
+                                    ORDER BY tree.level, (tree.relid::regclass)::text
+                                ) r
+                            ), '[]'::jsonb)
+                        )
+                        ELSE '[]'::jsonb
+                    END;
+                    _result := _result || jsonb_build_object(_name, COALESCE(_payload, '[]'::jsonb));
+                END LOOP;
+                RETURN _result;
+            END $$`);
+
     // --- [SEARCH] --------------------------------------------------------------------
     yield* sql.unsafe(String.raw`
         CREATE TEXT SEARCH DICTIONARY IF NOT EXISTS parametric_unaccent (TEMPLATE = unaccent, RULES = 'unaccent');
@@ -719,22 +601,48 @@ export default Effect.gen(function* () {
         CREATE TRIGGER search_documents_terms_sync AFTER INSERT OR DELETE ON search_documents FOR EACH ROW EXECUTE FUNCTION sync_search_terms();
         CREATE TRIGGER search_documents_terms_sync_update AFTER UPDATE ON search_documents FOR EACH ROW
             WHEN (OLD.scope_id IS DISTINCT FROM NEW.scope_id OR OLD.normalized_text IS DISTINCT FROM NEW.normalized_text) EXECUTE FUNCTION sync_search_terms();
-        CREATE OR REPLACE FUNCTION sync_search_document() RETURNS TRIGGER AS $$
-        DECLARE _et TEXT := TG_ARGV[0]; _d text; _c text; _m jsonb; _s uuid; BEGIN
-            IF TG_OP = 'DELETE' OR (TG_OP = 'UPDATE' AND _et <> 'auditLog' AND NEW.deleted_at IS NOT NULL) THEN
-                DELETE FROM search_documents WHERE entity_type = _et AND entity_id = OLD.id; RETURN COALESCE(NEW, OLD);
-            END IF;
-            IF _et = 'app' THEN _s:=NULL; _d:=NEW.name; _c:=NEW.namespace; _m:=jsonb_build_object('name',NEW.name,'namespace',NEW.namespace);
-            ELSIF _et = 'user' THEN _s:=NEW.app_id; _d:=NEW.email; _c:=NEW.role::text; _m:=jsonb_build_object('email',NEW.email,'role',NEW.role);
-            ELSIF _et = 'asset' THEN _s:=NEW.app_id; _d:=COALESCE(NEW.name,NEW.type); _c:=NEW.content;
-                _m:=jsonb_strip_nulls(jsonb_build_object('type',NEW.type,'size',NEW.size,'name',NEW.name,'hash',NEW.hash),true);
-            ELSIF _et = 'auditLog' THEN _s:=NEW.app_id; _d:=NEW.target_type||':'||NEW.operation::text; _c:=NEW.target_type||' '||NEW.operation::text;
-                _m:=jsonb_strip_nulls(jsonb_build_object('targetType',NEW.target_type,'operation',NEW.operation,'userId',NEW.user_id,'hasDelta',NEW.delta IS NOT NULL),true);
-            END IF;
+        CREATE OR REPLACE VIEW search_document_source AS
+            SELECT 'app'::text AS entity_type, a.id AS entity_id, NULL::uuid AS scope_id,
+                a.name AS display_text, a.namespace AS content_text,
+                jsonb_build_object('name', a.name, 'namespace', a.namespace) AS metadata
+            FROM apps a
+            UNION ALL
+            SELECT 'user'::text AS entity_type, u.id AS entity_id, u.app_id AS scope_id,
+                u.email AS display_text, u.role::text AS content_text,
+                jsonb_build_object('email', u.email, 'role', u.role) AS metadata
+            FROM users u
+            WHERE u.deleted_at IS NULL
+            UNION ALL
+            SELECT 'asset'::text AS entity_type, s.id AS entity_id, s.app_id AS scope_id,
+                COALESCE(s.name, s.type) AS display_text, s.content AS content_text,
+                jsonb_strip_nulls(jsonb_build_object('type', s.type, 'size', s.size, 'name', s.name, 'hash', s.hash), true) AS metadata
+            FROM assets s
+            WHERE s.deleted_at IS NULL
+            UNION ALL
+            SELECT 'auditLog'::text AS entity_type, l.id AS entity_id, l.app_id AS scope_id,
+                l.target_type || ':' || l.operation::text AS display_text,
+                l.target_type || ' ' || l.operation::text AS content_text,
+                jsonb_strip_nulls(jsonb_build_object('targetType', l.target_type, 'operation', l.operation, 'userId', l.user_id, 'hasDelta', l.delta IS NOT NULL), true) AS metadata
+            FROM audit_logs l;
+        CREATE OR REPLACE FUNCTION upsert_search_document_from_source(p_entity_type text, p_entity_id uuid)
+            RETURNS void LANGUAGE sql VOLATILE AS $$
             INSERT INTO search_documents (entity_type, entity_id, scope_id, display_text, content_text, metadata, normalized_text)
-                VALUES (_et, NEW.id, _s, _d, _c, _m, normalize_search_text(_d, _c, _m))
-                ON CONFLICT (entity_type, entity_id) DO UPDATE SET scope_id=EXCLUDED.scope_id, display_text=EXCLUDED.display_text,
-                    content_text=EXCLUDED.content_text, metadata=EXCLUDED.metadata, normalized_text=EXCLUDED.normalized_text;
+            SELECT s.entity_type, s.entity_id, s.scope_id, s.display_text, s.content_text, s.metadata,
+                normalize_search_text(s.display_text, s.content_text, s.metadata)
+            FROM search_document_source s
+            WHERE s.entity_type = p_entity_type AND s.entity_id = p_entity_id
+            ON CONFLICT (entity_type, entity_id) DO UPDATE SET
+                scope_id = EXCLUDED.scope_id,
+                display_text = EXCLUDED.display_text,
+                content_text = EXCLUDED.content_text,
+                metadata = EXCLUDED.metadata,
+                normalized_text = EXCLUDED.normalized_text $$;
+        CREATE OR REPLACE FUNCTION sync_search_document() RETURNS TRIGGER AS $$ DECLARE _et TEXT := TG_ARGV[0]; BEGIN
+            IF TG_OP = 'DELETE' THEN
+                DELETE FROM search_documents WHERE entity_type = _et AND entity_id = OLD.id;
+                RETURN OLD;
+            END IF;
+            PERFORM upsert_search_document_from_source(_et, NEW.id);
             RETURN NEW;
         END; $$ LANGUAGE plpgsql;
         CREATE TRIGGER apps_search_upsert AFTER INSERT OR UPDATE OF name, namespace ON apps FOR EACH ROW EXECUTE FUNCTION sync_search_document('app');
@@ -749,30 +657,11 @@ export default Effect.gen(function* () {
             RETURNS void LANGUAGE plpgsql SECURITY INVOKER AS $$ BEGIN
             IF p_scope_id IS NULL THEN DELETE FROM search_documents;
             ELSE DELETE FROM search_documents WHERE scope_id = p_scope_id; IF p_include_global THEN DELETE FROM search_documents WHERE scope_id IS NULL; END IF; END IF;
-            IF p_scope_id IS NULL OR p_include_global THEN INSERT INTO search_documents (entity_type, entity_id, scope_id, display_text, content_text, metadata, normalized_text)
-                SELECT 'app', s.id, NULL, s.name, s.namespace,
-                    jsonb_build_object('name',s.name,'namespace',s.namespace),
-                    normalize_search_text(s.name, s.namespace, jsonb_build_object('name',s.name,'namespace',s.namespace))
-                    FROM apps s; END IF;
             INSERT INTO search_documents (entity_type, entity_id, scope_id, display_text, content_text, metadata, normalized_text)
-            SELECT 'user', s.id, s.app_id, s.email, s.role::text,
-                jsonb_build_object('email',s.email,'role',s.role),
-                normalize_search_text(s.email, s.role::text, jsonb_build_object('email',s.email,'role',s.role))
-                FROM users s WHERE s.deleted_at IS NULL AND (p_scope_id IS NULL OR s.app_id = p_scope_id);
-            INSERT INTO search_documents (entity_type, entity_id, scope_id, display_text, content_text, metadata, normalized_text)
-            SELECT 'asset', s.id, s.app_id, COALESCE(s.name,s.type), s.content,
-                jsonb_strip_nulls(jsonb_build_object('type',s.type,'size',s.size,'name',s.name,'hash',s.hash),true),
-                normalize_search_text(COALESCE(s.name,s.type), s.content,
-                    jsonb_strip_nulls(jsonb_build_object('type',s.type,'size',s.size,'name',s.name,'hash',s.hash),true))
-                FROM assets s WHERE s.deleted_at IS NULL AND (p_scope_id IS NULL OR s.app_id = p_scope_id);
-            INSERT INTO search_documents (entity_type, entity_id, scope_id, display_text, content_text, metadata, normalized_text)
-            SELECT 'auditLog', s.id, s.app_id, s.target_type||':'||s.operation::text, s.target_type||' '||s.operation::text,
-                jsonb_strip_nulls(jsonb_build_object(
-                    'targetType',s.target_type,'operation',s.operation,'userId',s.user_id,'hasDelta',s.delta IS NOT NULL),true),
-                normalize_search_text(s.target_type||':'||s.operation::text, s.target_type||' '||s.operation::text,
-                    jsonb_strip_nulls(jsonb_build_object(
-                        'targetType',s.target_type,'operation',s.operation,'userId',s.user_id,'hasDelta',s.delta IS NOT NULL),true))
-                FROM audit_logs s WHERE p_scope_id IS NULL OR s.app_id = p_scope_id;
+            SELECT s.entity_type, s.entity_id, s.scope_id, s.display_text, s.content_text, s.metadata,
+                normalize_search_text(s.display_text, s.content_text, s.metadata)
+            FROM search_document_source s
+            WHERE p_scope_id IS NULL OR s.scope_id = p_scope_id OR (p_include_global AND s.scope_id IS NULL);
             ANALYZE search_documents; ANALYZE search_terms;
         END $$;
         CREATE OR REPLACE FUNCTION notify_search_refresh() RETURNS void LANGUAGE sql SECURITY INVOKER AS $$
@@ -790,7 +679,7 @@ export default Effect.gen(function* () {
                     WHEN p_include_global THEN st.scope_id = p_scope_id OR st.scope_id IS NULL
                     ELSE st.scope_id = p_scope_id END),
             prefix_hits AS (
-                SELECT term, SUM(frequency)::bigint AS frequency FROM scoped_terms WHERE term LIKE (escaped_prefix || '%') ESCAPE '\'
+                SELECT term, SUM(frequency)::bigint AS frequency FROM scoped_terms WHERE term LIKE (escaped_prefix || '%') ESCAPE '\\'
                 GROUP BY term ORDER BY frequency DESC, term ASC LIMIT (SELECT max_limit FROM normalized)),
             fuzzy_candidates AS (
                 SELECT term, frequency, levenshtein_less_equal(left(term, 255), left(prefix, 255), 2) AS lev,
@@ -807,6 +696,7 @@ export default Effect.gen(function* () {
             merged AS (SELECT term, frequency, 0 AS bucket FROM prefix_hits UNION ALL SELECT term, frequency, 1 AS bucket FROM fuzzy_hits)
             SELECT term, frequency FROM merged ORDER BY bucket ASC, frequency DESC, term ASC LIMIT (SELECT max_limit FROM normalized) $$;
         SELECT refresh_search_documents()`);
+
     // --- [SEED_PERMISSIONS] ----------------------------------------------------------
     yield* sql.unsafe(String.raw`
         WITH tenants(app_id) AS (VALUES ('00000000-0000-7000-8000-000000000001'::uuid),('00000000-0000-7000-8000-000000000000'::uuid)),
@@ -821,29 +711,20 @@ export default Effect.gen(function* () {
         privileged_actions(resource, action) AS (VALUES ('users','updateRole'),('audit','getByEntity'),('audit','getByUser'),('search','refresh'),('search','refreshEmbeddings'),
             ('webhooks','list'),('webhooks','register'),('webhooks','remove'),('webhooks','test'),('webhooks','retry'),('webhooks','status'),
             ('admin','listUsers'),('admin','listSessions'),('admin','deleteSession'),('admin','revokeSessionsByIp'),('admin','listJobs'),('admin','cancelJob'),('admin','listDlq'),('admin','replayDlq'),
-            ('admin','listNotifications'),('admin','replayNotification'),('admin','events'),('admin','ioDetail'),('admin','ioConfig'),('admin','statements'),('admin','cacheRatio'),('admin','walInspect'),
-            ('admin','kcache'),('admin','qualstats'),('admin','waitSampling'),('admin','waitSamplingCurrent'),('admin','waitSamplingHistory'),('admin','resetWaitSampling'),('admin','cronJobs'),
-            ('admin','partitionHealth'),('admin','partmanConfig'),('admin','runPartmanMaintenance'),('admin','syncCronJobs'),('admin','squeezeStatus'),('admin','squeezeStartWorker'),('admin','squeezeStopWorker'),
-            ('admin','cronHistory'),('admin','cronFailures'),('admin','buffercacheSummary'),('admin','buffercacheUsage'),('admin','buffercacheTop'),('admin','prewarmRelation'),
-            ('admin','deadTuples'),('admin','tableBloat'),('admin','indexBloat'),('admin','lockContention'),('admin','longRunningQueries'),('admin','connectionStats'),('admin','replicationLag'),
-            ('admin','indexUsage'),('admin','tableSizes'),('admin','unusedIndexes'),('admin','seqScanHeavy'),('admin','indexAdvisor'),('admin','hypotheticalIndexes'),('admin','createHypotheticalIndex'),
-            ('admin','resetHypotheticalIndexes'),('admin','visibility'),('admin','listTenants'),('admin','createTenant'),('admin','getTenant'),('admin','updateTenant'),('admin','deactivateTenant'),('admin','resumeTenant'),
+            ('admin','listNotifications'),('admin','replayNotification'),('admin','events'),('admin','queryDbObservability'),
+            ('admin','listTenants'),('admin','createTenant'),('admin','getTenant'),('admin','updateTenant'),('admin','deactivateTenant'),('admin','resumeTenant'),
             ('admin','archiveTenant'),('admin','purgeTenant'),('admin','getTenantOAuth'),('admin','updateTenantOAuth'),('admin','listPermissions'),('admin','grantPermission'),('admin','revokePermission'),('admin','getFeatureFlags'),('admin','setFeatureFlag')),
         seed AS (SELECT t.app_id, r.role, a.resource, a.action FROM tenants t CROSS JOIN all_roles r CROSS JOIN all_actions a
             UNION ALL SELECT t.app_id, r.role, a.resource, a.action FROM tenants t CROSS JOIN privileged_roles r CROSS JOIN privileged_actions a)
         INSERT INTO permissions (app_id, role, resource, action) SELECT * FROM seed ON CONFLICT (app_id, role, resource, action) DO NOTHING`);
     // --- [IMMV_AND_RLS] --------------------------------------------------------------
     yield* sql.unsafe(String.raw`
-        SELECT sync_cron_jobs();
-        SELECT pgivm.create_immv('job_status_counts', 'SELECT app_id, status, count(*) AS cnt FROM jobs GROUP BY app_id, status');
-        SELECT pgivm.create_immv('permission_lookups', 'SELECT app_id, role, resource, action FROM permissions WHERE deleted_at IS NULL');
         SELECT set_config('app.current_tenant', '00000000-0000-7000-8000-000000000001', false);
     DO $$ DECLARE _r record; BEGIN
         FOR _r IN SELECT * FROM (VALUES
             ('users','app'),('permissions','app'),('sessions','app'),('assets','app'),('audit_logs','app'),('jobs','app'),('notifications','app'),('job_dlq','app'),
             ('api_keys','user'),('oauth_accounts','user'),('mfa_secrets','user'),('webauthn_credentials','user'),
-            ('session_tokens','session'),('search_documents','scope'),('search_embeddings','scope'),('search_terms','scope'),
-            ('job_status_counts','app'),('permission_lookups','app')
+            ('session_tokens','session'),('search_documents','scope'),('search_embeddings','scope'),('search_terms','scope')
         ) AS t(tbl text, kind text) LOOP
             EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', _r.tbl);
             EXECUTE format('ALTER TABLE %I FORCE ROW LEVEL SECURITY', _r.tbl);
@@ -851,19 +732,9 @@ export default Effect.gen(function* () {
                 WHEN 'app' THEN 'USING (app_id = get_current_tenant_id()) WITH CHECK (app_id = get_current_tenant_id())'
                 WHEN 'user' THEN 'USING (user_id IN (SELECT get_tenant_user_ids())) WITH CHECK (user_id IN (SELECT get_tenant_user_ids()))'
                 WHEN 'session' THEN 'USING (EXISTS (SELECT 1 FROM sessions s WHERE s.id = session_tokens.session_id AND s.app_id = get_current_tenant_id()))'
-                    ' WITH CHECK (EXISTS (SELECT 1 FROM sessions s WHERE s.id = session_tokens.session_id AND s.app_id = get_current_tenant_id()))'
+                    || ' WITH CHECK (EXISTS (SELECT 1 FROM sessions s WHERE s.id = session_tokens.session_id AND s.app_id = get_current_tenant_id()))'
                 WHEN 'scope' THEN 'USING (scope_id IS NULL OR scope_id = get_current_tenant_id()) WITH CHECK (scope_id IS NULL OR scope_id = get_current_tenant_id())'
             END);
-        END LOOP;
-    END $$`);
-    // --- [SQUEEZE] -------------------------------------------------------------------
-    yield* sql.unsafe(String.raw`DO $$ DECLARE _rec record; BEGIN
-        FOR _rec IN SELECT * FROM (VALUES
-            ('public.jobs','0 2 * * *',20,2),('public.kv_store','30 2 * * *',20,2),('public.session_tokens','0 3 * * *',20,3)
-        ) AS t(relation text, schedule text, free_space_extra int, max_retry int) LOOP
-            INSERT INTO squeeze.tables (tabschema, tabname, schedule, free_space_extra, max_retry)
-            VALUES (split_part(_rec.relation, '.', 1), split_part(_rec.relation, '.', 2),
-                _rec.schedule::text, _rec.free_space_extra, _rec.max_retry) ON CONFLICT DO NOTHING;
         END LOOP;
     END $$`);
 });

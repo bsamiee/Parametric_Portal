@@ -36,7 +36,8 @@ import { Crypto } from '@parametric-portal/server/security/crypto';
 import { PolicyService } from '@parametric-portal/server/security/policy';
 import { ReplayGuardService } from '@parametric-portal/server/security/totp-replay';
 import { Resilience } from '@parametric-portal/server/utils/resilience';
-import { Config, Effect, Layer, Option } from 'effect';
+import { Env } from '@parametric-portal/server/env';
+import { Effect, Layer, Option } from 'effect';
 import { AdminLive } from './routes/admin.ts';
 import { AuditLive } from './routes/audit.ts';
 import { AuthLive } from './routes/auth.ts';
@@ -50,17 +51,16 @@ import { UsersLive } from './routes/users.ts';
 import { WebhooksLive } from './routes/webhooks.ts';
 import { WebSocketLive } from './routes/websocket.ts';
 
-// --- [CONSTANTS] -------------------------------------------------------------
-
-const ServerConfig = Config.all({
-    corsOrigins: Config.string('CORS_ORIGINS').pipe(Config.withDefault('*'), Config.map((origins) => origins.split(',').map((origin) => origin.trim()).filter(Boolean) as ReadonlyArray<string>)),
-    port: Config.number('PORT').pipe(Config.withDefault(4000)),
-});
-
 // --- [PLATFORM_LAYER] --------------------------------------------------------
 // External resources: database client, S3, filesystem, telemetry collector.
 
-const PlatformLayer = Layer.mergeAll(Client.layer, StorageAdapter.S3ClientLayer, NodeFileSystem.layer, Telemetry.Default);
+const PlatformLayer = Layer.unwrapEffect(Env.Service.pipe(Effect.map((env) => Layer.mergeAll(
+    Client.layerFromConfig(env.database),
+    StorageAdapter.S3ClientLayer,
+    NodeFileSystem.layer,
+    Telemetry.Default,
+    Layer.succeed(Env.Service, env),
+))));
 
 // --- [SERVICES_LAYER] --------------------------------------------------------
 // All application services in dependency order. Single provideMerge chain.
@@ -88,7 +88,8 @@ const ApiLayer = HttpApiBuilder.api(ParametricApi).pipe(Layer.provide(RouteLayer
 // HTTP server with middleware pipeline + auth + CORS in single MiddlewareLayer.
 
 const ServerLayer = Layer.unwrapEffect(Effect.gen(function* () {
-    const [database, auth, serverConfig] = yield* Effect.all([Effect.orDie(DatabaseService), Effect.orDie(Auth.Service), Effect.orDie(ServerConfig)]);
+    const [auth, database, env] = yield* Effect.all([Effect.orDie(Auth.Service), Effect.orDie(DatabaseService), Effect.orDie(Env.Service)]);
+    const corsOrigins = env.app.corsOrigins.split(',').map((origin) => origin.trim()).filter(Boolean) as ReadonlyArray<string>;
     const MiddlewareLayer = Middleware.layer({
         apiKeyLookup: (hash) => {
             const now = new Date();
@@ -106,7 +107,7 @@ const ServerLayer = Layer.unwrapEffect(Effect.gen(function* () {
                 ),
             );
         },
-        cors: serverConfig.corsOrigins,
+        cors: corsOrigins,
         sessionLookup: (hash) => auth.session.lookup(hash),
     });
     return HttpApiBuilder.serve((application) => Middleware.pipeline(database)(application).pipe(
@@ -120,7 +121,7 @@ const ServerLayer = Layer.unwrapEffect(Effect.gen(function* () {
         Layer.provide(ApiLayer),
         Layer.provide(MiddlewareLayer),
         HttpServer.withLogAddress,
-        Layer.provide(NodeHttpServer.layer(createServer, { port: serverConfig.port })),
+        Layer.provide(NodeHttpServer.layer(createServer, { port: env.app.port })),
     );
 })).pipe(Layer.provide(ServicesLayer));
 
@@ -129,4 +130,4 @@ const ServerLayer = Layer.unwrapEffect(Effect.gen(function* () {
 NodeRuntime.runMain((Effect.scoped(Layer.launch(ServerLayer)).pipe(
     Effect.onInterrupt(() => Effect.logInfo('Graceful shutdown initiated')),
     Effect.ensuring(Effect.logInfo('Server shutdown complete')),
-) as Effect.Effect<never>));
+) as Effect.Effect<never>).pipe(Effect.provide(Env.Service.Default)));

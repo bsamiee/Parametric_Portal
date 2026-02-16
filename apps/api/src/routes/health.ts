@@ -22,33 +22,33 @@ const _RATE_LIMIT_PRESET = 'health' as const;
 
 const _readiness = (polling: PollingService) => pipe(
     Effect.all({
-        cache: CacheService.health(),
-        db: Client.healthDeep(),
-        doppler: DopplerService.health(),
+        cache:         CacheService.health(),
+        db:            Client.healthDeep(),
+        doppler:       DopplerService.health(),
         pollingHealth: polling.refresh().pipe(Effect.andThen(polling.getHealth())),
-        vectorConfig: Client.vector.getConfig().pipe(Effect.map((cfg) => cfg.length > 0), Effect.orElseSucceed(() => false)),
+        vectorConfig:  Client.vector.getConfig().pipe(Effect.map((cfg) => cfg.length > 0), Effect.orElseSucceed(() => false)),
     }),
     Effect.let('critical', ({ pollingHealth }) => pollingHealth.alerts.filter((alert) => alert.severity === 'critical')),
-    Effect.tap(({ cache, critical, db, doppler, pollingHealth, vectorConfig }) => Effect.all([
-        Effect.annotateCurrentSpan('health.db.healthy', db.healthy),
-        Effect.annotateCurrentSpan('health.db.latencyMs', db.latencyMs),
-        Effect.annotateCurrentSpan('health.cache.connected', cache.connected),
-        Effect.annotateCurrentSpan('health.cache.latencyMs', cache.latencyMs),
-        Effect.annotateCurrentSpan('health.doppler.consecutiveFailures', doppler.consecutiveFailures),
-        Effect.annotateCurrentSpan('health.doppler.lastRefreshAt', doppler.lastRefreshAt),
-        Effect.annotateCurrentSpan('health.alerts.total', pollingHealth.alerts.length),
-        Effect.annotateCurrentSpan('health.alerts.critical', critical.length),
-        Effect.annotateCurrentSpan('health.polling.stale', pollingHealth.stale),
-        Effect.annotateCurrentSpan('health.vectorConfig', vectorConfig),
-    ], { discard: true })),
+    Effect.tap(({ cache, critical, db, doppler, pollingHealth, vectorConfig }) => Effect.annotateCurrentSpan({
+        'health.alerts.critical':             critical.length,
+        'health.alerts.total':                pollingHealth.alerts.length,
+        'health.cache.connected':             cache.connected,
+        'health.cache.latencyMs':             cache.latencyMs,
+        'health.db.healthy':                  db.healthy,
+        'health.db.latencyMs':                db.latencyMs,
+        'health.doppler.consecutiveFailures': doppler.consecutiveFailures,
+        'health.doppler.lastRefreshAt':       doppler.lastRefreshAt,
+        'health.polling.stale':               pollingHealth.stale,
+        'health.vectorConfig':                vectorConfig,
+    })),
     Effect.filterOrFail(
         ({ cache, critical, db, pollingHealth }) => db.healthy && cache.connected && critical.length === 0 && !pollingHealth.stale,
         ({ cache, critical, db, pollingHealth }) => HttpError.ServiceUnavailable.of(
             Match.value({ cache: cache.connected, critical: critical.length, db: db.healthy, stale: pollingHealth.stale }).pipe(
-                Match.when({ db: false }, () => 'Database check failed'),
+                Match.when({ db: false }, () =>    'Database check failed'),
                 Match.when({ cache: false }, () => 'Cache check failed'),
-                Match.when({ stale: true }, () => 'Polling data stale'),
-                Match.orElse(({ critical }) => `Metrics critical: ${critical} alerts`),
+                Match.when({ stale: true }, () =>  'Polling data stale'),
+                Match.orElse(({ critical }) =>     `Metrics critical: ${critical} alerts`),
             ),
             30000,
         ),
@@ -59,16 +59,16 @@ const _readiness = (polling: PollingService) => pipe(
             database: { healthy: db.healthy, latencyMs: db.latencyMs },
             metrics: Match.value({ alertCount: pollingHealth.alerts.length, criticalCount: critical.length }).pipe(
                 Match.when(({ criticalCount }) => criticalCount > 0, () => 'alerted' as const),
-                Match.when(({ alertCount }) => alertCount > 0, () => 'degraded' as const),
-                Match.orElse(() => 'healthy' as const),
+                Match.when(({ alertCount }) =>    alertCount > 0, () =>    'degraded' as const),
+                Match.orElse(() =>                'healthy' as const),
             ),
             polling: {
-                criticalAlerts: critical.length,
+                criticalAlerts:  critical.length,
                 lastFailureAtMs: pollingHealth.lastFailureAtMs,
                 lastSuccessAtMs: pollingHealth.lastSuccessAtMs,
-                scope: 'global' as const,
-                stale: pollingHealth.stale,
-                totalAlerts: pollingHealth.alerts.length,
+                scope:           'global' as const,
+                stale:           pollingHealth.stale,
+                totalAlerts:     pollingHealth.alerts.length,
             },
             vector: { configured: vectorConfig },
         },
@@ -86,7 +86,7 @@ const HealthLive = HttpApiBuilder.group(ParametricApi, 'health', (handlers) =>
             Effect.map(({ healthy, latencyMs }) => ({ latencyMs, status: healthy ? 'ok' as const : 'degraded' as const })),
             Telemetry.span('health.liveness'),
         )))
-        .handle('readiness', () => CacheService.rateLimit(_RATE_LIMIT_PRESET, _readiness(polling)))
+        .handle('readiness', () =>     CacheService.rateLimit(_RATE_LIMIT_PRESET, _readiness(polling)))
         .handle('clusterHealth', () => CacheService.rateLimit(_RATE_LIMIT_PRESET, ClusterService.Health.cluster().pipe(
             Effect.map((cluster) => ({ cluster })),
             Effect.mapError((error) => HttpError.ServiceUnavailable.of('Cluster health check failed', 30000, error)),

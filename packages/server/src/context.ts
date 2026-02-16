@@ -8,7 +8,8 @@ import type { Cookie } from '@effect/platform/Cookies';
 import type { SqlClient } from '@effect/sql';
 import type { SqlError } from '@effect/sql/SqlError';
 import { Client } from '@parametric-portal/database/client';
-import { Config, Data, Duration, Effect, FiberId, FiberRef, Option, pipe, Record, Schedule, Schema as S } from 'effect';
+import { Data, Duration, Effect, FiberId, FiberRef, Option, pipe, Record, Schedule, Schema as S } from 'effect';
+import { Env } from './env.ts';
 import { HttpError } from './errors.ts';
 import { constant, dual } from 'effect/Function';
 
@@ -126,10 +127,7 @@ class Request extends Effect.Tag('server/RequestContext')<Request, Context.Reque
         Client.tenant.locally(tenantId, Effect.locallyWith(Request.annotate(effect), Request._ref, (current) => ({ ...current, ...ctx, tenantId })));
     static readonly withinSync = <A, E, R>(tenantId: string, effect: Effect.Effect<A, E, R>, ctx?: Partial<Context.Request.Data>): Effect.Effect<A, E | SqlError, R | SqlClient.SqlClient> => Client.tenant.with(tenantId, Request.within(tenantId, effect, ctx));
     static readonly cookie = (() => {   // Cookie: IIFE encapsulates secure flag and config
-        const secure = Config.string('API_BASE_URL').pipe(
-            Config.withDefault('http://localhost:4000'),
-            Config.map((url) => url.startsWith('https://')),
-        );
+        const secure = Env.Service.pipe(Effect.map((env) => env.app.apiBaseUrl.startsWith('https://')));
         const configuration = {
             oauth: { name: 'oauthState', options: { httpOnly: true, maxAge: Duration.minutes(10), path: '/api/auth/oauth', sameSite: 'lax' } },
             refresh: { name: 'refreshToken', options: { httpOnly: true, maxAge: Duration.days(30), path: '/api/auth', sameSite: 'lax' } },

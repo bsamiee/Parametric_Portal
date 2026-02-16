@@ -4,13 +4,14 @@
  */
 import { DatabaseService } from '@parametric-portal/database/repos';
 import { SqlClient } from '@effect/sql';
-import { Array as A, Config, Cron, Effect, Layer, Match, Metric, Option, Record as R } from 'effect';
+import { Array as A, Cron, Effect, Layer, Match, Metric, Option, Record as R } from 'effect';
 import { AuditService } from '../../observe/audit.ts';
 import { MetricsService } from '../../observe/metrics.ts';
 import { Telemetry } from '../../observe/telemetry.ts';
 import { StorageService } from '../../domain/storage.ts';
 import { JobService } from '../jobs.ts';
 import { Context } from '../../context.ts';
+import { Env } from '../../env.ts';
 import { ClusterService } from '../cluster.ts';
 
 // --- [CONSTANTS] -------------------------------------------------------------
@@ -26,14 +27,6 @@ const _JOBS = {
     'purge-sessions':       { cron: '0 1 * * *',    days: 30,   repo: 'sessions' as const,      scope: 'tenant' as const, strategy: 'db-only' as const        },
     'purge-tenant-data':    { cron: null as unknown as string,  days: 0, repo: 'apps' as const, scope: 'manual' as const, strategy: 'cascade-tenant' as const },
 } as const;
-const _envKey = (name: string) => `PURGE_${name.replace('purge-', '').replaceAll('-', '_').toUpperCase()}`;
-const _config = Config.all({
-    jobs: Config.all(R.map(_JOBS, (defaults, name) => Config.all({
-        cron: Config.string(`${_envKey(name as string)}_CRON`),
-        days: Config.integer(`${_envKey(name as string)}_DAYS`),
-    }).pipe(Config.withDefault({ cron: defaults.cron, days: defaults.days })))),
-    s3: Config.all({ batchSize: Config.integer('PURGE_S3_BATCH_SIZE').pipe(Config.withDefault(100)), concurrency: Config.integer('PURGE_S3_CONCURRENCY').pipe(Config.withDefault(2)) }),
-});
 const _batchRemoveS3 = (assets: ReadonlyArray<{ storageRef: string | null }>, storage: typeof StorageService.Service, s3Config: { readonly batchSize: number; readonly concurrency: number }, label: string) =>
     Effect.gen(function* () {
         const chunks = A.chunksOf(A.filterMap(assets, (asset) => Option.fromNullable(asset.storageRef)), s3Config.batchSize);
@@ -63,8 +56,8 @@ const _purgeDbOnly = (database: DatabaseService.Type, repo: typeof _JOBS[keyof t
 
 class PurgeService extends Effect.Service<PurgeService>()('server/Purge', {
     effect: Effect.gen(function* () {
-        const [database, storage, audit, metrics, sql] = yield* Effect.all([DatabaseService, StorageService, AuditService, MetricsService, SqlClient.SqlClient]);
-        return { execute: (name: keyof typeof _JOBS) => PurgeService._execute(name, database, storage, audit, metrics).pipe(Effect.provideService(SqlClient.SqlClient, sql)) };
+        const [database, storage, audit, metrics, runtimeEnv, sql] = yield* Effect.all([DatabaseService, StorageService, AuditService, MetricsService, Env.Service, SqlClient.SqlClient]);
+        return { execute: (name: keyof typeof _JOBS) => PurgeService._execute(name, database, storage, audit, metrics).pipe(Effect.provideService(SqlClient.SqlClient, sql), Effect.provideService(Env.Service, runtimeEnv)) };
     }),
 }) {
     static readonly _strategies = {
@@ -85,44 +78,68 @@ class PurgeService extends Effect.Service<PurgeService>()('server/Purge', {
             _purgeDbOnly(database, repo, days).pipe(Effect.catchAll(() => Effect.succeed(0)), Effect.map((dbPurged) => ({ dbPurged, s3Deleted: 0, s3Failed: 0 }))),
     } as const;
     static readonly _execute = (name: keyof typeof _JOBS, database: DatabaseService.Type, storage: typeof StorageService.Service, audit: typeof AuditService.Service, metrics: MetricsService) =>
-        Effect.orDie(_config).pipe(Effect.flatMap((resolvedConfig) => {
-            const jobDef = _JOBS[name], jobCfg = resolvedConfig.jobs[name], labels = MetricsService.label({ job_name: name });
+        Env.Service.pipe(Effect.flatMap((env) => {
+            const jobDef = _JOBS[name];
+            const jobCfg = {
+                'purge-api-keys': env.purge.jobs.purgeApiKeys,
+                'purge-assets': env.purge.jobs.purgeAssets,
+                'purge-event-journal': env.purge.jobs.purgeEventJournal,
+                'purge-job-dlq': env.purge.jobs.purgeJobDlq,
+                'purge-kv-store': env.purge.jobs.purgeKvStore,
+                'purge-mfa-secrets': env.purge.jobs.purgeMfaSecrets,
+                'purge-oauth-accounts': env.purge.jobs.purgeOauthAccounts,
+                'purge-sessions': env.purge.jobs.purgeSessions,
+                'purge-tenant-data': { cron: 'manual', days: 0 },
+            }[name];
+            const s3Config = { batchSize: env.purge.s3BatchSize, concurrency: env.purge.s3Concurrency };
+            const labels = MetricsService.label({ job_name: name });
             const logPurgeResult = (details: { readonly dbPurged: number; readonly s3Deleted: number; readonly s3Failed: number }) => Match.value(details.dbPurged + details.s3Deleted).pipe(
                 Match.when(0, () => Effect.logInfo('No records to purge', { job: name })),
                 Match.orElse(() => Effect.all([audit.log(`Job.${name}`, { details: { ...details, retentionDays: jobCfg.days }, subjectId: name }), Effect.logInfo('Purge completed', { job: name, ...details, retentionDays: jobCfg.days })], { discard: true }))
             );
-            return PurgeService._strategies[jobDef.strategy](database, storage, jobCfg.days, jobDef.repo, resolvedConfig.s3).pipe(
+            return PurgeService._strategies[jobDef.strategy](database, storage, jobCfg.days, jobDef.repo, s3Config).pipe(
                 Effect.tap(logPurgeResult),
                 Effect.tap(() => Metric.increment(Metric.taggedWithLabels(metrics.jobs.completions, labels))),
                 Effect.tapError((error) => Effect.all([Effect.logError('Purge failed', { error: String(error), job: name }), Metric.increment(Metric.taggedWithLabels(metrics.jobs.failures, labels))], { discard: true })),
                 Effect.asVoid, Telemetry.span(`jobs.${name}`, { metrics: false }),
             );
         }));
-    static readonly _scheduledJobs = R.keys(_JOBS).filter((name) => _JOBS[name].cron !== null);
+    static readonly _scheduledJobs = R.keys(_JOBS).filter((name) => name !== 'purge-tenant-data');
     static readonly Crons = Layer.unwrapEffect(
-        Effect.orDie(_config).pipe(Effect.map((resolvedConfig) => Layer.mergeAll(
-            ...(PurgeService._scheduledJobs.map((name) => ClusterService.Schedule.cron({
-                cron: Cron.unsafeParse(resolvedConfig.jobs[name].cron),
-                execute: Effect.gen(function* () {
-                    const [jobs, database] = yield* Effect.all([JobService, DatabaseService]);
-                    const submitTenant = (tenantId: string) => Context.Request.withinSync(
-                        tenantId,
-                        jobs.submit(name, null),
-                        Context.Request.system(),
-                    ).pipe(Effect.asVoid);
-                    const submitAllApps = database.apps.find([]).pipe(
-                        Effect.map(A.map((app) => app.id)),
-                        Effect.andThen(Effect.forEach(submitTenant, { discard: true }))
-                    );
-                    return yield* Match.value(_JOBS[name].scope).pipe(
-                        Match.when('global', () => submitTenant(Context.Request.Id.system)),
-                        Match.when('manual', () => Effect.void),
-                        Match.orElse(() => Context.Request.withinSync(Context.Request.Id.system, submitAllApps, Context.Request.system())),
-                    );
-                }),
-                name,
-            })) as [Layer.Layer<never>, ...Layer.Layer<never>[]]),
-        ))),
+        Env.Service.pipe(Effect.map((env) => {
+            const jobsConfig = {
+                'purge-api-keys': env.purge.jobs.purgeApiKeys,
+                'purge-assets': env.purge.jobs.purgeAssets,
+                'purge-event-journal': env.purge.jobs.purgeEventJournal,
+                'purge-job-dlq': env.purge.jobs.purgeJobDlq,
+                'purge-kv-store': env.purge.jobs.purgeKvStore,
+                'purge-mfa-secrets': env.purge.jobs.purgeMfaSecrets,
+                'purge-oauth-accounts': env.purge.jobs.purgeOauthAccounts,
+                'purge-sessions': env.purge.jobs.purgeSessions,
+            } as const;
+            return PurgeService._scheduledJobs
+                .map((name) => ClusterService.Schedule.cron({
+                    cron: Cron.unsafeParse(jobsConfig[name].cron),
+                    execute: Effect.gen(function* () {
+                        const [jobs, database] = yield* Effect.all([JobService, DatabaseService]);
+                        const submitTenant = (tenantId: string) => Context.Request.withinSync(
+                            tenantId,
+                            jobs.submit(name, null),
+                            Context.Request.system(),
+                        ).pipe(Effect.asVoid);
+                        const submitAllApps = database.apps.find([]).pipe(
+                            Effect.map(A.map((app) => app.id)),
+                            Effect.andThen(Effect.forEach(submitTenant, { discard: true }))
+                        );
+                        return yield* Match.value(_JOBS[name].scope).pipe(
+                            Match.when('global', () => submitTenant(Context.Request.Id.system)),
+                            Match.orElse(() => Context.Request.withinSync(Context.Request.Id.system, submitAllApps, Context.Request.system())),
+                        );
+                    }),
+                    name,
+                }))
+                .reduce((accumulator, layer) => Layer.merge(accumulator, layer), Layer.empty);
+        })),
     );
     static readonly SweepCron = ClusterService.Schedule.cron({
         cron: Cron.unsafeParse('0 3 * * *'),
@@ -140,10 +157,10 @@ class PurgeService extends Effect.Service<PurgeService>()('server/Purge', {
         name: 'sweep-archived-tenants',
     });
     static readonly Handlers = Layer.effectDiscard(Effect.gen(function* () {
-        const [jobs, database, storage, audit, metrics, sql] = yield* Effect.all([JobService, DatabaseService, StorageService, AuditService, MetricsService, SqlClient.SqlClient]);
+        const [jobs, database, runtimeEnv, storage, audit, metrics, sql] = yield* Effect.all([JobService, DatabaseService, Env.Service, StorageService, AuditService, MetricsService, SqlClient.SqlClient]);
         const registerHandler = (name: keyof typeof _JOBS) => jobs.registerHandler(
             name,
-            () => PurgeService._execute(name, database, storage, audit, metrics).pipe(Effect.provideService(SqlClient.SqlClient, sql))
+            () => PurgeService._execute(name, database, storage, audit, metrics).pipe(Effect.provideService(SqlClient.SqlClient, sql), Effect.provideService(Env.Service, runtimeEnv))
         ).pipe(Effect.andThen(Effect.logInfo(`Handler registered: ${name}`)));
         yield* Effect.forEach(R.keys(_JOBS), registerHandler, { discard: true });
     }));

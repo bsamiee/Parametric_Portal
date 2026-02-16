@@ -20,7 +20,7 @@ import { StreamingService } from '@parametric-portal/server/platform/streaming';
 import { Crypto } from '@parametric-portal/server/security/crypto';
 import { PolicyService } from '@parametric-portal/server/security/policy';
 import { FeatureService } from '@parametric-portal/server/domain/features';
-import { constant, flow, identity } from 'effect/Function';
+import { constant, flow } from 'effect/Function';
 import { Array as Arr, Cause, Effect, Encoding, Match, Option, pipe, Struct } from 'effect';
 
 // --- [LAYERS] ----------------------------------------------------------------
@@ -28,19 +28,6 @@ import { Array as Arr, Cause, Effect, Encoding, Match, Option, pipe, Struct } fr
 const AdminLive = HttpApiBuilder.group(ParametricApi, 'admin', (handlers) =>
     Effect.gen(function* () {
         const [database, jobs, eventBus, audit, webhooks, policy, notifications, features, lifecycle] = yield* Effect.all([DatabaseService, JobService, EventBus, AuditService, WebhookService, PolicyService, NotificationService, FeatureService, TenantLifecycleService]);
-        const _dbQuery = <const N extends (typeof PolicyService.Catalog)['admin'][number]>(name: N, effect: Effect.Effect<unknown, unknown, unknown>) => Middleware.guarded('admin', name, 'api', effect.pipe(HttpError.mapTo(`${name} query failed`), Telemetry.span(`admin.${name}`// biome-ignore lint/suspicious/noExplicitAny: stat methods return unknown[] — handler chain requires specific response types, coercion is intentional
-        ))) as any;
-        const _dbMutation = <const N extends (typeof PolicyService.Catalog)['admin'][number]>(name: N, effect: Effect.Effect<unknown, unknown, unknown>, auditOp: string, opts?: {
-            readonly audit?: (result: unknown) => Record<string, unknown>;
-            readonly map?: (result: unknown) => unknown;
-        }) => Middleware.guarded('admin', name, 'mutation', effect.pipe(
-            HttpError.mapTo(`${name} failed`),
-            Effect.map(opts?.map ?? identity),
-            Effect.tap((result) => audit.log(auditOp, { details: opts?.audit ? opts.audit(result) : { result } })),
-            Telemetry.span(`admin.${name}`),
-        // biome-ignore lint/suspicious/noExplicitAny: stat methods return unknown[] — handler chain requires specific response types, coercion is intentional
-        )) as any;
-        const _dbStat = <const N extends (typeof PolicyService.Catalog)['admin'][number]>(name: N, limit?: number, extra?: Record<string, unknown> | null) => _dbQuery(name, database.observability.stat(name, limit, extra ?? null));
         return handlers
             .handle('listUsers', ({ urlParams }) => Middleware.guarded('admin', 'listUsers', 'api', database.users.page([], { cursor: urlParams.cursor, limit: urlParams.limit }).pipe(
                 HttpError.mapTo('User list failed'),
@@ -49,8 +36,8 @@ const AdminLive = HttpApiBuilder.group(ParametricApi, 'admin', (handlers) =>
             .handle('listSessions', ({ urlParams }) => Middleware.guarded('admin', 'listSessions', 'api', database.sessions.page(
                     pipe(
                         Match.value(urlParams),
-                        Match.when({ userId: Match.defined }, ({ userId }) => [{ field: 'user_id' as const, value: userId }]),
-                        Match.when({ ipAddress: Match.defined }, ({ ipAddress }) => [{ field: 'ip_address' as const, value: ipAddress }]),
+                        Match.when({ userId: Match.defined }, ({ userId }) => [{ field: 'userId' as const, value: userId }]),
+                        Match.when({ ipAddress: Match.defined }, ({ ipAddress }) => [{ field: 'ipAddress' as const, value: ipAddress }]),
                         Match.orElse(() => []),
                     ),
                     { cursor: urlParams.cursor, limit: urlParams.limit },
@@ -127,50 +114,11 @@ const AdminLive = HttpApiBuilder.group(ParametricApi, 'admin', (handlers) =>
                 })),
                 Telemetry.span('admin.events'),
             ))))
-            .handle('ioDetail',                 () => _dbStat('ioDetail'))
-            .handle('ioConfig',                 () => _dbStat('ioConfig'))
-            .handle('cacheRatio',               () => _dbStat('cacheRatio'))
-            .handle('cronJobs',                 () => _dbStat('cronJobs'))
-            .handle('hypotheticalIndexes',      () => _dbStat('hypotheticalIndexes'))
-            .handle('partmanConfig',            () => _dbStat('partmanConfig'))
-            .handle('buffercacheSummary',       () => _dbStat('buffercacheSummary'))
-            .handle('buffercacheUsage',         () => _dbStat('buffercacheUsage'))
-            .handle('squeezeStatus',            () => _dbQuery('squeezeStatus', database.observability.squeezeStatus()))
-            .handle('statements',               ({ urlParams }) => _dbStat('statements', urlParams.limit))
-            .handle('walInspect',               ({ urlParams }) => _dbStat('walInspect', urlParams.limit))
-            .handle('kcache',                   ({ urlParams }) => _dbStat('kcache', urlParams.limit))
-            .handle('qualstats',                ({ urlParams }) => _dbStat('qualstats', urlParams.limit))
-            .handle('waitSampling',             ({ urlParams }) => _dbStat('waitSampling', urlParams.limit))
-            .handle('waitSamplingCurrent',      ({ urlParams }) => _dbStat('waitSamplingCurrent', urlParams.limit))
-            .handle('deadTuples',               ({ urlParams }) => _dbStat('deadTuples', urlParams.limit))
-            .handle('tableBloat',               ({ urlParams }) => _dbStat('tableBloat', urlParams.limit))
-            .handle('indexBloat',               ({ urlParams }) => _dbStat('indexBloat', urlParams.limit))
-            .handle('lockContention',           ({ urlParams }) => _dbStat('lockContention', urlParams.limit))
-            .handle('connectionStats',          ({ urlParams }) => _dbStat('connectionStats', urlParams.limit))
-            .handle('replicationLag',           ({ urlParams }) => _dbStat('replicationLag', urlParams.limit))
-            .handle('indexUsage',               ({ urlParams }) => _dbStat('indexUsage', urlParams.limit))
-            .handle('tableSizes',               ({ urlParams }) => _dbStat('tableSizes', urlParams.limit))
-            .handle('unusedIndexes',            ({ urlParams }) => _dbStat('unusedIndexes', urlParams.limit))
-            .handle('seqScanHeavy',             ({ urlParams }) => _dbStat('seqScanHeavy', urlParams.limit))
-            .handle('visibility',               ({ urlParams }) => _dbStat('visibility', urlParams.limit))
-            .handle('buffercacheTop',           ({ urlParams }) => _dbStat('buffercacheTop', urlParams.limit))
-            .handle('waitSamplingHistory',      ({ urlParams }) => _dbStat('waitSamplingHistory', urlParams.limit, { sinceSeconds: urlParams.sinceSeconds }))
-            .handle('longRunningQueries',       ({ urlParams }) => _dbStat('longRunningQueries', urlParams.limit, { minSeconds: urlParams.minSeconds }))
-            .handle('indexAdvisor',             ({ urlParams }) => _dbStat('indexAdvisor', undefined, { minFilter: urlParams.minFilter, minSelectivity: urlParams.minSelectivity }))
-            .handle('cronHistory',              ({ urlParams }) => _dbStat('cronHistory', urlParams.limit, { jobName: urlParams.jobName ?? null }))
-            .handle('cronFailures',             ({ urlParams }) => _dbStat('cronFailures', undefined, { hours: urlParams.hours }))
-            .handle('partitionHealth',          ({ urlParams }) => _dbQuery('partitionHealth', database.observability.partitionHealth(urlParams.parentTable)))
-            .handle('squeezeStopWorker',        ({ path }) => _dbMutation('squeezeStopWorker', database.observability.squeezeStopWorker(path.pid), 'Db.squeezeStopWorker'))
-            .handle('createHypotheticalIndex',  ({ payload }) => _dbMutation('createHypotheticalIndex', database.observability.createHypotheticalIndex(payload.statement), 'Db.createHypotheticalIndex'))
-            .handle('resetWaitSampling',        () => _dbMutation('resetWaitSampling', database.observability.resetWaitSampling(), 'Db.resetWaitSampling'))
-            .handle('runPartmanMaintenance',    () => _dbMutation('runPartmanMaintenance', database.observability.runPartmanMaintenance(), 'Db.runPartmanMaintenance'))
-            .handle('syncCronJobs',             () => _dbMutation('syncCronJobs', database.observability.syncCronJobs(), 'Db.syncCronJobs'))
-            .handle('squeezeStartWorker',       () => _dbMutation('squeezeStartWorker', database.observability.squeezeStartWorker(), 'Db.squeezeStartWorker'))
-            .handle('resetHypotheticalIndexes', () => _dbMutation('resetHypotheticalIndexes', database.observability.resetHypotheticalIndexes(), 'Db.resetHypotheticalIndexes', {map: constant({ success: true as const }),}))
-            .handle('prewarmRelation', ({ payload }) => _dbMutation('prewarmRelation', database.observability.prewarmRelation(payload.relation, payload.mode), 'Db.prewarmRelation', {
-                audit: (result) => ({ ...(result as Record<string, unknown>), mode: payload.mode, relation: payload.relation }),
-                map: (blocks) => ({ blocks }),
-            }))
+            .handle('queryDbObservability', ({ payload }) => Middleware.guarded('admin', 'queryDbObservability', 'api', database.observability.query(payload).pipe(
+                HttpError.mapTo('queryDbObservability failed'),
+                Effect.map((sections) => ({ sections })),
+                Telemetry.span('admin.queryDbObservability'),
+            )))
             .handle('listPermissions', () => Middleware.guarded('admin', 'listPermissions', 'api', policy.list().pipe(
                 HttpError.mapTo('Permission list failed'),
                 Effect.map(Arr.map(({ action, resource, role }) => ({ action, resource, role }))),

@@ -135,9 +135,7 @@ class TenantLifecycleService extends Effect.Service<TenantLifecycleService>()('s
                 (payload) => S.decodeUnknown(_ProvisionPayload)(payload).pipe(
                     Effect.mapError((error) => HttpError.Validation.of('provisionTenantPayload', String(error))),
                     Effect.flatMap((decoded) => lifecycle.transition({ _tag: 'provision', ...decoded })),
-                    Effect.catchAll((error) => Effect.logError('Tenant provisioning failed', { error: String(error) }).pipe(
-                        Effect.andThen(Effect.fail(error)),
-                    )),
+                    Effect.catchAll((error) => Effect.logError('Tenant provisioning failed', { error: String(error) }).pipe(Effect.andThen(Effect.fail(error)),)),
                     Effect.asVoid,
                 ),
             );
@@ -146,9 +144,7 @@ class TenantLifecycleService extends Effect.Service<TenantLifecycleService>()('s
                 (payload) => S.decodeUnknown(_TransitionCommand)(payload).pipe(
                     Effect.mapError((error) => HttpError.Validation.of('tenantLifecyclePayload', String(error))),
                     Effect.flatMap(lifecycle.transition),
-                    Effect.catchAll((error) => Effect.logError('Tenant lifecycle transition failed', { error: String(error) }).pipe(
-                        Effect.andThen(Effect.fail(error)),
-                    )),
+                    Effect.catchAll((error) => Effect.logError('Tenant lifecycle transition failed', { error: String(error) }).pipe(Effect.andThen(Effect.fail(error)),)),
                     Effect.asVoid,
                 ),
             );

@@ -1,6 +1,6 @@
 /**
  * Load migrations from ../migrations directory via PgMigrator.
- * NodeContext filesystem access; depends on Client.layer.
+ * NodeContext filesystem access; caller provides explicit DB runtime config.
  */
 import { fileURLToPath } from 'node:url';
 import { NodeContext } from '@effect/platform-node';
@@ -10,10 +10,11 @@ import { Client } from './client.ts';
 
 // --- [LAYERS] ----------------------------------------------------------------
 
-const MigratorLive = PgMigrator.layer({ loader: PgMigrator.fromFileSystem(fileURLToPath(new URL(/* @vite-ignore */ '../migrations', import.meta.url))) }).pipe(
-    Layer.provide(Client.layer),
-    Layer.provide(NodeContext.layer),
-);
+const MigratorLive = (config: Parameters<typeof Client.layerFromConfig>[0]) =>
+    PgMigrator.layer({ loader: PgMigrator.fromFileSystem(fileURLToPath(new URL(/* @vite-ignore */ '../migrations', import.meta.url))) }).pipe(
+        Layer.provide(NodeContext.layer),
+        Layer.provide(Client.layerFromConfig(config)),
+    );
 
 // --- [EXPORT] ----------------------------------------------------------------
 

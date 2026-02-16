@@ -18,9 +18,8 @@ const IdempotencyRecord = S.Struct({
     status:       S.Literal('completed', 'pending'),
     tenantId:     S.String,
 });
-
-const makeCacheKey = (tenantId: string, resource: string, action: string, key: string) =>
-    `idem:${tenantId}:${resource}:${action}:${key}`;
+// [WHY] Production builds the cache key inline inside the idempotency middleware (packages/server/src/middleware.ts) — no exported pure function exists to import.
+const makeCacheKey = (tenantId: string, resource: string, action: string, key: string) => `idem:${tenantId}:${resource}:${action}:${key}`;
 
 // --- [ALGEBRAIC] -------------------------------------------------------------
 
@@ -40,7 +39,6 @@ describe('Idempotency record schema', () => {
             expect(record.completedAt).toBe(0);
             expect(record.result).toBe(null);
         }));
-
     it.effect('completed status with response data roundtrips correctly', () =>
         Effect.sync(() => {
             const record = S.decodeUnknownSync(IdempotencyRecord)({
@@ -56,7 +54,6 @@ describe('Idempotency record schema', () => {
             expect(record.completedAt).toBe(1707849600000);
             expect((record.result as Record<string, unknown>)['id']).toBe('pay_123');
         }));
-
     it.effect('invalid status value is rejected by schema', () =>
         Effect.sync(() => {
             const result = S.decodeUnknownEither(IdempotencyRecord)({
@@ -70,7 +67,6 @@ describe('Idempotency record schema', () => {
             });
             expect(result._tag).toBe('Left');
         }));
-
     it.effect('missing required field is rejected by schema', () =>
         Effect.sync(() => {
             const result = S.decodeUnknownEither(IdempotencyRecord)({
@@ -83,7 +79,6 @@ describe('Idempotency record schema', () => {
             });
             expect(result._tag).toBe('Left');
         }));
-
     it.effect('result field accepts any valid JSON value', () =>
         Effect.sync(() => {
             const record = S.decodeUnknownSync(IdempotencyRecord)({
@@ -98,13 +93,11 @@ describe('Idempotency record schema', () => {
             expect(record.result).toEqual({ message: 'success', nested: { data: [1, 2, 3], flag: true } });
         }));
 });
-
 describe('Cache key construction', () => {
     it('follows format idem:{tenantId}:{resource}:{action}:{key}', () => {
         const key = makeCacheKey('tenant-123', 'users', 'create', 'req-001');
         expect(key).toBe('idem:tenant-123:users:create:req-001');
     });
-
     it('produces unique keys for different components', () => {
         const base = makeCacheKey('tenant-123', 'users', 'create', 'req-001');
         expect(makeCacheKey('tenant-123', 'users', 'create', 'req-002')).not.toBe(base);
@@ -113,6 +106,8 @@ describe('Cache key construction', () => {
         expect(makeCacheKey('tenant-123', 'users', 'update', 'req-001')).not.toBe(base);
     });
 });
+
+// --- [EDGE_CASES] ------------------------------------------------------------
 
 describe('Branch condition logic', () => {
     it('identifies replay condition when bodyHash matches', () => {
@@ -128,7 +123,6 @@ describe('Branch condition logic', () => {
         expect(stored.bodyHash === 'hash-abc-123').toBe(true);
         expect(stored.status).toBe('completed');
     });
-
     it('identifies conflict condition when bodyHash differs', () => {
         const stored = S.decodeUnknownSync(IdempotencyRecord)({
             bodyHash:     'hash-original',
@@ -142,7 +136,6 @@ describe('Branch condition logic', () => {
         const isConflict = stored.status === 'completed' && stored.bodyHash !== 'hash-different';
         expect(isConflict).toBe(true);
     });
-
     it('identifies in-flight condition when status is pending', () => {
         const stored = S.decodeUnknownSync(IdempotencyRecord)({
             bodyHash:     'hash-pending',

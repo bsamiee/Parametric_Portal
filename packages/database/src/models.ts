@@ -62,6 +62,7 @@ const AppSettingsSchema = S.Struct({
     webhooks: S.optionalWith(S.Array(AppWebhookSchema), { default: () => [] }),
 });
 const AppSettingsDefaults = S.decodeSync(AppSettingsSchema)({});
+const _TimestampSchema =    S.Struct({ timestamp: S.Number });
 
 // --- [AUTH: USER] ------------------------------------------------------------
 class User extends Model.Class<User>('User')({
@@ -201,7 +202,7 @@ class Job extends Model.Class<Job>('Job')({
     priority:     S.Literal('critical', 'high', 'normal', 'low'),
     payload:      S.Unknown,
     output:       Model.FieldOption(S.Struct({ result: S.optional(S.Unknown), progress: S.optional(S.Struct({ message: S.String, pct: S.Number })) })),
-    history:      S.Array(S.Struct({error: S.optional(S.String), status: JobStatusSchema, timestamp: S.Number})),
+    history:      S.Array(S.extend(_TimestampSchema, S.Struct({ error: S.optional(S.String), status: JobStatusSchema }))),
     retryCurrent: S.Number,
     retryMax:     S.Number,
     scheduledAt:  Model.FieldOption(S.DateFromSelf),
@@ -225,7 +226,7 @@ class JobDlq extends Model.Class<JobDlq>('JobDlq')({
         'DeliveryFailed', 'DeserializationFailed', 'DuplicateEvent', 'ValidationFailed', 'AuditPersistFailed', 'HandlerTimeout',
     ),
     attempts:         S.Number,
-    errors:           S.Array(S.Struct({error: S.String, timestamp: S.Number})),
+    errors:           S.Array(S.extend(_TimestampSchema, S.Struct({ error: S.String }))),
     replayedAt:       Model.FieldOption(S.DateFromSelf),
 }) {}
 

@@ -4,8 +4,9 @@
  */
 import { timingSafeEqual } from 'node:crypto';
 import { type Hex64, Uuidv7 } from '@parametric-portal/types/types';
-import { Cache, Config, Data, Duration, Effect, Encoding, Either, HashMap, Option, Redacted, Schema as S } from 'effect';
+import { Cache, Data, Duration, Effect, Encoding, Either, HashMap, Option, Redacted, Schema as S } from 'effect';
 import { Context } from '../context.ts';
+import { Env } from '../env.ts';
 import { Telemetry } from '../observe/telemetry.ts';
 
 // --- [CONSTANTS] -------------------------------------------------------------
@@ -34,14 +35,21 @@ class CryptoError extends Data.TaggedError('CryptoError')<{
 
 class Service extends Effect.Service<Service>()('server/CryptoService', {
     effect: Effect.gen(function* () {
-        const multiKeyConfig = yield* Config.string('ENCRYPTION_KEYS').pipe(Config.option);
+        const env = yield* Env.Service;
+        const multiKeyConfig = env.security.encryptionKeys;
         const parsed = yield* Option.match(multiKeyConfig, {
-            onNone: () => Config.redacted('ENCRYPTION_KEY').pipe(Effect.map((redacted): ReadonlyArray<{ readonly key: string; readonly version: number }> => [{ key: Redacted.value(redacted), version: 1 }])),
-            onSome: (value) => S.decodeUnknown(S.parseJson(S.Array(S.Struct({ key: S.String, version: S.Number.pipe(S.int(), S.greaterThanOrEqualTo(1), S.lessThanOrEqualTo(255)) }))))(value).pipe(
+            onNone: () => Option.match(env.security.encryptionKey, {
+                onNone: () => Effect.fail(new CryptoError({ code: 'KEY_NOT_FOUND', op: 'key', tenantId: Context.Request.Id.system })),
+                onSome: (redacted): Effect.Effect<ReadonlyArray<{ readonly key: string; readonly version: number }>> => Effect.succeed([{ key: Redacted.value(redacted), version: 1 }]),
+            }),
+            onSome: (redacted) => S.decodeUnknown(S.parseJson(S.Array(S.Struct({ key: S.String, version: S.Number.pipe(S.int(), S.greaterThanOrEqualTo(1), S.lessThanOrEqualTo(255)) }))))(Redacted.value(redacted)).pipe(
                 Effect.mapError((error) => new CryptoError({ cause: error, code: 'INVALID_FORMAT', op: 'key', tenantId: Context.Request.Id.system })),
             ),
         });
-        const currentVersion = yield* Config.integer('ENCRYPTION_KEY_VERSION').pipe(Config.withDefault(parsed.reduce<number>((max, entry) => Math.max(entry.version, max), 0)));
+        const currentVersion = Option.getOrElse(
+            env.security.encryptionKeyVersion,
+            () => parsed.reduce<number>((max, entry) => Math.max(entry.version, max), 0),
+        );
         const imported = yield* Effect.forEach(parsed, (entry) =>
             Either.match(Encoding.decodeBase64(entry.key), {
                 onLeft: () => Effect.fail(new CryptoError({ code: 'INVALID_FORMAT', op: 'key', tenantId: Context.Request.Id.system })),

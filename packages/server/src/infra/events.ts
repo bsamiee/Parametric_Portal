@@ -20,28 +20,28 @@ import { ClusterService } from './cluster.ts';
 // --- [SCHEMA] ----------------------------------------------------------------
 
 class EventError extends S.TaggedError<EventError>()('EventError', {
-    cause: S.optional(S.Unknown),
+    cause:   S.optional(S.Unknown),
     eventId: S.optional(S.String),
-    reason: S.Literal('DeliveryFailed', 'DeserializationFailed', 'DuplicateEvent', 'ValidationFailed'),
+    reason:  S.Literal('DeliveryFailed', 'DeserializationFailed', 'DuplicateEvent', 'ValidationFailed'),
 }) {
     static readonly _props = {
         DeliveryFailed:         { retryable: true,  terminal: false },
-        DeserializationFailed:  { retryable: false, terminal: true },
-        DuplicateEvent:         { retryable: false, terminal: true },
-        ValidationFailed:       { retryable: false, terminal: true },
+        DeserializationFailed:  { retryable: false, terminal: true  },
+        DuplicateEvent:         { retryable: false, terminal: true  },
+        ValidationFailed:       { retryable: false, terminal: true  },
     } as const;
     static readonly from = (eventId: string, reason: EventError['reason'], cause?: unknown) => new EventError({ cause, eventId, reason });
-    get isTerminal(): boolean { return EventError._props[this.reason].terminal; }
+    get isTerminal():  boolean { return EventError._props[this.reason].terminal;  }
     get isRetryable(): boolean { return EventError._props[this.reason].retryable; }
 }
 class DomainEvent extends S.Class<DomainEvent>('DomainEvent')({
-    aggregateId: S.String,
-    causationId: S.optional(S.UUID),
+    aggregateId:   S.String,
+    causationId:   S.optional(S.UUID),
     correlationId: S.optional(S.UUID),
-    eventId: S.String.pipe(S.pattern(/^\d{18,19}$/), S.brand('SnowflakeId')),
-    payload: S.Unknown,
+    eventId:       S.String.pipe(S.pattern(/^\d{18,19}$/), S.brand('SnowflakeId')),
+    payload:       S.Unknown,
     schemaVersion: S.optionalWith(S.Int.pipe(S.between(1, 255)), { default: () => 1 }),
-    tenantId: S.String,
+    tenantId:      S.String,
     }) {
         [PrimaryKey.symbol]() { return this.eventId; }
         get eventType(): string {
@@ -61,11 +61,11 @@ class EventEnvelope extends S.Class<EventEnvelope>('EventEnvelope')({
 
 const _JSON = {
     envelope: S.parseJson(EventEnvelope),
-    notify: S.parseJson(S.Struct({ eventId: S.String, sourceNodeId: S.String })),
+    notify:   S.parseJson(S.Struct({ eventId: S.String, sourceNodeId: S.String })),
 } as const;
 const _CODEC = {
     envelope: { decode: S.decode(_JSON.envelope), encode: S.encode(_JSON.envelope) },
-    notify: { decode: S.decode(_JSON.notify), encode: S.encode(_JSON.notify) },
+    notify:   { decode: S.decode(_JSON.notify),   encode: S.encode(_JSON.notify)   },
 } as const;
 
 // --- [FUNCTIONS] -------------------------------------------------------------
@@ -73,8 +73,7 @@ const _CODEC = {
 const _extractSqlErrorCode = (cause: unknown): string =>
     Match.value(cause).pipe(
         Match.when(
-            (value: unknown): value is { code: string } =>
-                typeof value === 'object' && value !== null && 'code' in value && typeof (value as { readonly code?: unknown }).code === 'string',
+            (value: unknown): value is { code: string } => typeof value === 'object' && value !== null && 'code' in value && typeof (value as { readonly code?: unknown }).code === 'string',
             (value) => value.code,
         ),
         Match.when(

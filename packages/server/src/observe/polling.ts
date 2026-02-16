@@ -108,12 +108,11 @@ class PollingService extends Effect.Service<PollingService>()('server/Polling', 
         const pollJobQueueDepth = pollMetric({ fetch: _sumTenantMetric(() => database.jobs.countByStatuses('queued', 'processing')), gauge: metrics.jobs.queueDepth, metric: 'jobs_queue_depth', spanName: 'polling.jobQueueDepth', thresholds: _CONFIG.thresholds.jobQueueDepth, warningMessage: 'Job queue depth critical' });
         const pollEventOutboxDepth = pollMetric({ fetch: database.observability.outboxCount(), gauge: metrics.events.outboxDepth, metric: 'events_outbox_depth', spanName: 'polling.eventOutboxDepth', thresholds: _CONFIG.thresholds.eventOutboxDepth, warningMessage: 'Event outbox depth critical' });
         const pollIoStats = Effect.gen(function* () {
-            const rows = (yield* database.observability.stat('cacheRatio')) as readonly { hits: number; reads: number; writes: number }[];
             const zero = Number(_CONFIG.fallback.metric);
-            const totalReads = rows.reduce<number>((sum, row) => sum + row.reads, zero);
-            const totalHits = rows.reduce<number>((sum, row) => sum + row.hits, zero);
-            const totalWrites = rows.reduce<number>((sum, row) => sum + row.writes, zero);
-            const avgHitRatio = totalReads + totalHits > zero ? (totalHits / (totalReads + totalHits)) * 100 : zero;
+            const io = (yield* database.observability.query({ sections: [{ name: 'io' }] }))['io'] as { summary?: { cacheHitRatio?: number; reads?: number; writes?: number } };
+            const avgHitRatio = io.summary?.cacheHitRatio ?? zero;
+            const totalReads = io.summary?.reads ?? zero;
+            const totalWrites = io.summary?.writes ?? zero;
             yield* Effect.all([Metric.set(metrics.database.cacheHitRatio, avgHitRatio), Metric.set(metrics.database.ioReads, totalReads), Metric.set(metrics.database.ioWrites, totalWrites)], { discard: true });
             yield* Effect.when(Effect.logWarning('Cache hit ratio below threshold', { avgHitRatio, threshold: _CONFIG.thresholds.cacheHitRatio.warning }), () => avgHitRatio > zero && avgHitRatio < _CONFIG.thresholds.cacheHitRatio.warning);
             yield* STM.commit(TRef.set(ioStatsState, { avgHitRatio, totalReads, totalWrites }));

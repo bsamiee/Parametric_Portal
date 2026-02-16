@@ -17,6 +17,7 @@ export default defineConfig(
                 'domain/auth': './src/domain/auth.ts',
                 'domain/storage': './src/domain/storage.ts',
                 'domain/transfer': './src/domain/transfer.ts',
+                env: './src/env.ts',
                 errors: './src/errors.ts',
                 'infra/cluster': './src/infra/cluster.ts',
                 'infra/events': './src/infra/events.ts',
