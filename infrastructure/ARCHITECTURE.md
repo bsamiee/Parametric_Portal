@@ -221,12 +221,15 @@ export const apiUrl = api.url;
 ## Commands
 
 ```bash
-pulumi login s3://parametric-state   # Use S3 backend (free)
+pulumi login file://~/.pulumi-state  # Local backend (bootstrap default)
 pulumi stack init prod               # Create prod stack
 doppler run -- pulumi up             # Deploy with Doppler secrets
 pulumi preview                       # Preview changes
 pulumi destroy                       # Tear down
 ```
+
+> **Migration:** When moving to remote state, switch to `pulumi login s3://parametric-state`
+> and update `backend.url` in `Pulumi.yaml`.
 
 ## Secrets (via Doppler)
 
@@ -240,7 +243,9 @@ AWS_ACCESS_KEY_ID     # Pulumi AWS provider
 AWS_SECRET_ACCESS_KEY # Pulumi AWS provider
 ```
 
-No `PULUMI_CONFIG_PASSPHRASE` needed — we eliminated stack YAML files entirely.
+`PULUMI_CONFIG_PASSPHRASE` is required — the `file://` backend uses passphrase-based
+encryption for stack secrets. Bootstrap stores per-stack passphrases in Doppler and
+exports the variable before each `pulumi` command. No Pulumi stack YAML files are needed.
 
 ## Capabilities
 

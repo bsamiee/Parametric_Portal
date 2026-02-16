@@ -1,55 +1,55 @@
 {
-  "name": "@parametric-portal/theme",
-  "version": "2.0.1",
-  "type": "module",
-  "exports": {
-    "./base.css": "./src/base.css",
-    "./colors": {
-      "types": "./src/colors.ts",
-      "import": "./src/colors.ts",
-      "default": "./src/colors.ts"
+    "name": "@parametric-portal/theme",
+    "version": "2.0.1",
+    "type": "module",
+    "exports": {
+        "./base.css": "./src/base.css",
+        "./colors": {
+            "types": "./src/colors.ts",
+            "import": "./src/colors.ts",
+            "default": "./src/colors.ts"
+        },
+        "./component-wiring": {
+            "types": "./src/component-wiring.ts",
+            "import": "./src/component-wiring.ts",
+            "default": "./src/component-wiring.ts"
+        },
+        "./plugin": {
+            "types": "./src/plugin.ts",
+            "import": "./src/plugin.ts",
+            "default": "./src/plugin.ts"
+        },
+        "./theme": {
+            "types": "./src/theme.ts",
+            "import": "./src/theme.ts",
+            "default": "./src/theme.ts"
+        }
     },
-    "./component-wiring": {
-      "types": "./src/component-wiring.ts",
-      "import": "./src/component-wiring.ts",
-      "default": "./src/component-wiring.ts"
+    "scripts": {
+        "build": "vite build",
+        "check": "biome check .",
+        "dev": "vite dev --host",
+        "fix": "biome check --write .",
+        "preview": "vite preview --host",
+        "test": "vitest run --passWithNoTests",
+        "typecheck": "tsc --project tsconfig.json --noEmit"
     },
-    "./plugin": {
-      "types": "./src/plugin.ts",
-      "import": "./src/plugin.ts",
-      "default": "./src/plugin.ts"
+    "peerDependencies": {
+        "tailwindcss": "catalog:",
+        "tailwindcss-react-aria-components": "catalog:",
+        "tw-animate-css": "catalog:"
     },
-    "./theme": {
-      "types": "./src/theme.ts",
-      "import": "./src/theme.ts",
-      "default": "./src/theme.ts"
+    "dependencies": {
+        "@parametric-portal/types": "workspace:*",
+        "colorjs.io": "catalog:",
+        "effect": "catalog:"
+    },
+    "devDependencies": {
+        "@fast-check/vitest": "catalog:",
+        "fast-check": "catalog:",
+        "ts-essentials": "catalog:",
+        "typescript": "catalog:",
+        "vite": "catalog:",
+        "vitest": "catalog:"
     }
-  },
-  "scripts": {
-    "build": "vite build",
-    "check": "biome check .",
-    "dev": "vite dev --host",
-    "fix": "biome check --write .",
-    "preview": "vite preview --host",
-    "test": "vitest run --passWithNoTests",
-    "typecheck": "tsc --project tsconfig.json --noEmit"
-  },
-  "peerDependencies": {
-    "tailwindcss": "catalog:",
-    "tailwindcss-react-aria-components": "catalog:",
-    "tw-animate-css": "catalog:"
-  },
-  "dependencies": {
-    "@parametric-portal/types": "workspace:*",
-    "colorjs.io": "catalog:",
-    "effect": "catalog:"
-  },
-  "devDependencies": {
-    "@fast-check/vitest": "catalog:",
-    "fast-check": "catalog:",
-    "ts-essentials": "catalog:",
-    "typescript": "catalog:",
-    "vite": "catalog:",
-    "vitest": "catalog:"
-  }
 }

@@ -120,7 +120,7 @@ class EventBus extends Effect.Service<EventBus>()('server/EventBus', {
         );
         yield* Client.listen.raw('event_journal_notify').pipe(
             Stream.mapEffect((payload) => _CODEC.notify.decode(payload).pipe(
-                Effect.flatMap(({ eventId, sourceNodeId }) => database.journal.entry(eventId).pipe(
+                Effect.flatMap(({ eventId, sourceNodeId }) => database.observability.journalEntry(eventId).pipe(
                     Effect.flatMap(Option.match({
                         onNone: () => Effect.logWarning('LISTEN/NOTIFY event not found in journal', { eventId }),
                         onSome: handleNotifyEntry,
@@ -268,7 +268,7 @@ class EventBus extends Effect.Service<EventBus>()('server/EventBus', {
             return Stream.paginateChunkEffect(initialCursor, Effect.fn('events.replay')(function*(cursor) {
                 yield* Effect.annotateCurrentSpan('replay.batch_size', batchSize);
                 yield* Effect.annotateCurrentSpan('replay.cursor', cursor);
-                const rows = yield* database.journal.replay({
+                const rows = yield* database.observability.journalReplay({
                     batchSize,
                     eventType: filter.eventType,
                     sinceSequenceId: cursor,

@@ -3,7 +3,10 @@ name: skill-builder
 type: standard
 depth: full
 description: >-
-    Creates and refines Claude Code skills via structured workflows with YAML frontmatter, typed folders, and depth-gated LOC limits. Use when authoring SKILL.md files, organizing references/, or validating skill structure.
+    Creates and refines Claude Code skills following Anthropic best practices
+    with YAML frontmatter, progressive disclosure, and LOC-gated quality. Use
+    when authoring new SKILL.md files, restructuring skill references/,
+    upgrading skill depth or type, or validating existing skill compliance.
 ---
 
 # [H1][SKILL-BUILDER]
@@ -28,10 +31,10 @@ Create and refine Claude Code skills via structured workflows.
       - [simple](./templates/simple.skill.template.md) - DEFAULT
       - [standard](./templates/standard.skill.template.md)
       - [complex](./templates/complex.skill.template.md)
-    - (refine) Compare input to existing frontmatter; see [refine.md](./references/workflows/refine.md):
-      - Input = existing → optimize (density, fixes, quality)
-      - Input > existing → upgrade (expand structure or depth)
-      - Input < existing → downsize (combine, refactor, remove low-relevance)
+    - (refine) Compare input to existing frontmatter; see [refine-workflow.md](./references/refine-workflow.md):
+      - Input = existing — optimize (density, fixes, quality)
+      - Input > existing — upgrade (expand structure or depth)
+      - Input < existing — downsize (combine, refactor, remove low-relevance)
 11. Validate — Quality gate, LOC compliance, structure match
 
 **Dependencies:**
@@ -39,107 +42,54 @@ Create and refine Claude Code skills via structured workflows.
 - `skill-summarizer` — Voice and formatting extraction (with skill `style-standards`)
 - `report.md` — Sub-agent output format
 
-[REFERENCE]: [index.md](./index.md) — Complete file listing
+**References:**
+
+| Domain      | File                                                      |
+| ----------- | --------------------------------------------------------- |
+| Frontmatter | [frontmatter.md](references/frontmatter.md)               |
+| Structure   | [structure.md](references/structure.md)                    |
+| Depth       | [depth.md](references/depth.md)                            |
+| Scripting   | [scripting.md](references/scripting.md)                    |
+| Validation  | [validation.md](references/validation.md)                  |
+| Create      | [create-workflow.md](references/create-workflow.md)        |
+| Refine      | [refine-workflow.md](references/refine-workflow.md)        |
 
 ---
-## [1][FRONTMATTER]
->**Dictum:** *Metadata enables discovery before loading.*
+## [1][DOMAIN_GUIDE]
+>**Dictum:** *Metadata drives discovery, type gates structure, depth caps density.*
 
 <br>
 
-Frontmatter indexed at session start (~100 tokens). Description is ONLY field parsed for relevance—quality determines invocation accuracy.
+Frontmatter is indexed at session start (~100 tokens). Description quality determines invocation accuracy — LLM reasoning matches user intent, no embeddings. Type gates folder creation (simple/standard/complex). Depth enforces LOC limits and nesting rights per level (+50 SKILL.md, +25 reference cumulative).
+
+| [INDEX] | [TYPE]   | [DEPTH RANGE] | [FOLDERS]                          |
+| :-----: | -------- | :-----------: | ---------------------------------- |
+|   [1]   | Simple   |   Base-Ext    | SKILL.md only                      |
+|   [2]   | Standard |   Base-Full   | +references/, templates/           |
+|   [3]   | Complex  |   Ext-Full    | +scripts/                          |
 
 **Guidance:**
-- `Discovery` — LLM reasoning matches description to user intent. No embeddings, no keyword matching.
-- `Trigger Density` — Include file types, operations, "Use when" clauses. Every word aids matching.
-- `Voice` — Third person, active, present tense. Prohibit: 'could', 'might', 'probably', 'should'.
+- `Discovery` — Description is ONLY field parsed for relevance. Include "Use when" clauses, file types, operations. Third person, active, present tense.
+- `Structure` — Create only folders appropriate to type. Empty folders prohibited. Max 7 files in references/.
+- `Depth` — Hard caps: Base <300/<150, Extended <350/<175, Full <400/<200. Exceeding requires refactoring, not justification.
+- `Content Separation` — SKILL.md = WHY (tasks, guidance, best-practices). References = HOW (specs, tables, schemas). No verbatim duplication.
 
-**Best-Practices:**
-- **Length** — 1-2 sentences. Concise triggers outperform verbose explanations.
-- **Classification** — Include `type` and `depth` fields for refine workflow detection.
-- **Invocation Control** — `disable-model-invocation: true` for user-only; `user-invocable: false` for Claude-only.
+See [frontmatter.md](references/frontmatter.md) for schema. See [structure.md](references/structure.md) for layout. See [depth.md](references/depth.md) for limits.
 
 ---
-## [2][STRUCTURE]
->**Dictum:** *Type determines breadth—folder existence defines capability scope.*
+## [2][AUTHORING]
+>**Dictum:** *Templates enforce canonical structure, scripts extend deterministic capability.*
 
 <br>
 
-Type gates folder creation. Structure defines WHAT exists; Depth constrains HOW MUCH content.
+**Templates:** Select by type — simple (default), standard, complex. Follow template exactly; combine user input with skeleton for consistent artifacts.
 
-| [INDEX] | [TYPE]   | [FOLDERS]                          |
-| :-----: | -------- | ---------------------------------- |
-|   [1]   | Simple   | SKILL.md only                      |
-|   [2]   | Standard | +index.md, references/, templates/ |
-|   [3]   | Complex  | +scripts/                          |
+**Scripts:** Complex type only. Justified when: external tool wrapping, exact reproducibility, schema enforcement. See [scripting.md](references/scripting.md) for standards (Python 3.14+/TypeScript 6.0+, frozen config, dispatch tables, JSON output).
 
-**Guidance:**
-- `Naming` — Skill folder matches frontmatter `name` exactly. Kebab-case throughout.
-- `Index` — Standard/Complex require index.md at root listing all reference files.
-- `Upgrade Path` — Start with simplest type satisfying requirements.
-
-**Best-Practices:**
-- **Directory Purpose** — references/ for domain knowledge, templates/ for output scaffolds, scripts/ for automation.
-- **File Limit** — Max 7 files in references/ (including nested).
+**LOC Optimization:** Consolidate — restructure — densify — prune (in order). Brute-force trimming prohibited. See [depth.md > LOC_OPTIMIZATION](references/depth.md#3loc_optimization).
 
 ---
-## [3][DEPTH]
->**Dictum:** *Depth determines comprehensiveness—hard caps prevent bloat.*
-
-<br>
-
-Depth enforces LOC limits and nesting rights. Each level adds +50 SKILL.md, +25 reference files (cumulative).
-
-| [INDEX] | [DEPTH]  | [SKILL.MD] | [REF_FILE] | [NESTING]      |
-| :-----: | -------- | :--------: | :--------: | -------------- |
-|   [1]   | Base     |    <300    |    <150    | Flat only      |
-|   [2]   | Extended |    <350    |    <175    | 1 subfolder    |
-|   [3]   | Full     |    <400    |    <200    | 1-3 subfolders |
-
-**Guidance:**
-- `Nesting Gate` — Subfolder requires 3+ related files OR distinct domain concern.
-- `Content Scaling` — Base: 1-2 items per Guidance/Best-Practices. Extended: 2-4. Full: comprehensive.
-- `LOC Optimization` — Density over deletion; see [depth.md§LOC_OPTIMIZATION](./references/depth.md).
-- `Content Separation` — SKILL.md = WHY, references = HOW; see [depth.md§CONTENT_SEPARATION](./references/depth.md).
-
-**Best-Practices:**
-- **Hard Caps** — Exceeding limits requires refactoring, not justification.
-- **No Brute-Force** — Consolidate → restructure → densify → prune (in order).
-
----
-## [4][SCRIPTING]
->**Dictum:** *Deterministic automation extends LLM capabilities.*
-
-<br>
-
-Complex type enables scripts/ folder for external tool orchestration, artifact generation, validation.
-
-**Guidance:**
-- `Justification` — Script overhead demands explicit need: tool wrapping, exact reproducibility, schema enforcement.
-- `Depth Scaling` — Base/Extended: single script. Full: multiple when distinct concerns justify.
-
-**Best-Practices:**
-- **Type Selection** — Standard suffices for most skills. Complex only when automation is core purpose.
-- **Augmentation** — Scripts support workflows; core logic remains in SKILL.md and references.
-
----
-## [5][TEMPLATES]
->**Dictum:** *Templates enforce canonical structure.*
-
-<br>
-
-Templates define output scaffolds. Agent combines user input with template skeleton for consistent artifacts.
-
-**Guidance:**
-- `Purpose` — Follow template exactly. No improvisation.
-- `Composition` — Input data + template skeleton = generated artifact.
-
-**Best-Practices:**
-- **Placeholder Syntax** — Use `${variable-name}` for insertion points.
-- **Structure Match** — Template complexity matches depth selection.
-
----
-## [6][VALIDATION]
+## [3][VALIDATION]
 >**Dictum:** *Gates prevent incomplete artifacts.*
 
 <br>
@@ -151,4 +101,4 @@ Templates define output scaffolds. Agent combines user input with template skele
 - [ ] Workflow: Executed per Scope (create | refine).
 - [ ] Quality: LOC within limits, content separation enforced.
 
-[REFERENCE] Operational checklist: [→validation.md](./references/validation.md)
+See [validation.md](references/validation.md) for operational checklist.

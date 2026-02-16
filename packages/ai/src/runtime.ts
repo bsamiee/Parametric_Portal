@@ -20,11 +20,13 @@ const _CONFIG = {
         rateTtl: Duration.minutes(1),
     },
     cache: { settings: { capacity: 256, storeId: 'ai:settings', ttlMinutes: 5 } },
-    labels: {
-        operations: { embed: 'ai.embed', generateObject: 'ai.generateObject', generateText: 'ai.generateText', settings: 'ai.settings', streamText: 'ai.streamText' },
-    },
+    labels: {operations: { embed: 'ai.embed', generateObject: 'ai.generateObject', generateText: 'ai.generateText', settings: 'ai.settings', streamText: 'ai.streamText' },},
     telemetry: { operations: { chat: 'chat', embeddings: 'embeddings' } },
 } as const;
+const _TOKEN_FIELDS = [
+    ['input', 'inputTokens'], ['output', 'outputTokens'], ['total', 'totalTokens'],
+    ['reasoning', 'reasoningTokens'], ['cached', 'cachedInputTokens'],
+] as const;
 
 // --- [SCHEMA] ----------------------------------------------------------------
 
@@ -40,7 +42,6 @@ class AiRuntimeError extends Data.TaggedError('AiRuntimeError')<{
     readonly operation: string;
     readonly cause: unknown;
 }> {}
-
 class AiPolicyError extends Data.TaggedError('AiPolicyError')<{
     readonly operation: string;
     readonly reason: string;
@@ -56,11 +57,6 @@ const _wrapError = (operation: string) => (cause: unknown) =>
         Match.when(Match.instanceOf(AiPolicyError), (error) => error),
         Match.orElse((error) => new AiRuntimeError({ cause: error, operation })),
     );
-
-const _TOKEN_FIELDS = [
-    ['input', 'inputTokens'], ['output', 'outputTokens'], ['total', 'totalTokens'],
-    ['reasoning', 'reasoningTokens'], ['cached', 'cachedInputTokens'],
-] as const;
 
 // --- [SERVICES] --------------------------------------------------------------
 
@@ -113,8 +109,7 @@ class AiRuntime extends Effect.Service<AiRuntime>()('ai/Runtime', {
                     Effect.flatMap((current) => cache.kv.set(`${_CONFIG.budget.rateKeyPrefix}${tenantId}`, current + 1, _CONFIG.budget.rateTtl)),
                 ),
             ], { discard: true });
-        const settingsFor = (tenantId: string) =>
-            settingsCache.get(new AiSettingsKey({ tenantId })).pipe(Effect.mapError(mapSettingsError));
+        const settingsFor = (tenantId: string) => settingsCache.get(new AiSettingsKey({ tenantId })).pipe(Effect.mapError(mapSettingsError));
         const settings = () => Context.Request.currentTenantId.pipe(Effect.flatMap(settingsFor));
         const tokenUsage = (labels: Record<string, string | undefined>, usage: Response.Usage) =>
             Effect.forEach(
@@ -167,6 +162,10 @@ class AiRuntime extends Effect.Service<AiRuntime>()('ai/Runtime', {
                     const labels = MetricsService.label(labelPairs);
                     const layers = AiRegistry.layers(appSettings);
                     const ann = annotate({ operation: { name: _CONFIG.telemetry.operations.embeddings }, request: { model: appSettings.embedding.model }, system: appSettings.embedding.provider });
+                    const estimatedTokens = Match.value(input).pipe(
+                        Match.when(Match.string, (str) => Math.ceil(str.length / 4)),
+                        Match.orElse((arr) => Math.ceil(arr.join('').length / 4)),
+                    );
                     return track(_CONFIG.labels.operations.embed, labels,
                         Effect.gen(function* () {
                             const e = yield* EmbeddingModel.EmbeddingModel;
@@ -174,12 +173,7 @@ class AiRuntime extends Effect.Service<AiRuntime>()('ai/Runtime', {
                         }).pipe(Effect.provide(layers.embedding)),
                     ).pipe(
                         Effect.tap((result) => MetricsService.inc(metrics.ai.embeddings, labels, Array.isArray(input) ? (result as readonly (readonly number[])[]).length : 1)),
-                        Effect.tap(() => {
-                            const estimatedTokens = Array.isArray(input)
-                                ? Math.ceil((input as ReadonlyArray<string>).reduce((accumulator, text) => accumulator + text.length, 0) / 4)
-                                : Math.ceil((input as string).length / 4);
-                            return incrementBudgetCounters(requestContext.tenantId, estimatedTokens);
-                        }),
+                        Effect.tap(() => incrementBudgetCounters(requestContext.tenantId, estimatedTokens)),
                         Effect.ensuring(ann),
                         Telemetry.span(_CONFIG.labels.operations.embed, { kind: 'client', metrics: false }),
                     );

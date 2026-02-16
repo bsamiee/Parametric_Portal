@@ -26,6 +26,7 @@ type MergeResult<T> = T & { readonly _action: 'insert' | 'update' };
 type SqlCast = typeof Field.sqlCast[keyof typeof Field.sqlCast];
 type FnCallSpec = { args?: readonly (string | { field: string; cast: SqlCast })[]; params?: S.Schema.AnyNoContext; mode?: 'scalar' | 'set' | 'typed'; schema?: S.Schema.AnyNoContext };
 type _Render = (col: Statement.Identifier, sql: SqlClient.SqlClient, pg: PgClient.PgClient) => Statement.Fragment;
+type RoutineConfig = Pick<Config<Model.AnyNoContext>, 'functions'>;
 type ResolveSpec<M extends Model.AnyNoContext> =
     | keyof M['fields'] & string
     | readonly (keyof M['fields'] & string)[]
@@ -36,10 +37,9 @@ type Config<M extends Model.AnyNoContext> = {
     scoped?: keyof M['fields'] & string;
     resolve?: Record<string, ResolveSpec<M>>;
     conflict?: { keys: (keyof M['fields'] & string)[]; only?: (keyof M['fields'] & string)[] };
-    purge?: string;
+    purge?: string | { readonly table: string; readonly column: string; readonly defaultDays?: number };
     functions?: Record<string, FnCallSpec>;
 };
-type RoutineConfig = Pick<Config<Model.AnyNoContext>, 'functions'>;
 type _ResolverSurface<M extends Model.AnyNoContext, C extends Config<M>> = {
     [K in string & keyof NonNullable<C['resolve']> as NonNullable<C['resolve']>[K] extends readonly string[] ? never : K]: (value: unknown) => (
         NonNullable<C['resolve']>[K] extends { many: true }
@@ -101,8 +101,7 @@ const repo = <M extends Model.AnyNoContext, const C extends Config<M>>(model: M,
         const $lock = (lock: false | 'update' | 'share' | 'nowait' | 'skip') => ({ false: sql``, nowait: sql` FOR UPDATE NOWAIT`, share: sql` FOR SHARE`, skip: sql` FOR UPDATE SKIP LOCKED`, update: sql` FOR UPDATE` })[`${lock}`]; // NOSONAR S3358
         const $order = (asc: boolean) => asc ? sql`ORDER BY ${sql(pkCol)} ASC` : sql`ORDER BY ${sql(pkCol)} DESC`;
         const _scopeOpt = Option.fromNullable(config.scoped).pipe(Option.flatMap((field) => Option.fromNullable(Field.resolve(field))), Option.map((entry) => entry.col));
-        const _tenantScope = (operation: string, scopeCol: string) => (tenantId: string) =>
-            ({ [Client.tenant.Id.system]: Effect.succeed(sql``), [Client.tenant.Id.unspecified]: Effect.fail(new RepoScopeError({ operation, reason: 'tenant_missing', scopedField: scopeCol, table, tenantId })) } as Record<string, Effect.Effect<Statement.Fragment, RepoScopeError>>)[tenantId] ?? Effect.succeed(sql` AND ${sql(scopeCol)} = ${tenantId}`); // NOSONAR S3358
+        const _tenantScope = (operation: string, scopeCol: string) => (tenantId: string) => ({ [Client.tenant.Id.system]: Effect.succeed(sql``), [Client.tenant.Id.unspecified]: Effect.fail(new RepoScopeError({ operation, reason: 'tenant_missing', scopedField: scopeCol, table, tenantId })) } as Record<string, Effect.Effect<Statement.Fragment, RepoScopeError>>)[tenantId] ?? Effect.succeed(sql` AND ${sql(scopeCol)} = ${tenantId}`); // NOSONAR S3358
         const _withTenantContext = <A, E, R>(operation: string, effect: Effect.Effect<A, E, R>): Effect.Effect<A, E | RepoScopeError | SqlError, R> =>
             Option.match(_scopeOpt, {
                 onNone: () => effect,
@@ -137,13 +136,13 @@ const repo = <M extends Model.AnyNoContext, const C extends Config<M>>(model: M,
                     onSome: () => sql`${col} ?& ARRAY[${csvFrag}]::text[]`,
                 });
             },
-            in: ({ col, values }: OpCtx) => A.isNonEmptyArray(values) ? sql`${col} IN ${sql.in(values)}` : sql`FALSE`,
-            like: _cmp('LIKE'),
-            lt:   _cmp('<'),
-            lte:  _cmp('<='),
+            in:      ({ col, values }: OpCtx) => A.isNonEmptyArray(values) ? sql`${col} IN ${sql.in(values)}` : sql`FALSE`,
+            like:    _cmp('LIKE'),
+            lt:      _cmp('<'),
+            lte:     _cmp('<='),
             notNull: ({ col }: OpCtx) => sql`${col} IS NOT NULL`, null: ({ col }: OpCtx) => sql`${col} IS NULL`,
-            tsGte: ({ col, value }: OpCtx) => sql`uuid_extract_timestamp(${col}) >= ${value}`,
-            tsLte: ({ col, value }: OpCtx) => sql`uuid_extract_timestamp(${col}) <= ${value}`,
+            tsGte:   ({ col, value }: OpCtx) => sql`uuid_extract_timestamp(${col}) >= ${value}`,
+            tsLte:   ({ col, value }: OpCtx) => sql`uuid_extract_timestamp(${col}) <= ${value}`,
         } as const satisfies Record<string, (ctx: OpCtx) => Statement.Fragment>;
         const $pred = (predicate: Pred): Statement.Fragment => {
             const _handleObj = (pred: { field: string; value?: unknown; values?: unknown[]; op?: keyof typeof _ops; cast?: SqlCast; wrap?: string }) => {
@@ -333,9 +332,21 @@ const repo = <M extends Model.AnyNoContext, const C extends Config<M>>(model: M,
         };
         const drop = _soft('drop');
         const lift = _soft('lift');
-        const purge = (days = 30): Effect.Effect<number, RepoConfigError | RepoScopeError | SqlError | ParseError | Cause.NoSuchElementException> => {
+        const purge = (days?: number): Effect.Effect<number, RepoConfigError | RepoScopeError | SqlError | ParseError | Cause.NoSuchElementException> => {
+            const _purgeEffect = (cfg: NonNullable<typeof config.purge>) =>
+                typeof cfg === 'string'
+                    ? SqlSchema.single({
+                        execute: (num) => sql`SELECT ${sql.literal(cfg)}(${num}) AS count`,
+                        Request: S.Number,
+                        Result: S.Struct({ count: S.Int }),
+                    })(days ?? 30).pipe(Effect.map((row) => row.count))
+                    : SqlSchema.single({
+                        execute: (params) => sql`SELECT purge_table(${params.table}, ${params.column}, ${params.days}) AS count`,
+                        Request: S.Struct({ column: S.String, days: S.Int, table: S.String }),
+                        Result: S.Struct({ count: S.Int }),
+                    })({ column: cfg.column, days: days ?? cfg.defaultDays ?? 30, table: cfg.table }).pipe(Effect.map((row) => row.count));
             const effect: Effect.Effect<number, RepoConfigError | SqlError | ParseError | Cause.NoSuchElementException> = config.purge
-                ? ((functionName) => SqlSchema.single({ execute: (num) => sql`SELECT ${sql.literal(functionName)}(${num}) AS count`, Request: S.Number, Result: S.Struct({ count: S.Int }) })(days).pipe(Effect.map(row => row.count)))(config.purge)
+                ? _purgeEffect(config.purge)
                 : Effect.fail(new RepoConfigError({ message: 'purge function not configured', operation: 'purge', table }));
             return _withTenantContext('purge', effect);
         };
@@ -375,8 +386,7 @@ const repo = <M extends Model.AnyNoContext, const C extends Config<M>>(model: M,
                 ),
             );
         // Why: _callFn returns Effect<unknown> — generic <T> lets callers narrow the return type per function name
-        const fn = <T = unknown>(name: string, params: Record<string, unknown>) =>
-            _withTenantContext('fn', _callFn(sql, config.functions, model, table)(name, params) as Effect.Effect<T, RepoConfigError | RepoUnknownFnError | SqlError | ParseError | Cause.NoSuchElementException>);
+        const fn = <T = unknown>(name: string, params: Record<string, unknown>) => _withTenantContext('fn', _callFn(sql, config.functions, model, table)(name, params) as Effect.Effect<T, RepoConfigError | RepoUnknownFnError | SqlError | ParseError | Cause.NoSuchElementException>);
         const withTransaction = sql.withTransaction;
         const json = {
             decode: <A, I, R>(field: string, schema: S.Schema<A, I, R>) =>
@@ -384,6 +394,15 @@ const repo = <M extends Model.AnyNoContext, const C extends Config<M>>(model: M,
                     opt._tag === 'None' ? Effect.succeed(Option.none<A>()) : S.decodeUnknown(S.parseJson(schema))((opt.value as Record<string, unknown>)[field]).pipe(Effect.option),
             encode: <A, I, R>(schema: S.Schema<A, I, R>) => (value: A): Effect.Effect<string, ParseError, R> => S.encode(S.parseJson(schema))(value),
         };
+        const pageOpts = (options?: { limit?: number; cursor?: string }, defaultLimit = Page.bounds.default): { limit: number; cursor: string | undefined } => ({
+            cursor: options?.cursor,
+            limit: options?.limit ?? defaultLimit,
+        });
+        const touch = (field: string) => (id: string) => set(id, { [field]: Update.now });
+        const wildcard = (field: string, value: string | undefined): readonly Pred[] =>
+            value === undefined
+                ? []
+                : [{ field, op: (value.includes('*') ? 'like' : 'eq'), value: value.replaceAll('*', '%') }];
         // Why: compound (array) resolve specs need named-param delegates — kept manual in repos.ts
         const _resolverDelegates = Object.fromEntries(
             Object.entries(config.resolve ?? {}).filter(([, spec]) => !Array.isArray(spec)).map(([name]) => [
@@ -403,15 +422,17 @@ const repo = <M extends Model.AnyNoContext, const C extends Config<M>>(model: M,
                 }),
             })
             : {}) as { restore: (id: string, scopeVal?: string) => ReturnType<typeof lift>; softDelete: (id: string, scopeVal?: string) => ReturnType<typeof drop> };
-        return { ...base, ..._resolverDelegates, ..._softDelegates, agg, by, count, drop, exists, find, fn, json, lift, merge, one, page, pageOffset, pg, preds, purge, put, set, stream, upsert, withTransaction };
+        return { ...base, ..._resolverDelegates, ..._softDelegates, agg, by, count, drop, exists, find, fn, json, lift, merge, one, page, pageOffset, pageOpts, pg, preds, purge, put, set, stream, touch, upsert, wildcard, withTransaction };
         });
 const routine = <const C extends RoutineConfig>(table: string, config: C) =>
     Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient;
         // Why: _callFn returns Effect<unknown> — generic <T> lets callers narrow the return type per function name
-        const fn = <T = unknown>(name: string, params: Record<string, unknown>) =>
-            _callFn(sql, config.functions, undefined, table)(name, params) as Effect.Effect<T, RepoConfigError | RepoUnknownFnError | SqlError | ParseError | Cause.NoSuchElementException>;
-        return { fn };
+        const fn = <T = unknown>(name: string, params: Record<string, unknown>) => _callFn(sql, config.functions, undefined, table)(name, params) as Effect.Effect<T, RepoConfigError | RepoUnknownFnError | SqlError | ParseError | Cause.NoSuchElementException>;
+        const stat = <T = readonly unknown[]>(name: string, limit: number = 100, extra: Record<string, unknown> | null = null) => fn<T>('stat', { extra: extra ? JSON.stringify(extra) : null, limit, name });
+        const statBatch = (names: readonly string[], limit: number = 100) => fn<Record<string, readonly unknown[]>>('stat_batch', { extra: null, limit, names: [...names] });
+        const delegate = <T = unknown>(name: string) => (params: Record<string, unknown> = {}) => fn<T>(name, params);
+        return { delegate, fn, stat, statBatch };
     });
 
 // --- [EXPORT] ----------------------------------------------------------------

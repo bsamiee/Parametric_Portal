@@ -57,18 +57,8 @@ const offset = <T>(items: readonly T[], total: number, start: number, limit: num
 
 // biome-ignore lint/correctness/noUnusedVariables: const+namespace merge
 const Page = {
-    Asc,
-    bounds: _PAGE_BOUNDS,
-    decode,
-    encode,
-    Keyset,
-    KeysetInput,
-    keyset,
-    Limit,
-    Offset,
-    OffsetInput,
-    offset,
-    strip
+    Asc, bounds: _PAGE_BOUNDS, decode, encode, Keyset, KeysetInput, keyset, Limit, Offset,
+    OffsetInput, offset, strip
 } as const;
 
 // --- [NAMESPACE] -------------------------------------------------------------

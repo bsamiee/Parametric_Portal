@@ -37,10 +37,6 @@
           {
             "type": "command",
             "command": "bash \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/setup-env.sh"
-          },
-          {
-            "type": "command",
-            "command": "python3 \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/load-skill-index.py"
           }
         ]
       }
@@ -74,11 +70,6 @@
           {
             "type": "command",
             "command": "bash \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/validate-spec.sh",
-            "timeout": 10
-          },
-          {
-            "type": "command",
-            "command": "bash \"$CLAUDE_PROJECT_DIR\"/.claude/skills/ts-standards/scripts/validate-ts-standards.sh --mode hook",
             "timeout": 10
           }
         ]

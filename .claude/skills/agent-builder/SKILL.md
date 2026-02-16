@@ -18,17 +18,22 @@ Specialized execution contexts for Claude Code subagent delegation. Frontmatter 
 **Location:** `.claude/agents/` (project) or `~/.claude/agents/` (user). Higher priority wins: CLI flag > project > user > plugin.
 
 **Tasks:**
-1. Read [index.md](./index.md) — Reference file listing for navigation.
-2. Read [frontmatter.md](./references/frontmatter.md) — Complete schema (11 fields), triggers, syntax.
-3. Read [prompt.md](./references/prompt.md) — Structure patterns, constraint markers.
-4. Read [workflow.md](./references/workflow.md) — 5-phase creation process.
-5. (prose) Load `style-standards` skill — Voice, formatting, constraints.
-6. Execute per workflow — UNDERSTAND, ACQUIRE, RESEARCH, AUTHOR, VALIDATE.
-7. Validate — Quality gate; see §VALIDATION.
+1. Read [frontmatter.md](./references/frontmatter.md) — Complete schema (11 fields), triggers, syntax.
+2. Read [prompt.md](./references/prompt.md) — Structure patterns, constraint markers.
+3. Read [workflow.md](./references/workflow.md) — 5-phase creation process.
+4. (prose) Load `style-standards` skill — Voice, formatting, constraints.
+5. Execute per workflow — UNDERSTAND, ACQUIRE, RESEARCH, AUTHOR, VALIDATE.
+6. Validate — Quality gate; see §VALIDATION.
 
-**Templates:** [→agent.template.md](./templates/agent.template.md) — Standard agent scaffold.
+**References:**
 
-[REFERENCE]: [index.md](./index.md) — Complete reference file listing.
+| Domain      | File                                                       |
+| ----------- | ---------------------------------------------------------- |
+| Workflow    | [workflow.md](references/workflow.md)                      |
+| Frontmatter | [frontmatter.md](references/frontmatter.md)                |
+| Prompt      | [prompt.md](references/prompt.md)                          |
+| Validation  | [validation.md](references/validation.md)                  |
+| Template    | [agent.template.md](templates/agent.template.md)           |
 
 ---
 ## [1][FRONTMATTER]

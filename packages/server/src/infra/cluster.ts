@@ -19,21 +19,21 @@ import { Resilience } from '../utils/resilience.ts';
 // --- [CONSTANTS] -------------------------------------------------------------
 
 const _CONFIG = {
-    cron: { skipIfOlderThan: Duration.minutes(5) },
-    entity: { concurrency: 'unbounded', mailboxCapacity: 100, maxIdleTime: Duration.minutes(5) },
-    retry: { base: Duration.millis(50), cap: Duration.seconds(30), maxAttempts: { defect: 5, state: 3 } },
-    send: { retryInterval: Duration.millis(50) },
-    sharding: { preemptiveShutdown: true, shardsPerGroup: 100 },
+    cron:      { skipIfOlderThan: Duration.minutes(5) },
+    entity:    { concurrency: 'unbounded', mailboxCapacity: 100, maxIdleTime: Duration.minutes(5) },
+    retry:     { base: Duration.millis(50), cap: Duration.seconds(30), maxAttempts: { defect: 5, state: 3 } },
+    send:      { retryInterval: Duration.millis(50) },
+    sharding:  { preemptiveShutdown: true, shardsPerGroup: 100 },
     singleton: { keyPrefix: 'singleton-state:', migrationSla: Duration.seconds(10), schemaVersion: 1, threshold: 2 },
     transport: { serialization: 'msgpack', type: 'http' },
 } as const;
 const _RPC_SPAN_OPTS = { metrics: false } as const;
 const _shardingLayer = ShardingConfig.layer({
     entityMailboxCapacity: _CONFIG.entity.mailboxCapacity,
-    entityMaxIdleTime:  _CONFIG.entity.maxIdleTime,
-    preemptiveShutdown: _CONFIG.sharding.preemptiveShutdown,
-    sendRetryInterval:  _CONFIG.send.retryInterval,
-    shardsPerGroup:     _CONFIG.sharding.shardsPerGroup,
+    entityMaxIdleTime:     _CONFIG.entity.maxIdleTime,
+    preemptiveShutdown:    _CONFIG.sharding.preemptiveShutdown,
+    sendRetryInterval:     _CONFIG.send.retryInterval,
+    shardsPerGroup:        _CONFIG.sharding.shardsPerGroup,
 });
 const _CONTRACT_VERSION = '1';
 
@@ -42,14 +42,14 @@ const _CONTRACT_VERSION = '1';
 const _SCHEMA = {
     Payload: {
         ClusterHealth: {},
-        Invalidation: { mode: S.Literal('key', 'pattern'), storeId: S.String, target: S.String },
-        LeaderInfo: { shardGroup: S.optional(S.String) },
-        NodeInfo: { runnerId: S.String },
-        ShardAssignment: { entityId: S.String, shardGroup: S.optional(S.String) },
-        SingletonHealth: { singletons: S.Array(S.Struct({ expectedInterval: S.Number, name: S.String })) },
+        Invalidation:       { mode: S.Literal('key', 'pattern'), storeId: S.String, target: S.String },
+        LeaderInfo:         { shardGroup: S.optional(S.String) },
+        NodeInfo:           { runnerId: S.String },
+        ShardAssignment:    { entityId: S.String, shardGroup: S.optional(S.String) },
+        SingletonHealth:    { singletons: S.Array(S.Struct({ expectedInterval: S.Number, name: S.String })) },
         SingletonHeartbeat: { singletonName: S.String },
-        SingletonState: { singletonName: S.String },
-        Status: { entityId: S.String.pipe(S.pattern(/^\d{18,19}$/), S.brand('SnowflakeId')) },
+        SingletonState:     { singletonName: S.String },
+        Status:             { entityId: S.String.pipe(S.pattern(/^\d{18,19}$/), S.brand('SnowflakeId')) },
     },
     Response: {
         ClusterHealth:      S.Struct({ degraded: S.Boolean, entities: S.Number, healthy: S.Boolean, runners: S.Number, runnersHealthy: S.Number, shards: S.Number, singletons: S.Number }),
@@ -67,26 +67,26 @@ const _SCHEMA = {
 // --- [ERRORS] ----------------------------------------------------------------
 
 class ClusterError extends S.TaggedError<ClusterError>()('ClusterError', {
-    cause: S.optional(S.Unknown),
-    entityId: S.optional(S.String),
-    reason: S.Literal('AlreadyProcessingMessage', 'EntityNotAssignedToRunner', 'MailboxFull', 'MalformedMessage', 'PersistenceError', 'RpcClientError', 'RunnerNotRegistered', 'RunnerUnavailable', 'SendTimeout', 'SerializationError', 'Suspended'),
-    requestId: S.optional(S.String),
+    cause:       S.optional(S.Unknown),
+    entityId:    S.optional(S.String),
+    reason:      S.Literal('AlreadyProcessingMessage', 'EntityNotAssignedToRunner', 'MailboxFull', 'MalformedMessage', 'PersistenceError', 'RpcClientError', 'RunnerNotRegistered', 'RunnerUnavailable', 'SendTimeout', 'SerializationError', 'Suspended'),
+    requestId:   S.optional(S.String),
     resumeToken: S.optional(S.String),
 }) {
     static readonly from = <const R extends ClusterError['reason']>(reason: R, entityId?: string, options?: { cause?: unknown; requestId?: string; resumeToken?: string }) =>
         new ClusterError({ cause: options?.cause, entityId, reason, requestId: options?.requestId, resumeToken: options?.resumeToken }) as ClusterError & { readonly reason: R };
 }
 class SingletonError extends S.TaggedError<SingletonError>()('SingletonError', {
-    cause: S.optional(S.Unknown),
-    reason: S.Literal('HeartbeatFailed', 'LeaderHandoffFailed', 'NotFound', 'SchemaDecodeFailed', 'StateLoadFailed', 'StatePersistFailed', 'Unavailable'),
+    cause:         S.optional(S.Unknown),
+    reason:        S.Literal('HeartbeatFailed', 'LeaderHandoffFailed', 'NotFound', 'SchemaDecodeFailed', 'StateLoadFailed', 'StatePersistFailed', 'Unavailable'),
     singletonName: S.optional(S.String),
 }) {
     static readonly from = <const R extends SingletonError['reason']>(reason: R, singletonName: string, cause?: unknown) =>
         new SingletonError({ cause, reason, singletonName }) as SingletonError & { readonly reason: R };
 }
 class InfraError extends S.TaggedError<InfraError>()('InfraError', {
-    cause: S.optional(S.Unknown),
-    key: S.optional(S.String),
+    cause:  S.optional(S.Unknown),
+    key:    S.optional(S.String),
     reason: S.Literal('InvalidPattern', 'MetricsUnavailable', 'PartialFailure', 'StoreUnavailable', 'Timeout'),
 }) {
     static readonly from = <const R extends InfraError['reason']>(reason: R, key?: string, cause?: unknown) =>
@@ -127,8 +127,7 @@ const _trackLeaderExecution = <A, E, R>(name: string, effect: Effect.Effect<A, E
         Effect.flatMap((requestContext) => Context.Request.within(
             Context.Request.Id.system,
             Context.Request.withinCluster({ isLeader: true })(
-                MetricsService.trackEffect(
-                    Telemetry.span(effect, `${type}.${name}`, _RPC_SPAN_OPTS),
+                MetricsService.trackEffect(Telemetry.span(effect, `${type}.${name}`, _RPC_SPAN_OPTS),
                     {
                         duration: metrics.singleton.duration,
                         errors: metrics.errors,

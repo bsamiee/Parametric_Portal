@@ -85,15 +85,15 @@ class Request extends Effect.Tag('server/RequestContext')<Request, Context.Reque
     static readonly sessionOrFail = Request.current.pipe(Effect.flatMap((ctx) => Option.match(ctx.session, { onNone: () => Effect.fail(HttpError.Auth.of('Missing session')), onSome: Effect.succeed })));
     static readonly toAttrs = (ctx: Context.Request.Data, fiberId: FiberId.FiberId): Record.ReadonlyRecord<string, string> =>
         Record.getSomes({
-            'app.namespace': ctx.appNamespace,
-            'circuit.name': Option.map(ctx.circuit, (circuit) => circuit.name), 'circuit.state': Option.map(ctx.circuit, (circuit) => circuit.state),'client.address': ctx.ipAddress,
-            'cluster.entity_id': Option.flatMapNullable(ctx.cluster, (cluster) => cluster.entityId), 'cluster.entity_type': Option.flatMapNullable(ctx.cluster, (cluster) => cluster.entityType),
-            'cluster.is_leader': Option.map(ctx.cluster, (cluster) => String(cluster.isLeader)), 'cluster.runner_id': Option.flatMapNullable(ctx.cluster, (cluster) => cluster.runnerId),
+            'app.namespace':       ctx.appNamespace,
+            'circuit.name':        Option.map(ctx.circuit,   (circuit) => circuit.name), 'circuit.state': Option.map(ctx.circuit, (circuit) => circuit.state),'client.address': ctx.ipAddress,
+            'cluster.entity_id':   Option.flatMapNullable(ctx.cluster, (cluster) => cluster.entityId), 'cluster.entity_type': Option.flatMapNullable(ctx.cluster, (cluster) => cluster.entityType),
+            'cluster.is_leader':   Option.map(ctx.cluster,   (cluster) => String(cluster.isLeader)), 'cluster.runner_id': Option.flatMapNullable(ctx.cluster, (cluster) => cluster.runnerId),
             'cluster.shard_id': pipe(ctx.cluster, Option.flatMapNullable((cluster) => cluster.shardId), Option.map((shard) => shard.toString())),
             'http.request.header.x-request-id': Option.some(ctx.requestId),
-            'ratelimit.delay_ms': Option.map(ctx.rateLimit, (rateLimit) => String(Duration.toMillis(rateLimit.delay))), 'ratelimit.limit': Option.map(ctx.rateLimit, (rateLimit) => String(rateLimit.limit)),
+            'ratelimit.delay_ms':  Option.map(ctx.rateLimit, (rateLimit) => String(Duration.toMillis(rateLimit.delay))), 'ratelimit.limit': Option.map(ctx.rateLimit, (rateLimit) => String(rateLimit.limit)),
             'ratelimit.remaining': Option.map(ctx.rateLimit, (rateLimit) => String(rateLimit.remaining)), 'ratelimit.reset_after_ms': Option.map(ctx.rateLimit, (rateLimit) => String(Duration.toMillis(rateLimit.resetAfter))),'request.id': Option.some(ctx.requestId),
-            'session.kind': Option.map(ctx.session, (session) => session.kind), 'session.mfa': Option.map(ctx.session, (session) => String(session.mfaEnabled)),'tenant.id': Option.some(ctx.tenantId), 'thread.name': Option.some(FiberId.threadName(fiberId)),
+            'session.kind':        Option.map(ctx.session,   (session) => session.kind), 'session.mfa': Option.map(ctx.session, (session) => String(session.mfaEnabled)),'tenant.id': Option.some(ctx.tenantId), 'thread.name': Option.some(FiberId.threadName(fiberId)),
             'user_agent.original': Option.map(ctx.userAgent, (userAgent) => (userAgent.length > 120 ? `${userAgent.slice(0, 117)}...` : userAgent)),
         });
     static readonly attrs = Effect.all([Request.current, Effect.fiberId], { concurrency: 'unbounded' }).pipe(Effect.map(([ctx, fiberId]) => Request.toAttrs(ctx, fiberId)),);
@@ -110,14 +110,14 @@ class Request extends Effect.Tag('server/RequestContext')<Request, Context.Reque
         );
     static readonly update = (partial: Partial<Context.Request.Data>) => FiberRef.update(Request._ref, (ctx): Context.Request.Data => ({
         appNamespace: partial.appNamespace ?? ctx.appNamespace,
-        circuit: partial.circuit ?? ctx.circuit,
-        cluster: partial.cluster ?? ctx.cluster,
-        ipAddress: partial.ipAddress ?? ctx.ipAddress,
-        rateLimit: partial.rateLimit ?? ctx.rateLimit,
-        requestId: partial.requestId ?? ctx.requestId,
-        session: partial.session ?? ctx.session,
-        tenantId: partial.tenantId ?? ctx.tenantId,
-        userAgent: partial.userAgent ?? ctx.userAgent,
+        circuit:      partial.circuit ?? ctx.circuit,
+        cluster:      partial.cluster ?? ctx.cluster,
+        ipAddress:    partial.ipAddress ?? ctx.ipAddress,
+        rateLimit:    partial.rateLimit ?? ctx.rateLimit,
+        requestId:    partial.requestId ?? ctx.requestId,
+        session:      partial.session ?? ctx.session,
+        tenantId:     partial.tenantId ?? ctx.tenantId,
+        userAgent:    partial.userAgent ?? ctx.userAgent,
     })).pipe(
         Effect.andThen(Option.fromNullable(partial.tenantId).pipe(Option.match({ onNone: () => Effect.void, onSome: (tenantId) => Client.tenant.set(tenantId) }))),
         Effect.andThen(Request.annotate(Effect.void)),
@@ -152,24 +152,15 @@ class Request extends Effect.Tag('server/RequestContext')<Request, Context.Reque
         Effect.serviceOption(Entity.CurrentRunnerAddress).pipe(
             Effect.flatMap((runnerAddress) =>
                 Effect.locallyWith(Request.annotate(effect), Request._ref, (ctx) => {
-                    const current = Option.getOrElse(
-                        ctx.cluster,
-                        constant({ entityId: null, entityType: null, isLeader: false, runnerId: null, shardId: null }),
-                    );
+                    const current = Option.getOrElse(ctx.cluster, constant({ entityId: null, entityType: null, isLeader: false, runnerId: null, shardId: null }),);
                     const merged = { ...current, ...partial };
-                    return {
-                        ...ctx,
-                        cluster: Option.some({
-                            ...merged,
-                            runnerId: merged.runnerId ?? Option.getOrNull(Option.map(runnerAddress, (address) => address.toString())),
-                        }),
-                    };
+                    return {...ctx, cluster: Option.some({...merged, runnerId: merged.runnerId ?? Option.getOrNull(Option.map(runnerAddress, (address) => address.toString())),}),};
                 }),
             ),
         ),
     );
     static readonly config = {
-        csrf: { expectedValue: 'XMLHttpRequest', header: Request.Headers.requestedWith },
+        csrf:      { expectedValue: 'XMLHttpRequest', header: Request.Headers.requestedWith },
         durations: { pkce: Duration.minutes(10), refresh: Duration.days(30), session: Duration.days(7) },
         endpoints: { githubApi: 'https://api.github.com/user' },
         oauth: {

@@ -1,51 +1,51 @@
 {
-  "name": "@parametric-portal/ai",
-  "version": "2.0.1",
-  "type": "module",
-  "exports": {
-    "./registry": {
-      "types": "./src/registry.ts",
-      "import": "./src/registry.ts",
-      "default": "./src/registry.ts"
+    "name": "@parametric-portal/ai",
+    "version": "2.0.1",
+    "type": "module",
+    "exports": {
+        "./registry": {
+            "types": "./src/registry.ts",
+            "import": "./src/registry.ts",
+            "default": "./src/registry.ts"
+        },
+        "./runtime": {
+            "types": "./src/runtime.ts",
+            "import": "./src/runtime.ts",
+            "default": "./src/runtime.ts"
+        },
+        "./search": {
+            "types": "./src/search.ts",
+            "import": "./src/search.ts",
+            "default": "./src/search.ts"
+        },
+        "./mcp": {
+            "types": "./src/mcp.ts",
+            "import": "./src/mcp.ts",
+            "default": "./src/mcp.ts"
+        }
     },
-    "./runtime": {
-      "types": "./src/runtime.ts",
-      "import": "./src/runtime.ts",
-      "default": "./src/runtime.ts"
+    "scripts": {
+        "build": "vite build",
+        "check": "biome check .",
+        "fix": "biome check --write .",
+        "test": "vitest run --passWithNoTests",
+        "typecheck": "tsc --project tsconfig.json --noEmit"
     },
-    "./search": {
-      "types": "./src/search.ts",
-      "import": "./src/search.ts",
-      "default": "./src/search.ts"
+    "dependencies": {
+        "@effect/ai": "catalog:",
+        "@effect/ai-anthropic": "catalog:",
+        "@effect/ai-google": "catalog:",
+        "@effect/ai-openai": "catalog:",
+        "@effect/platform": "catalog:",
+        "@parametric-portal/database": "workspace:*",
+        "@parametric-portal/server": "workspace:*",
+        "@parametric-portal/types": "workspace:*",
+        "effect": "catalog:"
     },
-    "./mcp": {
-      "types": "./src/mcp.ts",
-      "import": "./src/mcp.ts",
-      "default": "./src/mcp.ts"
+    "devDependencies": {
+        "@types/node": "catalog:",
+        "typescript": "catalog:",
+        "vite": "catalog:",
+        "vitest": "catalog:"
     }
-  },
-  "scripts": {
-    "build": "vite build",
-    "check": "biome check .",
-    "fix": "biome check --write .",
-    "test": "vitest run --passWithNoTests",
-    "typecheck": "tsc --project tsconfig.json --noEmit"
-  },
-  "dependencies": {
-    "@effect/ai": "catalog:",
-    "@effect/ai-anthropic": "catalog:",
-    "@effect/ai-google": "catalog:",
-    "@effect/ai-openai": "catalog:",
-    "@effect/platform": "catalog:",
-    "@parametric-portal/database": "workspace:*",
-    "@parametric-portal/server": "workspace:*",
-    "@parametric-portal/types": "workspace:*",
-    "effect": "catalog:"
-  },
-  "devDependencies": {
-    "@types/node": "catalog:",
-    "typescript": "catalog:",
-    "vite": "catalog:",
-    "vitest": "catalog:"
-  }
 }

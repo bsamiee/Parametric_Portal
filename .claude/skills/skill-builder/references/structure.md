@@ -3,6 +3,8 @@
 
 <br>
 
+**Sections:** [Type Impact](#1type_impact) | [Folder Purpose](#2folder_purpose) | [Naming](#3naming) | [Validation File](#4validation_file)
+
 [IMPORTANT] Structure defines folder existence. Depth constrains folder contents.
 
 ---
@@ -11,11 +13,11 @@
 
 <br>
 
-| [INDEX] | [TYPE]   | [SKILL.MD] | [INDEX.MD] | [REFERENCES/] | [TEMPLATES/] | [SCRIPTS/] |
-| :-----: | -------- | :--------: | :--------: | :-----------: | :----------: | :--------: |
-|   [1]   | Simple   |    Yes     |     —      |       —       |      —       |     —      |
-|   [2]   | Standard |    Yes     |    Yes     |      Yes      |     Yes      |     —      |
-|   [3]   | Complex  |    Yes     |    Yes     |      Yes      |     Yes      |    Yes     |
+| [INDEX] | [TYPE]   | [SKILL.MD] | [REFERENCES/] | [TEMPLATES/] | [SCRIPTS/] |
+| :-----: | -------- | :--------: | :-----------: | :----------: | :--------: |
+|   [1]   | Simple   |    Yes     |       —       |      —       |     —      |
+|   [2]   | Standard |    Yes     |      Yes      |     Yes      |     —      |
+|   [3]   | Complex  |    Yes     |      Yes      |     Yes      |    Yes     |
 
 **Simple:** Single file. All content in SKILL.md. No supporting folders. Sections map to workflow steps.<br>
 **Standard:** Distributed content. references/ for deep knowledge, templates/ for output scaffolds. Domains map to reference files.<br>
@@ -31,7 +33,7 @@
 
 | [INDEX] | [FOLDER]      | [PURPOSE]                | [CONTENTS]                          |
 | :-----: | ------------- | ------------------------ | ----------------------------------- |
-|   [1]   | `/`           | Skill root               | SKILL.md, index.md                  |
+|   [1]   | `/`           | Skill root               | SKILL.md                            |
 |   [2]   | `references/` | Domain knowledge         | Tables, examples, deep explanations |
 |   [3]   | `templates/`  | Output scaffolds         | `${placeholder}` syntax, structure  |
 |   [4]   | `scripts/`    | Deterministic automation | Python/TypeScript executables       |
@@ -67,29 +69,7 @@
 - [NEVER] Numeric prefixes: `01-intro.md`, `02-setup.md`.
 
 ---
-## [4][INDEX_FILE]
->**Dictum:** *index.md provides single navigation source.*
-
-<br>
-
-Standard/Complex types require index.md at skill root.
-
-**Requirements:**
-- Located at skill root, not in subfolders.
-- Lists ALL reference files with path, domain, and dictum.
-- Single navigation source—no per-folder indexes.
-
-**Format:**
-```markdown
-| [INDEX] | [DOMAIN] | [PATH]                         | [DICTUM]           |
-| :-----: | -------- | ------------------------------ | ------------------ |
-|   [1]   | Domain   | [→file.md](references/file.md) | Brief description. |
-```
-
-[REFERENCE] Nesting rights by depth: [→depth.md§2](./depth.md#2unlocks)
-
----
-## [5][VALIDATION_FILE]
+## [4][VALIDATION_FILE]
 >**Dictum:** *validation.md centralizes operational checklists.*
 
 <br>
@@ -98,7 +78,7 @@ Standard/Complex types require validation.md in references/.
 
 **Purpose:**
 - Consolidates operational verification checklists from all domains.
-- SKILL.md §VALIDATION contains high-level gates (3-5 items).
+- SKILL.md VALIDATION contains high-level gates (3-5 items).
 - validation.md contains detailed checklists, error symptoms, commands.
 
 **Requirements:**
@@ -107,6 +87,6 @@ Standard/Complex types require validation.md in references/.
 - Includes error symptoms table for diagnosis.
 - Operational commands for verification (`wc -l`, `rg`, etc.).
 
-**Simple type exception:** Validation remains in SKILL.md §VALIDATION (no references/ folder).
+**Simple type exception:** Validation remains in SKILL.md VALIDATION (no references/ folder).
 
-[REFERENCE] Validation content guidelines: [→validation.md](./validation.md)
+See [validation.md](./validation.md) for content guidelines.

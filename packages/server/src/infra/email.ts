@@ -5,6 +5,7 @@
 import { SendEmailCommand, SESv2Client } from '@aws-sdk/client-sesv2';
 import { FetchHttpClient, HttpClient, HttpClientError, HttpClientRequest } from '@effect/platform';
 import { Config, Duration, Effect, identity, Match, Option, Redacted, Schema as S } from 'effect';
+import { constant } from 'effect/Function';
 import * as Nodemailer from 'nodemailer';
 import { Telemetry } from '../observe/telemetry.ts';
 
@@ -13,11 +14,11 @@ import { Telemetry } from '../observe/telemetry.ts';
 const _httpProvider = {
     postmark: {
         endpoint: Config.string('POSTMARK_ENDPOINT').pipe(Config.withDefault('https://api.postmarkapp.com/email/withTemplate')),
-        token: Config.redacted('POSTMARK_TOKEN').pipe(Config.option),
+        token:    Config.redacted('POSTMARK_TOKEN').pipe(Config.option),
     },
     resend: {
         endpoint: Config.string('RESEND_ENDPOINT').pipe(Config.withDefault('https://api.resend.com/emails')),
-        token: Config.redacted('RESEND_API_KEY').pipe(Config.option),
+        token:    Config.redacted('RESEND_API_KEY').pipe(Config.option),
     },
 } as const;
 
@@ -83,8 +84,9 @@ class EmailAdapter extends Effect.Service<EmailAdapter>()('server/EmailAdapter',
             requireTLS: smtpRequireTls,
             secure: smtpSecure,
         }));
-        const send = (raw: S.Schema.Encoded<typeof EmailRequest>) => S.decodeUnknown(EmailRequest)(raw).pipe(
-            Effect.flatMap((input) => Match.value(provider).pipe(
+        const send = Effect.fn('email.send')(function* (raw: S.Schema.Encoded<typeof EmailRequest>) {
+            const input = yield* S.decodeUnknown(EmailRequest)(raw);
+            return yield* Match.value(provider).pipe(
                 Match.when('resend', () => Option.match(resendToken, {
                     onNone: () => Effect.fail(EmailError.from('MissingConfig', 'resend')),
                     onSome: (token) => http.execute(
@@ -92,9 +94,9 @@ class EmailAdapter extends Effect.Service<EmailAdapter>()('server/EmailAdapter',
                             HttpClientRequest.setHeaders({ Authorization: `Bearer ${Redacted.value(token)}`, 'Content-Type': 'application/json' }),
                             HttpClientRequest.bodyUnsafeJson({
                                 from,
-                                headers: { 'X-Notification-Id': input.notificationId, 'X-Tenant-Id': input.tenantId },
+                                headers:  { 'X-Notification-Id': input.notificationId, 'X-Tenant-Id': input.tenantId },
                                 template: { id: input.template, variables: input.vars },
-                                to: [input.to],
+                                to:       [input.to],
                             }),
                         ),
                     ),
@@ -105,11 +107,11 @@ class EmailAdapter extends Effect.Service<EmailAdapter>()('server/EmailAdapter',
                         HttpClientRequest.post(postmarkEndpoint).pipe(
                             HttpClientRequest.setHeaders({ 'Content-Type': 'application/json', 'X-Postmark-Server-Token': Redacted.value(token) }),
                             HttpClientRequest.bodyUnsafeJson({
-                                From: from,
-                                Metadata: { notificationId: input.notificationId, tenantId: input.tenantId },
+                                From:          from,
+                                Metadata:      { notificationId: input.notificationId, tenantId: input.tenantId },
                                 TemplateAlias: input.template,
                                 TemplateModel: input.vars,
-                                To: input.to,
+                                To:            input.to,
                             }),
                         ),
                     ),
@@ -128,31 +130,29 @@ class EmailAdapter extends Effect.Service<EmailAdapter>()('server/EmailAdapter',
                                 TemplateName: input.template,
                             },
                         },
-                        Destination: { ToAddresses: [input.to] },
-                        EmailTags: [{ Name: 'notification_id', Value: input.notificationId }, { Name: 'tenant_id', Value: input.tenantId }],
+                        Destination:      { ToAddresses: [input.to] },
+                        EmailTags:        [{ Name: 'notification_id', Value: input.notificationId }, { Name: 'tenant_id', Value: input.tenantId }],
                         FromEmailAddress: from,
                     })),
                 })),
-                Match.when('smtp', () => Option.match(smtpTransporter, {
-                    onNone: () => Effect.fail(EmailError.from('MissingConfig', 'smtp')),
-                    onSome: (transporter) => Effect.tryPromise({
-                        catch: (cause) => EmailError.from('ProviderError', 'smtp', {
-                            cause,
-                            statusCode: typeof cause === 'object' && cause !== null && 'responseCode' in cause && typeof (cause as { readonly responseCode?: number }).responseCode === 'number'
-                                ? (cause as { readonly responseCode?: number }).responseCode
-                                : undefined,
-                        }),
-                        try: () => transporter.sendMail({
+                Match.when('smtp', () => Effect.gen(function* () {
+                    const transporter = yield* Effect.void.pipe(
+                        Effect.andThen(smtpTransporter),
+                        Effect.orElseFail(constant(EmailError.from('MissingConfig', 'smtp'))),
+                    );
+                    return yield* Effect.tryPromise(
+                        transporter.sendMail.bind(transporter, {
                             from,
                             headers: { 'X-Notification-Id': input.notificationId, 'X-Tenant-Id': input.tenantId },
                             subject: input.template,
-                            text: JSON.stringify(input.vars),
-                            to: input.to,
+                            text:    JSON.stringify(input.vars),
+                            to:      input.to,
                         }),
-                    }),
+                    );
                 })),
                 Match.exhaustive,
-            )),
+            );
+        },
             Effect.scoped,
             Effect.timeoutFail({
                 duration: Duration.millis(timeoutMs),
@@ -161,9 +161,7 @@ class EmailAdapter extends Effect.Service<EmailAdapter>()('server/EmailAdapter',
             Effect.mapError((error) =>
                 Match.value(error).pipe(
                     Match.when(Match.instanceOf(EmailError), identity),
-                    Match.when(Match.instanceOf(HttpClientError.ResponseError), (e) =>
-                        EmailError.from('ProviderError', provider, { cause: e, statusCode: e.response.status }),
-                    ),
+                    Match.when(Match.instanceOf(HttpClientError.ResponseError), (e) => EmailError.from('ProviderError', provider, { cause: e, statusCode: e.response.status }),),
                     Match.orElse((cause) => EmailError.from('ProviderError', provider, { cause })),
                 ),
             ),

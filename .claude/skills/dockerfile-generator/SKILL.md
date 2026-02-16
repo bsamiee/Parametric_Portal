@@ -34,12 +34,12 @@ Docker Engine 27+ | BuildKit 0.27+ | Dockerfile syntax 1.14 | Node 24 LTS Krypto
 
 <br>
 
-**Guidance:**<br>
+**Guidance:**
 - `Language` -- Language, version, framework, entry point, package manager (pnpm/npm/uv/go mod/maven/gradle)
 - `Build` -- Build commands, Nx target (monorepo), compilation flags, system deps.
 - `Runtime` -- Port(s), env vars, health endpoint, image size constraints, multi-arch (amd64/arm64).
 
-**Best-Practices:**<br>
+**Best-Practices:**
 - **Base images (February 2026):** `node:24-slim-trixie` (pnpm), `node:24-alpine3.23` (npm), `python:3.14-slim-trixie`, `golang:1.24-alpine3.23`, `rust:1.84-slim-trixie`, `eclipse-temurin:21-jdk-alpine`
 - **Chainguard:** `cgr.dev/chainguard/node:latest-dev` (build) / `cgr.dev/chainguard/node:latest` (runtime) -- daily CVE rebuilds, zero known vulnerabilities
 
@@ -51,12 +51,12 @@ Docker Engine 27+ | BuildKit 0.27+ | Dockerfile syntax 1.14 | Node 24 LTS Krypto
 
 <br>
 
-**Guidance:**<br>
+**Guidance:**
 - `Syntax` -- `# syntax=docker/dockerfile:1` as first line (enables BuildKit frontend).
 - `Multi-stage` -- Named stages: `deps`, `build`, `runtime` (minimum).
 - `Security` -- Non-root `USER 1001:1001`, no secrets in ENV/ARG, exec-form ENTRYPOINT.
 
-**Best-Practices:**<br>
+**Best-Practices:**
 - **BuildKit mounts:** `--mount=type=cache` for all pkg managers, `--mount=type=secret,id=key,env=VAR` for build secrets
 - **Layer optimization:** `COPY --link` on every COPY, `COPY --chmod=555` (no extra RUN chmod layer), heredoc `RUN <<EOF` for multi-line scripts
 - **Metadata:** OCI labels (`org.opencontainers.image.title/source/licenses/revision/created/version`), Pulumi-injectable ARGs (`GIT_SHA`, `BUILD_DATE`, `IMAGE_VERSION`)
@@ -68,11 +68,11 @@ Docker Engine 27+ | BuildKit 0.27+ | Dockerfile syntax 1.14 | Node 24 LTS Krypto
 
 <br>
 
-**Guidance:**<br>
+**Guidance:**
 - `Fetch-first` -- `pnpm fetch --frozen-lockfile` downloads to store without installing (maximizes cache hits).
 - `Deploy` -- `pnpm deploy --filter=@scope/app --prod /prod/app` extracts standalone prod deployment.
 
-**Best-Practices:**<br>
+**Best-Practices:**
 - **corepack:** `RUN corepack enable` (no global pnpm install)
 - **Offline install:** `pnpm install --frozen-lockfile --offline --ignore-scripts`
 - **Selective copy:** Only needed `packages/*/package.json` files (not entire workspace)

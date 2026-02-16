@@ -135,5 +135,5 @@ Validate PromQL for Prometheus 3.8-3.10 (native histograms stable, feature flag 
 - `scripts/_common.py` -- shared constants, CheckSpec dataclass, parsing utilities.
 - `scripts/validate_syntax.py` -- data-driven syntax validation via CheckSpec tuples.
 - `scripts/check_best_practices.py` -- data-driven semantic/performance checks.
-- `docs/best_practices.md` -- rules reference with native histogram patterns.
-- `docs/anti_patterns.md` -- 33 anti-patterns with WHY column.
+- `references/best_practices.md` -- rules reference with native histogram patterns.
+- `references/anti_patterns.md` -- 33 anti-patterns with WHY column.

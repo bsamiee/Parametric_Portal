@@ -14,15 +14,22 @@ description: >-
 Load commands from `.claude/commands/` (project) or `~/.claude/commands/` (user). Filename becomes command name.
 
 **Tasks:**
-1. Read [index.md](./index.md) — Reference file listing for navigation
-2. Read [workflow.md](./references/workflow.md) — 5-phase creation process
-3. Read [variables.md](./references/variables.md) — Argument capture, file references, skill loading
-4. Read [hints.md](./references/hints.md) — Argument-hint syntax, enum patterns
-5. (prose) Load `style-standards` skill — Voice, formatting, constraints
-6. Execute per workflow — UNDERSTAND, ACQUIRE, RESEARCH, AUTHOR, VALIDATE
-7. Validate — Quality gate; see §VALIDATION
+1. Read [workflow.md](./references/workflow.md) — 5-phase creation process
+2. Read [variables.md](./references/variables.md) — Argument capture, file references, skill loading
+3. Read [hints.md](./references/hints.md) — Argument-hint syntax, enum patterns
+4. (prose) Load `style-standards` skill — Voice, formatting, constraints
+5. Execute per workflow — UNDERSTAND, ACQUIRE, RESEARCH, AUTHOR, VALIDATE
+6. Validate — Quality gate; see §VALIDATION
 
-[REFERENCE]: [index.md](./index.md) — Complete reference file listing
+**References:**
+
+| Domain     | File                                                         |
+| ---------- | ------------------------------------------------------------ |
+| Workflow   | [workflow.md](references/workflow.md)                        |
+| Variables  | [variables.md](references/variables.md)                      |
+| Hints      | [hints.md](references/hints.md)                              |
+| Validation | [validation.md](references/validation.md)                    |
+| Template   | [command.template.md](templates/command.template.md)         |
 
 ---
 ## [1][FRONTMATTER]
@@ -165,7 +172,7 @@ allowed-tools: Read, Task, Glob, Edit, TaskCreate
 Load context above. Spawn Task agents. Verify findings against loaded context. Apply corrections.
 ```
 
-[→templates/command-template.md](./templates/command-template.md) — canonical template.
+[→templates/command.template.md](./templates/command.template.md) — canonical template.
 
 ---
 ## [5][ORGANIZATION]

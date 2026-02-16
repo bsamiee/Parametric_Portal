@@ -19,15 +19,14 @@ Build agent response formats. Configure scope-based style.
 [DELEGATE] Voice, formatting, constraint rules → `style-standards` skill.
 
 **Tasks:**
-1. Read [index.md](./index.md) — Reference file listing for navigation
-2. Select domain — FORMATS (structured data) or CONFIGURATION (response style scope)
-3. (formats) Read [formats.md](./references/formats.md) — Selection metrics, embedding, validation scoring
-4. (configuration) Read [configuration.md](./references/configuration.md) — Scope hierarchy, embedding patterns
-5. (schema) Read [schema.md](./references/schema.md) — Delimiter syntax, canonical examples
-6. (structure) Read [structure.md](./references/structure.md) — Ordering patterns, composition
-7. (prose) Load `style-standards` skill — Voice, formatting, constraints
-8. Execute per domain — Apply Guidance and Best-Practices
-9. Validate — Quality gate; see §VALIDATION
+1. Select domain — FORMATS (structured data) or CONFIGURATION (response style scope)
+2. (formats) Read [formats.md](./references/formats.md) — Selection metrics, embedding, validation scoring
+3. (configuration) Read [configuration.md](./references/configuration.md) — Scope hierarchy, embedding patterns
+4. (schema) Read [schema.md](./references/schema.md) — Delimiter syntax, canonical examples
+5. (structure) Read [structure.md](./references/structure.md) — Ordering patterns, composition
+6. (prose) Load `style-standards` skill — Voice, formatting, constraints
+7. Execute per domain — Apply Guidance and Best-Practices
+8. Validate — Quality gate; see §VALIDATION
 
 **Scope:**
 - *Formats:* Structured data serialization (JSON, YAML, Markdown-KV, XML) for agent output.
@@ -39,7 +38,17 @@ Build agent response formats. Configure scope-based style.
 - *[SCHEMA]* — Delimiters, examples. Load for: syntax reference, canonical patterns.
 - *[STRUCTURE]* — Ordering, composition. Load for: section sequencing, chaining.
 
-[REFERENCE]: [index.md](./index.md) — Complete reference file listing
+**References:**
+
+| Domain        | File                                                     |
+| ------------- | -------------------------------------------------------- |
+| Formats       | [formats.md](references/formats.md)                     |
+| Configuration | [configuration.md](references/configuration.md)          |
+| Schema        | [schema.md](references/schema.md)                        |
+| Structure     | [structure.md](references/structure.md)                  |
+| Validation    | [validation.md](references/validation.md)                |
+| Template      | [format.template.md](templates/format.template.md)       |
+| Template      | [style.template.md](templates/style.template.md)         |
 
 ---
 ## [1][FORMATS]

@@ -80,8 +80,8 @@ const AuthLive = HttpApiBuilder.group(ParametricApi, 'auth', (handlers) =>
                 CacheService.rateLimit('auth', Middleware.feature('enableOAuth').pipe(Effect.andThen(Resilience.run('oauth.start', auth.oauth.start(provider), { circuit: 'oauth', timeout: Duration.seconds(15) })),
                     Effect.catchTags({
                         BulkheadError: constant(Effect.fail(HttpError.OAuth.of(provider, 'Service at capacity'))),
-                        CircuitError: constant(Effect.fail(HttpError.OAuth.of(provider, 'Service temporarily unavailable'))),
-                        TimeoutError: constant(Effect.fail(HttpError.OAuth.of(provider, 'Request timed out'))),
+                        CircuitError:  constant(Effect.fail(HttpError.OAuth.of(provider, 'Service temporarily unavailable'))),
+                        TimeoutError:  constant(Effect.fail(HttpError.OAuth.of(provider, 'Request timed out'))),
                     }),
                     Effect.filterOrFail(
                         (result): result is Extract<typeof result, { readonly _tag: 'Initiate' }> => result._tag === 'Initiate',

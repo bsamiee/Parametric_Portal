@@ -37,17 +37,31 @@ Generate production-ready GitHub Actions workflows and custom actions. Validate 
 - Supply chain — SLSA attestation, SBOM, Cosign signing.
 - Monorepo CI — Nx affected detection, sparse checkout, pnpm workspace caching.
 
-**Domain Navigation Map:**
+**References:**
 
-| [INDEX] | [DOMAIN]              | [REFERENCE]                                                            | [LOAD_WHEN]                                                |
-| :-----: | --------------------- | ---------------------------------------------------------------------- | ---------------------------------------------------------- |
-|   [1]   | **Best Practices**    | [→best-practices.md](references/best-practices.md)                     | Permissions, caching, concurrency, runners, anti-patterns. |
-|   [2]   | **Version Discovery** | [→version-discovery.md](references/version-discovery.md)               | Action references, SHA pinning, supply chain integrity.    |
-|   [3]   | **Expressions**       | [→expressions-and-contexts.md](references/expressions-and-contexts.md) | Conditionals, dynamic values, injection prevention.        |
-|   [4]   | **Advanced Triggers** | [→advanced-triggers.md](references/advanced-triggers.md)               | Workflow chaining, dispatch, ChatOps, merge queue.         |
-|   [5]   | **Custom Actions**    | [→custom-actions.md](references/custom-actions.md)                     | Composite, Docker, JavaScript action authoring.            |
-
-[REFERENCE] [→index.md](./index.md) — Complete file listing.
+| Domain            | File                                                                       |
+| ----------------- | -------------------------------------------------------------------------- |
+| Best Practices    | [best-practices.md](references/best-practices.md)                          |
+| Version Discovery | [version-discovery.md](references/version-discovery.md)                    |
+| Expressions       | [expressions-and-contexts.md](references/expressions-and-contexts.md)      |
+| Advanced Triggers | [advanced-triggers.md](references/advanced-triggers.md)                    |
+| Custom Actions    | [custom-actions.md](references/custom-actions.md)                          |
+| Template          | [basic-workflow.template.yml](templates/basic-workflow.template.yml)        |
+| Template          | [reusable-workflow.template.yml](templates/reusable-workflow.template.yml)  |
+| Template          | [composite-action.template.yml](templates/composite-action.template.yml)   |
+| Template          | [docker-action.template.yml](templates/docker-action.template.yml)         |
+| Template          | [javascript-action.template.yml](templates/javascript-action.template.yml) |
+| Example           | [nodejs-ci.yml](examples/nodejs-ci.yml)                                    |
+| Example           | [docker-build-push.yml](examples/docker-build-push.yml)                    |
+| Example           | [monorepo-ci.yml](examples/monorepo-ci.yml)                                |
+| Example           | [dependency-review.yml](examples/dependency-review.yml)                    |
+| Example           | [sbom-attestation.yml](examples/sbom-attestation.yml)                      |
+| Example           | [setup-node-cached-action.yml](examples/setup-node-cached-action.yml)      |
+| Example           | [chatops-dispatch.yml](examples/chatops-dispatch.yml)                      |
+| Example           | [oidc-cloud-auth-action.yml](examples/oidc-cloud-auth-action.yml)          |
+| Example           | [release-deploy.yml](examples/release-deploy.yml)                          |
+| Example           | [docker-lint-scan-action.yml](examples/docker-lint-scan-action.yml)        |
+| Example           | [pr-change-router-action.yml](examples/pr-change-router-action.yml)        |
 
 ---
 ## [1][STANDARDS]
@@ -101,11 +115,11 @@ All templates use a unified `[UPPER_SNAKE_CASE]` placeholder convention:
 
 | [INDEX] | [TEMPLATE]            | [PATH]                                            | [SCAFFOLDS]                                                        |
 | :-----: | --------------------- | ------------------------------------------------- | ------------------------------------------------------------------ |
-|   [1]   | **Basic Workflow**    | `assets/templates/workflow/basic_workflow.yml`    | CI pipeline: lint, test, build, deploy with parameterized runtime. |
-|   [2]   | **Reusable Workflow** | `assets/templates/workflow/reusable_workflow.yml` | `workflow_call` with typed inputs, secrets, version extraction.    |
-|   [3]   | **Composite Action**  | `assets/templates/action/composite/action.yml`    | Multi-step action with parameterized runtime and error handling.   |
-|   [4]   | **Docker Action**     | `assets/templates/action/docker/action.yml`       | Container action with distroless multi-stage Dockerfile pattern.   |
-|   [5]   | **JavaScript Action** | `assets/templates/action/javascript/action.yml`   | Node 24 action with pre/post lifecycle, typed error handling.      |
+|   [1]   | **Basic Workflow**    | `templates/basic-workflow.template.yml`    | CI pipeline: lint, test, build, deploy with parameterized runtime. |
+|   [2]   | **Reusable Workflow** | `templates/reusable-workflow.template.yml` | `workflow_call` with typed inputs, secrets, version extraction.    |
+|   [3]   | **Composite Action**  | `templates/composite-action.template.yml`  | Multi-step action with parameterized runtime and error handling.   |
+|   [4]   | **Docker Action**     | `templates/docker-action.template.yml`     | Container action with distroless multi-stage Dockerfile pattern.   |
+|   [5]   | **JavaScript Action** | `templates/javascript-action.template.yml` | Node 24 action with pre/post lifecycle, typed error handling.      |
 
 [REFERENCE] [→custom-actions.md](./references/custom-actions.md) — Action type selection, metadata, runtime deprecation.
 
@@ -119,17 +133,17 @@ Each example demonstrates distinct patterns with minimal overlap. Load relevant 
 
 | [INDEX] | [EXAMPLE]                                | [PATH]                                          | [DEMONSTRATES]                                                    |
 | :-----: | ---------------------------------------- | ----------------------------------------------- | ----------------------------------------------------------------- |
-|   [1]   | **Node.js CI**                           | `examples/workflows/nodejs-ci.yml`              | Matrix testing, caching, artifact upload, coverage, summaries.    |
-|   [2]   | **Docker Build + Push**                  | `examples/workflows/docker-build-push.yml`      | Multi-platform builds, GHCR, BuildKit caching, SLSA provenance.   |
-|   [3]   | **Monorepo CI**                          | `examples/workflows/monorepo-ci.yml`            | Nx affected detection, pnpm workspace, sparse checkout.           |
-|   [4]   | **PR Security Gate**                     | `examples/security/dependency-review.yml`       | Multi-job security: dep review, CodeQL, Gitleaks, triage.         |
-|   [5]   | **Container Supply Chain**               | `examples/security/sbom-attestation.yml`        | SBOM, Trivy severity gating, Cosign, gh attestation verify.       |
-|   [6]   | **Composite Action (setup-node-cached)** | `examples/actions/setup-node-cached/action.yml` | Smart caching, corepack detection, cache-dir resolution.          |
-|   [7]   | **ChatOps Dispatch**                     | `examples/workflows/chatops-dispatch.yml`       | Slash commands, injection prevention, App token, env indirection. |
-|   [8]   | **Multi-Cloud OIDC Auth**                | `examples/actions/oidc-cloud-auth/action.yml`   | Composite action: AWS/GCP/Azure OIDC, output normalization.       |
-|   [9]   | **Release + Deploy**                     | `examples/workflows/release-deploy.yml`         | Environment promotion, reusable workflow, concurrency groups.     |
-|  [10]   | **Docker Lint + Scan**                   | `examples/actions/docker-lint-scan/action.yml`  | Composite action: Trivy scan, hadolint, SARIF output.             |
-|  [11]   | **PR Change Router**                     | `examples/actions/pr-change-router/action.yml`  | Composite action: paths-filter, dynamic matrix, label sync.       |
+|   [1]   | **Node.js CI**                           | `examples/nodejs-ci.yml`              | Matrix testing, caching, artifact upload, coverage, summaries.    |
+|   [2]   | **Docker Build + Push**                  | `examples/docker-build-push.yml`      | Multi-platform builds, GHCR, BuildKit caching, SLSA provenance.   |
+|   [3]   | **Monorepo CI**                          | `examples/monorepo-ci.yml`            | Nx affected detection, pnpm workspace, sparse checkout.           |
+|   [4]   | **PR Security Gate**                     | `examples/dependency-review.yml`      | Multi-job security: dep review, CodeQL, Gitleaks, triage.         |
+|   [5]   | **Container Supply Chain**               | `examples/sbom-attestation.yml`       | SBOM, Trivy severity gating, Cosign, gh attestation verify.       |
+|   [6]   | **Composite Action (setup-node-cached)** | `examples/setup-node-cached-action.yml` | Smart caching, corepack detection, cache-dir resolution.        |
+|   [7]   | **ChatOps Dispatch**                     | `examples/chatops-dispatch.yml`       | Slash commands, injection prevention, App token, env indirection. |
+|   [8]   | **Multi-Cloud OIDC Auth**                | `examples/oidc-cloud-auth-action.yml` | Composite action: AWS/GCP/Azure OIDC, output normalization.       |
+|   [9]   | **Release + Deploy**                     | `examples/release-deploy.yml`         | Environment promotion, reusable workflow, concurrency groups.     |
+|  [10]   | **Docker Lint + Scan**                   | `examples/docker-lint-scan-action.yml` | Composite action: Trivy scan, hadolint, SARIF output.            |
+|  [11]   | **PR Change Router**                     | `examples/pr-change-router-action.yml` | Composite action: paths-filter, dynamic matrix, label sync.      |
 
 ---
 ## [4][ACTION_DISCOVERY]

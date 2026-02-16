@@ -144,13 +144,13 @@ const Client = (() => {
                 ))),
         },
         lock: {
-            acquire: _lockOp(_LOCK_OPS.acquire),
+            acquire:     _lockOp(_LOCK_OPS.acquire),
             session: {
                 acquire: _lockOp(_LOCK_OPS.sessionAcquire),
                 release: _lockOp(_LOCK_OPS.sessionRelease),
-                try: _lockOp(_LOCK_OPS.sessionTry),
+                try:     _lockOp(_LOCK_OPS.sessionTry),
             },
-            try: _lockOp(_LOCK_OPS.try),
+            try:         _lockOp(_LOCK_OPS.try),
         },
         notify: (channel: string, payload: string) => sql.pipe(Effect.flatMap((db) => db`SELECT pg_notify(${channel}, ${payload})`)),
         tenant: (() => {

@@ -1,211 +1,216 @@
 {
-  "name": "@parametric-portal/server",
-  "version": "2.0.1",
-  "type": "module",
-  "exports": {
-    "./api": {
-      "types": "./src/api.ts",
-      "import": "./src/api.ts",
-      "default": "./src/api.ts"
+    "name": "@parametric-portal/server",
+    "version": "2.0.1",
+    "type": "module",
+    "exports": {
+        "./api": {
+            "types": "./src/api.ts",
+            "import": "./src/api.ts",
+            "default": "./src/api.ts"
+        },
+        "./context": {
+            "types": "./src/context.ts",
+            "import": "./src/context.ts",
+            "default": "./src/context.ts"
+        },
+        "./errors": {
+            "types": "./src/errors.ts",
+            "import": "./src/errors.ts",
+            "default": "./src/errors.ts"
+        },
+        "./middleware": {
+            "types": "./src/middleware.ts",
+            "import": "./src/middleware.ts",
+            "default": "./src/middleware.ts"
+        },
+        "./observe/metrics": {
+            "types": "./src/observe/metrics.ts",
+            "import": "./src/observe/metrics.ts",
+            "default": "./src/observe/metrics.ts"
+        },
+        "./platform/cache": {
+            "types": "./src/platform/cache.ts",
+            "import": "./src/platform/cache.ts",
+            "default": "./src/platform/cache.ts"
+        },
+        "./platform/doppler": {
+            "types": "./src/platform/doppler.ts",
+            "import": "./src/platform/doppler.ts",
+            "default": "./src/platform/doppler.ts"
+        },
+        "./platform/websocket": {
+            "types": "./src/platform/websocket.ts",
+            "import": "./src/platform/websocket.ts",
+            "default": "./src/platform/websocket.ts"
+        },
+        "./observe/telemetry": {
+            "types": "./src/observe/telemetry.ts",
+            "import": "./src/observe/telemetry.ts",
+            "default": "./src/observe/telemetry.ts"
+        },
+        "./infra/cluster": {
+            "types": "./src/infra/cluster.ts",
+            "import": "./src/infra/cluster.ts",
+            "default": "./src/infra/cluster.ts"
+        },
+        "./infra/events": {
+            "types": "./src/infra/events.ts",
+            "import": "./src/infra/events.ts",
+            "default": "./src/infra/events.ts"
+        },
+        "./infra/storage": {
+            "types": "./src/infra/storage.ts",
+            "import": "./src/infra/storage.ts",
+            "default": "./src/infra/storage.ts"
+        },
+        "./infra/jobs": {
+            "types": "./src/infra/jobs.ts",
+            "import": "./src/infra/jobs.ts",
+            "default": "./src/infra/jobs.ts"
+        },
+        "./observe/polling": {
+            "types": "./src/observe/polling.ts",
+            "import": "./src/observe/polling.ts",
+            "default": "./src/observe/polling.ts"
+        },
+        "./security/crypto": {
+            "types": "./src/security/crypto.ts",
+            "import": "./src/security/crypto.ts",
+            "default": "./src/security/crypto.ts"
+        },
+        "./security/policy": {
+            "types": "./src/security/policy.ts",
+            "import": "./src/security/policy.ts",
+            "default": "./src/security/policy.ts"
+        },
+        "./security/totp-replay": {
+            "types": "./src/security/totp-replay.ts",
+            "import": "./src/security/totp-replay.ts",
+            "default": "./src/security/totp-replay.ts"
+        },
+        "./observe/audit": {
+            "types": "./src/observe/audit.ts",
+            "import": "./src/observe/audit.ts",
+            "default": "./src/observe/audit.ts"
+        },
+        "./domain/auth": {
+            "types": "./src/domain/auth.ts",
+            "import": "./src/domain/auth.ts",
+            "default": "./src/domain/auth.ts"
+        },
+        "./domain/storage": {
+            "types": "./src/domain/storage.ts",
+            "import": "./src/domain/storage.ts",
+            "default": "./src/domain/storage.ts"
+        },
+        "./domain/notifications": {
+            "types": "./src/domain/notifications.ts",
+            "import": "./src/domain/notifications.ts",
+            "default": "./src/domain/notifications.ts"
+        },
+        "./domain/transfer": {
+            "types": "./src/domain/transfer.ts",
+            "import": "./src/domain/transfer.ts",
+            "default": "./src/domain/transfer.ts"
+        },
+        "./utils/circuit": {
+            "types": "./src/utils/circuit.ts",
+            "import": "./src/utils/circuit.ts",
+            "default": "./src/utils/circuit.ts"
+        },
+        "./utils/diff": {
+            "types": "./src/utils/diff.ts",
+            "import": "./src/utils/diff.ts",
+            "default": "./src/utils/diff.ts"
+        },
+        "./utils/transfer": {
+            "types": "./src/utils/transfer.ts",
+            "import": "./src/utils/transfer.ts",
+            "default": "./src/utils/transfer.ts"
+        },
+        "./utils/resilience": {
+            "types": "./src/utils/resilience.ts",
+            "import": "./src/utils/resilience.ts",
+            "default": "./src/utils/resilience.ts"
+        },
+        "./infra/handlers/purge": {
+            "types": "./src/infra/handlers/purge.ts",
+            "import": "./src/infra/handlers/purge.ts",
+            "default": "./src/infra/handlers/purge.ts"
+        },
+        "./infra/handlers/tenant-lifecycle": {
+            "types": "./src/infra/handlers/tenant-lifecycle.ts",
+            "import": "./src/infra/handlers/tenant-lifecycle.ts",
+            "default": "./src/infra/handlers/tenant-lifecycle.ts"
+        },
+        "./platform/streaming": {
+            "types": "./src/platform/streaming.ts",
+            "import": "./src/platform/streaming.ts",
+            "default": "./src/platform/streaming.ts"
+        },
+        "./infra/webhooks": {
+            "types": "./src/infra/webhooks.ts",
+            "import": "./src/infra/webhooks.ts",
+            "default": "./src/infra/webhooks.ts"
+        },
+        "./domain/features": {
+            "types": "./src/domain/features.ts",
+            "import": "./src/domain/features.ts",
+            "default": "./src/domain/features.ts"
+        },
+        "./infra/email": {
+            "types": "./src/infra/email.ts",
+            "import": "./src/infra/email.ts",
+            "default": "./src/infra/email.ts"
+        }
     },
-    "./context": {
-      "types": "./src/context.ts",
-      "import": "./src/context.ts",
-      "default": "./src/context.ts"
+    "scripts": {
+        "build": "vite build",
+        "check": "biome check .",
+        "fix": "biome check --write .",
+        "test": "vitest run --passWithNoTests",
+        "typecheck": "tsc --project tsconfig.json --noEmit"
     },
-    "./errors": {
-      "types": "./src/errors.ts",
-      "import": "./src/errors.ts",
-      "default": "./src/errors.ts"
+    "dependencies": {
+        "@aws-sdk/client-s3": "catalog:",
+        "@aws-sdk/client-sesv2": "catalog:",
+        "@aws-sdk/s3-request-presigner": "catalog:",
+        "@dopplerhq/node-sdk": "catalog:",
+        "@effect-aws/client-s3": "catalog:",
+        "@effect/cluster": "catalog:",
+        "@effect/experimental": "catalog:",
+        "@effect/opentelemetry": "catalog:",
+        "@effect/platform": "catalog:",
+        "@effect/platform-node": "catalog:",
+        "@effect/platform-node-shared": "catalog:",
+        "@effect/rpc": "catalog:",
+        "@effect/sql": "catalog:",
+        "@effect/sql-pg": "catalog:",
+        "@effect/workflow": "catalog:",
+        "@parametric-portal/database": "workspace:*",
+        "@parametric-portal/types": "workspace:*",
+        "@simplewebauthn/server": "catalog:",
+        "arctic": "catalog:",
+        "effect": "catalog:",
+        "exceljs": "catalog:",
+        "ipaddr.js": "catalog:",
+        "ioredis": "catalog:",
+        "jszip": "catalog:",
+        "nanoid": "catalog:",
+        "nodemailer": "catalog:",
+        "otplib": "catalog:",
+        "papaparse": "catalog:",
+        "rfc6902": "catalog:",
+        "sax": "catalog:",
+        "yaml": "catalog:"
     },
-    "./middleware": {
-      "types": "./src/middleware.ts",
-      "import": "./src/middleware.ts",
-      "default": "./src/middleware.ts"
-    },
-    "./observe/metrics": {
-      "types": "./src/observe/metrics.ts",
-      "import": "./src/observe/metrics.ts",
-      "default": "./src/observe/metrics.ts"
-    },
-    "./platform/cache": {
-      "types": "./src/platform/cache.ts",
-      "import": "./src/platform/cache.ts",
-      "default": "./src/platform/cache.ts"
-    },
-    "./platform/websocket": {
-      "types": "./src/platform/websocket.ts",
-      "import": "./src/platform/websocket.ts",
-      "default": "./src/platform/websocket.ts"
-    },
-    "./observe/telemetry": {
-      "types": "./src/observe/telemetry.ts",
-      "import": "./src/observe/telemetry.ts",
-      "default": "./src/observe/telemetry.ts"
-    },
-    "./infra/cluster": {
-      "types": "./src/infra/cluster.ts",
-      "import": "./src/infra/cluster.ts",
-      "default": "./src/infra/cluster.ts"
-    },
-    "./infra/events": {
-      "types": "./src/infra/events.ts",
-      "import": "./src/infra/events.ts",
-      "default": "./src/infra/events.ts"
-    },
-    "./infra/storage": {
-      "types": "./src/infra/storage.ts",
-      "import": "./src/infra/storage.ts",
-      "default": "./src/infra/storage.ts"
-    },
-    "./infra/jobs": {
-      "types": "./src/infra/jobs.ts",
-      "import": "./src/infra/jobs.ts",
-      "default": "./src/infra/jobs.ts"
-    },
-    "./observe/polling": {
-      "types": "./src/observe/polling.ts",
-      "import": "./src/observe/polling.ts",
-      "default": "./src/observe/polling.ts"
-    },
-    "./security/crypto": {
-      "types": "./src/security/crypto.ts",
-      "import": "./src/security/crypto.ts",
-      "default": "./src/security/crypto.ts"
-    },
-    "./security/policy": {
-      "types": "./src/security/policy.ts",
-      "import": "./src/security/policy.ts",
-      "default": "./src/security/policy.ts"
-    },
-    "./security/totp-replay": {
-      "types": "./src/security/totp-replay.ts",
-      "import": "./src/security/totp-replay.ts",
-      "default": "./src/security/totp-replay.ts"
-    },
-    "./observe/audit": {
-      "types": "./src/observe/audit.ts",
-      "import": "./src/observe/audit.ts",
-      "default": "./src/observe/audit.ts"
-    },
-    "./domain/auth": {
-      "types": "./src/domain/auth.ts",
-      "import": "./src/domain/auth.ts",
-      "default": "./src/domain/auth.ts"
-    },
-    "./domain/storage": {
-      "types": "./src/domain/storage.ts",
-      "import": "./src/domain/storage.ts",
-      "default": "./src/domain/storage.ts"
-    },
-    "./domain/notifications": {
-      "types": "./src/domain/notifications.ts",
-      "import": "./src/domain/notifications.ts",
-      "default": "./src/domain/notifications.ts"
-    },
-    "./domain/transfer": {
-      "types": "./src/domain/transfer.ts",
-      "import": "./src/domain/transfer.ts",
-      "default": "./src/domain/transfer.ts"
-    },
-    "./utils/circuit": {
-      "types": "./src/utils/circuit.ts",
-      "import": "./src/utils/circuit.ts",
-      "default": "./src/utils/circuit.ts"
-    },
-    "./utils/diff": {
-      "types": "./src/utils/diff.ts",
-      "import": "./src/utils/diff.ts",
-      "default": "./src/utils/diff.ts"
-    },
-    "./utils/transfer": {
-      "types": "./src/utils/transfer.ts",
-      "import": "./src/utils/transfer.ts",
-      "default": "./src/utils/transfer.ts"
-    },
-    "./utils/resilience": {
-      "types": "./src/utils/resilience.ts",
-      "import": "./src/utils/resilience.ts",
-      "default": "./src/utils/resilience.ts"
-    },
-    "./infra/handlers/purge": {
-      "types": "./src/infra/handlers/purge.ts",
-      "import": "./src/infra/handlers/purge.ts",
-      "default": "./src/infra/handlers/purge.ts"
-    },
-    "./infra/handlers/tenant-lifecycle": {
-      "types": "./src/infra/handlers/tenant-lifecycle.ts",
-      "import": "./src/infra/handlers/tenant-lifecycle.ts",
-      "default": "./src/infra/handlers/tenant-lifecycle.ts"
-    },
-    "./platform/streaming": {
-      "types": "./src/platform/streaming.ts",
-      "import": "./src/platform/streaming.ts",
-      "default": "./src/platform/streaming.ts"
-    },
-    "./infra/webhooks": {
-      "types": "./src/infra/webhooks.ts",
-      "import": "./src/infra/webhooks.ts",
-      "default": "./src/infra/webhooks.ts"
-    },
-    "./domain/features": {
-      "types": "./src/domain/features.ts",
-      "import": "./src/domain/features.ts",
-      "default": "./src/domain/features.ts"
-    },
-    "./infra/email": {
-      "types": "./src/infra/email.ts",
-      "import": "./src/infra/email.ts",
-      "default": "./src/infra/email.ts"
+    "devDependencies": {
+        "@types/node": "catalog:",
+        "@types/nodemailer": "catalog:",
+        "@types/papaparse": "catalog:",
+        "@types/sax": "catalog:",
+        "typescript": "catalog:",
+        "vite": "catalog:",
+        "vitest": "catalog:"
     }
-  },
-  "scripts": {
-    "build": "vite build",
-    "check": "biome check .",
-    "fix": "biome check --write .",
-    "test": "vitest run --passWithNoTests",
-    "typecheck": "tsc --project tsconfig.json --noEmit"
-  },
-  "dependencies": {
-    "@aws-sdk/client-s3": "catalog:",
-    "@aws-sdk/client-sesv2": "catalog:",
-    "@aws-sdk/s3-request-presigner": "catalog:",
-    "@dopplerhq/node-sdk": "catalog:",
-    "@effect-aws/client-s3": "catalog:",
-    "@effect/cluster": "catalog:",
-    "@effect/experimental": "catalog:",
-    "@effect/opentelemetry": "catalog:",
-    "@effect/platform": "catalog:",
-    "@effect/platform-node": "catalog:",
-    "@effect/platform-node-shared": "catalog:",
-    "@effect/rpc": "catalog:",
-    "@effect/sql": "catalog:",
-    "@effect/sql-pg": "catalog:",
-    "@effect/workflow": "catalog:",
-    "@parametric-portal/database": "workspace:*",
-    "@parametric-portal/types": "workspace:*",
-    "@simplewebauthn/server": "catalog:",
-    "arctic": "catalog:",
-    "effect": "catalog:",
-    "exceljs": "catalog:",
-    "ipaddr.js": "catalog:",
-    "ioredis": "catalog:",
-    "jszip": "catalog:",
-    "nanoid": "catalog:",
-    "nodemailer": "catalog:",
-    "otplib": "catalog:",
-    "papaparse": "catalog:",
-    "rfc6902": "catalog:",
-    "sax": "catalog:",
-    "yaml": "catalog:"
-  },
-  "devDependencies": {
-    "@types/node": "catalog:",
-    "@types/nodemailer": "catalog:",
-    "@types/papaparse": "catalog:",
-    "@types/sax": "catalog:",
-    "typescript": "catalog:",
-    "vite": "catalog:",
-    "vitest": "catalog:"
-  }
 }

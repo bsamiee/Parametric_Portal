@@ -19,18 +19,6 @@ import { Crypto } from './security/crypto.ts';
 import { PolicyService } from './security/policy.ts';
 import { FeatureService } from './domain/features.ts';
 
-// --- [SCHEMA] ----------------------------------------------------------------
-
-const _IdempotencyRecord = S.Struct({
-    bodyHash:     S.String,
-    completedAt:  S.Number,
-    key:          S.String,
-    operationKey: S.String,
-    result:       S.Unknown,
-    status:       S.Literal('completed', 'pending'),
-    tenantId:     S.String,
-});
-
 // --- [CONSTANTS] -------------------------------------------------------------
 
 const _CONFIG = {
@@ -62,7 +50,7 @@ const _CONFIG = {
 } as const;
 const _IDEMPOTENCY = {
     completedTtl: Duration.hours(24),
-    pendingTtl: Duration.minutes(2),
+    pendingTtl:   Duration.minutes(2),
 } as const;
 const _proxyConfig = Config.all({
     enabled: Config.map(
@@ -74,6 +62,21 @@ const _proxyConfig = Config.all({
         (raw) => Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : 1,
     ),
 });
+
+// --- [SCHEMA] ----------------------------------------------------------------
+
+const _IdempotencyRecord = S.Struct({
+    bodyHash:     S.String,
+    completedAt:  S.Number,
+    key:          S.String,
+    operationKey: S.String,
+    result:       S.Unknown,
+    status:       S.Literal('completed', 'pending'),
+    tenantId:     S.String,
+});
+
+// --- [CLASSES] ---------------------------------------------------------------
+
 class TenantResolution extends Data.TaggedError('TenantResolution')<{ readonly details: string; readonly error: string; readonly status: number; readonly tenantId?: string }> {}
 
 // --- [GLOBAL_MIDDLEWARE] -----------------------------------------------------
@@ -188,8 +191,7 @@ const _idempotent = <R extends string, A extends string, B, E, Deps>(
                         FiberRef.set(_idempotencyOutcome, Option.some('conflict')),
                         Effect.andThen(Effect.fail(HttpError.Conflict.of('idempotency', `in-flight: ${key} [retry-after: ${Duration.toSeconds(_IDEMPOTENCY.pendingTtl)}]`))),
                     )),
-                    // [WHY] Cast to B: no response schema available in generic middleware. TTL bounds staleness; callers version idempotency keys across schema changes.
-                    Match.when({ bodyHash: (h: string) => h === bodyHash }, (matched) => pipe(
+                    Match.when({ bodyHash: (h: string) => h === bodyHash }, (matched) => pipe( // [WHY] Cast to B: no response schema available in generic middleware. TTL bounds staleness; callers version idempotency keys across schema changes.
                         FiberRef.set(_idempotencyOutcome, Option.some('replayed')),
                         Effect.as(matched.result as B),
                         Effect.provideService(HttpServerRequest.HttpServerRequest, request),
@@ -319,7 +321,7 @@ class Middleware extends HttpApiMiddleware.Tag<Middleware>()('server/Middleware'
 
 namespace Middleware {
     export type SessionLookup = Parameters<typeof Middleware._makeAuthLayer>[0];
-    export type ApiKeyLookup = Parameters<typeof Middleware._makeAuthLayer>[1];
+    export type ApiKeyLookup =  Parameters<typeof Middleware._makeAuthLayer>[1];
 }
 
 // --- [EXPORT] ----------------------------------------------------------------

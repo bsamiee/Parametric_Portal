@@ -6,10 +6,7 @@
  * Per-endpoint addError() only for endpoint-specific errors (NotFound, Conflict, Validation).
  */
 import { HttpApi, HttpApiEndpoint, HttpApiGroup, HttpApiSchema, Multipart, OpenApi } from '@effect/platform';
-import {
-    ApiKey, App, AppSettingsSchema, Asset, AuditOperationSchema, AuditLog, Job, JobDlq, Notification, OAuthProviderSchema,
-    Permission, PreferencesSchema, RoleSchema, Session, User,
-} from '@parametric-portal/database/models';
+import {ApiKey, App, AppSettingsSchema, Asset, AuditOperationSchema, AuditLog, Job, JobDlq, Notification, OAuthProviderSchema, Permission, PreferencesSchema, RoleSchema, Session, User,} from '@parametric-portal/database/models';
 import { Url } from '@parametric-portal/types/types';
 import { Schema as S } from 'effect';
 import { HttpError } from './errors.ts';
@@ -20,6 +17,7 @@ import { Middleware } from './middleware.ts';
 // --- [SCHEMA] ----------------------------------------------------------------
 
 const _PaginationBase = S.Struct({ cursor: S.optional(HttpApiSchema.param('cursor', S.String)), limit: S.optionalWith(HttpApiSchema.param('limit', S.NumberFromString.pipe(S.int(), S.between(1, 100))), { default: () => 20 }) });
+const _ObsUrlParams = S.Struct({ limit: S.optionalWith(HttpApiSchema.param('limit', S.NumberFromString.pipe(S.int(), S.between(1, 500))), { default: () => 100 }) });
 const _Success = S.Struct({ success: S.Literal(true) });
 const AuthResponse = S.Struct({
     accessToken: S.String.annotations({ description: 'Opaque access token for API authentication' }),
@@ -42,7 +40,7 @@ const Query = S.extend(TemporalQuery, S.Struct({
     operation: S.optional(HttpApiSchema.param('operation', AuditOperationSchema)),
 }));
 const TransferQuery = S.Struct({
-    after: S.optionalWith(HttpApiSchema.param('after', S.DateFromString), { as: 'Option' }),
+    after: S.optionalWith(HttpApiSchema.param('after',   S.DateFromString), { as: 'Option' }),
     before: S.optionalWith(HttpApiSchema.param('before', S.DateFromString), { as: 'Option' }),
     dryRun: S.optionalWith(HttpApiSchema.param('dryRun', S.BooleanFromString), { as: 'Option' }),
     format: S.optionalWith(HttpApiSchema.param('format', S.String), { default: () => 'ndjson' }),
@@ -75,8 +73,7 @@ const _AuthGroup = HttpApiGroup.make('auth')
     .prefix('/v1/auth')
     .addError(HttpError.Conflict)
     .addError(HttpError.RateLimit)
-    .add(
-        HttpApiEndpoint.get('oauthStart', '/oauth/:provider')
+    .add(HttpApiEndpoint.get('oauthStart', '/oauth/:provider')
             .setPath(S.Struct({ provider: OAuthProviderSchema }))
             .addSuccess(S.Struct({ url: Url }))
             .addError(HttpError.Forbidden)
@@ -85,8 +82,7 @@ const _AuthGroup = HttpApiGroup.make('auth')
             .annotate(OpenApi.Summary, 'Start OAuth flow')
             .annotate(OpenApi.Description, 'Initiates OAuth authorization flow for the specified provider.'),
     )
-    .add(
-        HttpApiEndpoint.get('oauthCallback', '/oauth/:provider/callback')
+    .add(HttpApiEndpoint.get('oauthCallback', '/oauth/:provider/callback')
             .setPath(S.Struct({ provider: OAuthProviderSchema }))
             .setUrlParams(S.Struct({ code: S.String, state: S.String }))
             .addSuccess(AuthResponse)
@@ -96,15 +92,13 @@ const _AuthGroup = HttpApiGroup.make('auth')
             .annotate(OpenApi.Summary, 'OAuth callback')
             .annotate(OpenApi.Description, 'Handles OAuth provider callback. Validates state, exchanges code for tokens, and creates/updates user session.'),
     )
-    .add(
-        HttpApiEndpoint.post('refresh', '/refresh')
+    .add(HttpApiEndpoint.post('refresh', '/refresh')
             .addSuccess(AuthResponse)
             .addError(HttpError.Auth)
             .annotate(OpenApi.Summary, 'Refresh access token')
             .annotate(OpenApi.Description, 'Exchanges refresh token (from HttpOnly cookie) for new access and refresh tokens.'),
     )
-    .add(
-        HttpApiEndpoint.post('logout', '/logout')
+    .add(HttpApiEndpoint.post('logout', '/logout')
             .middleware(Middleware)
             .addSuccess(_Success)
             .addError(HttpError.Auth)
@@ -112,8 +106,7 @@ const _AuthGroup = HttpApiGroup.make('auth')
             .addError(HttpError.Internal)
             .annotate(OpenApi.Summary, 'End session'),
     )
-    .add(
-        HttpApiEndpoint.get('me', '/me')
+    .add(HttpApiEndpoint.get('me', '/me')
             .middleware(Middleware)
             .addSuccess(User.json)
             .addError(HttpError.NotFound)
@@ -121,16 +114,14 @@ const _AuthGroup = HttpApiGroup.make('auth')
             .addError(HttpError.Internal)
             .annotate(OpenApi.Summary, 'Get current user'),
     )
-    .add(
-        HttpApiEndpoint.get('mfaStatus', '/mfa/status')
+    .add(HttpApiEndpoint.get('mfaStatus', '/mfa/status')
             .middleware(Middleware)
             .addSuccess(S.Struct({ enabled: S.Boolean, enrolled: S.Boolean, remainingBackupCodes: S.optional(S.Int) }))
             .addError(HttpError.Forbidden)
             .addError(HttpError.Internal)
             .annotate(OpenApi.Summary, 'Get MFA status'),
     )
-    .add(
-        HttpApiEndpoint.post('mfaEnroll', '/mfa/enroll')
+    .add(HttpApiEndpoint.post('mfaEnroll', '/mfa/enroll')
             .middleware(Middleware)
             .addSuccess(S.Struct({ backupCodes: S.Array(S.String), qrDataUrl: S.String, secret: S.String }))
             .addError(HttpError.Auth)
@@ -141,8 +132,7 @@ const _AuthGroup = HttpApiGroup.make('auth')
             .annotate(OpenApi.Summary, 'Enroll in MFA')
             .annotate(OpenApi.Description, 'Generates TOTP secret and backup codes for MFA enrollment.'),
     )
-    .add(
-        HttpApiEndpoint.post('mfaVerify', '/mfa/verify')
+    .add(HttpApiEndpoint.post('mfaVerify', '/mfa/verify')
             .middleware(Middleware)
             .setPayload(S.Struct({ code: S.String.pipe(S.pattern(/^\d{6}$/)) }))
             .addSuccess(_Success)
@@ -152,8 +142,7 @@ const _AuthGroup = HttpApiGroup.make('auth')
             .annotate(OpenApi.Summary, 'Verify MFA code')
             .annotate(OpenApi.Description, 'Verifies TOTP code and enables MFA if not already enabled.'),
     )
-    .add(
-        HttpApiEndpoint.del('mfaDisable', '/mfa')
+    .add(HttpApiEndpoint.del('mfaDisable', '/mfa')
             .middleware(Middleware)
             .addSuccess(_Success)
             .addError(HttpError.Auth)
@@ -162,8 +151,7 @@ const _AuthGroup = HttpApiGroup.make('auth')
             .addError(HttpError.Internal)
             .annotate(OpenApi.Summary, 'Disable MFA'),
     )
-    .add(
-        HttpApiEndpoint.post('mfaRecover', '/mfa/recover')
+    .add(HttpApiEndpoint.post('mfaRecover', '/mfa/recover')
             .middleware(Middleware)
             .setPayload(S.Struct({ code: S.NonEmptyTrimmedString }))
             .addSuccess(S.Struct({ remainingCodes: S.Int, success: S.Literal(true) }))
@@ -173,16 +161,14 @@ const _AuthGroup = HttpApiGroup.make('auth')
             .annotate(OpenApi.Summary, 'Use MFA recovery code')
             .annotate(OpenApi.Description, 'Validates backup code for account recovery when TOTP device is unavailable.'),
     )
-    .add(
-        HttpApiEndpoint.get('listApiKeys', '/apikeys')
+    .add(HttpApiEndpoint.get('listApiKeys', '/apikeys')
             .middleware(Middleware)
             .addSuccess(S.Struct({ data: S.Array(ApiKey.json) }))
             .addError(HttpError.Forbidden)
             .addError(HttpError.Internal)
             .annotate(OpenApi.Summary, 'List API keys'),
     )
-    .add(
-        HttpApiEndpoint.post('createApiKey', '/apikeys')
+    .add(HttpApiEndpoint.post('createApiKey', '/apikeys')
             .middleware(Middleware)
             .setPayload(S.Struct({ expiresAt: S.optional(S.DateFromSelf), name: S.NonEmptyTrimmedString }))
             .addSuccess(S.extend(ApiKey.json, S.Struct({ apiKey: S.String })))
@@ -193,8 +179,7 @@ const _AuthGroup = HttpApiGroup.make('auth')
             .annotate(OpenApi.Summary, 'Create API key')
             .annotate(OpenApi.Description, 'Creates new API key. The key value is returned only once in the response.'),
     )
-    .add(
-        HttpApiEndpoint.del('deleteApiKey', '/apikeys/:id')
+    .add(HttpApiEndpoint.del('deleteApiKey', '/apikeys/:id')
             .middleware(Middleware)
             .setPath(S.Struct({ id: S.UUID }))
             .addSuccess(_Success)
@@ -204,8 +189,7 @@ const _AuthGroup = HttpApiGroup.make('auth')
             .addError(HttpError.Internal)
             .annotate(OpenApi.Summary, 'Revoke API key'),
     )
-    .add(
-        HttpApiEndpoint.post('rotateApiKey', '/apikeys/:id/rotate')
+    .add(HttpApiEndpoint.post('rotateApiKey', '/apikeys/:id/rotate')
             .middleware(Middleware)
             .setPath(S.Struct({ id: S.UUID }))
             .addSuccess(S.extend(ApiKey.json, S.Struct({ apiKey: S.String })))
@@ -216,8 +200,7 @@ const _AuthGroup = HttpApiGroup.make('auth')
             .annotate(OpenApi.Summary, 'Rotate API key')
             .annotate(OpenApi.Description, 'Generates a new key value for an existing API key. The old key is invalidated immediately. The new key value is returned only once.'),
     )
-    .add(
-        HttpApiEndpoint.post('linkProvider', '/link/:provider')
+    .add(HttpApiEndpoint.post('linkProvider', '/link/:provider')
             .middleware(Middleware)
             .setPath(S.Struct({ provider: OAuthProviderSchema }))
             .setPayload(S.Struct({ externalId: S.NonEmptyTrimmedString }))
@@ -229,8 +212,7 @@ const _AuthGroup = HttpApiGroup.make('auth')
             .annotate(OpenApi.Summary, 'Link OAuth provider')
             .annotate(OpenApi.Description, 'Links an OAuth provider to the authenticated user account using the provider external ID from a completed OAuth flow.'),
     )
-    .add(
-        HttpApiEndpoint.del('unlinkProvider', '/link/:provider')
+    .add(HttpApiEndpoint.del('unlinkProvider', '/link/:provider')
             .middleware(Middleware)
             .setPath(S.Struct({ provider: OAuthProviderSchema }))
             .addSuccess(_Success)
@@ -248,8 +230,7 @@ const _HealthGroup = HttpApiGroup.make('health')
     .prefix('/health')
     .addError(HttpError.RateLimit)
     .add(HttpApiEndpoint.get('liveness', '/liveness').addSuccess(S.Struct({ latencyMs: S.Number, status: S.Literal('ok', 'degraded') })))
-    .add(
-        HttpApiEndpoint.get('readiness', '/readiness')
+    .add(HttpApiEndpoint.get('readiness', '/readiness')
             .addSuccess(S.Struct({
                 checks: S.Struct({
                     cache: S.Struct({ connected: S.Boolean, latencyMs: S.Number }),
@@ -269,8 +250,7 @@ const _HealthGroup = HttpApiGroup.make('health')
             }))
             .addError(HttpError.ServiceUnavailable),
     )
-    .add(
-        HttpApiEndpoint.get('clusterHealth', '/cluster')
+    .add(HttpApiEndpoint.get('clusterHealth', '/cluster')
             .addSuccess(S.Struct({
                 cluster: S.Struct({
                     degraded: S.Boolean, healthy: S.Boolean,
@@ -284,20 +264,17 @@ const _HealthGroup = HttpApiGroup.make('health')
 // Telemetry: unauthenticated OTLP ingest
 const _TelemetryGroup = HttpApiGroup.make('telemetry')
     .prefix('/v1')
-    .add(
-        HttpApiEndpoint.post('ingestTraces', '/traces')
+    .add(HttpApiEndpoint.post('ingestTraces', '/traces')
             .addSuccess(S.Void)
             .addError(HttpError.RateLimit)
             .addError(HttpError.ServiceUnavailable),
     )
-    .add(
-        HttpApiEndpoint.post('ingestMetrics', '/metrics')
+    .add(HttpApiEndpoint.post('ingestMetrics', '/metrics')
             .addSuccess(S.Void)
             .addError(HttpError.RateLimit)
             .addError(HttpError.ServiceUnavailable),
     )
-    .add(
-        HttpApiEndpoint.post('ingestLogs', '/logs')
+    .add(HttpApiEndpoint.post('ingestLogs', '/logs')
             .addSuccess(S.Void)
             .addError(HttpError.RateLimit)
             .addError(HttpError.ServiceUnavailable),
@@ -311,58 +288,48 @@ const _UsersGroup = HttpApiGroup.make('users')
     .addError(HttpError.Forbidden)
     .addError(HttpError.Internal)
     .addError(HttpError.RateLimit)
-    .add(
-        HttpApiEndpoint.get('getMe', '/me')
+    .add(HttpApiEndpoint.get('getMe', '/me')
             .addSuccess(User.json)
             .addError(HttpError.NotFound)
             .annotate(OpenApi.Summary, 'Get own profile'),
     )
-    .add(
-        HttpApiEndpoint.patch('updateProfile', '/me')
-            .setPayload(S.Struct({
-                email: S.String.pipe(S.pattern(/^[^@\s]+@[^@\s]+\.[^@\s]+$/)).annotations({ description: 'New email address' }),
-            }))
+    .add(HttpApiEndpoint.patch('updateProfile', '/me')
+            .setPayload(S.Struct({email: S.String.pipe(S.pattern(/^[^@\s]+@[^@\s]+\.[^@\s]+$/)).annotations({ description: 'New email address' }),}))
             .addSuccess(User.json)
             .addError(HttpError.NotFound)
             .addError(HttpError.Validation)
             .annotate(OpenApi.Summary, 'Update own profile'),
     )
-    .add(
-        HttpApiEndpoint.post('deactivate', '/me/deactivate')
+    .add(HttpApiEndpoint.post('deactivate', '/me/deactivate')
             .addSuccess(_Success)
             .addError(HttpError.NotFound)
             .annotate(OpenApi.Summary, 'Deactivate own account'),
     )
-    .add(
-        HttpApiEndpoint.patch('updateRole', '/:id/role')
+    .add(HttpApiEndpoint.patch('updateRole', '/:id/role')
             .setPath(S.Struct({ id: S.UUID }))
             .setPayload(S.Struct({ role: RoleSchema }))
             .addSuccess(User.json)
             .addError(HttpError.NotFound),
     )
-    .add(
-        HttpApiEndpoint.get('getNotificationPreferences', '/me/notifications/preferences')
+    .add(HttpApiEndpoint.get('getNotificationPreferences', '/me/notifications/preferences')
             .addSuccess(PreferencesSchema)
             .addError(HttpError.NotFound)
             .addError(HttpError.Validation)
             .annotate(OpenApi.Summary, 'Get notification preferences'),
     )
-    .add(
-        HttpApiEndpoint.put('updateNotificationPreferences', '/me/notifications/preferences')
+    .add(HttpApiEndpoint.put('updateNotificationPreferences', '/me/notifications/preferences')
             .setPayload(PreferencesSchema)
             .addSuccess(PreferencesSchema)
             .addError(HttpError.NotFound)
             .addError(HttpError.Validation)
             .annotate(OpenApi.Summary, 'Update notification preferences'),
     )
-    .add(
-        HttpApiEndpoint.get('listNotifications', '/me/notifications')
+    .add(HttpApiEndpoint.get('listNotifications', '/me/notifications')
             .setUrlParams(TemporalQuery)
             .addSuccess(KeysetResponse(Notification.json))
             .annotate(OpenApi.Summary, 'List own notifications'),
     )
-    .add(
-        HttpApiEndpoint.get('subscribeNotifications', '/me/notifications/subscribe')
+    .add(HttpApiEndpoint.get('subscribeNotifications', '/me/notifications/subscribe')
             .addSuccess(S.Void)
             .annotate(OpenApi.Summary, 'Subscribe to own notifications'),
     );
@@ -375,20 +342,17 @@ const _AuditGroup = HttpApiGroup.make('audit')
     .addError(HttpError.Forbidden)
     .addError(HttpError.Internal)
     .addError(HttpError.RateLimit)
-    .add(
-        HttpApiEndpoint.get('getByEntity', '/entity/:subject/:subjectId')
+    .add(HttpApiEndpoint.get('getByEntity', '/entity/:subject/:subjectId')
             .setPath(S.Struct({ subject: S.Literal('ApiKey', 'App', 'Asset', 'MfaSecret', 'OauthAccount', 'Session', 'User'), subjectId: S.UUID }))
             .setUrlParams(Query)
             .addSuccess(KeysetResponse(AuditLogWithDiff)),
     )
-    .add(
-        HttpApiEndpoint.get('getByUser', '/user/:userId')
+    .add(HttpApiEndpoint.get('getByUser', '/user/:userId')
             .setPath(S.Struct({ userId: S.UUID }))
             .setUrlParams(Query)
             .addSuccess(KeysetResponse(AuditLogWithDiff)),
     )
-    .add(
-        HttpApiEndpoint.get('getMine', '/me')
+    .add(HttpApiEndpoint.get('getMine', '/me')
             .setUrlParams(Query)
             .addSuccess(KeysetResponse(AuditLogWithDiff)),
     );
@@ -400,16 +364,14 @@ const _TransferGroup = HttpApiGroup.make('transfer')
     .addError(HttpError.Forbidden)
     .addError(HttpError.Internal)
     .addError(HttpError.RateLimit)
-    .add(
-        HttpApiEndpoint.get('export', '/export')
+    .add(HttpApiEndpoint.get('export', '/export')
             .setUrlParams(TransferQuery)
             .addSuccess(TransferResult)
             .addError(HttpError.NotFound)
             .addError(HttpError.Validation)
             .annotate(OpenApi.Description, 'Export assets in specified format. For xlsx/zip: returns JSON with base64-encoded data. For csv/ndjson: returns raw streaming response with Content-Disposition header.'),
     )
-    .add(
-        HttpApiEndpoint.post('import', '/import')
+    .add(HttpApiEndpoint.post('import', '/import')
             .setUrlParams(TransferQuery)
             .addSuccess(TransferResult)
             .addError(HttpError.Validation),
@@ -423,8 +385,7 @@ const _SearchGroup = HttpApiGroup.make('search')
     .addError(HttpError.Forbidden)
     .addError(HttpError.Internal)
     .addError(HttpError.RateLimit)
-    .add(
-        HttpApiEndpoint.get('search', '/')
+    .add(HttpApiEndpoint.get('search', '/')
             .setUrlParams(S.extend(_PaginationBase, S.Struct({
                 entityTypes: S.optional(HttpApiSchema.param('entityTypes', S.transform(
                     S.String,
@@ -445,8 +406,7 @@ const _SearchGroup = HttpApiGroup.make('search')
             ))
             .annotate(OpenApi.Description, 'Full-text + pg_trgm multi-channel + semantic ranking'),
     )
-    .add(
-        HttpApiEndpoint.get('suggest', '/suggest')
+    .add(HttpApiEndpoint.get('suggest', '/suggest')
             .setUrlParams(S.Struct({
                 includeGlobal: S.optional(HttpApiSchema.param('includeGlobal', S.BooleanFromString)),
                 limit: S.optional(HttpApiSchema.param('limit', S.NumberFromString.pipe(S.int(), S.between(1, 20)))),
@@ -455,14 +415,12 @@ const _SearchGroup = HttpApiGroup.make('search')
             .addSuccess(S.Array(S.Struct({ frequency: S.Int, term: S.String })))
             .annotate(OpenApi.Description, 'Prefix suggestions with pg_trgm typo fallback'),
     )
-    .add(
-        HttpApiEndpoint.post('refresh', '/refresh')
+    .add(HttpApiEndpoint.post('refresh', '/refresh')
             .setPayload(S.Struct({ includeGlobal: S.optional(S.Boolean) }))
             .addSuccess(S.Struct({ status: S.Literal('ok') }))
             .annotate(OpenApi.Description, 'Refresh search index (admin only)'),
     )
-    .add(
-        HttpApiEndpoint.post('refreshEmbeddings', '/refresh/embeddings')
+    .add(HttpApiEndpoint.post('refreshEmbeddings', '/refresh/embeddings')
             .setPayload(S.Struct({ includeGlobal: S.optional(S.Boolean) }))
             .addSuccess(S.Struct({ count: S.Int }))
             .annotate(OpenApi.Description, 'Refresh search embeddings (admin only)'),
@@ -475,8 +433,7 @@ const _JobsGroup = HttpApiGroup.make('jobs')
     .addError(HttpError.Forbidden)
     .addError(HttpError.Internal)
     .addError(HttpError.RateLimit)
-    .add(
-        HttpApiEndpoint.get('subscribe', '/subscribe')
+    .add(HttpApiEndpoint.get('subscribe', '/subscribe')
             .addSuccess(S.Void)
             .annotate(OpenApi.Description, 'Subscribe to job status updates via SSE'),
     );
@@ -489,8 +446,7 @@ const _WebSocketGroup = HttpApiGroup.make('websocket')
     .addError(HttpError.Forbidden)
     .addError(HttpError.Internal)
     .addError(HttpError.RateLimit)
-    .add(
-        HttpApiEndpoint.get('connect', '/')
+    .add(HttpApiEndpoint.get('connect', '/')
             .addSuccess(S.Void)
             .annotate(OpenApi.Description, 'Upgrade to WebSocket for realtime events'),
     );
@@ -503,8 +459,7 @@ const _StorageGroup = HttpApiGroup.make('storage')
     .addError(HttpError.Forbidden)
     .addError(HttpError.Internal)
     .addError(HttpError.RateLimit)
-    .add(
-        HttpApiEndpoint.post('sign', '/sign')
+    .add(HttpApiEndpoint.post('sign', '/sign')
             .setPayload(S.Struct({
                 contentType: S.optional(S.String).annotations({ description: 'Content-Type for PUT operations (default: application/octet-stream)' }),
                 expiresInSeconds: S.optionalWith(S.Int.pipe(S.between(60, 3600)), { default: () => 3600 }).annotations({ description: 'URL expiration in seconds (60-3600, default: 3600)' }),
@@ -521,18 +476,15 @@ const _StorageGroup = HttpApiGroup.make('storage')
             .annotate(OpenApi.Summary, 'Generate presigned URL')
             .annotate(OpenApi.Description, 'Generates a presigned URL for direct S3 upload or download. URLs are tenant-scoped and time-limited.'),
     )
-    .add(
-        HttpApiEndpoint.get('exists', '/exists/:key')
+    .add(HttpApiEndpoint.get('exists', '/exists/:key')
             .setPath(S.Struct({ key: S.String }))
             .addSuccess(S.Struct({ exists: S.Boolean, key: S.String })),
     )
-    .add(
-        HttpApiEndpoint.del('remove', '/:key')
+    .add(HttpApiEndpoint.del('remove', '/:key')
             .setPath(S.Struct({ key: S.String }))
             .addSuccess(S.Struct({ key: S.String, success: S.Literal(true) })),
     )
-    .add(
-        HttpApiEndpoint.post('upload', '/upload')
+    .add(HttpApiEndpoint.post('upload', '/upload')
             .setPayload(S.Struct({
                 contentType: S.optional(S.String).annotations({ description: 'Optional content-type override' }),
                 file: Multipart.SingleFileSchema.annotations({ description: 'File to upload' }),
@@ -547,16 +499,14 @@ const _StorageGroup = HttpApiGroup.make('storage')
             .annotate(OpenApi.Summary, 'Upload file directly')
             .annotate(OpenApi.Description, 'Server-side file upload with multipart form data. Files are stored in tenant namespace with automatic content-type detection.'),
     )
-    .add(
-        HttpApiEndpoint.get('getAsset', '/assets/:id')
+    .add(HttpApiEndpoint.get('getAsset', '/assets/:id')
             .setPath(S.Struct({ id: S.UUID }))
             .addSuccess(Asset.json)
             .addError(HttpError.NotFound)
             .annotate(OpenApi.Summary, 'Get asset by ID')
             .annotate(OpenApi.Description, 'Retrieves a single asset by its unique identifier.'),
     )
-    .add(
-        HttpApiEndpoint.post('createAsset', '/assets')
+    .add(HttpApiEndpoint.post('createAsset', '/assets')
             .setPayload(S.Struct({
                 content: S.String.annotations({ description: 'Asset content' }),
                 hash: S.optional(S.String).annotations({ description: 'Content hash for deduplication' }),
@@ -569,8 +519,7 @@ const _StorageGroup = HttpApiGroup.make('storage')
             .annotate(OpenApi.Summary, 'Create asset')
             .annotate(OpenApi.Description, 'Creates a new asset in the current tenant namespace.'),
     )
-    .add(
-        HttpApiEndpoint.patch('updateAsset', '/assets/:id')
+    .add(HttpApiEndpoint.patch('updateAsset', '/assets/:id')
             .setPath(S.Struct({ id: S.UUID }))
             .setPayload(S.Struct({
                 content: S.optional(S.String).annotations({ description: 'Updated content' }),
@@ -584,16 +533,14 @@ const _StorageGroup = HttpApiGroup.make('storage')
             .annotate(OpenApi.Summary, 'Update asset metadata')
             .annotate(OpenApi.Description, 'Updates metadata fields of an existing asset.'),
     )
-    .add(
-        HttpApiEndpoint.del('archiveAsset', '/assets/:id')
+    .add(HttpApiEndpoint.del('archiveAsset', '/assets/:id')
             .setPath(S.Struct({ id: S.UUID }))
             .addSuccess(S.Struct({ id: S.UUID, success: S.Literal(true) }))
             .addError(HttpError.NotFound)
             .annotate(OpenApi.Summary, 'Archive asset')
             .annotate(OpenApi.Description, 'Soft-deletes an asset. The asset can be restored later.'),
     )
-    .add(
-        HttpApiEndpoint.get('listAssets', '/assets')
+    .add(HttpApiEndpoint.get('listAssets', '/assets')
             .setUrlParams(S.extend(_PaginationBase, S.Struct({
                 after: S.optional(HttpApiSchema.param('after', S.DateFromString)).annotations({ description: 'Filter: created after this date' }),
                 before: S.optional(HttpApiSchema.param('before', S.DateFromString)).annotations({ description: 'Filter: created before this date' }),
@@ -614,8 +561,7 @@ const _WebhooksGroup = HttpApiGroup.make('webhooks')
     .addError(HttpError.Internal)
     .addError(HttpError.NotFound)
     .addError(HttpError.RateLimit)
-    .add(
-        HttpApiEndpoint.get('list', '/')
+    .add(HttpApiEndpoint.get('list', '/')
             .addSuccess(S.Array(S.Struct({
                 active: S.Boolean,
                 eventTypes: S.Array(S.String),
@@ -624,8 +570,7 @@ const _WebhooksGroup = HttpApiGroup.make('webhooks')
             })))
             .annotate(OpenApi.Summary, 'List registered webhooks'),
     )
-    .add(
-        HttpApiEndpoint.post('register', '/')
+    .add(HttpApiEndpoint.post('register', '/')
             .setPayload(S.Struct({
                 active: S.Boolean,
                 eventTypes: S.Array(S.String),
@@ -637,15 +582,13 @@ const _WebhooksGroup = HttpApiGroup.make('webhooks')
             .addError(HttpError.Validation)
             .annotate(OpenApi.Summary, 'Register webhook'),
     )
-    .add(
-        HttpApiEndpoint.del('remove', '/:url')
+    .add(HttpApiEndpoint.del('remove', '/:url')
             .setPath(S.Struct({ url: S.String }))
             .addSuccess(_Success)
             .addError(HttpError.Validation)
             .annotate(OpenApi.Summary, 'Remove webhook'),
     )
-    .add(
-        HttpApiEndpoint.post('test', '/test')
+    .add(HttpApiEndpoint.post('test', '/test')
             .setPayload(S.Struct({
                 secret: S.String.pipe(S.minLength(32)),
                 timeout: S.optionalWith(S.Number, { default: () => 5000 }),
@@ -654,15 +597,13 @@ const _WebhooksGroup = HttpApiGroup.make('webhooks')
             .addSuccess(S.Struct({ deliveredAt: S.Number, durationMs: S.Number, statusCode: S.Number }))
             .annotate(OpenApi.Summary, 'Test webhook delivery'),
     )
-    .add(
-        HttpApiEndpoint.post('retry', '/retry/:id')
+    .add(HttpApiEndpoint.post('retry', '/retry/:id')
             .setPath(S.Struct({ id: S.UUID }))
             .addSuccess(_Success)
             .addError(HttpError.NotFound)
             .annotate(OpenApi.Summary, 'Retry failed delivery'),
     )
-    .add(
-        HttpApiEndpoint.get('status', '/status')
+    .add(HttpApiEndpoint.get('status', '/status')
             .setUrlParams(S.Struct({ url: S.optional(HttpApiSchema.param('url', S.String)) }))
             .addSuccess(S.Array(WebhookService.DeliveryRecord))
             .annotate(OpenApi.Summary, 'Delivery status')
@@ -678,14 +619,12 @@ const _AdminGroup = HttpApiGroup.make('admin')
     .addError(HttpError.Internal)
     .addError(HttpError.RateLimit)
     .addError(HttpError.Validation)
-    .add(
-        HttpApiEndpoint.get('listUsers', '/users')
+    .add(HttpApiEndpoint.get('listUsers', '/users')
             .setUrlParams(_PaginationBase)
             .addSuccess(KeysetResponse(User.json))
             .annotate(OpenApi.Summary, 'List users'),
     )
-    .add(
-        HttpApiEndpoint.get('listSessions', '/sessions')
+    .add(HttpApiEndpoint.get('listSessions', '/sessions')
             .setUrlParams(S.Struct({
                 cursor: S.optional(HttpApiSchema.param('cursor', S.String)),
                 ipAddress: S.optional(HttpApiSchema.param('ipAddress', S.String)),
@@ -698,87 +637,73 @@ const _AdminGroup = HttpApiGroup.make('admin')
             .addSuccess(KeysetResponse(Session.json))
             .annotate(OpenApi.Summary, 'List sessions'),
     )
-    .add(
-        HttpApiEndpoint.del('deleteSession', '/sessions/:id')
+    .add(HttpApiEndpoint.del('deleteSession', '/sessions/:id')
             .setPath(S.Struct({ id: S.UUID }))
             .addSuccess(_Success)
             .addError(HttpError.NotFound)
             .annotate(OpenApi.Summary, 'Force-end session'),
     )
-    .add(
-        HttpApiEndpoint.post('revokeSessionsByIp', '/sessions/revoke-ip')
+    .add(HttpApiEndpoint.post('revokeSessionsByIp', '/sessions/revoke-ip')
             .setPayload(S.Struct({ ipAddress: S.String }))
             .addSuccess(S.Struct({ revoked: S.Int }))
             .annotate(OpenApi.Summary, 'Revoke all sessions by IP'),
     )
-    .add(
-        HttpApiEndpoint.get('listJobs', '/jobs')
+    .add(HttpApiEndpoint.get('listJobs', '/jobs')
             .setUrlParams(_PaginationBase)
             .addSuccess(KeysetResponse(Job.json))
             .annotate(OpenApi.Summary, 'List jobs'),
     )
-    .add(
-        HttpApiEndpoint.post('cancelJob', '/jobs/:id/cancel')
+    .add(HttpApiEndpoint.post('cancelJob', '/jobs/:id/cancel')
             .setPath(S.Struct({ id: S.String }))
             .addSuccess(_Success)
             .addError(HttpError.NotFound)
             .annotate(OpenApi.Summary, 'Cancel job'),
     )
-    .add(
-        HttpApiEndpoint.get('listDlq', '/dlq')
+    .add(HttpApiEndpoint.get('listDlq', '/dlq')
             .setUrlParams(_PaginationBase)
             .addSuccess(KeysetResponse(JobDlq.json))
             .annotate(OpenApi.Summary, 'List dead letters'),
     )
-    .add(
-        HttpApiEndpoint.post('replayDlq', '/dlq/:id/replay')
+    .add(HttpApiEndpoint.post('replayDlq', '/dlq/:id/replay')
             .setPath(S.Struct({ id: S.UUID }))
             .addSuccess(_Success)
             .addError(HttpError.NotFound)
             .addError(HttpError.Validation)
             .annotate(OpenApi.Summary, 'Replay dead letter'),
     )
-    .add(
-        HttpApiEndpoint.get('listNotifications', '/notifications')
+    .add(HttpApiEndpoint.get('listNotifications', '/notifications')
             .setUrlParams(TemporalQuery)
             .addSuccess(KeysetResponse(Notification.json))
             .annotate(OpenApi.Summary, 'List notifications'),
     )
-    .add(
-        HttpApiEndpoint.post('replayNotification', '/notifications/:id/replay')
+    .add(HttpApiEndpoint.post('replayNotification', '/notifications/:id/replay')
             .setPath(S.Struct({ id: S.UUID }))
             .addSuccess(_Success)
             .addError(HttpError.NotFound)
             .annotate(OpenApi.Summary, 'Replay notification'),
     )
-    .add(
-        HttpApiEndpoint.get('events', '/events')
+    .add(HttpApiEndpoint.get('events', '/events')
             .addSuccess(S.Void)
             .annotate(OpenApi.Summary, 'SSE event stream'),
     )
-    .add(
-        HttpApiEndpoint.get('ioDetail', '/db/io-stats')
+    .add(HttpApiEndpoint.get('ioDetail', '/db/io-stats')
             .addSuccess(S.Array(S.Struct({
-                backendType: S.String, evictions: S.Number, extendBytes: S.Number,extends: S.Number, 
-                extendTime: S.Number, 
+                backendType: S.String, evictions: S.Number, extendBytes: S.Number,extends: S.Number,
+                extendTime: S.Number,
                 fsyncs: S.Number, fsyncTime: S.Number,hits: S.Number, ioContext: S.String,
-                ioObject: S.String, readBytes: S.Number, 
+                ioObject: S.String, readBytes: S.Number,
                 reads: S.Number, readTime: S.Number,reuses: S.Number, statsReset: S.NullOr(S.String),
-                writeBytes: S.Number, 
-                writebacks: S.Number, writebackTime: S.Number,writes: S.Number,writeTime: S.Number, 
+                writeBytes: S.Number,
+                writebacks: S.Number, writebackTime: S.Number,writes: S.Number,writeTime: S.Number,
             })))
             .annotate(OpenApi.Summary, 'Database IO statistics'),
     )
-    .add(
-        HttpApiEndpoint.get('ioConfig', '/db/io-config')
+    .add(HttpApiEndpoint.get('ioConfig', '/db/io-config')
             .addSuccess(S.Array(S.Struct({ name: S.String, setting: S.String })))
             .annotate(OpenApi.Summary, 'Database IO configuration'),
     )
-    .add(
-        HttpApiEndpoint.get('statements', '/db/statements')
-            .setUrlParams(S.Struct({
-                limit: S.optionalWith(HttpApiSchema.param('limit', S.NumberFromString.pipe(S.int(), S.between(1, 500))), { default: () => 100 }),
-            }))
+    .add(HttpApiEndpoint.get('statements', '/db/statements')
+            .setUrlParams(_ObsUrlParams)
             .addSuccess(S.Array(S.Struct({
                 blkReadTime: S.Number, blkWriteTime: S.Number,
                 calls: S.Number, dbid: S.Number, dealloc: S.Number,
@@ -796,8 +721,7 @@ const _AdminGroup = HttpApiGroup.make('admin')
             })))
             .annotate(OpenApi.Summary, 'Database statement statistics'),
     )
-    .add(
-        HttpApiEndpoint.get('cacheRatio', '/db/cache-hit-ratio')
+    .add(HttpApiEndpoint.get('cacheRatio', '/db/cache-hit-ratio')
             .addSuccess(S.Array(S.Struct({
                 backendType: S.String, cacheHitRatio: S.Number, hits: S.Number,
                 ioContext: S.String, ioObject: S.String,
@@ -805,11 +729,8 @@ const _AdminGroup = HttpApiGroup.make('admin')
             })))
             .annotate(OpenApi.Summary, 'Database cache hit ratio'),
     )
-    .add(
-        HttpApiEndpoint.get('walInspect', '/db/walinspect')
-            .setUrlParams(S.Struct({
-                limit: S.optionalWith(HttpApiSchema.param('limit', S.NumberFromString.pipe(S.int(), S.between(1, 500))), { default: () => 100 }),
-            }))
+    .add(HttpApiEndpoint.get('walInspect', '/db/walinspect')
+            .setUrlParams(_ObsUrlParams)
             .addSuccess(S.Array(S.Struct({
                 blockRef: S.NullOr(S.String), description: S.NullOr(S.String),
                 endLsn: S.String, fpiLength: S.Number,
@@ -819,11 +740,8 @@ const _AdminGroup = HttpApiGroup.make('admin')
             })))
             .annotate(OpenApi.Summary, 'WAL inspection snapshot'),
     )
-    .add(
-        HttpApiEndpoint.get('kcache', '/db/stat-kcache')
-            .setUrlParams(S.Struct({
-                limit: S.optionalWith(HttpApiSchema.param('limit', S.NumberFromString.pipe(S.int(), S.between(1, 500))), { default: () => 100 }),
-            }))
+    .add(HttpApiEndpoint.get('kcache', '/db/stat-kcache')
+            .setUrlParams(_ObsUrlParams)
             .addSuccess(S.Array(S.Struct({
                 calls: S.Number, datname: S.String,
                 execReads: S.Number, execSystemTime: S.Number,
@@ -838,11 +756,8 @@ const _AdminGroup = HttpApiGroup.make('admin')
             })))
             .annotate(OpenApi.Summary, 'Per-query filesystem IO attribution'),
     )
-    .add(
-        HttpApiEndpoint.get('qualstats', '/db/qualstats')
-            .setUrlParams(S.Struct({
-                limit: S.optionalWith(HttpApiSchema.param('limit', S.NumberFromString.pipe(S.int(), S.between(1, 500))), { default: () => 100 }),
-            }))
+    .add(HttpApiEndpoint.get('qualstats', '/db/qualstats')
+            .setUrlParams(_ObsUrlParams)
             .addSuccess(S.Array(S.Struct({
                 constvalues: S.NullOr(S.Array(S.String)), dbid: S.Number,
                 exampleQuery: S.NullOr(S.String), executionCount: S.Number,
@@ -853,33 +768,18 @@ const _AdminGroup = HttpApiGroup.make('admin')
             })))
             .annotate(OpenApi.Summary, 'Qualifying query statistics (pg_qualstats)'),
     )
-    .add(
-        HttpApiEndpoint.get('waitSampling', '/db/wait-sampling')
-            .setUrlParams(S.Struct({
-                limit: S.optionalWith(HttpApiSchema.param('limit', S.NumberFromString.pipe(S.int(), S.between(1, 500))), { default: () => 100 }),
-            }))
-            .addSuccess(S.Array(S.Struct({
-                event: S.String, eventType: S.String, totalCount: S.Number,
-            })))
+    .add(HttpApiEndpoint.get('waitSampling', '/db/wait-sampling')
+            .setUrlParams(_ObsUrlParams)
+            .addSuccess(S.Array(S.Struct({event: S.String, eventType: S.String, totalCount: S.Number,})))
             .annotate(OpenApi.Summary, 'Wait event distribution (pg_wait_sampling)'),
     )
-    .add(
-        HttpApiEndpoint.get('waitSamplingCurrent', '/db/wait-sampling/current')
-            .setUrlParams(S.Struct({
-                limit: S.optionalWith(HttpApiSchema.param('limit', S.NumberFromString.pipe(S.int(), S.between(1, 500))), { default: () => 100 }),
-            }))
-            .addSuccess(S.Array(S.Struct({
-                event: S.String, eventType: S.String,
-                pid: S.Number, queryid: S.NullOr(S.Number),
-            })))
+    .add(HttpApiEndpoint.get('waitSamplingCurrent', '/db/wait-sampling/current')
+            .setUrlParams(_ObsUrlParams)
+            .addSuccess(S.Array(S.Struct({event: S.String, eventType: S.String, pid: S.Number, queryid: S.NullOr(S.Number),})))
             .annotate(OpenApi.Summary, 'Current wait events (pg_wait_sampling_current)'),
     )
-    .add(
-        HttpApiEndpoint.get('waitSamplingHistory', '/db/wait-sampling/history')
-            .setUrlParams(S.Struct({
-                limit: S.optionalWith(HttpApiSchema.param('limit', S.NumberFromString.pipe(S.int(), S.between(1, 500))), { default: () => 100 }),
-                sinceSeconds: S.optionalWith(HttpApiSchema.param('sinceSeconds', S.NumberFromString.pipe(S.int(), S.between(1, 3600))), { default: () => 60 }),
-            }))
+    .add(HttpApiEndpoint.get('waitSamplingHistory', '/db/wait-sampling/history')
+            .setUrlParams(S.extend(_ObsUrlParams, S.Struct({sinceSeconds: S.optionalWith(HttpApiSchema.param('sinceSeconds', S.NumberFromString.pipe(S.int(), S.between(1, 3600))), { default: () => 60 }),})))
             .addSuccess(S.Array(S.Struct({
                 event: S.String, eventType: S.String,
                 pid: S.Number, queryid: S.NullOr(S.Number),
@@ -887,13 +787,11 @@ const _AdminGroup = HttpApiGroup.make('admin')
             })))
             .annotate(OpenApi.Summary, 'Recent wait sampling history'),
     )
-    .add(
-        HttpApiEndpoint.post('resetWaitSampling', '/db/wait-sampling/reset')
+    .add(HttpApiEndpoint.post('resetWaitSampling', '/db/wait-sampling/reset')
             .addSuccess(S.Boolean)
             .annotate(OpenApi.Summary, 'Reset wait sampling profile counters'),
     )
-    .add(
-        HttpApiEndpoint.get('cronJobs', '/db/cron-jobs')
+    .add(HttpApiEndpoint.get('cronJobs', '/db/cron-jobs')
             .addSuccess(S.Array(S.Struct({
                 active: S.Boolean, command: S.String, database: S.String,
                 jobid: S.Number, jobname: S.NullOr(S.String),
@@ -902,19 +800,12 @@ const _AdminGroup = HttpApiGroup.make('admin')
             })))
             .annotate(OpenApi.Summary, 'Database cron jobs'),
     )
-    .add(
-        HttpApiEndpoint.get('partitionHealth', '/db/partition-health')
-            .setUrlParams(S.Struct({
-                parentTable: S.optionalWith(HttpApiSchema.param('parentTable', S.Literal('public.sessions')), { default: () => 'public.sessions' as const }),
-            }))
-            .addSuccess(S.Array(S.Struct({
-                bound: S.NullOr(S.String), isLeaf: S.Boolean,
-                level: S.Number, partition: S.String,
-            })))
+    .add(HttpApiEndpoint.get('partitionHealth', '/db/partition-health')
+            .setUrlParams(S.Struct({parentTable: S.optionalWith(HttpApiSchema.param('parentTable', S.Literal('public.sessions')), { default: () => 'public.sessions' as const }),}))
+            .addSuccess(S.Array(S.Struct({bound: S.NullOr(S.String), isLeaf: S.Boolean, level: S.Number, partition: S.String,})))
             .annotate(OpenApi.Summary, 'Partition metadata and bounds'),
     )
-    .add(
-        HttpApiEndpoint.get('partmanConfig', '/db/partman/config')
+    .add(HttpApiEndpoint.get('partmanConfig', '/db/partman/config')
             .addSuccess(S.Array(S.Struct({
                 control: S.String, infiniteTimePartitions: S.Boolean,
                 parentTable: S.String, partitionInterval: S.String,
@@ -922,21 +813,18 @@ const _AdminGroup = HttpApiGroup.make('admin')
             })))
             .annotate(OpenApi.Summary, 'pg_partman parent configuration'),
     )
-    .add(
-        HttpApiEndpoint.post('runPartmanMaintenance', '/db/partman/run-maintenance')
+    .add(HttpApiEndpoint.post('runPartmanMaintenance', '/db/partman/run-maintenance')
             .addSuccess(S.Boolean)
             .annotate(OpenApi.Summary, 'Run pg_partman maintenance'),
     )
-    .add(
-        HttpApiEndpoint.post('syncCronJobs', '/db/reconcile-maintenance')
+    .add(HttpApiEndpoint.post('syncCronJobs', '/db/reconcile-maintenance')
             .addSuccess(S.Array(S.Struct({
                 error: S.optional(S.String), name: S.String,
                 schedule: S.String, status: S.Literal('created', 'error', 'unchanged', 'updated'),
             })))
             .annotate(OpenApi.Summary, 'Reconcile database maintenance cron jobs'),
     )
-    .add(
-        HttpApiEndpoint.get('squeezeStatus', '/db/squeeze/status')
+    .add(HttpApiEndpoint.get('squeezeStatus', '/db/squeeze/status')
             .addSuccess(S.Struct({
                 tables: S.Array(S.Struct({
                     active: S.Boolean, freeSpaceExtra: S.Number,
@@ -947,28 +835,17 @@ const _AdminGroup = HttpApiGroup.make('admin')
             }))
             .annotate(OpenApi.Summary, 'pg_squeeze table/worker status'),
     )
-    .add(
-        HttpApiEndpoint.post('squeezeStartWorker', '/db/squeeze/workers/start')
+    .add(HttpApiEndpoint.post('squeezeStartWorker', '/db/squeeze/workers/start')
             .addSuccess(S.Boolean)
             .annotate(OpenApi.Summary, 'Start pg_squeeze background worker'),
     )
-    .add(
-        HttpApiEndpoint.post('squeezeStopWorker', '/db/squeeze/workers/:pid/stop')
+    .add(HttpApiEndpoint.post('squeezeStopWorker', '/db/squeeze/workers/:pid/stop')
             .setPath(S.Struct({ pid: S.NumberFromString.pipe(S.int(), S.positive()) }))
             .addSuccess(S.Boolean)
             .annotate(OpenApi.Summary, 'Stop a pg_squeeze background worker'),
     )
-    .add(
-        HttpApiEndpoint.get('deadTuples', '/db/dead-tuples')
-            .setUrlParams(S.Struct({
-                limit: S.optionalWith(
-                    HttpApiSchema.param(
-                        'limit',
-                        S.NumberFromString.pipe(S.int(), S.between(1, 500)),
-                    ),
-                    { default: () => 100 },
-                ),
-            }))
+    .add(HttpApiEndpoint.get('deadTuples', '/db/dead-tuples')
+            .setUrlParams(_ObsUrlParams)
             .addSuccess(S.Array(S.Struct({
                 analyzeCount: S.Number, autoanalyzeCount: S.Number,
                 autovacuumCount: S.Number, deadPct: S.Number,
@@ -980,55 +857,28 @@ const _AdminGroup = HttpApiGroup.make('admin')
             })))
             .annotate(OpenApi.Summary, 'Dead tuple counts per table'),
     )
-    .add(
-        HttpApiEndpoint.get('tableBloat', '/db/table-bloat')
-            .setUrlParams(S.Struct({
-                limit: S.optionalWith(
-                    HttpApiSchema.param(
-                        'limit',
-                        S.NumberFromString.pipe(S.int(), S.between(1, 500)),
-                    ),
-                    { default: () => 100 },
-                ),
-            }))
+    .add(HttpApiEndpoint.get('tableBloat', '/db/table-bloat')
+            .setUrlParams(_ObsUrlParams)
             .addSuccess(S.Array(S.Struct({
                 indexBytes: S.Number, overheadBytes: S.Number,
                 schemaname: S.String, tableBytes: S.Number,tablename: S.String,
-                tableSize: S.String, 
+                tableSize: S.String,
                 totalBytes: S.Number, totalSize: S.String,
             })))
             .annotate(OpenApi.Summary, 'Table bloat and size breakdown'),
     )
-    .add(
-        HttpApiEndpoint.get('indexBloat', '/db/index-bloat')
-            .setUrlParams(S.Struct({
-                limit: S.optionalWith(
-                    HttpApiSchema.param(
-                        'limit',
-                        S.NumberFromString.pipe(S.int(), S.between(1, 500)),
-                    ),
-                    { default: () => 100 },
-                ),
-            }))
+    .add(HttpApiEndpoint.get('indexBloat', '/db/index-bloat')
+            .setUrlParams(_ObsUrlParams)
             .addSuccess(S.Array(S.Struct({
                 idxScan: S.Number, idxTupFetch: S.Number,
                 idxTupRead: S.Number, indexBytes: S.Number,indexname: S.String,
-                indexSize: S.String, 
+                indexSize: S.String,
                 schemaname: S.String, tablename: S.String,
             })))
             .annotate(OpenApi.Summary, 'Index size and scan statistics'),
     )
-    .add(
-        HttpApiEndpoint.get('lockContention', '/db/lock-contention')
-            .setUrlParams(S.Struct({
-                limit: S.optionalWith(
-                    HttpApiSchema.param(
-                        'limit',
-                        S.NumberFromString.pipe(S.int(), S.between(1, 500)),
-                    ),
-                    { default: () => 100 },
-                ),
-            }))
+    .add(HttpApiEndpoint.get('lockContention', '/db/lock-contention')
+            .setUrlParams(_ObsUrlParams)
             .addSuccess(S.Array(S.Struct({
                 blockedDuration: S.String, blockedPid: S.Number,
                 blockedQuery: S.String, blockedUser: S.String,
@@ -1038,24 +888,13 @@ const _AdminGroup = HttpApiGroup.make('admin')
             })))
             .annotate(OpenApi.Summary, 'Active lock contention'),
     )
-    .add(
-        HttpApiEndpoint.get('longRunningQueries', '/db/long-running-queries')
-            .setUrlParams(S.Struct({
-                limit: S.optionalWith(
-                    HttpApiSchema.param(
-                        'limit',
-                        S.NumberFromString.pipe(S.int(), S.between(1, 500)),
-                    ),
-                    { default: () => 100 },
-                ),
+    .add(HttpApiEndpoint.get('longRunningQueries', '/db/long-running-queries')
+            .setUrlParams(S.extend(_ObsUrlParams, S.Struct({
                 minSeconds: S.optionalWith(
-                    HttpApiSchema.param(
-                        'minSeconds',
-                        S.NumberFromString.pipe(S.int(), S.between(1, 3600)),
-                    ),
+                    HttpApiSchema.param('minSeconds', S.NumberFromString.pipe(S.int(), S.between(1, 3600)),),
                     { default: () => 5 },
                 ),
-            }))
+            })))
             .addSuccess(S.Array(S.Struct({
                 datname: S.String, duration: S.String,
                 durationSeconds: S.Number, pid: S.Number,
@@ -1066,17 +905,8 @@ const _AdminGroup = HttpApiGroup.make('admin')
             })))
             .annotate(OpenApi.Summary, 'Long-running active queries'),
     )
-    .add(
-        HttpApiEndpoint.get('connectionStats', '/db/connection-stats')
-            .setUrlParams(S.Struct({
-                limit: S.optionalWith(
-                    HttpApiSchema.param(
-                        'limit',
-                        S.NumberFromString.pipe(S.int(), S.between(1, 500)),
-                    ),
-                    { default: () => 100 },
-                ),
-            }))
+    .add(HttpApiEndpoint.get('connectionStats', '/db/connection-stats')
+            .setUrlParams(_ObsUrlParams)
             .addSuccess(S.Array(S.Struct({
                 clientAddr: S.NullOr(S.String), cnt: S.Number,
                 datname: S.NullOr(S.String), newestQuery: S.NullOr(S.String),
@@ -1085,17 +915,8 @@ const _AdminGroup = HttpApiGroup.make('admin')
             })))
             .annotate(OpenApi.Summary, 'Connection pool statistics'),
     )
-    .add(
-        HttpApiEndpoint.get('replicationLag', '/db/replication-lag')
-            .setUrlParams(S.Struct({
-                limit: S.optionalWith(
-                    HttpApiSchema.param(
-                        'limit',
-                        S.NumberFromString.pipe(S.int(), S.between(1, 500)),
-                    ),
-                    { default: () => 100 },
-                ),
-            }))
+    .add(HttpApiEndpoint.get('replicationLag', '/db/replication-lag')
+            .setUrlParams(_ObsUrlParams)
             .addSuccess(S.Array(S.Struct({
                 applicationName: S.String, clientAddr: S.NullOr(S.String),
                 flushLag: S.NullOr(S.String), flushLsn: S.NullOr(S.String),
@@ -1107,36 +928,18 @@ const _AdminGroup = HttpApiGroup.make('admin')
             })))
             .annotate(OpenApi.Summary, 'Streaming replication lag'),
     )
-    .add(
-        HttpApiEndpoint.get('indexUsage', '/db/index-usage')
-            .setUrlParams(S.Struct({
-                limit: S.optionalWith(
-                    HttpApiSchema.param(
-                        'limit',
-                        S.NumberFromString.pipe(S.int(), S.between(1, 500)),
-                    ),
-                    { default: () => 100 },
-                ),
-            }))
+    .add(HttpApiEndpoint.get('indexUsage', '/db/index-usage')
+            .setUrlParams(_ObsUrlParams)
             .addSuccess(S.Array(S.Struct({
                 idxScan: S.Number, idxTupFetch: S.Number,
                 idxTupRead: S.Number, indexBytes: S.Number,indexrelname: S.String,
-                indexSize: S.String, 
+                indexSize: S.String,
                 relname: S.String, schemaname: S.String,
             })))
             .annotate(OpenApi.Summary, 'Index usage ranked by scans'),
     )
-    .add(
-        HttpApiEndpoint.get('tableSizes', '/db/table-sizes')
-            .setUrlParams(S.Struct({
-                limit: S.optionalWith(
-                    HttpApiSchema.param(
-                        'limit',
-                        S.NumberFromString.pipe(S.int(), S.between(1, 500)),
-                    ),
-                    { default: () => 100 },
-                ),
-            }))
+    .add(HttpApiEndpoint.get('tableSizes', '/db/table-sizes')
+            .setUrlParams(_ObsUrlParams)
             .addSuccess(S.Array(S.Struct({
                 idxScan: S.Number, idxTupFetch: S.Number,
                 indexBytes: S.Number, nDeadTup: S.Number,
@@ -1147,75 +950,40 @@ const _AdminGroup = HttpApiGroup.make('admin')
             })))
             .annotate(OpenApi.Summary, 'Table sizes with live/dead tuples'),
     )
-    .add(
-        HttpApiEndpoint.get('unusedIndexes', '/db/unused-indexes')
-            .setUrlParams(S.Struct({
-                limit: S.optionalWith(
-                    HttpApiSchema.param(
-                        'limit',
-                        S.NumberFromString.pipe(S.int(), S.between(1, 500)),
-                    ),
-                    { default: () => 100 },
-                ),
-            }))
+    .add(HttpApiEndpoint.get('unusedIndexes', '/db/unused-indexes')
+            .setUrlParams(_ObsUrlParams)
             .addSuccess(S.Array(S.Struct({
                 idxScan: S.Number, indexBytes: S.Number,indexrelname: S.String,
-                indexSize: S.String, 
+                indexSize: S.String,
                 relname: S.String, schemaname: S.String,
             })))
             .annotate(OpenApi.Summary, 'Indexes with zero scans'),
     )
-    .add(
-        HttpApiEndpoint.get('seqScanHeavy', '/db/seq-scan-heavy')
-            .setUrlParams(S.Struct({
-                limit: S.optionalWith(
-                    HttpApiSchema.param(
-                        'limit',
-                        S.NumberFromString.pipe(S.int(), S.between(1, 500)),
-                    ),
-                    { default: () => 100 },
-                ),
-            }))
+    .add(HttpApiEndpoint.get('seqScanHeavy', '/db/seq-scan-heavy')
+            .setUrlParams(_ObsUrlParams)
             .addSuccess(S.Array(S.Struct({
                 idxScan: S.Number, nLiveTup: S.Number,
                 relname: S.String, schemaname: S.String,
                 seqPct: S.Number, seqScan: S.Number,
                 seqTupRead: S.Number, totalBytes: S.Number,
             })))
-            .annotate(
-                OpenApi.Summary,
-                'Tables with high sequential scan ratio',
-            ),
+            .annotate(OpenApi.Summary, 'Tables with high sequential scan ratio',),
     )
-    .add(
-        HttpApiEndpoint.get('indexAdvisor', '/db/index-advisor')
+    .add(HttpApiEndpoint.get('indexAdvisor', '/db/index-advisor')
             .setUrlParams(S.Struct({
                 minFilter: S.optionalWith(
-                    HttpApiSchema.param(
-                        'minFilter',
-                        S.NumberFromString.pipe(S.int(), S.positive()),
-                    ),
+                    HttpApiSchema.param('minFilter', S.NumberFromString.pipe(S.int(), S.positive()),),
                     { default: () => 1000 },
                 ),
                 minSelectivity: S.optionalWith(
-                    HttpApiSchema.param(
-                        'minSelectivity',
-                        S.NumberFromString.pipe(S.int(), S.between(1, 100)),
-                    ),
+                    HttpApiSchema.param('minSelectivity', S.NumberFromString.pipe(S.int(), S.between(1, 100)),),
                     { default: () => 30 },
                 ),
             }))
-            .addSuccess(S.Array(S.Struct({
-                accessMethod: S.NullOr(S.String),
-                indexDdl: S.String, queryids: S.Unknown,
-            })))
-            .annotate(
-                OpenApi.Summary,
-                'pg_qualstats index advisor recommendations',
-            ),
+            .addSuccess(S.Array(S.Struct({accessMethod: S.NullOr(S.String), indexDdl: S.String, queryids: S.Unknown,})))
+            .annotate(OpenApi.Summary, 'pg_qualstats index advisor recommendations',),
     )
-    .add(
-        HttpApiEndpoint.get('hypotheticalIndexes', '/db/hypothetical-indexes')
+    .add(HttpApiEndpoint.get('hypotheticalIndexes', '/db/hypothetical-indexes')
             .addSuccess(S.Array(S.Struct({
                 amname: S.String, indexname: S.String,
                 indexrelid: S.Number, nspname: S.String,
@@ -1223,85 +991,40 @@ const _AdminGroup = HttpApiGroup.make('admin')
             })))
             .annotate(OpenApi.Summary, 'List hypothetical indexes (hypopg)'),
     )
-    .add(
-        HttpApiEndpoint.post(
-            'createHypotheticalIndex', '/db/hypothetical-indexes',
-        )
-            .setPayload(S.Struct({
-                statement: S.NonEmptyTrimmedString.annotations({
-                    description: 'CREATE INDEX statement to simulate',
-                }),
-            }))
-            .addSuccess(S.Array(S.Struct({
-                indexname: S.String,
-                indexrelid: S.Number,
-            })))
-            .annotate(
-                OpenApi.Summary,
-                'Create hypothetical index (hypopg)',
-            ),
+    .add(HttpApiEndpoint.post('createHypotheticalIndex', '/db/hypothetical-indexes',)
+            .setPayload(S.Struct({statement: S.NonEmptyTrimmedString.annotations({description: 'CREATE INDEX statement to simulate',}),}))
+            .addSuccess(S.Array(S.Struct({indexname: S.String, indexrelid: S.Number,})))
+            .annotate(OpenApi.Summary, 'Create hypothetical index (hypopg)',),
     )
-    .add(
-        HttpApiEndpoint.post(
-            'resetHypotheticalIndexes',
-            '/db/hypothetical-indexes/reset',
-        )
+    .add(HttpApiEndpoint.post('resetHypotheticalIndexes','/db/hypothetical-indexes/reset',)
             .addSuccess(_Success)
-            .annotate(
-                OpenApi.Summary,
-                'Reset all hypothetical indexes (hypopg)',
-            ),
+            .annotate(OpenApi.Summary,'Reset all hypothetical indexes (hypopg)',),
     )
-    .add(
-        HttpApiEndpoint.get('visibility', '/db/visibility')
-            .setUrlParams(S.Struct({
-                limit: S.optionalWith(
-                    HttpApiSchema.param(
-                        'limit',
-                        S.NumberFromString.pipe(S.int(), S.between(1, 500)),
-                    ),
-                    { default: () => 100 },
-                ),
-            }))
+    .add(HttpApiEndpoint.get('visibility', '/db/visibility')
+            .setUrlParams(_ObsUrlParams)
             .addSuccess(S.Array(S.Struct({
                 allFrozen: S.Number, allVisible: S.Number,relkind: S.String,
                 relname: S.String,
-                relSize: S.Number, 
+                relSize: S.Number,
             })))
             .annotate(OpenApi.Summary, 'Visibility map summary per table'),
     )
-    .add(
-        HttpApiEndpoint.get('cronHistory', '/db/cron-history')
-            .setUrlParams(S.Struct({
-                jobName: S.optional(
-                    HttpApiSchema.param('jobName', S.String),
-                ),
-                limit: S.optionalWith(
-                    HttpApiSchema.param(
-                        'limit',
-                        S.NumberFromString.pipe(S.int(), S.between(1, 500)),
-                    ),
-                    { default: () => 100 },
-                ),
-            }))
+    .add(HttpApiEndpoint.get('cronHistory', '/db/cron-history')
+            .setUrlParams(S.extend(_ObsUrlParams, S.Struct({jobName: S.optional(HttpApiSchema.param('jobName', S.String),),})))
             .addSuccess(S.Array(S.Struct({
                 command: S.String, database: S.String,
                 durationSeconds: S.NullOr(S.Number), endTime: S.NullOr(S.String),jobname: S.String,
-                jobPid: S.Number, 
+                jobPid: S.Number,
                 returnMessage: S.NullOr(S.String), runid: S.Number,
                 startTime: S.NullOr(S.String), status: S.String,
                 username: S.String,
             })))
             .annotate(OpenApi.Summary, 'Cron job execution history'),
     )
-    .add(
-        HttpApiEndpoint.get('cronFailures', '/db/cron-failures')
+    .add(HttpApiEndpoint.get('cronFailures', '/db/cron-failures')
             .setUrlParams(S.Struct({
                 hours: S.optionalWith(
-                    HttpApiSchema.param(
-                        'hours',
-                        S.NumberFromString.pipe(S.int(), S.between(1, 168)),
-                    ),
+                    HttpApiSchema.param('hours', S.NumberFromString.pipe(S.int(), S.between(1, 168)),),
                     { default: () => 24 },
                 ),
             }))
@@ -1312,8 +1035,7 @@ const _AdminGroup = HttpApiGroup.make('admin')
             })))
             .annotate(OpenApi.Summary, 'Recent cron job failures'),
     )
-    .add(
-        HttpApiEndpoint.get('buffercacheSummary', '/db/buffercache/summary')
+    .add(HttpApiEndpoint.get('buffercacheSummary', '/db/buffercache/summary')
             .addSuccess(S.Array(S.Struct({
                 buffersDirty: S.Number, buffersPinned: S.Number,
                 buffersUnused: S.Number, buffersUsed: S.Number,
@@ -1321,22 +1043,17 @@ const _AdminGroup = HttpApiGroup.make('admin')
             })))
             .annotate(OpenApi.Summary, 'Buffer cache summary'),
     )
-    .add(
-        HttpApiEndpoint.get('buffercacheUsage', '/db/buffercache/usage')
+    .add(HttpApiEndpoint.get('buffercacheUsage', '/db/buffercache/usage')
             .addSuccess(S.Array(S.Struct({
                 buffers: S.Number, dirty: S.Number,
                 pinned: S.Number, usageCount: S.Number,
             })))
             .annotate(OpenApi.Summary, 'Buffer cache usage counts'),
     )
-    .add(
-        HttpApiEndpoint.get('buffercacheTop', '/db/buffercache/top')
+    .add(HttpApiEndpoint.get('buffercacheTop', '/db/buffercache/top')
             .setUrlParams(S.Struct({
                 limit: S.optionalWith(
-                    HttpApiSchema.param(
-                        'limit',
-                        S.NumberFromString.pipe(S.int(), S.between(1, 100)),
-                    ),
+                    HttpApiSchema.param('limit', S.NumberFromString.pipe(S.int(), S.between(1, 100)),),
                     { default: () => 50 },
                 ),
             }))
@@ -1345,25 +1062,17 @@ const _AdminGroup = HttpApiGroup.make('admin')
                 relkind: S.String, relname: S.String,
                 size: S.String,
             })))
-            .annotate(
-                OpenApi.Summary,
-                'Top relations in buffer cache by buffers',
-            ),
+            .annotate(OpenApi.Summary, 'Top relations in buffer cache by buffers',),
     )
-    .add(
-        HttpApiEndpoint.post('prewarmRelation', '/db/prewarm')
+    .add(HttpApiEndpoint.post('prewarmRelation', '/db/prewarm')
             .setPayload(S.Struct({
-                mode: S.optionalWith(
-                    S.Literal('buffer', 'read', 'prefetch'),
-                    { default: () => 'buffer' as const },
-                ),
+                mode: S.optionalWith(S.Literal('buffer', 'read', 'prefetch'), { default: () => 'buffer' as const },),
                 relation: S.NonEmptyTrimmedString,
             }))
             .addSuccess(S.Struct({ blocks: S.Int }))
             .annotate(OpenApi.Summary, 'Prewarm a relation into buffer cache'),
     )
-    .add(
-        HttpApiEndpoint.get('listPermissions', '/permissions')
+    .add(HttpApiEndpoint.get('listPermissions', '/permissions')
             .addSuccess(S.Array(S.Struct({
                 action: Permission.fields.action,
                 resource: Permission.fields.resource,
@@ -1371,25 +1080,21 @@ const _AdminGroup = HttpApiGroup.make('admin')
             })))
             .annotate(OpenApi.Summary, 'List tenant permissions'),
     )
-    .add(
-        HttpApiEndpoint.put('grantPermission', '/permissions')
+    .add(HttpApiEndpoint.put('grantPermission', '/permissions')
             .setPayload(S.Struct({ action: Permission.fields.action, resource: Permission.fields.resource, role: Permission.fields.role }))
             .addSuccess(S.Struct({ action: Permission.fields.action, resource: Permission.fields.resource, role: Permission.fields.role }))
             .annotate(OpenApi.Summary, 'Grant tenant permission'),
     )
-    .add(
-        HttpApiEndpoint.del('revokePermission', '/permissions')
+    .add(HttpApiEndpoint.del('revokePermission', '/permissions')
             .setPayload(S.Struct({ action: Permission.fields.action, resource: Permission.fields.resource, role: Permission.fields.role }))
             .addSuccess(_Success)
             .annotate(OpenApi.Summary, 'Revoke tenant permission'),
     )
-    .add(
-        HttpApiEndpoint.get('listTenants', '/tenants')
+    .add(HttpApiEndpoint.get('listTenants', '/tenants')
             .addSuccess(S.Array(App.json))
             .annotate(OpenApi.Summary, 'List tenants'),
     )
-    .add(
-        HttpApiEndpoint.post('createTenant', '/tenants')
+    .add(HttpApiEndpoint.post('createTenant', '/tenants')
             .setPayload(S.Struct({
                 name: S.NonEmptyTrimmedString,
                 namespace: S.NonEmptyTrimmedString.pipe(S.pattern(/^[a-z0-9][a-z0-9-]{1,62}[a-z0-9]$/)),
@@ -1401,62 +1106,51 @@ const _AdminGroup = HttpApiGroup.make('admin')
             .addError(HttpError.Validation)
             .annotate(OpenApi.Summary, 'Create tenant'),
     )
-    .add(
-        HttpApiEndpoint.get('getTenant', '/tenants/:id')
+    .add(HttpApiEndpoint.get('getTenant', '/tenants/:id')
             .setPath(S.Struct({ id: S.UUID }))
             .addSuccess(App.json)
             .addError(HttpError.NotFound)
             .annotate(OpenApi.Summary, 'Get tenant'),
     )
-    .add(
-        HttpApiEndpoint.patch('updateTenant', '/tenants/:id')
+    .add(HttpApiEndpoint.patch('updateTenant', '/tenants/:id')
             .setPath(S.Struct({ id: S.UUID }))
-            .setPayload(S.Struct({
-                name: S.optional(S.NonEmptyTrimmedString),
-                settings: S.optional(AppSettingsSchema),
-            }))
+            .setPayload(S.Struct({name: S.optional(S.NonEmptyTrimmedString), settings: S.optional(AppSettingsSchema),}))
             .addSuccess(App.json)
             .addError(HttpError.NotFound)
             .annotate(OpenApi.Summary, 'Update tenant'),
     )
-    .add(
-        HttpApiEndpoint.del('deactivateTenant', '/tenants/:id')
+    .add(HttpApiEndpoint.del('deactivateTenant', '/tenants/:id')
             .setPath(S.Struct({ id: S.UUID }))
             .addSuccess(_Success)
             .addError(HttpError.NotFound)
             .annotate(OpenApi.Summary, 'Suspend tenant'),
     )
-    .add(
-        HttpApiEndpoint.post('resumeTenant', '/tenants/:id/resume')
+    .add(HttpApiEndpoint.post('resumeTenant', '/tenants/:id/resume')
             .setPath(S.Struct({ id: S.UUID }))
             .addSuccess(_Success)
             .addError(HttpError.NotFound)
             .annotate(OpenApi.Summary, 'Resume suspended tenant'),
     )
-    .add(
-        HttpApiEndpoint.post('archiveTenant', '/tenants/:id/archive')
+    .add(HttpApiEndpoint.post('archiveTenant', '/tenants/:id/archive')
             .setPath(S.Struct({ id: S.UUID }))
             .addSuccess(_Success)
             .addError(HttpError.NotFound)
             .annotate(OpenApi.Summary, 'Archive tenant'),
     )
-    .add(
-        HttpApiEndpoint.post('purgeTenant', '/tenants/:id/purge')
+    .add(HttpApiEndpoint.post('purgeTenant', '/tenants/:id/purge')
             .setPath(S.Struct({ id: S.UUID }))
             .setPayload(S.Struct({ confirm: S.Literal(true) }))
             .addSuccess(_Success)
             .addError(HttpError.NotFound)
             .annotate(OpenApi.Summary, 'Purge tenant data'),
     )
-    .add(
-        HttpApiEndpoint.get('getTenantOAuth', '/tenants/:id/oauth')
+    .add(HttpApiEndpoint.get('getTenantOAuth', '/tenants/:id/oauth')
             .setPath(S.Struct({ id: S.UUID }))
             .addSuccess(S.Struct({ providers: S.Array(_TenantOAuthProviderRead) }))
             .addError(HttpError.NotFound)
             .annotate(OpenApi.Summary, 'Get tenant OAuth config'),
     )
-    .add(
-        HttpApiEndpoint.put('updateTenantOAuth', '/tenants/:id/oauth')
+    .add(HttpApiEndpoint.put('updateTenantOAuth', '/tenants/:id/oauth')
             .setPath(S.Struct({ id: S.UUID }))
             .setPayload(S.Struct({ providers: S.Array(S.Struct({ clientId: S.NonEmptyTrimmedString, clientSecret: S.optional(S.NonEmptyTrimmedString), enabled: S.Boolean, keyId: S.optional(S.NonEmptyTrimmedString), provider: OAuthProviderSchema, scopes: S.optional(S.Array(S.String)), teamId: S.optional(S.NonEmptyTrimmedString), tenant: S.optional(S.NonEmptyTrimmedString) })) }))
             .addSuccess(S.Struct({ providers: S.Array(_TenantOAuthProviderRead) }))
@@ -1464,17 +1158,12 @@ const _AdminGroup = HttpApiGroup.make('admin')
             .addError(HttpError.Validation)
             .annotate(OpenApi.Summary, 'Update tenant OAuth config'),
     )
-    .add(
-        HttpApiEndpoint.get('getFeatureFlags', '/features')
+    .add(HttpApiEndpoint.get('getFeatureFlags', '/features')
             .addSuccess(FeatureService.FeatureFlagsSchema)
             .annotate(OpenApi.Summary, 'Get tenant feature flags'),
     )
-    .add(
-        HttpApiEndpoint.put('setFeatureFlag', '/features')
-            .setPayload(S.Struct({
-                flag: S.keyof(FeatureService.FeatureFlagsSchema),
-                value: S.Int.pipe(S.between(0, 100)),
-            }))
+    .add(HttpApiEndpoint.put('setFeatureFlag', '/features')
+            .setPayload(S.Struct({flag: S.keyof(FeatureService.FeatureFlagsSchema), value: S.Int.pipe(S.between(0, 100)),}))
             .addSuccess(_Success)
             .addError(HttpError.NotFound)
             .annotate(OpenApi.Summary, 'Set tenant feature flag'),

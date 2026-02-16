@@ -59,9 +59,7 @@ const UsersLive = HttpApiBuilder.group(ParametricApi, 'users', (handlers) =>
                     Effect.filterOrFail(Option.isSome, constant(HttpError.NotFound.of('user', id))),
                     Effect.map(({ value }) => value),
                     Effect.bindTo('user'),
-                    Effect.bind('updatedUser', () => database.users.set(id, { role }).pipe(
-                        HttpError.mapTo('Role update failed'),
-                    )),
+                    Effect.bind('updatedUser', () => database.users.set(id, { role }).pipe(HttpError.mapTo('Role update failed'),)),
                     Effect.tap(({ user, updatedUser }) => audit.log('User.update', {
                         after: { email: updatedUser.email, role: updatedUser.role },
                         before: { email: user.email, role: user.role },

@@ -1,71 +1,71 @@
 {
-  "name": "@parametric-portal/database",
-  "version": "2.0.1",
-  "type": "module",
-  "exports": {
-    "./client": {
-      "types": "./src/client.ts",
-      "import": "./src/client.ts",
-      "default": "./src/client.ts"
+    "name": "@parametric-portal/database",
+    "version": "2.0.1",
+    "type": "module",
+    "exports": {
+        "./client": {
+            "types": "./src/client.ts",
+            "import": "./src/client.ts",
+            "default": "./src/client.ts"
+        },
+        "./factory": {
+            "types": "./src/factory.ts",
+            "import": "./src/factory.ts",
+            "default": "./src/factory.ts"
+        },
+        "./field": {
+            "types": "./src/field.ts",
+            "import": "./src/field.ts",
+            "default": "./src/field.ts"
+        },
+        "./migrator": {
+            "types": "./src/migrator.ts",
+            "import": "./src/migrator.ts",
+            "default": "./src/migrator.ts"
+        },
+        "./models": {
+            "types": "./src/models.ts",
+            "import": "./src/models.ts",
+            "default": "./src/models.ts"
+        },
+        "./page": {
+            "types": "./src/page.ts",
+            "import": "./src/page.ts",
+            "default": "./src/page.ts"
+        },
+        "./repos": {
+            "types": "./src/repos.ts",
+            "import": "./src/repos.ts",
+            "default": "./src/repos.ts"
+        },
+        "./search": {
+            "types": "./src/search.ts",
+            "import": "./src/search.ts",
+            "default": "./src/search.ts"
+        }
     },
-    "./factory": {
-      "types": "./src/factory.ts",
-      "import": "./src/factory.ts",
-      "default": "./src/factory.ts"
+    "scripts": {
+        "build": "vite build",
+        "check": "biome check .",
+        "fix": "biome check --write .",
+        "test": "vitest run --passWithNoTests",
+        "typecheck": "tsc --project tsconfig.json --noEmit"
     },
-    "./field": {
-      "types": "./src/field.ts",
-      "import": "./src/field.ts",
-      "default": "./src/field.ts"
+    "dependencies": {
+        "@effect/experimental": "catalog:",
+        "@effect/platform-node": "catalog:",
+        "@effect/sql": "catalog:",
+        "@effect/sql-pg": "catalog:",
+        "@parametric-portal/types": "workspace:*",
+        "effect": "catalog:"
     },
-    "./migrator": {
-      "types": "./src/migrator.ts",
-      "import": "./src/migrator.ts",
-      "default": "./src/migrator.ts"
-    },
-    "./models": {
-      "types": "./src/models.ts",
-      "import": "./src/models.ts",
-      "default": "./src/models.ts"
-    },
-    "./page": {
-      "types": "./src/page.ts",
-      "import": "./src/page.ts",
-      "default": "./src/page.ts"
-    },
-    "./repos": {
-      "types": "./src/repos.ts",
-      "import": "./src/repos.ts",
-      "default": "./src/repos.ts"
-    },
-    "./search": {
-      "types": "./src/search.ts",
-      "import": "./src/search.ts",
-      "default": "./src/search.ts"
+    "devDependencies": {
+        "@types/node": "catalog:",
+        "ts-essentials": "catalog:",
+        "ts-toolbelt": "catalog:",
+        "type-fest": "catalog:",
+        "typescript": "catalog:",
+        "vite": "catalog:",
+        "vitest": "catalog:"
     }
-  },
-  "scripts": {
-    "build": "vite build",
-    "check": "biome check .",
-    "fix": "biome check --write .",
-    "test": "vitest run --passWithNoTests",
-    "typecheck": "tsc --project tsconfig.json --noEmit"
-  },
-  "dependencies": {
-    "@effect/experimental": "catalog:",
-    "@effect/platform-node": "catalog:",
-    "@effect/sql": "catalog:",
-    "@effect/sql-pg": "catalog:",
-    "@parametric-portal/types": "workspace:*",
-    "effect": "catalog:"
-  },
-  "devDependencies": {
-    "@types/node": "catalog:",
-    "ts-essentials": "catalog:",
-    "ts-toolbelt": "catalog:",
-    "type-fest": "catalog:",
-    "typescript": "catalog:",
-    "vite": "catalog:",
-    "vitest": "catalog:"
-  }
 }

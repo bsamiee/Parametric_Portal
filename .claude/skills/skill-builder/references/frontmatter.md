@@ -3,32 +3,42 @@
 
 <br>
 
+**Sections:** [Schema](#1schema) | [Invocation Control](#11invocation_control) | [Name](#12name) | [Description](#13description) | [Substitutions](#2substitutions) | [Triggers](#3triggers) | [Allowed Tools](#4allowed_tools) | [Syntax](#5syntax)
+
 [IMPORTANT] Frontmatter indexed at session start. Description quality determines invocation accuracy.
 
 ---
 ## [1][SCHEMA]
->**Dictum:** *Eleven Claude Code fields; two skill-builder classification fields.*
+>**Dictum:** *Anthropic fields drive runtime; project fields drive workflows.*
 
 <br>
+
+**Anthropic Specification:**
 
 | [INDEX] | [FIELD]                    | [TYPE]  | [REQ]  | [DEFAULT] | [CONSTRAINT]                                              |
 | :-----: | -------------------------- | ------- | :----: | :-------: | --------------------------------------------------------- |
 |   [1]   | `name`                     | string  |  Yes   |  dirname  | Lowercase+numbers+hyphens, max 64, no XML, no reserved^1^ |
 |   [2]   | `description`              | string  |  Rec   |  para 1   | Non-empty, max 1024 chars, no XML tags                    |
-|   [3]   | `type`                     | enum    | Yes^2^ |     —     | `simple`, `standard`, `complex` — see structure.md        |
-|   [4]   | `depth`                    | enum    | Yes^2^ |     —     | `base`, `extended`, `full` — see depth.md                 |
-|   [5]   | `argument-hint`            | string  |   No   |     —     | Autocomplete hint: `[required]` `[optional?]`             |
-|   [6]   | `disable-model-invocation` | boolean |   No   |  `false`  | `true` prevents Claude auto-loading, user-only invocation |
-|   [7]   | `user-invocable`           | boolean |   No   |  `true`   | `false` hides from `/` menu, Claude-only invocation       |
-|   [8]   | `allowed-tools`            | list    |   No   |     —     | Comma-separated tools permitted without approval          |
-|   [9]   | `model`                    | string  |   No   | `inherit` | `opus`, `sonnet`, `haiku`, or `inherit`                   |
-|  [10]   | `context`                  | enum    |   No   |     —     | `fork` — run skill in isolated subagent context           |
-|  [11]   | `agent`                    | string  |   No   |  general  | Subagent type when `context: fork` set                    |
-|  [12]   | `hooks`                    | object  |   No   |     —     | Scoped lifecycle hooks (all 14 event types supported)     |
-|  [13]   | `version`                  | string  |   No   |     —     | Metadata for tracking skill versions (e.g., `"1.0.0"`)    |
+|   [3]   | `argument-hint`            | string  |   No   |     —     | Autocomplete hint: `[required]` `[optional?]`             |
+|   [4]   | `disable-model-invocation` | boolean |   No   |  `false`  | `true` prevents Claude auto-loading, user-only invocation |
+|   [5]   | `user-invocable`           | boolean |   No   |  `true`   | `false` hides from `/` menu, Claude-only invocation       |
+|   [6]   | `allowed-tools`            | list    |   No   |     —     | Comma-separated tools permitted without approval          |
+|   [7]   | `model`                    | string  |   No   | `inherit` | `opus`, `sonnet`, `haiku`, or `inherit`                   |
+|   [8]   | `context`                  | enum    |   No   |     —     | `fork` — run skill in isolated subagent context           |
+|   [9]   | `agent`                    | string  |   No   |  general  | Subagent type when `context: fork` set                    |
+|  [10]   | `hooks`                    | object  |   No   |     —     | Scoped lifecycle hooks (all 14 event types supported)     |
 
 ^1^Reserved: "anthropic", "claude" — registration fails.
-^2^Required by skill-builder for refine workflow; not required by Claude Code itself.
+
+**Project Extensions** (consumed by skill-builder refine workflow; not required by Claude Code runtime):
+
+| [INDEX] | [FIELD]   | [TYPE] | [REQ]  | [DEFAULT] | [CONSTRAINT]                                         |
+| :-----: | --------- | ------ | :----: | :-------: | ---------------------------------------------------- |
+|   [1]   | `type`    | enum   | Yes^2^ |     —     | `simple`, `standard`, `complex` — see structure.md   |
+|   [2]   | `depth`   | enum   | Yes^2^ |     —     | `base`, `extended`, `full` — see depth.md            |
+|   [3]   | `version` | string |   No   |     —     | Metadata for tracking skill versions (e.g., `"1.0.0"`) |
+
+^2^Required by skill-builder for refine workflow detection.
 
 ---
 ### [1.1][INVOCATION_CONTROL]
@@ -169,4 +179,4 @@ description: >-
   Word documents, or spreadsheets.
 ```
 
-[REFERENCE] Frontmatter validation checklist: [->validation.md§2](./validation.md#2frontmatter)
+See [validation.md > Frontmatter](./validation.md#2frontmatter) for frontmatter validation checklist.

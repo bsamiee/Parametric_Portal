@@ -29,6 +29,7 @@ import { MetricsService } from '@parametric-portal/server/observe/metrics';
 import { PollingService } from '@parametric-portal/server/observe/polling';
 import { Telemetry } from '@parametric-portal/server/observe/telemetry';
 import { CacheService } from '@parametric-portal/server/platform/cache';
+import { DopplerService } from '@parametric-portal/server/platform/doppler';
 import { StreamingService } from '@parametric-portal/server/platform/streaming';
 import { WebSocketService } from '@parametric-portal/server/platform/websocket';
 import { Crypto } from '@parametric-portal/server/security/crypto';
@@ -65,7 +66,7 @@ const PlatformLayer = Layer.mergeAll(Client.layer, StorageAdapter.S3ClientLayer,
 // All application services in dependency order. Single provideMerge chain.
 // Crons: domain services own their schedules (PollingService.Crons, PurgeService.Crons, SearchService.EmbeddingCron)
 
-const ServicesLayer = Layer.mergeAll(Auth.Service.Default, EmailAdapter.Default, FeatureService.Default, NotificationService.Default, StorageService.Default, TransferService.Default, AiRuntime.Default, SearchService.Default, JobService.Default, PollingService.Default, EventBus.Default, WebhookService.Default, WebSocketService.Default, PolicyService.Default).pipe(
+const ServicesLayer = Layer.mergeAll(Auth.Service.Default, EmailAdapter.Default, FeatureService.Default, NotificationService.Default, StorageService.Default, TransferService.Default, AiRuntime.Default, SearchService.Default, JobService.Default, PollingService.Default, EventBus.Default, WebhookService.Default, WebSocketService.Default, PolicyService.Default, DopplerService.Default).pipe(
     Layer.provideMerge(Layer.mergeAll(PollingService.Crons, PurgeService.Crons, PurgeService.SweepCron, SearchService.EmbeddingCron)),
     Layer.provideMerge(TenantLifecycleService.Layer),
     Layer.provideMerge(PurgeService.Handlers),

@@ -17,10 +17,10 @@ Validate bash scripts via syntax check, ShellCheck 0.11.0+ static analysis, and 
 **Tasks:**
 1. Run `bash scripts/validate.sh <script-path>` — Syntax, static analysis, custom checks.
 2. Review errors/warnings/info from output.
-3. Reference docs/ for fix patterns:
-   - [→shell-reference.md](./docs/shell-reference.md) — Bash 5.2+/5.3 vs POSIX sh, parameter expansion, FP patterns.
-   - [→shellcheck-reference.md](./docs/shellcheck-reference.md) — SC codes, v0.11.0 additions, directives, CI integration.
-   - [→text-tools.md](./docs/text-tools.md) — rg/sd/awk/regex, bash-native alternatives.
+3. Reference references/ for fix patterns:
+   - [→shell-reference.md](./references/shell-reference.md) — Bash 5.2+/5.3 vs POSIX sh, parameter expansion, FP patterns.
+   - [→shellcheck-reference.md](./references/shellcheck-reference.md) — SC codes, v0.11.0 additions, directives, CI integration.
+   - [→text-tools.md](./references/text-tools.md) — rg/sd/awk/regex, bash-native alternatives.
 4. Suggest fixes — Before/after with line numbers.
 
 ---
@@ -64,12 +64,12 @@ Validate bash scripts via syntax check, ShellCheck 0.11.0+ static analysis, and 
 | :-----: | ---------------------------------- | ------------------------------------------------------------- |
 |   [1]   | **`scripts/validate.sh`**          | Main validator (shebang detection, assoc array counters).     |
 |   [2]   | **`scripts/ensure_shellcheck.sh`** | Asserts shellcheck presence (Nix-provided; apt/dnf fallback). |
-|   [3]   | **`docs/shell-reference.md`**      | Bash 5.2+/5.3 vs POSIX sh, FP patterns, data structures.      |
-|   [4]   | **`docs/shellcheck-reference.md`** | SC codes, v0.11.0 additions, directives, CI.                  |
-|   [5]   | **`docs/text-tools.md`**           | rg/sd/awk/regex, bash-native alternatives.                    |
+|   [3]   | **`references/shell-reference.md`**      | Bash 5.2+/5.3 vs POSIX sh, FP patterns, data structures.      |
+|   [4]   | **`references/shellcheck-reference.md`** | SC codes, v0.11.0 additions, directives, CI.                  |
+|   [5]   | **`references/text-tools.md`**           | rg/sd/awk/regex, bash-native alternatives.                    |
 |   [6]   | **`examples/good.sh`**             | Best practices (bash + POSIX).                                |
 |   [7]   | **`examples/bad.sh`**              | Anti-patterns (bash + POSIX).                                 |
 
-[REFERENCE]: [→shell-reference.md](./docs/shell-reference.md) — Language features, FP patterns.<br>
-[REFERENCE]: [→shellcheck-reference.md](./docs/shellcheck-reference.md) — ShellCheck codes, directives.<br>
-[REFERENCE]: [→text-tools.md](./docs/text-tools.md) — Modern text tools (rg/sd/awk), bash-native alternatives.
+[REFERENCE]: [→shell-reference.md](./references/shell-reference.md) — Language features, FP patterns.<br>
+[REFERENCE]: [→shellcheck-reference.md](./references/shellcheck-reference.md) — ShellCheck codes, directives.<br>
+[REFERENCE]: [→text-tools.md](./references/text-tools.md) — Modern text tools (rg/sd/awk), bash-native alternatives.

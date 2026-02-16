@@ -19,9 +19,9 @@ description: ${action-verb-capability}. Use when ${scenario-1}, ${scenario-2}, o
 ${one-sentence-purpose}
 
 **Workflow:**
-1. §${STEP_1} — ${step-1-action}
-2. §${STEP_2} — ${step-2-action}
-3. §${STEP_N} — ${step-n-action}
+1. ${STEP_1} — ${step-1-action}
+2. ${STEP_2} — ${step-2-action}
+3. ${STEP_N} — ${step-n-action}
 
 **Dependencies:** ${remove-if-none}
 - `${skill-name}` — ${purpose}

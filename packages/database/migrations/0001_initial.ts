@@ -38,9 +38,7 @@ export default Effect.gen(function* () {
             ('auto_explain.log_timing','on'),('auto_explain.log_triggers','on'),('auto_explain.log_format','json'),
             ('auto_explain.sample_rate','0.01'),('pg_prewarm.autoprewarm','on'),('pg_prewarm.autoprewarm_interval','300')
         ) AS t(name, val) LOOP
-            IF EXISTS (SELECT 1 FROM pg_settings WHERE name = _kv.name) THEN
-                EXECUTE format('ALTER DATABASE %I SET %s = %L', current_database(), _kv.name, _kv.val);
-            END IF;
+            IF EXISTS (SELECT 1 FROM pg_settings WHERE name = _kv.name) THEN EXECUTE format('ALTER DATABASE %I SET %s = %L', current_database(), _kv.name, _kv.val); END IF;
         END LOOP;
     END $$`);
     // --- [FUNCTIONS] -----------------------------------------------------------------
@@ -93,8 +91,9 @@ export default Effect.gen(function* () {
             CONSTRAINT apps_namespace_not_empty CHECK (length(trim(namespace)) > 0),
             CONSTRAINT apps_settings_shape CHECK (settings IS NULL OR jsonb_typeof(settings) = 'object'));
         CREATE UNIQUE INDEX idx_apps_namespace ON apps(namespace) INCLUDE (id);
-        INSERT INTO apps (id, name, namespace) VALUES ('00000000-0000-7000-8000-000000000000', 'System', 'system') ON CONFLICT (id) DO NOTHING;
-        INSERT INTO apps (id, name, namespace) VALUES ('00000000-0000-7000-8000-000000000001', 'Default', 'default') ON CONFLICT (id) DO NOTHING`);
+        INSERT INTO apps (id, name, namespace) VALUES
+            ('00000000-0000-7000-8000-000000000000', 'System', 'system'),
+            ('00000000-0000-7000-8000-000000000001', 'Default', 'default') ON CONFLICT (id) DO NOTHING`);
     yield* sql.unsafe(String.raw`
         CREATE TABLE users (
             id UUID PRIMARY KEY DEFAULT uuidv7(),
@@ -149,8 +148,7 @@ export default Effect.gen(function* () {
         ) RETURNS void LANGUAGE plpgsql VOLATILE AS $fn$ BEGIN
             PERFORM partman.create_parent(p_parent_table := 'public.' || p_table, p_control := p_control, p_type := 'range',
                 p_interval := '1 month', p_premake := 4, p_default_table := false, p_time_encoder := p_time_encoder, p_time_decoder := p_time_decoder);
-            UPDATE partman.part_config SET infinite_time_partitions = true, retention = p_retention, retention_keep_table = false
-                WHERE parent_table = 'public.' || p_table;
+            UPDATE partman.part_config SET infinite_time_partitions = true, retention = p_retention, retention_keep_table = false WHERE parent_table = 'public.' || p_table;
         END $fn$;
         CREATE INDEX idx_sessions_app_user_active ON sessions(app_id, user_id)
             INCLUDE (expiry_access, expiry_refresh, verified_at, updated_at, ip_address) WHERE deleted_at IS NULL;
@@ -333,7 +331,7 @@ export default Effect.gen(function* () {
                 FROM pg_inherits inh JOIN pg_class cls ON cls.oid = inh.inhrelid
                 JOIN pg_namespace nsp ON nsp.oid = cls.relnamespace WHERE inh.inhparent = 'public.sessions'::regclass
             LOOP IF _rel.bound <> 'DEFAULT' THEN
-                _upper := (regexp_match(_rel.bound, $$TO \('([^']+)'\)$$))[1];
+                _upper := (regexp_match(_rel.bound, $re$TO \('([^']+)'\)$re$))[1];
                 IF _upper IS NOT NULL AND _upper::timestamptz < _cutoff THEN
                     EXECUTE format('DROP TABLE IF EXISTS %I.%I', _rel.nspname, _rel.relname); _dropped := _dropped + 1;
                 END IF; END IF;
@@ -341,18 +339,14 @@ export default Effect.gen(function* () {
             DELETE FROM sessions WHERE deleted_at IS NOT NULL AND deleted_at < _cutoff; GET DIAGNOSTICS _deleted = ROW_COUNT;
             PERFORM partman.run_maintenance(p_analyze := false); RETURN _deleted + _dropped;
         END $$;
-    DO $$ DECLARE _rec record; BEGIN
-        FOR _rec IN SELECT * FROM (VALUES
-            ('api_keys','deleted_at',365), ('oauth_accounts','deleted_at',90), ('mfa_secrets','deleted_at',90),
-            ('assets','deleted_at',30), ('kv_store','expires_at',30), ('job_dlq','replayed_at',30)
-        ) AS t(table_name text, column_name text, default_days int) LOOP
-            EXECUTE format($fn$
-                CREATE OR REPLACE FUNCTION purge_%I(p_older_than_days INT DEFAULT %s) RETURNS INT LANGUAGE sql VOLATILE AS $body$
-                    WITH purged AS (DELETE FROM %I WHERE %I IS NOT NULL AND %I < NOW() - make_interval(days => p_older_than_days) RETURNING 1)
-                    SELECT COUNT(*)::int FROM purged $body$ $fn$,
-                _rec.table_name, _rec.default_days, _rec.table_name, _rec.column_name, _rec.column_name);
-        END LOOP;
-    END $$`);
+        CREATE OR REPLACE FUNCTION purge_table(p_table TEXT, p_column TEXT, p_older_than_days INT DEFAULT 30) RETURNS INT LANGUAGE plpgsql VOLATILE AS $$
+        DECLARE _count INT;
+        BEGIN EXECUTE format(
+            'WITH purged AS (DELETE FROM %I WHERE %I IS NOT NULL AND %I < NOW() - make_interval(days => $1) RETURNING 1) SELECT COUNT(*)::int FROM purged',
+            p_table, p_column, p_column
+        ) USING p_older_than_days INTO _count;
+        RETURN _count;
+        END $$`);
     yield* sql.unsafe(String.raw`
         CREATE OR REPLACE FUNCTION purge_journal(p_older_than_days INT DEFAULT 30) RETURNS INT LANGUAGE sql VOLATILE AS $$
             WITH purged AS (DELETE FROM effect_event_journal WHERE timestamp < (EXTRACT(EPOCH FROM NOW()) * 1000 - p_older_than_days::bigint * 86400000)::bigint RETURNING 1)
@@ -381,10 +375,8 @@ export default Effect.gen(function* () {
             DELETE FROM apps WHERE id = p_app_id; GET DIAGNOSTICS _count = ROW_COUNT; _total := _total + _count;
             RETURN _total::int;
         END $$;
-        CREATE OR REPLACE FUNCTION count_outbox() RETURNS INT
-            LANGUAGE sql STABLE PARALLEL SAFE AS $$ SELECT COUNT(*)::int FROM effect_event_remotes $$;
-        CREATE OR REPLACE FUNCTION get_journal_entry(p_primary_key TEXT) RETURNS TABLE(payload TEXT)
-            LANGUAGE sql STABLE PARALLEL SAFE AS $$ SELECT convert_from(payload, 'UTF8') FROM effect_event_journal WHERE primary_key = p_primary_key LIMIT 1 $$;
+        CREATE OR REPLACE FUNCTION get_journal_entry(p_primary_key TEXT) RETURNS TABLE(payload TEXT) LANGUAGE sql STABLE PARALLEL SAFE AS $$
+            SELECT convert_from(payload, 'UTF8') FROM effect_event_journal WHERE primary_key = p_primary_key LIMIT 1 $$;
         CREATE OR REPLACE FUNCTION list_journal_entries(
             p_since_sequence_id TEXT DEFAULT '0', p_since_timestamp BIGINT DEFAULT NULL, p_event_type TEXT DEFAULT NULL, p_limit INT DEFAULT 500
         ) RETURNS TABLE(payload TEXT, primary_key TEXT) LANGUAGE sql STABLE PARALLEL SAFE AS $$
@@ -393,14 +385,10 @@ export default Effect.gen(function* () {
               AND (p_since_timestamp IS NULL OR e.timestamp >= p_since_timestamp)
               AND (p_event_type IS NULL OR e.event = p_event_type)
             ORDER BY e.primary_key::bigint ASC LIMIT LEAST(GREATEST(COALESCE(p_limit, 500), 1), 5000) $$;
-        CREATE OR REPLACE FUNCTION delete_kv_by_prefix(p_prefix TEXT) RETURNS INT
-            LANGUAGE sql VOLATILE AS $$ WITH deleted AS (DELETE FROM kv_store WHERE starts_with(key, p_prefix) RETURNING 1) SELECT COUNT(*)::int FROM deleted $$;
-        CREATE OR REPLACE FUNCTION revoke_sessions_by_ip(p_app_id UUID, p_ip INET) RETURNS INT LANGUAGE sql VOLATILE AS $$
-            WITH revoked AS (UPDATE sessions SET deleted_at = NOW() WHERE app_id = p_app_id AND ip_address = p_ip AND deleted_at IS NULL RETURNING 1)
-            SELECT COUNT(*)::int FROM revoked $$;
-        CREATE OR REPLACE FUNCTION count_audit_by_ip(p_app_id UUID, p_ip INET, p_window_minutes INT DEFAULT 60) RETURNS INT
-            LANGUAGE sql STABLE PARALLEL SAFE AS $$ SELECT COUNT(*)::int FROM audit_logs
-            WHERE app_id = p_app_id AND context_ip = p_ip AND uuid_extract_timestamp(id) > NOW() - make_interval(mins => p_window_minutes) $$`);
+        CREATE OR REPLACE FUNCTION delete_kv_by_prefix(p_prefix TEXT) RETURNS INT LANGUAGE sql VOLATILE AS $$
+            WITH deleted AS (DELETE FROM kv_store WHERE starts_with(key, p_prefix) RETURNING 1) SELECT COUNT(*)::int FROM deleted $$;
+        CREATE OR REPLACE FUNCTION count_audit_by_ip(p_app_id UUID, p_ip INET, p_window_minutes INT DEFAULT 60) RETURNS INT LANGUAGE sql STABLE PARALLEL SAFE AS $$
+            SELECT COUNT(*)::int FROM audit_logs WHERE app_id = p_app_id AND context_ip = p_ip AND uuid_extract_timestamp(id) > NOW() - make_interval(mins => p_window_minutes) $$`);
     // --- [STAT_FUNCTION] -------------------------------------------------------------
     yield* sql.unsafe(String.raw`
         CREATE OR REPLACE FUNCTION stat(p_name TEXT, p_limit INT DEFAULT 100, p_extra JSONB DEFAULT NULL) RETURNS JSONB LANGUAGE plpgsql STABLE AS $fn$
@@ -581,6 +569,14 @@ export default Effect.gen(function* () {
         EXECUTE 'SELECT COALESCE(jsonb_agg(to_jsonb(r)),''[]''::jsonb) FROM (' || _sql || ') r' INTO _result;
         RETURN _result;
         END $fn$;
+        CREATE OR REPLACE FUNCTION stat_batch(p_names TEXT[], p_limit INT DEFAULT 100, p_extra JSONB DEFAULT NULL)
+            RETURNS JSONB LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_catalog AS $fn$
+            DECLARE _result JSONB := '{}'::jsonb; _name TEXT;
+            BEGIN FOREACH _name IN ARRAY p_names LOOP
+                _result := _result || jsonb_build_object(_name, stat(_name, p_limit, p_extra));
+            END LOOP;
+            RETURN _result;
+            END $fn$;
         CREATE OR REPLACE FUNCTION prewarm_relation(p_relation TEXT, p_mode TEXT DEFAULT 'buffer')
             RETURNS INT LANGUAGE plpgsql VOLATILE AS $$ BEGIN
                 IF NOT EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'public' AND c.relname = p_relation) THEN
@@ -596,22 +592,20 @@ export default Effect.gen(function* () {
                 RETURN QUERY SELECT * FROM hypopg_create_index(p_statement);
             END $$;
         CREATE OR REPLACE FUNCTION reset_hypothetical_indexes() RETURNS void LANGUAGE sql VOLATILE AS $$ SELECT hypopg_reset() $$;
-    DO $$ DECLARE _rec record; BEGIN
-        FOR _rec IN SELECT * FROM (VALUES
-            ('reset_wait_sampling_profile','pg_wait_sampling_reset_profile()'),
-            ('run_partman_maintenance','partman.run_maintenance(p_analyze := false)'),
-            ('start_squeeze_worker','squeeze.start_worker()')
-        ) AS t(fn_name text, delegate text) LOOP
-            EXECUTE format('CREATE OR REPLACE FUNCTION %I() RETURNS BOOLEAN LANGUAGE sql VOLATILE AS $fn$ SELECT %s IS NOT NULL $fn$', _rec.fn_name, _rec.delegate);
-        END LOOP;
-    END $$;
-        CREATE OR REPLACE FUNCTION stop_squeeze_worker(p_pid INT) RETURNS BOOLEAN
-            LANGUAGE sql VOLATILE AS $$ SELECT squeeze.stop_worker(p_pid) IS NOT NULL $$;
+        CREATE OR REPLACE FUNCTION exec_delegate(p_name TEXT, p_args JSONB DEFAULT '{}') RETURNS BOOLEAN LANGUAGE plpgsql VOLATILE AS $$
+        DECLARE _result BOOLEAN;
+        BEGIN EXECUTE CASE p_name
+            WHEN 'reset_wait_sampling' THEN 'SELECT pg_wait_sampling_reset_profile() IS NOT NULL'
+            WHEN 'run_partman'         THEN 'SELECT partman.run_maintenance(p_analyze := false) IS NOT NULL'
+            WHEN 'start_squeeze'       THEN 'SELECT squeeze.start_worker() IS NOT NULL'
+            WHEN 'stop_squeeze'        THEN format('SELECT squeeze.stop_worker(%s) IS NOT NULL', (p_args->>'pid')::int)
+            ELSE 'SELECT FALSE'
+        END INTO _result;
+        RETURN COALESCE(_result, FALSE);
+        END $$;
         CREATE OR REPLACE FUNCTION list_partition_health(p_parent_table TEXT) RETURNS JSONB LANGUAGE sql STABLE AS $$
-            SELECT COALESCE(jsonb_agg(jsonb_build_object(
-                'partition', (tree.relid::regclass)::text, 'level', tree.level,
-                'isLeaf', tree.isleaf, 'bound', pg_get_expr(cls.relpartbound, cls.oid))
-                ORDER BY tree.level, (tree.relid::regclass)::text), '[]'::jsonb)
+            SELECT COALESCE(jsonb_agg(jsonb_build_object('partition', (tree.relid::regclass)::text, 'level', tree.level,
+                'isLeaf', tree.isleaf, 'bound', pg_get_expr(cls.relpartbound, cls.oid)) ORDER BY tree.level, (tree.relid::regclass)::text), '[]'::jsonb)
             FROM pg_partition_tree(p_parent_table::regclass) tree JOIN pg_class cls ON cls.oid = tree.relid $$`);
     // --- [CRON_SYNC] -----------------------------------------------------------------
     yield* sql.unsafe(String.raw`
@@ -620,13 +614,13 @@ export default Effect.gen(function* () {
             FOR _job IN SELECT * FROM (VALUES
                 ('maintenance-partman','5 * * * *','SELECT partman.run_maintenance(p_analyze := false)'),
                 ('maintenance-purge-sessions','15 1 * * *','SELECT purge_sessions(30)'),
-                ('maintenance-purge-api-keys','20 3 * * 0','SELECT purge_api_keys(365)'),
-                ('maintenance-purge-oauth-accounts','20 5 * * 0','SELECT purge_oauth_accounts(90)'),
-                ('maintenance-purge-mfa-secrets','20 4 * * 0','SELECT purge_mfa_secrets(90)'),
-                ('maintenance-purge-assets','30 2 * * *','SELECT purge_assets(30)'),
-                ('maintenance-purge-kv-store','20 0 * * 0','SELECT purge_kv_store(90)'),
+                ('maintenance-purge-api-keys','20 3 * * 0','SELECT purge_table(''api_keys'',''deleted_at'',365)'),
+                ('maintenance-purge-oauth-accounts','20 5 * * 0','SELECT purge_table(''oauth_accounts'',''deleted_at'',90)'),
+                ('maintenance-purge-mfa-secrets','20 4 * * 0','SELECT purge_table(''mfa_secrets'',''deleted_at'',90)'),
+                ('maintenance-purge-assets','30 2 * * *','SELECT purge_table(''assets'',''deleted_at'',30)'),
+                ('maintenance-purge-kv-store','20 0 * * 0','SELECT purge_table(''kv_store'',''expires_at'',90)'),
                 ('maintenance-purge-event-journal','20 2 * * *','SELECT purge_journal(30)'),
-                ('maintenance-purge-job-dlq','25 2 * * *','SELECT purge_job_dlq(30)'),
+                ('maintenance-purge-job-dlq','25 2 * * *','SELECT purge_table(''job_dlq'',''replayed_at'',30)'),
                 ('maintenance-vacuum-jobs','0 4 * * *','VACUUM (BUFFER_USAGE_LIMIT ''256MB'', ANALYZE) jobs'),
                 ('maintenance-vacuum-sessions','10 4 * * *','VACUUM (BUFFER_USAGE_LIMIT ''256MB'', ANALYZE) sessions'),
                 ('maintenance-vacuum-notifications','20 4 * * *','VACUUM (BUFFER_USAGE_LIMIT ''256MB'', ANALYZE) notifications'),
@@ -711,22 +705,18 @@ export default Effect.gen(function* () {
                 WHERE char_length(lexeme) BETWEEN 2 AND 255), ARRAY[]::text[]) $$;
         CREATE OR REPLACE FUNCTION _merge_search_terms(p_scope_id uuid, p_terms text[], p_delta int) RETURNS void LANGUAGE plpgsql VOLATILE AS $$ BEGIN
             IF p_terms IS NULL OR cardinality(p_terms) = 0 THEN RETURN; END IF;
-            IF p_delta > 0 THEN
-                INSERT INTO search_terms (scope_id, term, frequency) SELECT p_scope_id, term, COUNT(*)::int FROM unnest(p_terms) term GROUP BY term
+            IF p_delta > 0 THEN INSERT INTO search_terms (scope_id, term, frequency) SELECT p_scope_id, term, COUNT(*)::int FROM unnest(p_terms) term GROUP BY term
                 ON CONFLICT (scope_id, term) DO UPDATE SET frequency = search_terms.frequency + EXCLUDED.frequency, updated_at = now();
-            ELSE
-                UPDATE search_terms st SET frequency = st.frequency - t.cnt, updated_at = now()
+            ELSE UPDATE search_terms st SET frequency = st.frequency - t.cnt, updated_at = now()
                 FROM (SELECT term, COUNT(*)::int AS cnt FROM unnest(p_terms) term GROUP BY term) t
                 WHERE st.scope_id IS NOT DISTINCT FROM p_scope_id AND st.term = t.term;
-                DELETE FROM search_terms st WHERE st.scope_id IS NOT DISTINCT FROM p_scope_id AND st.frequency <= 0;
-            END IF;
+                DELETE FROM search_terms st WHERE st.scope_id IS NOT DISTINCT FROM p_scope_id AND st.frequency <= 0; END IF;
         END $$;
         CREATE OR REPLACE FUNCTION sync_search_terms() RETURNS TRIGGER AS $$ BEGIN
             IF TG_OP IN ('UPDATE', 'DELETE') THEN PERFORM _merge_search_terms(OLD.scope_id, _search_terms_array(OLD.normalized_text), -1); END IF;
             IF TG_OP IN ('INSERT', 'UPDATE') THEN PERFORM _merge_search_terms(NEW.scope_id, _search_terms_array(NEW.normalized_text), 1); END IF;
             RETURN COALESCE(NEW, OLD); END $$ LANGUAGE plpgsql;
-        CREATE TRIGGER search_documents_terms_sync_insert AFTER INSERT ON search_documents FOR EACH ROW EXECUTE FUNCTION sync_search_terms();
-        CREATE TRIGGER search_documents_terms_sync_delete AFTER DELETE ON search_documents FOR EACH ROW EXECUTE FUNCTION sync_search_terms();
+        CREATE TRIGGER search_documents_terms_sync AFTER INSERT OR DELETE ON search_documents FOR EACH ROW EXECUTE FUNCTION sync_search_terms();
         CREATE TRIGGER search_documents_terms_sync_update AFTER UPDATE ON search_documents FOR EACH ROW
             WHEN (OLD.scope_id IS DISTINCT FROM NEW.scope_id OR OLD.normalized_text IS DISTINCT FROM NEW.normalized_text) EXECUTE FUNCTION sync_search_terms();
         CREATE OR REPLACE FUNCTION sync_search_document() RETURNS TRIGGER AS $$
@@ -748,11 +738,9 @@ export default Effect.gen(function* () {
             RETURN NEW;
         END; $$ LANGUAGE plpgsql;
         CREATE TRIGGER apps_search_upsert AFTER INSERT OR UPDATE OF name, namespace ON apps FOR EACH ROW EXECUTE FUNCTION sync_search_document('app');
-        CREATE TRIGGER users_search_upsert AFTER INSERT OR UPDATE OF email, role, deleted_at ON users
-            FOR EACH ROW WHEN (NEW.deleted_at IS NULL) EXECUTE FUNCTION sync_search_document('user');
+        CREATE TRIGGER users_search_upsert AFTER INSERT OR UPDATE OF email, role, deleted_at ON users FOR EACH ROW WHEN (NEW.deleted_at IS NULL) EXECUTE FUNCTION sync_search_document('user');
         CREATE TRIGGER users_search_delete AFTER UPDATE OF deleted_at ON users FOR EACH ROW WHEN (NEW.deleted_at IS NOT NULL) EXECUTE FUNCTION sync_search_document('user');
-        CREATE TRIGGER assets_search_upsert AFTER INSERT OR UPDATE OF content, type, name, hash, deleted_at ON assets
-            FOR EACH ROW WHEN (NEW.deleted_at IS NULL) EXECUTE FUNCTION sync_search_document('asset');
+        CREATE TRIGGER assets_search_upsert AFTER INSERT OR UPDATE OF content, type, name, hash, deleted_at ON assets FOR EACH ROW WHEN (NEW.deleted_at IS NULL) EXECUTE FUNCTION sync_search_document('asset');
         CREATE TRIGGER assets_search_delete AFTER UPDATE OF deleted_at ON assets FOR EACH ROW WHEN (NEW.deleted_at IS NOT NULL) EXECUTE FUNCTION sync_search_document('asset');
         CREATE TRIGGER audit_logs_search_insert AFTER INSERT ON audit_logs FOR EACH ROW EXECUTE FUNCTION sync_search_document('auditLog')`);
     // --- [SEARCH_REFRESH] ------------------------------------------------------------
@@ -819,45 +807,28 @@ export default Effect.gen(function* () {
             merged AS (SELECT term, frequency, 0 AS bucket FROM prefix_hits UNION ALL SELECT term, frequency, 1 AS bucket FROM fuzzy_hits)
             SELECT term, frequency FROM merged ORDER BY bucket ASC, frequency DESC, term ASC LIMIT (SELECT max_limit FROM normalized) $$;
         SELECT refresh_search_documents()`);
-
     // --- [SEED_PERMISSIONS] ----------------------------------------------------------
     yield* sql.unsafe(String.raw`
         WITH tenants(app_id) AS (VALUES ('00000000-0000-7000-8000-000000000001'::uuid),('00000000-0000-7000-8000-000000000000'::uuid)),
         all_roles(role) AS (VALUES ('owner'),('admin'),('member'),('viewer'),('guest')),
         all_actions(resource, action) AS (VALUES
-            ('auth','logout'),('auth','me'),('auth','mfaStatus'),
-            ('auth','mfaEnroll'),('auth','mfaVerify'),('auth','mfaDisable'),
-            ('auth','mfaRecover'),('auth','listApiKeys'),('auth','createApiKey'),
-            ('auth','deleteApiKey'),('auth','rotateApiKey'),
-            ('auth','linkProvider'),('auth','unlinkProvider'),
-            ('users','getMe'),('users','updateProfile'),('users','deactivate'),
-            ('users','getNotificationPreferences'),('users','updateNotificationPreferences'),
-            ('users','listNotifications'),('users','subscribeNotifications'),
+            ('auth','logout'),('auth','me'),('auth','mfaStatus'),('auth','mfaEnroll'),('auth','mfaVerify'),('auth','mfaDisable'),('auth','mfaRecover'),('auth','listApiKeys'),('auth','createApiKey'),
+            ('auth','deleteApiKey'),('auth','rotateApiKey'),('auth','linkProvider'),('auth','unlinkProvider'),
+            ('users','getMe'),('users','updateProfile'),('users','deactivate'),('users','getNotificationPreferences'),('users','updateNotificationPreferences'),('users','listNotifications'),('users','subscribeNotifications'),
             ('audit','getMine'),('transfer','export'),('transfer','import'),('search','search'),('search','suggest'),('jobs','subscribe'),
-            ('storage','sign'),('storage','exists'),('storage','remove'),('storage','upload'),('storage','getAsset'),
-            ('storage','createAsset'),('storage','updateAsset'),('storage','archiveAsset'),('storage','listAssets'),('websocket','connect')),
+            ('storage','sign'),('storage','exists'),('storage','remove'),('storage','upload'),('storage','getAsset'),('storage','createAsset'),('storage','updateAsset'),('storage','archiveAsset'),('storage','listAssets'),('websocket','connect')),
         privileged_roles(role) AS (VALUES ('owner'),('admin')),
         privileged_actions(resource, action) AS (VALUES ('users','updateRole'),('audit','getByEntity'),('audit','getByUser'),('search','refresh'),('search','refreshEmbeddings'),
             ('webhooks','list'),('webhooks','register'),('webhooks','remove'),('webhooks','test'),('webhooks','retry'),('webhooks','status'),
-            ('admin','listUsers'),('admin','listSessions'),('admin','deleteSession'),('admin','revokeSessionsByIp'),
-            ('admin','listJobs'),('admin','cancelJob'),('admin','listDlq'),('admin','replayDlq'),
-            ('admin','listNotifications'),('admin','replayNotification'),('admin','events'),
-            ('admin','ioDetail'),('admin','ioConfig'),('admin','statements'),('admin','cacheRatio'),('admin','walInspect'),
-            ('admin','kcache'),('admin','qualstats'),('admin','waitSampling'),('admin','waitSamplingCurrent'),
-            ('admin','waitSamplingHistory'),('admin','resetWaitSampling'),('admin','cronJobs'),
-            ('admin','partitionHealth'),('admin','partmanConfig'),('admin','runPartmanMaintenance'),('admin','syncCronJobs'),
-            ('admin','squeezeStatus'),('admin','squeezeStartWorker'),('admin','squeezeStopWorker'),
+            ('admin','listUsers'),('admin','listSessions'),('admin','deleteSession'),('admin','revokeSessionsByIp'),('admin','listJobs'),('admin','cancelJob'),('admin','listDlq'),('admin','replayDlq'),
+            ('admin','listNotifications'),('admin','replayNotification'),('admin','events'),('admin','ioDetail'),('admin','ioConfig'),('admin','statements'),('admin','cacheRatio'),('admin','walInspect'),
+            ('admin','kcache'),('admin','qualstats'),('admin','waitSampling'),('admin','waitSamplingCurrent'),('admin','waitSamplingHistory'),('admin','resetWaitSampling'),('admin','cronJobs'),
+            ('admin','partitionHealth'),('admin','partmanConfig'),('admin','runPartmanMaintenance'),('admin','syncCronJobs'),('admin','squeezeStatus'),('admin','squeezeStartWorker'),('admin','squeezeStopWorker'),
             ('admin','cronHistory'),('admin','cronFailures'),('admin','buffercacheSummary'),('admin','buffercacheUsage'),('admin','buffercacheTop'),('admin','prewarmRelation'),
-            ('admin','deadTuples'),('admin','tableBloat'),('admin','indexBloat'),('admin','lockContention'),
-            ('admin','longRunningQueries'),('admin','connectionStats'),('admin','replicationLag'),
-            ('admin','indexUsage'),('admin','tableSizes'),('admin','unusedIndexes'),('admin','seqScanHeavy'),
-            ('admin','indexAdvisor'),('admin','hypotheticalIndexes'),('admin','createHypotheticalIndex'),
-            ('admin','resetHypotheticalIndexes'),('admin','visibility'),
-            ('admin','listTenants'),('admin','createTenant'),('admin','getTenant'),
-            ('admin','updateTenant'),('admin','deactivateTenant'),('admin','resumeTenant'),
-            ('admin','archiveTenant'),('admin','purgeTenant'),
-            ('admin','getTenantOAuth'),('admin','updateTenantOAuth'),
-            ('admin','listPermissions'),('admin','grantPermission'),('admin','revokePermission'),('admin','getFeatureFlags'),('admin','setFeatureFlag')),
+            ('admin','deadTuples'),('admin','tableBloat'),('admin','indexBloat'),('admin','lockContention'),('admin','longRunningQueries'),('admin','connectionStats'),('admin','replicationLag'),
+            ('admin','indexUsage'),('admin','tableSizes'),('admin','unusedIndexes'),('admin','seqScanHeavy'),('admin','indexAdvisor'),('admin','hypotheticalIndexes'),('admin','createHypotheticalIndex'),
+            ('admin','resetHypotheticalIndexes'),('admin','visibility'),('admin','listTenants'),('admin','createTenant'),('admin','getTenant'),('admin','updateTenant'),('admin','deactivateTenant'),('admin','resumeTenant'),
+            ('admin','archiveTenant'),('admin','purgeTenant'),('admin','getTenantOAuth'),('admin','updateTenantOAuth'),('admin','listPermissions'),('admin','grantPermission'),('admin','revokePermission'),('admin','getFeatureFlags'),('admin','setFeatureFlag')),
         seed AS (SELECT t.app_id, r.role, a.resource, a.action FROM tenants t CROSS JOIN all_roles r CROSS JOIN all_actions a
             UNION ALL SELECT t.app_id, r.role, a.resource, a.action FROM tenants t CROSS JOIN privileged_roles r CROSS JOIN privileged_actions a)
         INSERT INTO permissions (app_id, role, resource, action) SELECT * FROM seed ON CONFLICT (app_id, role, resource, action) DO NOTHING`);
@@ -879,9 +850,8 @@ export default Effect.gen(function* () {
             EXECUTE format('CREATE POLICY %I ON %I %s', _r.tbl||'_tenant_isolation', _r.tbl, CASE _r.kind
                 WHEN 'app' THEN 'USING (app_id = get_current_tenant_id()) WITH CHECK (app_id = get_current_tenant_id())'
                 WHEN 'user' THEN 'USING (user_id IN (SELECT get_tenant_user_ids())) WITH CHECK (user_id IN (SELECT get_tenant_user_ids()))'
-                WHEN 'session' THEN 'USING (EXISTS (SELECT 1 FROM sessions s WHERE s.id = session_tokens.session_id'
-                    ' AND s.app_id = get_current_tenant_id())) WITH CHECK (EXISTS (SELECT 1 FROM sessions s'
-                    ' WHERE s.id = session_tokens.session_id AND s.app_id = get_current_tenant_id()))'
+                WHEN 'session' THEN 'USING (EXISTS (SELECT 1 FROM sessions s WHERE s.id = session_tokens.session_id AND s.app_id = get_current_tenant_id()))'
+                    ' WITH CHECK (EXISTS (SELECT 1 FROM sessions s WHERE s.id = session_tokens.session_id AND s.app_id = get_current_tenant_id()))'
                 WHEN 'scope' THEN 'USING (scope_id IS NULL OR scope_id = get_current_tenant_id()) WITH CHECK (scope_id IS NULL OR scope_id = get_current_tenant_id())'
             END);
         END LOOP;

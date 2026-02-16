@@ -14,22 +14,31 @@ description: >-
 Build Claude Code hooks—shell commands, prompt evaluations, or multi-turn agents execute at 15 agent lifecycle events.
 
 **Tasks:**
-1. Read [index.md](./index.md) — Reference file listing for navigation
-2. Read [lifecycle.md](./references/lifecycle.md) — 14 events, input schemas, exit codes, blocking behavior
-3. Read [schema.md](./references/schema.md) — Configuration structure, matchers, JSON responses, hook types
-4. (integration) Read [integration.md](./references/integration.md) — Environment variables, context injection
-5. (scripting) Read [scripting.md](./references/scripting.md) — Python standards, security patterns
-6. (recipes) Read [recipes.md](./references/recipes.md) — Proven implementation patterns
-7. (troubleshooting) Read [troubleshooting.md](./references/troubleshooting.md) — Known issues, platform workarounds
-8. (prose) Load `style-standards` skill — Voice, formatting, constraints
-9. Validate — Quality gate; see §VALIDATION
+1. Read [lifecycle.md](./references/lifecycle.md) — 14 events, input schemas, exit codes, blocking behavior
+2. Read [schema.md](./references/schema.md) — Configuration structure, matchers, JSON responses, hook types
+3. (integration) Read [integration.md](./references/integration.md) — Environment variables, context injection
+4. (scripting) Read [scripting.md](./references/scripting.md) — Python standards, security patterns
+5. (recipes) Read [recipes.md](./references/recipes.md) — Proven implementation patterns
+6. (troubleshooting) Read [troubleshooting.md](./references/troubleshooting.md) — Known issues, platform workarounds
+7. (prose) Load `style-standards` skill — Voice, formatting, constraints
+8. Validate — Quality gate; see §VALIDATION
 
 **Scope:**
 - *Event Selection:* Choose hook type by automation goal (blocking vs observing).
 - *Configuration:* Author settings.json entries with matchers and timeouts.
 - *Response Handling:* Control agent via exit codes, JSON responses, or prompt evaluation.
 
-[REFERENCE]: [index.md](./index.md) — Complete reference file listing
+**References:**
+
+| Domain          | File                                                   |
+| --------------- | ------------------------------------------------------ |
+| Schema          | [schema.md](references/schema.md)                     |
+| Lifecycle       | [lifecycle.md](references/lifecycle.md)                |
+| Integration     | [integration.md](references/integration.md)            |
+| Scripting       | [scripting.md](references/scripting.md)                |
+| Recipes         | [recipes.md](references/recipes.md)                    |
+| Troubleshooting | [troubleshooting.md](references/troubleshooting.md)    |
+| Validation      | [validation.md](references/validation.md)              |
 
 ---
 ## [1][EVENT_SELECTION]

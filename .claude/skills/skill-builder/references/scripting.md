@@ -3,6 +3,8 @@
 
 <br>
 
+**Sections:** [Criteria](#1criteria) | [Standards](#2standards) | [Python](#3python) | [TypeScript](#4typescript) | [Organization](#5organization)
+
 Scripts extend skill capabilities with executable automation. Required for: CLI tooling, exact reproducibility, tool orchestration.
 
 ---
@@ -42,7 +44,7 @@ Scripts extend skill capabilities with executable automation. Required for: CLI 
 **Density:**<br>
 Maximum functionality in minimum LOC. Single script addresses single concern. No wrapper abstractions.
 
-[REFERENCE] Script validation checklist: [→validation.md§5](./validation.md#5scripting)
+See [validation.md > Scripting](./validation.md#5scripting) for script validation checklist.
 
 ---
 ## [3][PYTHON]

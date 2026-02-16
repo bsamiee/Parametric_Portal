@@ -20,21 +20,27 @@ ${one-sentence-purpose}
 
 **Tasks:**
 1. Collect parameters — ${param-1}: `${options}`, ${param-n}: `${options}`
-2. Read [index.md](./index.md) — Reference file listing for navigation
-3. Read [${domain-1}.md](./references/${domain-1}.md) — ${domain-1-description}
-4. Read [${domain-n}.md](./references/${domain-n}.md) — ${domain-n-description}
-5. (scripting) Read [scripting.md](./references/scripting.md) — Automation standards
-6. (prose) Load `style-standards` skill — Voice, formatting, constraints
-7. Execute per ${workflow}:
-   - (${param-value-1}) ${action} — see [${workflow-1}.md](./references/workflows/${workflow-1}.md)
-   - (${param-value-n}) ${action} — see [${workflow-n}.md](./references/workflows/${workflow-n}.md)
-8. Validate — Quality gate; see §VALIDATION
+2. Read [${domain-1}.md](./references/${domain-1}.md) — ${domain-1-description}
+3. Read [${domain-n}.md](./references/${domain-n}.md) — ${domain-n-description}
+4. (scripting) Read [scripting.md](./references/scripting.md) — Automation standards
+5. (prose) Load `style-standards` skill — Voice, formatting, constraints
+6. Execute per ${workflow}:
+   - (${param-value-1}) ${action} — see [${workflow-1}.md](./references/${workflow-1}.md)
+   - (${param-value-n}) ${action} — see [${workflow-n}.md](./references/${workflow-n}.md)
+7. Validate — Quality gate; see VALIDATION
 
 **Dependencies:**
 - `${skill-name}` — ${purpose}
 - `${output-style}` — Sub-agent output format
 
-[REFERENCE]: [index.md](./index.md) — Complete file listing
+**References:**
+
+| Domain        | File                                                        |
+| ------------- | ----------------------------------------------------------- |
+| ${domain-1}   | [${domain-1}.md](references/${domain-1}.md)                  |
+| ${domain-n}   | [${domain-n}.md](references/${domain-n}.md)                  |
+| Scripting     | [scripting.md](references/scripting.md)                      |
+| Validation    | [validation.md](references/validation.md)                    |
 
 ---
 ## [1][${DOMAIN_1}]
@@ -95,4 +101,4 @@ scripts/ folder for external tool orchestration, artifact generation, validation
 - [ ] Style: `style-standards` constraints applied.
 - [ ] Quality: LOC within limits, content separation enforced.
 
-[REFERENCE] Operational checklist: [→validation.md](./references/validation.md)
+See [validation.md](./references/validation.md) for operational checklist.

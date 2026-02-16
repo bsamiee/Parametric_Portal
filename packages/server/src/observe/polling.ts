@@ -106,9 +106,9 @@ class PollingService extends Effect.Service<PollingService>()('server/Polling', 
         );
         const pollDlqSize = pollMetric({ fetch: _sumTenantMetric(() => database.jobDlq.countPending()), gauge: metrics.jobs.dlqSize, metric: 'jobs_dlq_size', spanName: 'polling.dlqSize', thresholds: _CONFIG.thresholds.dlqSize, warningMessage: 'DLQ size critical' });
         const pollJobQueueDepth = pollMetric({ fetch: _sumTenantMetric(() => database.jobs.countByStatuses('queued', 'processing')), gauge: metrics.jobs.queueDepth, metric: 'jobs_queue_depth', spanName: 'polling.jobQueueDepth', thresholds: _CONFIG.thresholds.jobQueueDepth, warningMessage: 'Job queue depth critical' });
-        const pollEventOutboxDepth = pollMetric({ fetch: database.outbox.count, gauge: metrics.events.outboxDepth, metric: 'events_outbox_depth', spanName: 'polling.eventOutboxDepth', thresholds: _CONFIG.thresholds.eventOutboxDepth, warningMessage: 'Event outbox depth critical' });
+        const pollEventOutboxDepth = pollMetric({ fetch: database.observability.outboxCount(), gauge: metrics.events.outboxDepth, metric: 'events_outbox_depth', spanName: 'polling.eventOutboxDepth', thresholds: _CONFIG.thresholds.eventOutboxDepth, warningMessage: 'Event outbox depth critical' });
         const pollIoStats = Effect.gen(function* () {
-            const rows = yield* database.monitoring.cacheRatio();
+            const rows = (yield* database.observability.stat('cacheRatio')) as readonly { hits: number; reads: number; writes: number }[];
             const zero = Number(_CONFIG.fallback.metric);
             const totalReads = rows.reduce<number>((sum, row) => sum + row.reads, zero);
             const totalHits = rows.reduce<number>((sum, row) => sum + row.hits, zero);

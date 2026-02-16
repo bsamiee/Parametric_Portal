@@ -1,214 +1,205 @@
 /** Doppler secrets management: typed, cached, auto-refreshing secret access. */
 import { createHash } from 'node:crypto';
-import { Config, Data, Duration, Effect, Metric, Option, Redacted, Ref, Schedule } from 'effect';
 import { DopplerSDK } from '@dopplerhq/node-sdk';
+import { Config, Data, Duration, Effect, Match, Metric, Option, Redacted, Ref, Schedule, Schema as S } from 'effect';
 import { MetricsService } from '../observe/metrics.ts';
+import { Resilience } from '../utils/resilience.ts';
 
-// --- [TYPES] -----------------------------------------------------------------
+// --- [SCHEMA] ----------------------------------------------------------------
 
-type HealthState = {
-    readonly consecutiveFailures: number;
-    readonly lastError: Option.Option<DopplerError>;
-    readonly lastRefreshAt: number;
-};
+const _Operation = S.Literal('auth', 'download', 'configLogs', 'refresh', 'getRequired');
+const _ErrorState = S.Struct({
+    _tag: S.Literal('DopplerError'),
+    cause: S.Unknown,
+    operation: _Operation,
+});
+const _HealthState = S.Struct({
+    consecutiveFailures: S.NonNegativeInt,
+    lastError: S.OptionFromSelf(_ErrorState),
+    lastRefreshAt: S.NonNegative,
+});
+
+// --- [CONSTANTS] -------------------------------------------------------------
+
+const _CONFIG = { refreshMs: 300_000 } as const;
 
 // --- [ERRORS] ----------------------------------------------------------------
 
 class DopplerError extends Data.TaggedError('DopplerError')<{
-    readonly operation: string;
+    readonly operation: typeof _Operation.Type;
     readonly cause: unknown;
 }> {}
+
+// --- [FUNCTIONS] -------------------------------------------------------------
+
+const _toSecretMap = (payload: Record<string, unknown>): ReadonlyMap<string, string> =>
+    new Map(Object.entries(payload).flatMap(([key, value]) => typeof value === 'string' ? [[key, value] as const] : []));
+const _hashEntries = (entries: ReadonlyMap<string, string>): string =>
+    createHash('sha256')
+        .update(JSON.stringify([...entries.entries()].sort(([left], [right]) => left.localeCompare(right))))
+        .digest('hex');
+const _network = <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, R> => effect.pipe(Effect.retry(Resilience.schedule('default')));
+const _trackRefreshDuration = <A, E, R>(metricsOpt: Option.Option<MetricsService>, effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, R> =>
+    Option.match(metricsOpt, {
+        onNone: () => effect,
+        onSome: (metrics) => effect.pipe(Metric.trackDuration(metrics.doppler.refreshDuration)),
+    });
 
 // --- [SERVICES] --------------------------------------------------------------
 
 class DopplerService extends Effect.Service<DopplerService>()('server/DopplerService', {
     scoped: Effect.gen(function* () {
-        const token = yield* Config.redacted('DOPPLER_TOKEN');
-        const project = yield* Config.string('DOPPLER_PROJECT');
-        const config = yield* Config.string('DOPPLER_CONFIG');
-        const refreshMs = yield* Config.integer('DOPPLER_REFRESH_MS').pipe(Config.withDefault(300_000));
-
-        const sdk = new DopplerSDK({ accessToken: Redacted.value(token) });
-
-        // [Task 7] Validate token before first download — clear startup diagnostics
-        const authInfo = yield* Effect.tryPromise({
-            catch: (cause) => new DopplerError({ cause, operation: 'auth' }),
-            try: () => sdk.auth.me(),
+        const settings = yield* Config.all({
+            config: Config.string('DOPPLER_CONFIG'),
+            project: Config.string('DOPPLER_PROJECT'),
+            refreshMs: Config.integer('DOPPLER_REFRESH_MS').pipe(Config.withDefault(_CONFIG.refreshMs)),
+            token: Config.redacted('DOPPLER_TOKEN'),
         });
-        yield* Effect.log('Doppler token validated', {
-            tokenType: authInfo.type_ ?? 'unknown',
-            workspace: authInfo.workplace?.name ?? 'unknown',
-        });
-
-        const fetchSecrets = Effect.tryPromise({
-            catch: (cause) => new DopplerError({ cause, operation: 'download' }),
-            try: () => sdk.secrets.download(project, config, { format: 'json' }),
-        });
-
-        const fetchLatestLogId = Effect.tryPromise({
-            catch: (cause) => new DopplerError({ cause, operation: 'configLogs' }),
-            try: () => sdk.configLogs.list(project, config, { perPage: 1 }),
-        }).pipe(
-            Effect.map((response) => Option.fromNullable(response.logs?.[0]?.id)),
-            // Fall back gracefully — optimization must not break the refresh
-            Effect.orElseSucceed(() => Option.none<string>()),
+        const sdk = new DopplerSDK({ accessToken: Redacted.value(settings.token) });
+        const metricsOpt = yield* Effect.serviceOption(MetricsService);
+        const sdkCall = <A>(operation: typeof _Operation.Type, run: () => Promise<A>): Effect.Effect<A, DopplerError> =>
+            _network(Effect.tryPromise({ catch: (cause) => new DopplerError({ cause, operation }), try: run }));
+        const fetchSecrets = sdkCall('download', () => sdk.secrets.download(settings.project, settings.config, { format: 'json' })).pipe(
+            Effect.map((payload) => payload as Record<string, unknown>),
+            Effect.map(_toSecretMap),
         );
-
-        const toMap = (response: Record<string, unknown>) =>
-            new Map(
-                Object.entries(response).flatMap(([key, value]) =>
-                    typeof value === 'string' ? [[key, value] as const] : [],
-                ),
-            );
-
-        const computeHash = (secrets: Record<string, unknown>) =>
-            Effect.sync(() => createHash('sha256').update(JSON.stringify(secrets)).digest('hex'));
-
+        const fetchLatestLogId = sdkCall('configLogs', () => sdk.configLogs.list(settings.project, settings.config, { perPage: 1 })).pipe(
+            Effect.map((response) => Option.fromNullable(response.logs?.[0]?.id)),
+            Effect.catchAll(() => Effect.succeed(Option.none<string>())),
+        );
+        yield* sdkCall('auth', () => sdk.auth.me()).pipe(
+            Effect.flatMap((authInfo) =>
+                Effect.log('Doppler token validated', {
+                    tokenType: authInfo.type_ ?? 'unknown',
+                    workspace: authInfo.workplace?.name ?? 'unknown',
+                }),
+            ),
+        );
         const cache = yield* Ref.make<ReadonlyMap<string, string>>(new Map());
         const secretsHash = yield* Ref.make('');
-        const lastLogId = yield* Ref.make<Option.Option<string>>(Option.none());
-        const healthState = yield* Ref.make<HealthState>({
+        const lastLogId = yield* Ref.make(Option.none<string>());
+        const healthState = yield* Ref.make<typeof _HealthState.Type>({
             consecutiveFailures: 0,
             lastError: Option.none(),
             lastRefreshAt: 0,
         });
-
-        // Initial fetch — MUST succeed or service fails to start
-        const initialSecrets = yield* fetchSecrets;
-        const initialMap = toMap(initialSecrets as Record<string, unknown>);
-        const initialHash = yield* computeHash(initialSecrets as Record<string, unknown>);
-        yield* Ref.set(cache, initialMap);
-        yield* Ref.set(secretsHash, initialHash);
-        yield* Ref.set(healthState, { consecutiveFailures: 0, lastError: Option.none(), lastRefreshAt: Date.now() });
-
-        // Seed the configLogs baseline
-        const initialLogId = yield* fetchLatestLogId;
-        yield* Ref.set(lastLogId, initialLogId);
-
-        // Background refresh on schedule (forked, fail-open)
-        const _refreshCore = Effect.fn('DopplerService.refresh')(function* () {
-            const metricsOpt = yield* Effect.serviceOption(MetricsService);
-
-            // [Task 6] Check configLogs for changes before full download
-            const storedLogId = yield* Ref.get(lastLogId);
-            const currentLogId = yield* fetchLatestLogId;
-            const logUnchanged = Option.isSome(storedLogId)
-                && Option.isSome(currentLogId)
-                && storedLogId.value === currentLogId.value;
-
-            yield* Effect.when(
-                Effect.log(`Doppler config unchanged (log: ${Option.getOrElse(currentLogId, () => 'none')}), skipping download`),
-                () => logUnchanged,
-            );
-
-            // Update stored log ID regardless
-            yield* Ref.set(lastLogId, currentLogId);
-
-            yield* Effect.unless(Effect.gen(function* () {
-                const secrets = yield* fetchSecrets;
-                const entries = toMap(secrets as Record<string, unknown>);
-                const newHash = yield* computeHash(secrets as Record<string, unknown>);
-                const oldHash = yield* Ref.get(secretsHash);
-
-                // [Task 5] Skip cache update when secrets unchanged
-                const hashUnchanged = newHash === oldHash;
-                yield* Effect.when(
-                    Effect.log('Doppler secrets unchanged, skipping cache update'),
-                    () => hashUnchanged,
-                );
-
-                yield* Effect.unless(Effect.gen(function* () {
-                    yield* Ref.set(cache, entries);
-                    yield* Ref.set(secretsHash, newHash);
-                    yield* Effect.log('Doppler secrets refreshed', { config, count: entries.size, project });
-                }), () => hashUnchanged);
-
-                // Update metrics gauge with current cache size
-                yield* Option.match(metricsOpt, {
-                    onNone: () => Effect.void,
-                    onSome: (metrics) => Metric.set(metrics.doppler.cacheSize, entries.size),
-                });
-            }), () => logUnchanged);
-
-            // Mark success
-            yield* Ref.set(healthState, { consecutiveFailures: 0, lastError: Option.none(), lastRefreshAt: Date.now() });
-
-            // Increment refresh counter
-            yield* Option.match(metricsOpt, {
-                onNone: () => Effect.void,
-                onSome: (metrics) => Metric.increment(metrics.doppler.refreshes),
-            });
-        });
-
-        const refresh = _refreshCore().pipe(
-            Effect.catchAll((error) =>
-                Effect.gen(function* () {
-                    yield* Effect.logWarning('Doppler refresh failed, serving stale', { error });
-                    const current = yield* Ref.get(healthState);
-                    yield* Ref.set(healthState, {
-                        consecutiveFailures: current.consecutiveFailures + 1,
-                        lastError: Option.some(error instanceof DopplerError ? error : new DopplerError({ cause: error, operation: 'refresh' })),
-                        lastRefreshAt: current.lastRefreshAt,
-                    });
-                    const metricsOpt = yield* Effect.serviceOption(MetricsService);
-                    yield* Option.match(metricsOpt, {
-                        onNone: () => Effect.void,
-                        onSome: (metrics) => Effect.all([
-                            Metric.increment(metrics.doppler.refreshes),
-                            Metric.increment(metrics.doppler.refreshFailures),
-                        ], { discard: true }),
-                    });
+        const markHealthy = Effect.sync(Date.now).pipe(
+            Effect.flatMap((now) =>
+                Ref.set(healthState, {
+                    consecutiveFailures: 0,
+                    lastError: Option.none(),
+                    lastRefreshAt: now,
                 }),
             ),
         );
-
+        const markFailed = (cause: unknown) =>
+            Effect.gen(function* () {
+                const current = yield* Ref.get(healthState);
+                const error = cause instanceof DopplerError ? cause : new DopplerError({ cause, operation: 'refresh' });
+                yield* Ref.set(healthState, {
+                    consecutiveFailures: current.consecutiveFailures + 1,
+                    lastError: Option.some(error),
+                    lastRefreshAt: current.lastRefreshAt,
+                });
+                yield* Effect.logWarning('Doppler refresh failed, serving stale', { error });
+                yield* Option.match(metricsOpt, {
+                    onNone: () => Effect.void,
+                    onSome: (metrics) => Effect.all([
+                        Metric.increment(metrics.doppler.refreshes),
+                        Metric.increment(metrics.doppler.refreshFailures),
+                    ], { discard: true }),
+                });
+            });
+        const initialEntries = yield* fetchSecrets;
+        yield* Ref.set(cache, initialEntries);
+        yield* Ref.set(secretsHash, _hashEntries(initialEntries));
+        yield* Ref.set(lastLogId, yield* fetchLatestLogId);
+        yield* markHealthy;
+        yield* Option.match(metricsOpt, {
+            onNone: () => Effect.void,
+            onSome: (metrics) => Metric.set(metrics.doppler.cacheSize, initialEntries.size),
+        });
+        const refreshCore = Effect.fn('DopplerService.refresh')(function* () {
+                const [storedLogId, currentLogId] = yield* Effect.all([Ref.get(lastLogId), fetchLatestLogId], { concurrency: 'unbounded' });
+                yield* Ref.set(lastLogId, currentLogId);
+                const logUnchanged = Option.match(storedLogId, {
+                    onNone: () => false,
+                    onSome: (stored) => Option.match(currentLogId, {
+                        onNone: () => false,
+                        onSome: (current) => stored === current,
+                    }),
+                });
+                yield* Match.value(logUnchanged).pipe(
+                    Match.when(true, () => Effect.log(`Doppler config unchanged (log: ${Option.getOrElse(currentLogId, () => 'none')}), skipping download`)),
+                    Match.when(false, () => Effect.void),
+                    Match.exhaustive,
+                );
+                const entries = yield* Match.value(logUnchanged).pipe(
+                    Match.when(true, () => Ref.get(cache)),
+                    Match.when(false, () => fetchSecrets.pipe(
+                        Effect.flatMap((nextEntries) =>
+                            Effect.all([Ref.get(secretsHash), Effect.succeed(_hashEntries(nextEntries))], { concurrency: 'unbounded' }).pipe(
+                                Effect.flatMap(([oldHash, newHash]) => Match.value(newHash === oldHash).pipe(
+                                    Match.when(true, () => Effect.log('Doppler secrets unchanged, skipping cache update')),
+                                    Match.when(false, () => Effect.all([
+                                        Ref.set(cache, nextEntries),
+                                        Ref.set(secretsHash, newHash),
+                                        Effect.log('Doppler secrets refreshed', { config: settings.config, count: nextEntries.size, project: settings.project }),
+                                    ], { discard: true })),
+                                    Match.exhaustive,
+                                )),
+                                Effect.as(nextEntries),
+                            ),
+                        ),
+                    )),
+                    Match.exhaustive,
+                );
+                yield* markHealthy;
+                yield* Option.match(metricsOpt, {
+                    onNone: () => Effect.void,
+                    onSome: (metrics) => Effect.all([
+                        Metric.set(metrics.doppler.cacheSize, entries.size),
+                        Metric.increment(metrics.doppler.refreshes),
+                    ], { discard: true }),
+                });
+            });
+        const refresh = _trackRefreshDuration(metricsOpt, refreshCore()).pipe(Effect.catchAll(markFailed));
         yield* refresh.pipe(
-            Effect.schedule(Schedule.fixed(Duration.millis(refreshMs))),
+            Effect.schedule(Schedule.fixed(Duration.millis(settings.refreshMs))),
             Effect.forkScoped,
         );
-
-        // [Task 4] Log on shutdown — placed after forkScoped so finalizer runs before fiber cancel
         yield* Effect.addFinalizer(() =>
             Ref.get(cache).pipe(
                 Effect.flatMap((secrets) =>
-                    Effect.log('DopplerService shutting down', { cacheSize: secrets.size, config, project }),
+                    Effect.log('DopplerService shutting down', {
+                        cacheSize: secrets.size,
+                        config: settings.config,
+                        project: settings.project,
+                    }),
                 ),
             ),
         );
-
-        yield* Effect.log('DopplerService initialized', { config, project, refreshMs });
-
-        // Instance methods (R=never)
-        const get = (name: string) =>
-            Ref.get(cache).pipe(Effect.map((secrets) => Option.fromNullable(secrets.get(name))));
-
-        const getRequired = (name: string) =>
-            Ref.get(cache).pipe(
-                Effect.map((secrets) => secrets.get(name)),
-                Effect.flatMap((value) =>
-                    value !== undefined
-                        ? Effect.succeed(value)
-                        : Effect.fail(new DopplerError({ cause: `Secret "${name}" not found`, operation: 'getRequired' })),
-                ),
-            );
-
+        yield* Effect.log('DopplerService initialized', {
+            config: settings.config,
+            project: settings.project,
+            refreshMs: settings.refreshMs,
+        });
+        const get = (name: string) => Ref.get(cache).pipe(Effect.map((secrets) => Option.fromNullable(secrets.get(name))));
+        const getRequired = (name: string) => get(name).pipe(
+            Effect.flatMap(Option.match({
+                onNone: () => Effect.fail(new DopplerError({ cause: `Secret "${name}" not found`, operation: 'getRequired' })),
+                onSome: Effect.succeed,
+            })),
+        );
         const getAll = Ref.get(cache);
-
         const health = () => Ref.get(healthState);
-
         return { get, getAll, getRequired, health } as const;
     }),
 }) {
-    static readonly get = (name: string) =>
-        DopplerService.pipe(Effect.flatMap((service) => service.get(name)));
-
-    static readonly getRequired = (name: string) =>
-        DopplerService.pipe(Effect.flatMap((service) => service.getRequired(name)));
-
+    static readonly get = (name: string) => DopplerService.pipe(Effect.flatMap((service) => service.get(name)));
+    static readonly getRequired = (name: string) => DopplerService.pipe(Effect.flatMap((service) => service.getRequired(name)));
     static readonly getAll = DopplerService.pipe(Effect.flatMap((service) => service.getAll));
-
-    static readonly health = () =>
-        DopplerService.pipe(Effect.flatMap((service) => service.health()));
+    static readonly health = () => DopplerService.pipe(Effect.flatMap((service) => service.health()));
 }
 
 // --- [EXPORT] ----------------------------------------------------------------

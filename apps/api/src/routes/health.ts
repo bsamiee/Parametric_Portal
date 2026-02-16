@@ -12,7 +12,7 @@ import { PollingService } from '@parametric-portal/server/observe/polling';
 import { Telemetry } from '@parametric-portal/server/observe/telemetry';
 import { CacheService } from '@parametric-portal/server/platform/cache';
 import { DopplerService } from '@parametric-portal/server/platform/doppler';
-import { Effect, Match, Option, pipe } from 'effect';
+import { Effect, Match, pipe } from 'effect';
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
@@ -24,7 +24,7 @@ const _readiness = (polling: PollingService) => pipe(
     Effect.all({
         cache: CacheService.health(),
         db: Client.healthDeep(),
-        doppler: DopplerService.health().pipe(Effect.orElseSucceed(() => ({ consecutiveFailures: 0, lastError: Option.none(), lastRefreshAt: 0 }))),
+        doppler: DopplerService.health(),
         pollingHealth: polling.refresh().pipe(Effect.andThen(polling.getHealth())),
         vectorConfig: Client.vector.getConfig().pipe(Effect.map((cfg) => cfg.length > 0), Effect.orElseSucceed(() => false)),
     }),

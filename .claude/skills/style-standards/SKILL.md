@@ -15,13 +15,12 @@ description: >-
 Govern file creation and modification in monorepo.
 
 **Tasks:**
-1. Read [index.md](./index.md) — Reference file listing for navigation
-2. Read [keywords.md](./references/keywords.md) — Canonical keyword list; all Markers use official terms
-3. (taxonomy) Read [taxonomy.md](./references/taxonomy.md) — Lexicon, references, stati definitions
-4. (voice) Read [voice.md](./references/voice.md) — Grammar, ordering, comments, constraints, naming, density
-5. (formatting) Read [formatting.md](./references/formatting.md) — Structure, typeset, spacing, examples
-6. Apply standards — Implement per domain Guidance and Best-Practices
-7. Validate — Quality gate; see §VALIDATION
+1. Read [keywords.md](./references/keywords.md) — Canonical keyword list; all Markers use official terms
+2. (taxonomy) Read [taxonomy.md](./references/taxonomy.md) — Lexicon, references, stati definitions
+3. (voice) Read [voice.md](./references/voice.md) — Grammar, ordering, comments, constraints, naming, density
+4. (formatting) Read [formatting.md](./references/formatting.md) — Structure, typeset, spacing, examples
+5. Apply standards — Implement per domain Guidance and Best-Practices
+6. Validate — Quality gate; see §VALIDATION
 
 **Scope:**
 - *Documentation:* Markdown structure, headers, lists, tables, Dictums, separators.
@@ -32,7 +31,15 @@ Govern file creation and modification in monorepo.
 - *[VOICE]* — Tone, grammar, comments, naming. Load for: imperative phrasing, headers, code naming.
 - *[FORMATTING]* — Layout, separators, spacing. Load for: header structure, dividers, whitespace rules.
 
-[REFERENCE]: [index.md](./index.md) — Reference file listing
+**References:**
+
+| Domain     | File                                           |
+| ---------- | ---------------------------------------------- |
+| Keywords   | [keywords.md](references/keywords.md)          |
+| Taxonomy   | [taxonomy.md](references/taxonomy.md)          |
+| Voice      | [voice.md](references/voice.md)                |
+| Formatting | [formatting.md](references/formatting.md)      |
+| Validation | [validation.md](references/validation.md)      |
 
 ---
 ## [1][TAXONOMY]

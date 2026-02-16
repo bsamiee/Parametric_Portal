@@ -22,7 +22,6 @@
         "nx:typecheck": "nx run-many -t typecheck",
         "prepare": "lefthook install",
         "quality": "pnpm exec nx run-many -t typecheck,check,infra:lint && knip && sherif",
-        "check:ts-standards": "bash ./.claude/skills/ts-standards/scripts/validate-ts-standards.sh --mode check",
         "quality:affected": "pnpm exec nx affected -t typecheck,check,infra:lint --base=origin/main && knip && sherif",
         "reset": "pnpm clean && pnpm install && pnpm nx:build:libs",
         "sonar": "pnpm nx affected -t test -- --coverage && npx @sonar/scan",
@@ -57,10 +56,10 @@
         "@radix-ui/react-separator": "catalog:",
         "@radix-ui/react-slot": "catalog:",
         "@rollup/plugin-typescript": "catalog:",
+        "@sonar/scan": "catalog:",
         "@stryker-mutator/core": "catalog:",
         "@stryker-mutator/typescript-checker": "catalog:",
         "@stryker-mutator/vitest-runner": "catalog:",
-        "@sonar/scan": "catalog:",
         "@swc-node/register": "catalog:",
         "@swc/core": "catalog:",
         "@tailwindcss/vite": "catalog:",
@@ -144,7 +143,7 @@
             }
         }
     },
-    "packageManager": "pnpm@10.28.2",
+    "packageManager": "pnpm@10.29.3",
     "pnpm": {
         "overrides": {
             "jiti": "2.6.1",

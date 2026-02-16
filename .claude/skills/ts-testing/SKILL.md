@@ -18,14 +18,25 @@ description: >-
 Generate dense, law-driven test suites. Pure transformations tested via algebraic laws; effectful boundaries tested via properties. Density over quantity -- few powerful tests, not many trivial ones.
 
 **Tasks:**
-1. Read [index.md](./index.md) -- reference file listing.
-2. Classify test category via [section 4](#4category_routing).
-3. For unit PBT: read [->laws.md](./references/laws.md), [->density.md](./references/density.md).
-4. For integration/E2E: read [->categories.md](./references/categories.md).
-5. Author spec following workflow in [section 1](#1workflow).
-6. Validate against [section 8](#8validation) and [->validation.md](./references/validation.md).
+1. Classify test category via [section 4](#4category_routing).
+2. For unit PBT: read [->laws.md](./references/laws.md), [->density.md](./references/density.md).
+3. For integration/E2E: read [->categories.md](./references/categories.md).
+4. Author spec following workflow in [section 1](#1workflow).
+5. Validate against [section 8](#8validation) and [->validation.md](./references/validation.md).
 
 **Versions:** Vitest (inline projects), fast-check (PBT + model-based), @effect/vitest (Effect bridge), Stryker (mutation), testcontainers (integration), Playwright (E2E).
+
+**References:**
+
+| Domain     | File                                                                   |
+| ---------- | ---------------------------------------------------------------------- |
+| Laws       | [laws.md](references/laws.md)                                          |
+| Density    | [density.md](references/density.md)                                    |
+| Categories | [categories.md](references/categories.md)                              |
+| Guardrails | [guardrails.md](references/guardrails.md)                              |
+| Validation | [validation.md](references/validation.md)                              |
+| Template   | [unit-pbt.spec.template.md](templates/unit-pbt.spec.template.md)       |
+| Template   | [integration.spec.template.md](templates/integration.spec.template.md) |
 
 ---
 ## [1][WORKFLOW]

@@ -16,15 +16,15 @@ import { ClusterService } from '../cluster.ts';
 // --- [CONSTANTS] -------------------------------------------------------------
 
 const _JOBS = {
-    'purge-api-keys':       { cron: '0 3 * * 0',    days: 365,  repo: 'apiKeys' as const,       scope: 'tenant' as const, strategy: 'db-only' as const },
-    'purge-assets':         { cron: '0 */6 * * *',  days: 30,   repo: 'assets' as const,        scope: 'tenant' as const, strategy: 'db-and-s3' as const },
-    'purge-event-journal':  { cron: '0 2 * * *',    days: 30,   repo: 'journal' as const,  scope: 'global' as const, strategy: 'db-only' as const },
-    'purge-job-dlq':        { cron: '0 2 * * *',    days: 30,   repo: 'jobDlq' as const,        scope: 'tenant' as const, strategy: 'db-only' as const },
-    'purge-kv-store':       { cron: '0 0 * * 0',    days: 90,   repo: 'kvStore' as const,       scope: 'global' as const, strategy: 'db-only' as const },
-    'purge-mfa-secrets':    { cron: '0 4 * * 0',    days: 90,   repo: 'mfaSecrets' as const,    scope: 'tenant' as const, strategy: 'db-only' as const },
-    'purge-oauth-accounts': { cron: '0 5 * * 0',    days: 90,   repo: 'oauthAccounts' as const, scope: 'tenant' as const, strategy: 'db-only' as const },
-    'purge-sessions':       { cron: '0 1 * * *',    days: 30,   repo: 'sessions' as const,      scope: 'tenant' as const, strategy: 'db-only' as const },
-    'purge-tenant-data':    { cron: null as unknown as string, days: 0, repo: 'apps' as const, scope: 'manual' as const, strategy: 'cascade-tenant' as const },
+    'purge-api-keys':       { cron: '0 3 * * 0',    days: 365,  repo: 'apiKeys' as const,       scope: 'tenant' as const, strategy: 'db-only' as const        },
+    'purge-assets':         { cron: '0 */6 * * *',  days: 30,   repo: 'assets' as const,        scope: 'tenant' as const, strategy: 'db-and-s3' as const      },
+    'purge-event-journal':  { cron: '0 2 * * *',    days: 30,   repo: 'journal' as const,       scope: 'global' as const, strategy: 'db-only' as const        },
+    'purge-job-dlq':        { cron: '0 2 * * *',    days: 30,   repo: 'jobDlq' as const,        scope: 'tenant' as const, strategy: 'db-only' as const        },
+    'purge-kv-store':       { cron: '0 0 * * 0',    days: 90,   repo: 'kvStore' as const,       scope: 'global' as const, strategy: 'db-only' as const        },
+    'purge-mfa-secrets':    { cron: '0 4 * * 0',    days: 90,   repo: 'mfaSecrets' as const,    scope: 'tenant' as const, strategy: 'db-only' as const        },
+    'purge-oauth-accounts': { cron: '0 5 * * 0',    days: 90,   repo: 'oauthAccounts' as const, scope: 'tenant' as const, strategy: 'db-only' as const        },
+    'purge-sessions':       { cron: '0 1 * * *',    days: 30,   repo: 'sessions' as const,      scope: 'tenant' as const, strategy: 'db-only' as const        },
+    'purge-tenant-data':    { cron: null as unknown as string,  days: 0, repo: 'apps' as const, scope: 'manual' as const, strategy: 'cascade-tenant' as const },
 } as const;
 const _envKey = (name: string) => `PURGE_${name.replace('purge-', '').replaceAll('-', '_').toUpperCase()}`;
 const _config = Config.all({
@@ -50,7 +50,7 @@ const _purgeDbOnly = (database: DatabaseService.Type, repo: typeof _JOBS[keyof t
         Match.when('apiKeys', () => database.apiKeys.purge(days)),
         Match.when('apps', () => Effect.succeed(0)),
         Match.when('assets', () => database.assets.purge(days)),
-        Match.when('journal', () => database.journal.purge(days)),
+        Match.when('journal', () => database.observability.journalPurge(days)),
         Match.when('jobDlq', () => database.jobDlq.purge(days)),
         Match.when('kvStore', () => database.kvStore.purge(days)),
         Match.when('mfaSecrets', () => database.mfaSecrets.purge(days)),
@@ -72,7 +72,7 @@ class PurgeService extends Effect.Service<PurgeService>()('server/Purge', {
             const tenantId = yield* Context.Request.currentTenantId;
             const assets = yield* database.assets.find([]);
             const s3 = yield* _batchRemoveS3(assets, storage, s3Config, 'cascade');
-            const dbPurged = yield* database.system.tenantPurge(tenantId).pipe(Effect.orElseSucceed(() => 0));
+            const dbPurged = yield* database.observability.tenantPurge(tenantId).pipe(Effect.orElseSucceed(() => 0));
             return { dbPurged, s3Deleted: s3.deleted, s3Failed: s3.failed };
         }),
         'db-and-s3': (database: DatabaseService.Type, storage: typeof StorageService.Service, days: number, _repo: PurgeService.PurgeableRepo, s3Config: { readonly batchSize: number; readonly concurrency: number }) => Effect.gen(function* () {

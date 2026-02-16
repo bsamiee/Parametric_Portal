@@ -44,7 +44,20 @@ Mermaid v11+ diagram creation with frontmatter YAML, ELK layout, Dracula palette
 2. Read [→styling.md](./references/styling.md): Theme, classDef, palette.
 3. Select diagram category per §2 table, load corresponding syntax reference.
 
-[REFERENCE]: [→index.md](./references/index.md) — Complete file listing.
+**References:**
+
+| Domain        | File                                                                   |
+| ------------- | ---------------------------------------------------------------------- |
+| Configuration | [global-config.md](references/global-config.md)                        |
+| Styling       | [styling.md](references/styling.md)                                    |
+| Validation    | [validation.md](references/validation.md)                              |
+| Graph         | [graph.md](references/graph.md)                                        |
+| Interaction   | [interaction.md](references/interaction.md)                            |
+| Modeling      | [modeling.md](references/modeling.md)                                  |
+| Charts        | [charts.md](references/charts.md)                                      |
+| Architecture  | [architecture.md](references/architecture.md)                          |
+| Template      | [architecture-beta.template.md](templates/architecture-beta.template.md) |
+| Template      | [c4-container.template.md](templates/c4-container.template.md)         |
 
 **Guidance:**
 - `Config First` — Frontmatter YAML must precede diagram declaration. Mermaid parses config before nodes.

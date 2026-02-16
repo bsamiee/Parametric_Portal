@@ -25,7 +25,19 @@ Generate valid n8n workflow JSON.
 6. Generate JSON — Apply template from [workflow.template.md](./templates/workflow.template.md)
 7. Validate — Run `uv run .claude/skills/n8n-builder/scripts/validate-workflow.py`
 
-[REFERENCE]: [index.md](./index.md) — File listing.
+**References:**
+
+| Domain       | File                                                       |
+| ------------ | ---------------------------------------------------------- |
+| Schema       | [schema.md](references/schema.md)                         |
+| Nodes        | [nodes.md](references/nodes.md)                            |
+| Connections  | [connections.md](references/connections.md)                 |
+| Expressions  | [expressions.md](references/expressions.md)                |
+| Integrations | [integrations.md](references/integrations.md)              |
+| RAG          | [rag.md](references/rag.md)                                |
+| Validation   | [validation.md](references/validation.md)                  |
+| Template     | [workflow.template.md](templates/workflow.template.md)     |
+| Script       | [validate-workflow.py](scripts/validate-workflow.py)       |
 
 ---
 ## [0][N8N_2.0]

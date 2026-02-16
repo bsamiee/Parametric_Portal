@@ -3,6 +3,8 @@
 
 <br>
 
+**Sections:** [Limits](#1limits) | [Unlocks](#2unlocks) | [LOC Optimization](#3loc_optimization) | [Content Separation](#4content_separation)
+
 [IMPORTANT] Depth prevents bloat through hard caps. Each level adds +50 LOC to SKILL.md, +25 LOC to reference files (cumulative).
 
 ---
@@ -19,7 +21,7 @@
 
 [CRITICAL] Exceeding limits requires refactoring, not justification. No exceptions.
 
-[REFERENCE] File count limit: Max 7 files in references/ — see [→structure.md§2](./structure.md#2folder_purpose)
+See [structure.md > Folder Purpose](./structure.md#2folder_purpose) for file count limit (max 7 in references/).
 
 ---
 ## [2][UNLOCKS]
@@ -116,4 +118,4 @@ All domain sections include Guidance and Best-Practices. Depth scales content de
 
 [CRITICAL] Even simple skills without references: sections must be high-impact, crafted with care. No boilerplate. Every item earns its LOC.
 
-[REFERENCE] Depth validation checklist: [→validation.md§4](./validation.md#4depth)
+See [validation.md > Depth](./validation.md#4depth) for depth validation checklist.
