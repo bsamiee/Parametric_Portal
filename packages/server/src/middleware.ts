@@ -237,30 +237,72 @@ class Middleware extends HttpApiMiddleware.Tag<Middleware>()('server/Middleware'
             ),
         );
     static readonly guarded = <R extends keyof typeof PolicyService.Catalog, A extends (typeof PolicyService.Catalog)[R][number], B, E, Deps>(
-        resource: R, action: A, preset: 'api' | 'mutation' | 'realtime', effect: Effect.Effect<B, E, Deps>,
-    ) => CacheService.rateLimit(preset, Middleware.permission(resource, action).pipe(
-        Effect.andThen(preset === 'mutation'
-            ? HttpServerRequest.HttpServerRequest.pipe(
-                Effect.flatMap((req) => pipe(
-                    Headers.get(req.headers, Context.Request.Headers.idempotencyKey),
-                    Option.match({
-                        onNone: () => effect,
-                        onSome: (key) => _idempotent(key, resource, action, effect),
-                    }),
-                )),
-            )
-            : effect
-        ),
-    ));
-    static readonly _makeAuthLayer = (
-        sessionLookup: (hash: Hex64) => Effect.Effect<Option.Option<Context.Request.Session>, unknown>,
-        apiKeyLookup: (hash: Hex64) => Effect.Effect<Option.Option<{ readonly id: string; readonly userId: string }>, unknown>,) =>
+        resource: R,
+        action: A,
+        effect: Effect.Effect<B, E, Deps>,
+        options: { readonly mapTo?: string; readonly preset?: 'api' | 'mutation' | 'realtime'; readonly span?: string } = {},
+    ): Effect.Effect<B, HttpError.Auth | HttpError.Forbidden | HttpError.Internal | HttpError.RateLimit, unknown> =>
+        CacheService.rateLimit(options.preset ?? 'api', Middleware.permission(resource, action).pipe(
+            Effect.andThen(
+                Match.value(options.preset ?? 'api').pipe(
+                    Match.when('mutation', () => HttpServerRequest.HttpServerRequest.pipe(
+                        Effect.flatMap((req) => pipe(
+                            Headers.get(req.headers, Context.Request.Headers.idempotencyKey),
+                            Option.match({
+                                onNone: () => effect,
+                                onSome: (key) => _idempotent(key, resource, action, effect),
+                            }),
+                        )),
+                    )),
+                    Match.orElse(() => effect),
+                ),
+            ),
+            HttpError.mapTo(options.mapTo ?? `${String(resource)}.${String(action)} failed`),
+            Telemetry.span(options.span ?? `${String(resource)}.${String(action)}`),
+        ));
+    static readonly resource = <R extends keyof typeof PolicyService.Catalog>(resource: R) => ({
+        api: <A extends (typeof PolicyService.Catalog)[R][number], B, E, Deps>(
+            action: A,
+            effect: Effect.Effect<B, E, Deps>,
+            options?: { readonly mapTo?: string; readonly span?: string },
+        ) => Middleware.guarded(resource, action, effect, options),
+        mutation: <A extends (typeof PolicyService.Catalog)[R][number], B, E, Deps>(
+            action: A,
+            effect: Effect.Effect<B, E, Deps>,
+            options?: { readonly mapTo?: string; readonly span?: string },
+        ) => Middleware.guarded(resource, action, effect, { ...options, preset: 'mutation' }),
+        realtime: <A extends (typeof PolicyService.Catalog)[R][number], B, E, Deps>(
+            action: A,
+            effect: Effect.Effect<B, E, Deps>,
+            options?: { readonly mapTo?: string; readonly span?: string },
+        ) => Middleware.guarded(resource, action, effect, { ...options, preset: 'realtime' }),
+    } as const);
+    static readonly pipeline = (database: Parameters<typeof _makeRequestContext>[0], options?: { readonly hsts?: Parameters<typeof _security>[0] }) =>
+        (app: HttpApp.Default) => app.pipe(
+            _trace,
+            _makeRequestContext(database),
+            _security(options?.hsts),
+            HttpMiddleware.make((app) => Effect.timed(app).pipe(Effect.map(([duration, response]) => HttpServerResponse.setHeader(response, 'server-timing', `total;dur=${Duration.toMillis(duration)}`)))),
+            MetricsService.middleware,
+        );
+    static readonly layer = (config: {
+        readonly sessionLookup: (hash: Hex64) => Effect.Effect<Option.Option<{
+            readonly appId: string;
+            readonly id: string;
+            readonly kind: 'apiKey' | 'session';
+            readonly mfaEnabled: boolean;
+            readonly userId: string;
+            readonly verifiedAt: Option.Option<Date>;
+        }>, unknown>;
+        readonly apiKeyLookup: (hash: Hex64) => Effect.Effect<Option.Option<{ readonly id: string; readonly userId: string }>, unknown>;
+        readonly cors?: ReadonlyArray<string>;
+    }) => Layer.merge(
         Layer.effect(this, Effect.map(Effect.all([MetricsService, AuditService, SqlClient.SqlClient]), ([metrics, audit, sqlClient]) => Middleware.of({
             bearer: Effect.fn(function* (token: Redacted.Redacted<string>) {
                 const tenantId = yield* Context.Request.currentTenantId;
                 const hash = yield* Crypto.hmac(tenantId, Redacted.value(token));
                 yield* Metric.increment(metrics.auth.session.lookups);
-                const sessionOpt = yield* Context.Request.within(tenantId, sessionLookup(hash)).pipe(
+                const sessionOpt = yield* Context.Request.within(tenantId, config.sessionLookup(hash)).pipe(
                     Effect.provideService(SqlClient.SqlClient, sqlClient),
                     Effect.catchAll((error) =>
                         Effect.logError('Session lookup failed', { error: String(error) }).pipe(
@@ -279,7 +321,7 @@ class Middleware extends HttpApiMiddleware.Tag<Middleware>()('server/Middleware'
                 const tenantId = yield* Context.Request.currentTenantId;
                 const hash = yield* Crypto.hmac(tenantId, Redacted.value(token));
                 yield* Metric.increment(metrics.auth.apiKey.lookups);
-                const keyOpt = yield* Context.Request.within(tenantId, apiKeyLookup(hash)).pipe(
+                const keyOpt = yield* Context.Request.within(tenantId, config.apiKeyLookup(hash)).pipe(
                     Effect.provideService(SqlClient.SqlClient, sqlClient),
                     Effect.catchAll((error) =>
                         Effect.logError('API key lookup failed', { error: String(error) }).pipe(
@@ -292,21 +334,7 @@ class Middleware extends HttpApiMiddleware.Tag<Middleware>()('server/Middleware'
                 );
                 yield* Context.Request.update({ session: Option.some({ appId: tenantId, id: key.id, kind: 'apiKey', mfaEnabled: false, userId: key.userId, verifiedAt: Option.none() }) }).pipe(Effect.tap(constant(Metric.increment(metrics.auth.apiKey.hits))));
             }),
-        })));
-    static readonly pipeline = (database: Parameters<typeof _makeRequestContext>[0], options?: { readonly hsts?: Parameters<typeof _security>[0] }) =>
-        (app: HttpApp.Default) => app.pipe(
-            _trace,
-            _makeRequestContext(database),
-            _security(options?.hsts),
-            HttpMiddleware.make((app) => Effect.timed(app).pipe(Effect.map(([duration, response]) => HttpServerResponse.setHeader(response, 'server-timing', `total;dur=${Duration.toMillis(duration)}`)))),
-            MetricsService.middleware,
-        );
-    static readonly layer = (config: {
-        readonly sessionLookup: Middleware.SessionLookup;
-        readonly apiKeyLookup: Middleware.ApiKeyLookup;
-        readonly cors?: ReadonlyArray<string>;
-    }) => Layer.merge(
-        Middleware._makeAuthLayer(config.sessionLookup, config.apiKeyLookup),
+        }))),
         pipe((config.cors ?? _CONFIG.cors.allowedOrigins).map((o) => o.trim()).filter(Boolean), (list) => HttpApiBuilder.middlewareCors({ ..._CONFIG.cors, allowedOrigins: list, credentials: !list.includes('*') && _CONFIG.cors.credentials })),
     );
 }
@@ -314,8 +342,8 @@ class Middleware extends HttpApiMiddleware.Tag<Middleware>()('server/Middleware'
 // --- [NAMESPACE] -------------------------------------------------------------
 
 namespace Middleware {
-    export type SessionLookup = Parameters<typeof Middleware._makeAuthLayer>[0];
-    export type ApiKeyLookup =  Parameters<typeof Middleware._makeAuthLayer>[1];
+    export type SessionLookup = Parameters<typeof Middleware.layer>[0]['sessionLookup'];
+    export type ApiKeyLookup =  Parameters<typeof Middleware.layer>[0]['apiKeyLookup'];
 }
 
 // --- [EXPORT] ----------------------------------------------------------------

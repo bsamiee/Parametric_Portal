@@ -18,20 +18,16 @@ class StorageService extends Effect.Service<StorageService>()('server/Storage', 
             Match.when(Predicate.isRecord, (record) => pipe(Record.get(record as Record<string, unknown>, 'size'), Option.filter(Predicate.isNumber), Option.match({ onNone: constant({}), onSome: (size) => ({ size }) }))),
             Match.orElse(constant({})),
         );
-        const _traced = <O>(name: string, op: Effect.Effect<O, unknown>, event: string, details: Record<string, unknown>, subjectId: string) =>
-            pipe(op, Effect.tap((result) => audit.log(event, { details: { ...details, ..._sizeOf(result) }, subjectId })), Telemetry.span(`storage.domain.${name}`, { metrics: false }));
-        function put(input: StorageAdapter.PutInput): Effect.Effect<StorageAdapter.PutResult, unknown>;
-        function put(input: readonly StorageAdapter.PutInput[]): Effect.Effect<readonly StorageAdapter.PutResult[], unknown>;
-        function put(input: StorageAdapter.PutInput | readonly StorageAdapter.PutInput[]): Effect.Effect<StorageAdapter.PutResult | readonly StorageAdapter.PutResult[], unknown> {
-            return Match.value(input).pipe(
-                Match.when((value: StorageAdapter.PutInput | readonly StorageAdapter.PutInput[]): value is readonly StorageAdapter.PutInput[] => Array.isArray(value), (items) => pipe(
-                    storage.put(items),
+        const _traced = <O>(name: string, op: Effect.Effect<O, unknown>, event: string, details: Record<string, unknown>, subjectId: string) => pipe(op, Effect.tap((result) => audit.log(event, { details: { ...details, ..._sizeOf(result) }, subjectId })), Telemetry.span(`storage.domain.${name}`, { metrics: false }));
+        const put = (input: { readonly key: string; readonly body: Uint8Array | string; readonly contentType?: string; readonly metadata?: Record<string, string> } | readonly { readonly key: string; readonly body: Uint8Array | string; readonly contentType?: string; readonly metadata?: Record<string, string> }[]) =>
+            Match.value(input).pipe(
+                Match.when((value: { readonly key: string; readonly body: Uint8Array | string; readonly contentType?: string; readonly metadata?: Record<string, string> } | readonly { readonly key: string; readonly body: Uint8Array | string; readonly contentType?: string; readonly metadata?: Record<string, string> }[]): value is readonly { readonly key: string; readonly body: Uint8Array | string; readonly contentType?: string; readonly metadata?: Record<string, string> }[] => Array.isArray(value), (items) => pipe(
+                    storage.put(items) as Effect.Effect<readonly { readonly key: string; readonly etag: string; readonly size: number }[], unknown>,
                     Effect.tap((results) => audit.log('Storage.upload', { details: { count: items.length, keys: pipe(items, A.map(Struct.get('key'))), totalSize: pipe(results, A.map(Struct.get('size')), N.sumAll) }, subjectId: pipe(A.head(items), Option.map(Struct.get('key')), Option.getOrUndefined) })),
                     Telemetry.span('storage.domain.put.batch', { metrics: false }),
                 )),
-                Match.orElse((item) => _traced('put', storage.put(item), 'Storage.upload', { contentType: item.contentType, key: item.key }, item.key)),
+                Match.orElse((item) => _traced('put', storage.put(item) as Effect.Effect<{ readonly key: string; readonly etag: string; readonly size: number }, unknown>, 'Storage.upload', { contentType: item.contentType, key: item.key }, item.key)),
             );
-        }
         function remove(key: string): Effect.Effect<void, unknown>;
         function remove(keys: readonly string[]): Effect.Effect<void, unknown>;
         function remove(keys: string | readonly string[]) {
@@ -40,18 +36,15 @@ class StorageService extends Effect.Service<StorageService>()('server/Storage', 
                 Match.orElse((item) => _traced('remove', storage.remove(item), 'Storage.delete', { key: item }, item)),
             );
         }
-        function copy(input: StorageAdapter.CopyInput): Effect.Effect<StorageAdapter.CopyResult, unknown>;
-        function copy(input: readonly StorageAdapter.CopyInput[]): Effect.Effect<readonly StorageAdapter.CopyResult[], unknown>;
-        function copy(input: StorageAdapter.CopyInput | readonly StorageAdapter.CopyInput[]): Effect.Effect<StorageAdapter.CopyResult | readonly StorageAdapter.CopyResult[], unknown> {
-            return Match.value(input).pipe(
-                Match.when(Array.isArray as (value: StorageAdapter.CopyInput | readonly StorageAdapter.CopyInput[]) => value is readonly StorageAdapter.CopyInput[], (items) => pipe(
-                    storage.copy(items),
+        const copy = (input: { readonly sourceKey: string; readonly destKey: string; readonly metadata?: Record<string, string> } | readonly { readonly sourceKey: string; readonly destKey: string; readonly metadata?: Record<string, string> }[]) =>
+            Match.value(input).pipe(
+                Match.when((value: { readonly sourceKey: string; readonly destKey: string; readonly metadata?: Record<string, string> } | readonly { readonly sourceKey: string; readonly destKey: string; readonly metadata?: Record<string, string> }[]): value is readonly { readonly sourceKey: string; readonly destKey: string; readonly metadata?: Record<string, string> }[] => Array.isArray(value), (items) => pipe(
+                    storage.copy(items) as Effect.Effect<readonly { readonly sourceKey: string; readonly destKey: string; readonly etag: string }[], unknown>,
                     Effect.tap(constant(audit.log('Storage.copy', { details: { copies: pipe(items, A.map((item) => ({ dest: item.destKey, source: item.sourceKey }))), count: items.length }, subjectId: pipe(A.head(items), Option.map(Struct.get('destKey')), Option.getOrUndefined) }))),
                     Telemetry.span('storage.domain.copy.batch', { metrics: false }),
                 )),
-                Match.orElse((item) => _traced('copy', storage.copy(item), 'Storage.copy', { destKey: item.destKey, sourceKey: item.sourceKey }, item.destKey)),
+                Match.orElse((item) => _traced('copy', storage.copy(item) as Effect.Effect<{ readonly sourceKey: string; readonly destKey: string; readonly etag: string }, unknown>, 'Storage.copy', { destKey: item.destKey, sourceKey: item.sourceKey }, item.destKey)),
             );
-        }
         const putStream = (input: { key: string; stream: Stream.Stream<Uint8Array, unknown>; contentType?: string; metadata?: Record<string, string>; partSizeBytes?: number }) =>
             pipe(
                 storage.putStream(input),

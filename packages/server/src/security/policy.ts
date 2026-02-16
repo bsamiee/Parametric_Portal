@@ -76,9 +76,7 @@ class PolicyService extends Effect.Service<PolicyService>()('server/Policy', {
             yield* Effect.filterOrFail(Effect.succeed(session), () => !(matches(rules.interactive) && session.kind !== 'session'), () => HttpError.Forbidden.of('Interactive session required'));
             yield* Effect.when(Effect.fail(HttpError.Forbidden.of('MFA enrollment required')), () => matches(rules.mfa) && !session.mfaEnabled);
             yield* Effect.when(Effect.fail(HttpError.Forbidden.of('MFA verification required')), () => matches(rules.mfa) && session.mfaEnabled && Option.isNone(session.verifiedAt));
-            const user = yield* database.users.one([{ field: 'id', value: session.userId }]).pipe(
-                Effect.flatMap(Option.match({ onNone: () => Effect.fail(HttpError.Forbidden.of('User not found')), onSome: Effect.succeed })),
-            );
+            const user = yield* database.users.one([{ field: 'id', value: session.userId }]).pipe(Effect.flatMap(Option.match({ onNone: () => Effect.fail(HttpError.Forbidden.of('User not found')), onSome: Effect.succeed })),);
             yield* Effect.filterOrFail(
                 Effect.succeed(user),
                 (candidate) => Option.isNone(candidate.deletedAt) && candidate.status === 'active',

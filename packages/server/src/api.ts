@@ -16,7 +16,10 @@ import { Middleware } from './middleware.ts';
 
 // --- [SCHEMA] ----------------------------------------------------------------
 
-const _PaginationBase = S.Struct({ cursor: S.optional(HttpApiSchema.param('cursor', S.String)), limit: S.optionalWith(HttpApiSchema.param('limit', S.NumberFromString.pipe(S.int(), S.between(1, 100))), { default: () => 20 }) });
+const _CursorLimitQuery = S.Struct({
+    cursor: S.optional(HttpApiSchema.param('cursor', S.String)),
+    limit: S.optionalWith(HttpApiSchema.param('limit', S.NumberFromString.pipe(S.int(), S.between(1, 100))), { default: () => 20 }),
+});
 const _Success = S.Struct({ success: S.Literal(true) });
 const _DbObservabilitySectionName = S.Literal('io', 'activity', 'storage', 'partitions');
 const _DbObservabilityPayload = S.Struct({
@@ -39,21 +42,24 @@ const KeysetResponse = <T extends S.Schema.Any>(itemSchema: T) => S.Struct({
     items: S.Array(itemSchema).annotations({ description: 'Page of results' }),
     total: S.Int.annotations({ description: 'Total count of matching items' }),
 }).annotations({ description: 'Cursor-based pagination wrapper', title: 'KeysetResponse' });
-const TemporalQuery = S.extend(_PaginationBase, S.Struct({
+const _TemporalWindowQuery = S.extend(_CursorLimitQuery, S.Struct({
     after: S.optional(HttpApiSchema.param('after', S.DateFromString)),
     before: S.optional(HttpApiSchema.param('before', S.DateFromString)),
 }));
-const Query = S.extend(TemporalQuery, S.Struct({
+const _PermissionTuple = S.Struct({
+    action: Permission.fields.action,
+    resource: Permission.fields.resource,
+    role: Permission.fields.role,
+});
+const Query = S.extend(_TemporalWindowQuery, S.Struct({
     includeDiff: S.optional(HttpApiSchema.param('includeDiff', S.BooleanFromString)),
     operation: S.optional(HttpApiSchema.param('operation', AuditOperationSchema)),
 }));
-const TransferQuery = S.Struct({
-    after: S.optionalWith(HttpApiSchema.param('after',   S.DateFromString), { as: 'Option' }),
-    before: S.optionalWith(HttpApiSchema.param('before', S.DateFromString), { as: 'Option' }),
+const TransferQuery = S.extend(_TemporalWindowQuery, S.Struct({
     dryRun: S.optionalWith(HttpApiSchema.param('dryRun', S.BooleanFromString), { as: 'Option' }),
     format: S.optionalWith(HttpApiSchema.param('format', S.String), { default: () => 'ndjson' }),
     typeSlug: S.optionalWith(HttpApiSchema.param('type', S.NonEmptyTrimmedString), { as: 'Option' }),
-});
+}));
 const TransferResult = S.Struct({
     count: S.optional(S.Int),
     data: S.optional(S.String),
@@ -333,7 +339,7 @@ const _UsersGroup = HttpApiGroup.make('users')
             .annotate(OpenApi.Summary, 'Update notification preferences'),
     )
     .add(HttpApiEndpoint.get('listNotifications', '/me/notifications')
-            .setUrlParams(TemporalQuery)
+            .setUrlParams(_TemporalWindowQuery)
             .addSuccess(KeysetResponse(Notification.json))
             .annotate(OpenApi.Summary, 'List own notifications'),
     )
@@ -394,7 +400,7 @@ const _SearchGroup = HttpApiGroup.make('search')
     .addError(HttpError.Internal)
     .addError(HttpError.RateLimit)
     .add(HttpApiEndpoint.get('search', '/')
-            .setUrlParams(S.extend(_PaginationBase, S.Struct({
+            .setUrlParams(S.extend(_CursorLimitQuery, S.Struct({
                 entityTypes: S.optional(HttpApiSchema.param('entityTypes', S.transform(
                     S.String,
                     S.Array(SearchEntityType),
@@ -403,7 +409,7 @@ const _SearchGroup = HttpApiGroup.make('search')
                 includeFacets: S.optional(HttpApiSchema.param('includeFacets', S.BooleanFromString)),
                 includeGlobal: S.optional(HttpApiSchema.param('includeGlobal', S.BooleanFromString)),
                 includeSnippets: S.optional(HttpApiSchema.param('includeSnippets', S.BooleanFromString)),
-                q: HttpApiSchema.param('q', S.String.pipe(S.minLength(2), S.maxLength(256))),
+                term: HttpApiSchema.param('term', S.String.pipe(S.minLength(2), S.maxLength(256))),
             })))
             .addSuccess(S.extend(
                 KeysetResponse(S.Struct({
@@ -549,7 +555,7 @@ const _StorageGroup = HttpApiGroup.make('storage')
             .annotate(OpenApi.Description, 'Soft-deletes an asset. The asset can be restored later.'),
     )
     .add(HttpApiEndpoint.get('listAssets', '/assets')
-            .setUrlParams(S.extend(_PaginationBase, S.Struct({
+            .setUrlParams(S.extend(_CursorLimitQuery, S.Struct({
                 after: S.optional(HttpApiSchema.param('after', S.DateFromString)).annotations({ description: 'Filter: created after this date' }),
                 before: S.optional(HttpApiSchema.param('before', S.DateFromString)).annotations({ description: 'Filter: created before this date' }),
                 sort: S.optionalWith(HttpApiSchema.param('sort', S.Literal('asc', 'desc')), { default: () => 'desc' as const }).annotations({ description: 'Sort direction' }),
@@ -628,7 +634,7 @@ const _AdminGroup = HttpApiGroup.make('admin')
     .addError(HttpError.RateLimit)
     .addError(HttpError.Validation)
     .add(HttpApiEndpoint.get('listUsers', '/users')
-            .setUrlParams(_PaginationBase)
+            .setUrlParams(_CursorLimitQuery)
             .addSuccess(KeysetResponse(User.json))
             .annotate(OpenApi.Summary, 'List users'),
     )
@@ -657,7 +663,7 @@ const _AdminGroup = HttpApiGroup.make('admin')
             .annotate(OpenApi.Summary, 'Revoke all sessions by IP'),
     )
     .add(HttpApiEndpoint.get('listJobs', '/jobs')
-            .setUrlParams(_PaginationBase)
+            .setUrlParams(_CursorLimitQuery)
             .addSuccess(KeysetResponse(Job.json))
             .annotate(OpenApi.Summary, 'List jobs'),
     )
@@ -668,7 +674,7 @@ const _AdminGroup = HttpApiGroup.make('admin')
             .annotate(OpenApi.Summary, 'Cancel job'),
     )
     .add(HttpApiEndpoint.get('listDlq', '/dlq')
-            .setUrlParams(_PaginationBase)
+            .setUrlParams(_CursorLimitQuery)
             .addSuccess(KeysetResponse(JobDlq.json))
             .annotate(OpenApi.Summary, 'List dead letters'),
     )
@@ -680,7 +686,7 @@ const _AdminGroup = HttpApiGroup.make('admin')
             .annotate(OpenApi.Summary, 'Replay dead letter'),
     )
     .add(HttpApiEndpoint.get('listNotifications', '/notifications')
-            .setUrlParams(TemporalQuery)
+            .setUrlParams(_TemporalWindowQuery)
             .addSuccess(KeysetResponse(Notification.json))
             .annotate(OpenApi.Summary, 'List notifications'),
     )
@@ -700,20 +706,16 @@ const _AdminGroup = HttpApiGroup.make('admin')
             .annotate(OpenApi.Summary, 'Query database observability sections'),
     )
     .add(HttpApiEndpoint.get('listPermissions', '/permissions')
-            .addSuccess(S.Array(S.Struct({
-                action: Permission.fields.action,
-                resource: Permission.fields.resource,
-                role: Permission.fields.role,
-            })))
+            .addSuccess(S.Array(_PermissionTuple))
             .annotate(OpenApi.Summary, 'List tenant permissions'),
     )
     .add(HttpApiEndpoint.put('grantPermission', '/permissions')
-            .setPayload(S.Struct({ action: Permission.fields.action, resource: Permission.fields.resource, role: Permission.fields.role }))
-            .addSuccess(S.Struct({ action: Permission.fields.action, resource: Permission.fields.resource, role: Permission.fields.role }))
+            .setPayload(_PermissionTuple)
+            .addSuccess(_PermissionTuple)
             .annotate(OpenApi.Summary, 'Grant tenant permission'),
     )
     .add(HttpApiEndpoint.del('revokePermission', '/permissions')
-            .setPayload(S.Struct({ action: Permission.fields.action, resource: Permission.fields.resource, role: Permission.fields.role }))
+            .setPayload(_PermissionTuple)
             .addSuccess(_Success)
             .annotate(OpenApi.Summary, 'Revoke tenant permission'),
     )

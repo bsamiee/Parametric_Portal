@@ -243,28 +243,28 @@ const repo = <M extends Model.AnyNoContext, const C extends Config<M>>(model: M,
             );
         };
         // --- Mutation helpers ------------------------------------------------
-        const _withData = <T, E, R>(operation: string, data: T | readonly T[] | null | undefined, onEmpty: (isArr: boolean) => R, onData: (items: readonly T[], isArr: boolean) => Effect.Effect<R, E>): Effect.Effect<R, RepoConfigError | E> =>
-            data == null ? Effect.fail(new RepoConfigError({ message: 'data cannot be null or undefined', operation, table }))
-            : ((isArr, items) => items.length === 0 ? Effect.succeed(onEmpty(isArr)) : onData(items, isArr))(Array.isArray(data), (Array.isArray(data) ? data : [data]) as readonly T[]);
+        const _withData = <T, E, R>(data: T | readonly T[], onEmpty: (isMany: boolean) => R, onData: (items: readonly T[], isMany: boolean) => Effect.Effect<R, E>): Effect.Effect<R, E> =>
+            ((isMany, items) => items.length === 0 ? Effect.succeed(onEmpty(isMany)) : onData(items, isMany))(Array.isArray(data), (Array.isArray(data) ? data : [data]) as readonly T[]);
         // --- Mutation methods ------------------------------------------------
-        const _conflictInsert = <T extends S.Schema.Type<typeof model.insert>>(operation: string, data: T | readonly T[] | null | undefined, keys: readonly string[], updates: readonly Statement.Fragment[], occ?: Date) =>
-            _withData(operation, data, (isArr) => isArr ? [] as S.Schema.Type<M>[] : undefined,
-                (items, isArr) => items.length === 1
-                    ? SqlSchema.findOne({ execute: (row) => sql`INSERT INTO ${sql(table)} ${sql.insert(row)} ON CONFLICT (${sql.csv(keys)}) DO UPDATE SET ${sql.csv(updates)}${$touch}${occ ? sql` WHERE ${sql(table)}.updated_at = ${occ}` : sql``} RETURNING *`, Request: model.insert, Result: model })(items[0])
-                        .pipe(Effect.flatMap(opt => Option.match(opt, {
-                            onNone: () => Effect.fail(occ ? new RepoOccError({ expected: occ, pk: String((items[0] as Record<string, unknown>)[_pkField]), table }) : new RepoConfigError({ message: 'unexpected empty result', operation, table })),
-                            onSome: row => Effect.succeed((isArr ? [row] : row) as S.Schema.Type<M> | readonly S.Schema.Type<M>[]),
-                        })))
-                    : SqlSchema.findAll({ execute: (rows) => sql`INSERT INTO ${sql(table)} ${sql.insert(rows)} ON CONFLICT (${sql.csv(keys)}) DO UPDATE SET ${sql.csv(updates)}${$touch} RETURNING *`, Request: S.Array(model.insert), Result: model })(items)
-                        .pipe(Effect.map(rows => isArr ? rows : rows[0])));
+        const _conflictInsert = <T extends S.Schema.Type<typeof model.insert>>(data: T | readonly T[], keys: readonly string[], updates: readonly Statement.Fragment[], occ?: Date) =>
+            _withData(data, () => [] as readonly S.Schema.Type<M>[],
+                (items, isMany) => isMany && occ
+                    ? Effect.fail(new RepoConfigError({ message: 'OCC not supported for bulk operations', operation: 'insert', table }))
+                    : items.length === 1
+                        ? SqlSchema.findOne({ execute: (row) => sql`INSERT INTO ${sql(table)} ${sql.insert(row)} ON CONFLICT (${sql.csv(keys)}) DO UPDATE SET ${sql.csv(updates)}${$touch}${occ ? sql` WHERE ${sql(table)}.updated_at = ${occ}` : sql``} RETURNING *`, Request: model.insert, Result: model })(items[0])
+                            .pipe(Effect.flatMap(opt => Option.match(opt, {
+                                onNone: () => Effect.fail(occ ? new RepoOccError({ expected: occ, pk: String((items[0] as Record<string, unknown>)[_pkField]), table }) : new RepoConfigError({ message: 'unexpected empty result', operation: 'insert', table })),
+                                onSome: row => Effect.succeed((isMany ? [row] : row) as S.Schema.Type<M> | readonly S.Schema.Type<M>[]),
+                            })))
+                        : SqlSchema.findAll({ execute: (rows) => sql`INSERT INTO ${sql(table)} ${sql.insert(rows)} ON CONFLICT (${sql.csv(keys)}) DO UPDATE SET ${sql.csv(updates)}${$touch} RETURNING *`, Request: S.Array(model.insert), Result: model })(items));
         function put<T extends S.Schema.Type<typeof model.insert>>(data: readonly T[], conflict?: { keys: string[]; only?: string[]; occ?: Date }): Effect.Effect<readonly S.Schema.Type<M>[], RepoConfigError | RepoOccError | RepoScopeError | SqlError | ParseError | Cause.NoSuchElementException>;
         function put<T extends S.Schema.Type<typeof model.insert>>(data: T, conflict?: { keys: string[]; only?: string[]; occ?: Date }): Effect.Effect<S.Schema.Type<M>, RepoConfigError | RepoOccError | RepoScopeError | SqlError | ParseError | Cause.NoSuchElementException>;
-        function put<T extends S.Schema.Type<typeof model.insert>>(data: T | readonly T[] | null | undefined, conflict?: { keys: string[]; only?: string[]; occ?: Date }): Effect.Effect<S.Schema.Type<M> | readonly S.Schema.Type<M>[] | undefined, RepoConfigError | RepoOccError | RepoScopeError | SqlError | ParseError | Cause.NoSuchElementException> {
+        function put<T extends S.Schema.Type<typeof model.insert>>(data: T | readonly T[], conflict?: { keys: string[]; only?: string[]; occ?: Date }): Effect.Effect<S.Schema.Type<M> | readonly S.Schema.Type<M>[], RepoConfigError | RepoOccError | RepoScopeError | SqlError | ParseError | Cause.NoSuchElementException> {
             return _withTenantContext('put', conflict
-                ? _conflictInsert('put', data, conflict.keys.map(_toCol), $excluded(conflict.keys.map(_toCol), conflict.only?.map(_toCol)), conflict.occ)
-                : _withData('put', data, (isArr) => isArr ? [] as S.Schema.Type<M>[] : undefined,
-                    (items, isArr) => SqlSchema.findAll({ execute: (rows) => sql`INSERT INTO ${sql(table)} ${sql.insert(rows)} RETURNING *`, Request: S.Array(model.insert), Result: model })(items)
-                        .pipe(Effect.map(rows => isArr ? rows : rows[0]))));
+                ? _conflictInsert(data, conflict.keys.map(_toCol), $excluded(conflict.keys.map(_toCol), conflict.only?.map(_toCol)), conflict.occ)
+                : _withData(data, () => [] as readonly S.Schema.Type<M>[],
+                    (items, isMany) => SqlSchema.findAll({ execute: (rows) => sql`INSERT INTO ${sql(table)} ${sql.insert(rows)} RETURNING *`, Request: S.Array(model.insert), Result: model })(items)
+                        .pipe(Effect.map(rows => isMany ? rows : rows[0]))));
         }
         const set = (input: string | [string, unknown] | Pred | readonly Pred[], updates: Record<string, unknown>, scope?: Record<string, unknown>, when?: Pred | readonly Pred[]) => {
             const single = _isSingle(input);
@@ -323,25 +323,25 @@ const repo = <M extends Model.AnyNoContext, const C extends Config<M>>(model: M,
         };
         function upsert<T extends S.Schema.Type<typeof model.insert>>(data: readonly T[], occ?: Date): Effect.Effect<readonly S.Schema.Type<M>[], RepoConfigError | RepoOccError | RepoScopeError | SqlError | ParseError>;
         function upsert<T extends S.Schema.Type<typeof model.insert>>(data: T, occ?: Date): Effect.Effect<S.Schema.Type<M>, RepoConfigError | RepoOccError | RepoScopeError | SqlError | ParseError>;
-        function upsert<T extends S.Schema.Type<typeof model.insert>>(data: T | readonly T[] | null | undefined, occ?: Date): Effect.Effect<S.Schema.Type<M> | readonly S.Schema.Type<M>[] | undefined, RepoConfigError | RepoOccError | RepoScopeError | SqlError | ParseError> {
+        function upsert<T extends S.Schema.Type<typeof model.insert>>(data: T | readonly T[], occ?: Date): Effect.Effect<S.Schema.Type<M> | readonly S.Schema.Type<M>[], RepoConfigError | RepoOccError | RepoScopeError | SqlError | ParseError> {
             return _withTenantContext('upsert', upsertConfiguration
-                ? _conflictInsert('upsert', data, upsertConfiguration.keys, upsertConfiguration.updates, occ)
+                ? _conflictInsert(data, upsertConfiguration.keys, upsertConfiguration.updates, occ)
                 : Effect.fail(new RepoConfigError({ message: 'conflict keys not configured', operation: 'upsert', table })));
         }
         type _Merged = S.Schema.Type<M> & { readonly _action: 'insert' | 'update' };
-        const merge = <T extends S.Schema.Type<typeof model.insert>>(data: T | readonly T[] | null | undefined): Effect.Effect<_Merged | readonly _Merged[] | undefined, RepoConfigError | RepoScopeError | SqlError | ParseError> =>
-            _withTenantContext('merge', upsertConfiguration
-                ? _withData<Record<string, unknown>, SqlError | ParseError, _Merged | readonly _Merged[] | undefined>(
-                    'merge', data as Record<string, unknown> | readonly Record<string, unknown>[] | null | undefined,
-                    (isArr) => isArr ? [] as _Merged[] : undefined,
-                (items, isArr) => sql`MERGE INTO ${sql(table)} USING (VALUES ${sql.csv(items.map(item => sql`(${sql.csv(_insertFields.map(field => sql`${item[field]}`))})`))} ) AS source(${sql.csv(_insertCols.map(column => sql`${sql(column)}`))})
+        const merge = <T extends S.Schema.Type<typeof model.insert>>(data: T | readonly T[]): Effect.Effect<_Merged | readonly _Merged[], RepoConfigError | RepoScopeError | SqlError | ParseError> =>
+            _withTenantContext('merge', (upsertConfiguration
+                ? _withData<Record<string, unknown>, SqlError | ParseError, _Merged | readonly _Merged[]>(
+                    data as Record<string, unknown> | readonly Record<string, unknown>[],
+                    () => [] as readonly _Merged[],
+                    (items, isMany) => sql`MERGE INTO ${sql(table)} USING (VALUES ${sql.csv(items.map(item => sql`(${sql.csv(_insertFields.map(field => sql`${item[field]}`))})`))} ) AS source(${sql.csv(_insertCols.map(column => sql`${sql(column)}`))})
                     ON ${sql.and(upsertConfiguration.keys.map((key) => sql`${sql(table)}.${sql(key)} = source.${sql(key)}`))}
                     WHEN MATCHED THEN UPDATE SET ${sql.csv(_insertCols.filter(column => !upsertConfiguration.keys.includes(column)).map(column => sql`${sql(column)} = source.${sql(column)}`))}${$touch}
                     WHEN NOT MATCHED THEN INSERT (${sql.csv(_insertCols.map(column => sql`${sql(column)}`))}) VALUES (${sql.csv(_insertCols.map(column => sql`source.${sql(column)}`))})
                         RETURNING *, (CASE WHEN xmax = 0 THEN 'insert' ELSE 'update' END) AS _action`
-                        .pipe(Effect.map(results => isArr ? results as _Merged[] : results[0] as _Merged))
+                        .pipe(Effect.map(results => isMany ? results as _Merged[] : results[0] as _Merged))
                 )
-                : Effect.fail(new RepoConfigError({ message: 'conflict keys not configured', operation: 'merge', table })));
+                : Effect.fail(new RepoConfigError({ message: 'conflict keys not configured', operation: 'merge', table }))) as Effect.Effect<_Merged | readonly _Merged[], RepoConfigError | SqlError | ParseError>);
         const stream = (predicate: Pred | readonly Pred[], options: { asc?: boolean } = {}): Stream.Stream<S.Schema.Type<M>, RepoScopeError | SqlError | ParseError> =>
             Stream.unwrap(
                 _autoScope('stream').pipe(

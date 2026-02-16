@@ -3,7 +3,6 @@
  * Polymorphic cursor encoding; fetch LIMIT+1 for accurate hasNext detection.
  */
 import { Effect, Option, Schema as S } from 'effect';
-import type { Simplify } from 'type-fest';
 
 // --- [SCHEMA] ----------------------------------------------------------------
 
@@ -55,22 +54,10 @@ const offset = <T>(items: readonly T[], total: number, start: number, limit: num
 
 // --- [OBJECT] ----------------------------------------------------------------
 
-// biome-ignore lint/correctness/noUnusedVariables: const+namespace merge
 const Page = {
     Asc, bounds: _PAGE_BOUNDS, decode, encode, Keyset, KeysetInput, keyset, Limit, Offset,
     OffsetInput, offset, strip
 } as const;
-
-// --- [NAMESPACE] -------------------------------------------------------------
-
-namespace Page {
-    export type Keyset = S.Schema.Type<typeof Keyset>;
-    export type KeysetInput = S.Schema.Type<typeof KeysetInput>;
-    export type KeysetOut<T> = Simplify<{ readonly cursor: string | null; readonly hasNext: boolean; readonly hasPrev: boolean; readonly items: readonly T[]; readonly total: number }>;
-    export type Offset = S.Schema.Type<typeof Offset>;
-    export type OffsetInput = S.Schema.Type<typeof OffsetInput>;
-    export type OffsetOut<T> = Simplify<{ readonly hasNext: boolean; readonly hasPrev: boolean; readonly items: readonly T[]; readonly page: number; readonly pages: number; readonly total: number }>;
-}
 
 // --- [EXPORT] ----------------------------------------------------------------
 

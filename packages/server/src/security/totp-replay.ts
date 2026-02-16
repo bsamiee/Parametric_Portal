@@ -36,9 +36,7 @@ class ReplayGuardService extends Effect.Service<ReplayGuardService>()('server/Re
                     const lockout = yield* CacheService.kv.get(_CONFIG.lockoutKey(userId), _CONFIG.lockoutSchema);
                     yield* pipe(lockout, Option.filter((state) => state.lockedUntil > now), Option.match({
                         onNone: () => Effect.void,
-                        onSome: (state) => incMfa('lockout_block').pipe(
-                            Effect.andThen(Effect.fail(HttpError.RateLimit.of(state.lockedUntil - now, { recoveryAction: 'email-verify' }))),
-                        ),
+                        onSome: (state) => incMfa('lockout_block').pipe(Effect.andThen(Effect.fail(HttpError.RateLimit.of(state.lockedUntil - now, { recoveryAction: 'email-verify' }))),),
                     }));
                 }).pipe(Telemetry.span('totp.checkLockout', { metrics: false })),
             recordFailure: (userId: string) =>

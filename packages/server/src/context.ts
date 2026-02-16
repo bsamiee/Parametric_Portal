@@ -15,11 +15,7 @@ import { constant, dual } from 'effect/Function';
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
-const _ID = {
-    default:        '00000000-0000-7000-8000-000000000001',
-    job:            '00000000-0000-7000-8000-000000000002',
-    ...Client.tenant.Id,
-} as const;
+const _ID = {default: '00000000-0000-7000-8000-000000000001', job: '00000000-0000-7000-8000-000000000002', ...Client.tenant.Id,} as const;
 
 // --- [SCHEMA] ----------------------------------------------------------------
 
@@ -44,7 +40,7 @@ class Serializable extends S.Class<Serializable>('server/Context.Serializable')(
     runnerId: S.optional(_RunnerId), sessionId: S.optional(S.String), shardId: S.optional(_ShardIdString),
     tenantId: S.String, userId: S.optional(S.String),
 }) {
-    static readonly fromData = (ctx: Context.Request.Data): Serializable =>
+    static readonly fromData = (ctx: S.Schema.Type<typeof _RequestData>): Serializable =>
         new Serializable({
             appNamespace: Option.getOrUndefined(ctx.appNamespace), ipAddress: Option.getOrUndefined(ctx.ipAddress),
             requestId: ctx.requestId, tenantId: ctx.tenantId,
@@ -58,7 +54,7 @@ class Serializable extends S.Class<Serializable>('server/Context.Serializable')(
 
 // --- [REQUEST] ---------------------------------------------------------------
 
-class Request extends Effect.Tag('server/RequestContext')<Request, Context.Request.Data>() {
+class Request extends Effect.Tag('server/RequestContext')<Request, S.Schema.Type<typeof _RequestData>>() {
     static readonly Id = _ID;
     static readonly Headers = {
         appId:              'x-app-id',
@@ -79,12 +75,12 @@ class Request extends Effect.Tag('server/RequestContext')<Request, Context.Reque
         requestId:          'x-request-id',
         trace: [            'traceparent', 'tracestate', 'baggage'] as const,
     } as const;
-    static readonly system = (requestId = crypto.randomUUID(), tenantId: Context.Request.Id = _ID.system): Context.Request.Data => ({ appNamespace: Option.none(), circuit: Option.none(), cluster: Option.none(), ipAddress: Option.none(), rateLimit: Option.none(), requestId, session: Option.none(), tenantId, userAgent: Option.none() });
-    private static readonly _ref = FiberRef.unsafeMake<Context.Request.Data>(Request.system(_ID.default, _ID.unspecified));
+    static readonly system = (requestId = crypto.randomUUID(), tenantId: (typeof _ID)[keyof typeof _ID] = _ID.system): S.Schema.Type<typeof _RequestData> => ({ appNamespace: Option.none(), circuit: Option.none(), cluster: Option.none(), ipAddress: Option.none(), rateLimit: Option.none(), requestId, session: Option.none(), tenantId, userAgent: Option.none() });
+    private static readonly _ref = FiberRef.unsafeMake<S.Schema.Type<typeof _RequestData>>(Request.system(_ID.default, _ID.unspecified));
     static readonly current = FiberRef.get(Request._ref);
     static readonly currentTenantId = Request.current.pipe(Effect.map((ctx) => ctx.tenantId));
     static readonly sessionOrFail = Request.current.pipe(Effect.flatMap((ctx) => Option.match(ctx.session, { onNone: () => Effect.fail(HttpError.Auth.of('Missing session')), onSome: Effect.succeed })));
-    static readonly toAttrs = (ctx: Context.Request.Data, fiberId: FiberId.FiberId): Record.ReadonlyRecord<string, string> =>
+    static readonly toAttrs = (ctx: S.Schema.Type<typeof _RequestData>, fiberId: FiberId.FiberId): Record.ReadonlyRecord<string, string> =>
         Record.getSomes({
             'app.namespace':       ctx.appNamespace,
             'circuit.name':        Option.map(ctx.circuit,   (circuit) => circuit.name), 'circuit.state': Option.map(ctx.circuit, (circuit) => circuit.state),'client.address': ctx.ipAddress,
@@ -109,23 +105,23 @@ class Request extends Effect.Tag('server/RequestContext')<Request, Context.Reque
                 ),
             ),
         );
-    static readonly update = (partial: Partial<Context.Request.Data>) => FiberRef.update(Request._ref, (ctx): Context.Request.Data => ({
+    static readonly update = (partial: Partial<S.Schema.Type<typeof _RequestData>>) => FiberRef.update(Request._ref, (ctx): S.Schema.Type<typeof _RequestData> => ({
         appNamespace: partial.appNamespace ?? ctx.appNamespace,
-        circuit:      partial.circuit ?? ctx.circuit,
-        cluster:      partial.cluster ?? ctx.cluster,
-        ipAddress:    partial.ipAddress ?? ctx.ipAddress,
-        rateLimit:    partial.rateLimit ?? ctx.rateLimit,
-        requestId:    partial.requestId ?? ctx.requestId,
-        session:      partial.session ?? ctx.session,
-        tenantId:     partial.tenantId ?? ctx.tenantId,
-        userAgent:    partial.userAgent ?? ctx.userAgent,
+        circuit:      partial.circuit      ?? ctx.circuit,
+        cluster:      partial.cluster      ?? ctx.cluster,
+        ipAddress:    partial.ipAddress    ?? ctx.ipAddress,
+        rateLimit:    partial.rateLimit    ?? ctx.rateLimit,
+        requestId:    partial.requestId    ?? ctx.requestId,
+        session:      partial.session      ?? ctx.session,
+        tenantId:     partial.tenantId     ?? ctx.tenantId,
+        userAgent:    partial.userAgent    ?? ctx.userAgent,
     })).pipe(
         Effect.andThen(Option.fromNullable(partial.tenantId).pipe(Option.match({ onNone: () => Effect.void, onSome: (tenantId) => Client.tenant.set(tenantId) }))),
         Effect.andThen(Request.annotate(Effect.void)),
     );
-    static readonly within = <A, E, R>(tenantId: string, effect: Effect.Effect<A, E, R>, ctx?: Partial<Context.Request.Data>): Effect.Effect<A, E, R> =>
+    static readonly within = <A, E, R>(tenantId: string, effect: Effect.Effect<A, E, R>, ctx?: Partial<S.Schema.Type<typeof _RequestData>>): Effect.Effect<A, E, R> =>
         Client.tenant.locally(tenantId, Effect.locallyWith(Request.annotate(effect), Request._ref, (current) => ({ ...current, ...ctx, tenantId })));
-    static readonly withinSync = <A, E, R>(tenantId: string, effect: Effect.Effect<A, E, R>, ctx?: Partial<Context.Request.Data>): Effect.Effect<A, E | SqlError, R | SqlClient.SqlClient> => Client.tenant.with(tenantId, Request.within(tenantId, effect, ctx));
+    static readonly withinSync = <A, E, R>(tenantId: string, effect: Effect.Effect<A, E, R>, ctx?: Partial<S.Schema.Type<typeof _RequestData>>): Effect.Effect<A, E | SqlError, R | SqlClient.SqlClient> => Client.tenant.with(tenantId, Request.within(tenantId, effect, ctx));
     static readonly cookie = (() => {   // Cookie: IIFE encapsulates secure flag and config
         const secure = Env.Service.pipe(Effect.map((env) => env.app.apiBaseUrl.startsWith('https://')));
         const configuration = {
@@ -144,9 +140,9 @@ class Request extends Effect.Tag('server/RequestContext')<Request, Context.Reque
     static readonly toSerializable = Request.current.pipe(Effect.map(Serializable.fromData));
     static readonly clusterState = Request.current.pipe(Effect.flatMap((ctx) => Option.match(ctx.cluster, { onNone: () => Effect.fail(new (class extends Data.TaggedError('ClusterContextRequired')<{ readonly operation: string }> {})(({ operation: 'cluster' }))), onSome: Effect.succeed })),);
     static readonly withinCluster: {
-        <A, E, R>(effect: Effect.Effect<A, E, R>, partial: Partial<Context.Request.ClusterState>): Effect.Effect<A, E, R>;
-        (partial: Partial<Context.Request.ClusterState>): <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>;
-    } = dual(2, <A, E, R>(effect: Effect.Effect<A, E, R>, partial: Partial<Context.Request.ClusterState>) =>
+        <A, E, R>(effect: Effect.Effect<A, E, R>, partial: Partial<Option.Option.Value<S.Schema.Type<typeof _RequestData>['cluster']>>): Effect.Effect<A, E, R>;
+        (partial: Partial<Option.Option.Value<S.Schema.Type<typeof _RequestData>['cluster']>>): <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>;
+    } = dual(2, <A, E, R>(effect: Effect.Effect<A, E, R>, partial: Partial<Option.Option.Value<S.Schema.Type<typeof _RequestData>['cluster']>>) =>
         Effect.serviceOption(Entity.CurrentRunnerAddress).pipe(
             Effect.flatMap((runnerAddress) =>
                 Effect.locallyWith(Request.annotate(effect), Request._ref, (ctx) => {
@@ -171,24 +167,7 @@ class Request extends Effect.Tag('server/RequestContext')<Request, Context.Reque
 
 // --- [ENTRY_POINT] -----------------------------------------------------------
 
-// biome-ignore lint/correctness/noUnusedVariables: const+namespace merge
 const Context = { Request, Serializable } as const;
-
-// --- [NAMESPACE] -------------------------------------------------------------
-
-namespace Context {
-    export type Serializable = InstanceType<typeof Serializable>;
-    export namespace Request {
-        export type Id = (typeof Request.Id)[keyof typeof Request.Id];
-        export type Data = S.Schema.Type<typeof _RequestData>;
-        export type Session = Data['session'] extends Option.Option<infer Session> ? Session : never;
-        export type RateLimit = Data['rateLimit'] extends Option.Option<infer RateLimit> ? RateLimit : never;
-        export type Circuit = Data['circuit'] extends Option.Option<infer Circuit> ? Circuit : never;
-        export type ClusterState = Data['cluster'] extends Option.Option<infer ClusterState> ? ClusterState : never;
-        export type AuditFields = { ipAddress: string | undefined; requestId: Data['requestId']; userAgent: string | undefined };
-        export type RunnerId = S.Schema.Type<typeof _RunnerId>; // Branded runtime runner ID
-    }
-}
 
 // --- [EXPORT] ----------------------------------------------------------------
 

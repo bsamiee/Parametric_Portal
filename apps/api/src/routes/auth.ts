@@ -35,45 +35,13 @@ const _csrf = HttpServerRequest.HttpServerRequest.pipe(
         ),
     ),
 );
-const _handleApiKeyOperation = (operation: 'create' | 'rotate', repositories: DatabaseService.Type, audit: typeof AuditService.Service, input: { expiresAt?: Date; id?: string; name?: string }) =>
-    Effect.gen(function* () {
-        yield* _csrf;
-        const [{ userId }, metrics, tenantId] = yield* Effect.all([Context.Request.sessionOrFail, MetricsService, Context.Request.currentTenantId]);
-        const pair = yield* Crypto.pair.pipe(HttpError.mapTo('Key generation failed'));
-        const token = Redacted.value(pair.token);
-        const [hash, encrypted] = yield* Effect.all([
-            Crypto.hmac(tenantId, token).pipe(HttpError.mapTo('Key hashing failed')),
-            Crypto.encrypt(token).pipe(HttpError.mapTo('Key encryption failed')),
-        ]);
-        const record = yield* operation === 'create'
-            ? repositories.apiKeys.insert({
-                deletedAt: Option.none(), encrypted: Buffer.from(encrypted), expiresAt: Option.fromNullable(input.expiresAt), hash,
-                lastUsedAt: Option.none(), name: input.name ?? '', updatedAt: undefined, userId,
-            }).pipe(HttpError.mapTo('API key insert failed'))
-            : Effect.gen(function* () {
-                const keyOption = yield* repositories.apiKeys.one([{ field: 'id', value: input.id as string }]).pipe(HttpError.mapTo('API key lookup failed'));
-                yield* Option.match(keyOption.pipe(Option.filter((apiKey) => apiKey.userId === userId)), {
-                    onNone: () => Effect.fail(HttpError.NotFound.of('apikey', input.id as string)),
-                    onSome: Effect.succeed,
-                });
-                return yield* repositories.apiKeys.set(input.id as string, { encrypted: Buffer.from(encrypted), hash }).pipe(HttpError.mapTo('API key rotation failed'));
-            });
-        const auditEntry = {
-            create: { details: { name: record.name }, label: 'ApiKey.create' as const, subjectId: record.id },
-            rotate: { details: { keyId: input.id as string, name: record.name }, label: 'ApiKey.update' as const, subjectId: userId },
-        }[operation];
-        yield* Effect.all([
-            MetricsService.inc(metrics.auth.apiKeys, MetricsService.label({ operation })),
-            audit.log(auditEntry.label, { details: auditEntry.details, subjectId: auditEntry.subjectId }),
-        ], { discard: true });
-        return { ...record, apiKey: Redacted.value(pair.token) };
-    }).pipe(Telemetry.span(`auth.apiKeys.${operation}`));
 
 // --- [LAYERS] ----------------------------------------------------------------
 
 const AuthLive = HttpApiBuilder.group(ParametricApi, 'auth', (handlers) =>
     Effect.gen(function* () {
         const [repositories, auth, audit] = yield* Effect.all([DatabaseService, Auth.Service, AuditService]);
+        const authRoute = Middleware.resource('auth');
         return handlers
             // OAuth
             .handleRaw('oauthStart', ({ path: { provider } }) =>
@@ -101,8 +69,8 @@ const AuthLive = HttpApiBuilder.group(ParametricApi, 'auth', (handlers) =>
                     const result = yield* Resilience.run('oauth.callback', auth.oauth.callback(provider, code, state, stateCookie), { circuit: 'oauth', timeout: Duration.seconds(15) }).pipe(
                         Effect.catchTags({
                             BulkheadError: constant(Effect.fail(HttpError.OAuth.of(provider, 'Service at capacity'))),
-                            CircuitError: constant(Effect.fail(HttpError.OAuth.of(provider, 'Service temporarily unavailable'))),
-                            TimeoutError: constant(Effect.fail(HttpError.OAuth.of(provider, 'Request timed out'))),
+                            CircuitError:  constant(Effect.fail(HttpError.OAuth.of(provider, 'Service temporarily unavailable'))),
+                            TimeoutError:  constant(Effect.fail(HttpError.OAuth.of(provider, 'Request timed out'))),
                         }),
                     );
                     return yield* HttpServerResponse.json({ accessToken: result.accessToken, expiresAt: result.expiresAt, mfaPending: result.mfaPending }).pipe(
@@ -127,7 +95,7 @@ const AuthLive = HttpApiBuilder.group(ParametricApi, 'auth', (handlers) =>
                     );
                 }).pipe(Telemetry.span('auth.refresh'))))
             .handleRaw('logout', () =>
-                Middleware.guarded('auth', 'logout', 'api', Effect.gen(function* () {
+                authRoute.api('logout', Effect.gen(function* () {
                     yield* _csrf;
                     const session = yield* Context.Request.sessionOrFail;
                     yield* auth.session.revoke(session.id, 'logout');
@@ -135,9 +103,9 @@ const AuthLive = HttpApiBuilder.group(ParametricApi, 'auth', (handlers) =>
                         Effect.flatMap(Context.Request.cookie.clear('refresh')),
                         HttpError.mapTo('Response build failed'),
                     );
-                }).pipe(Telemetry.span('auth.logout'))))
+                })))
             .handle('me', () =>
-                Middleware.guarded('auth', 'me', 'api', Effect.gen(function* () {
+                authRoute.api('me', Effect.gen(function* () {
                     const { userId } = yield* Context.Request.sessionOrFail;
                     const user = yield* repositories.users.one([{ field: 'id', value: userId }]).pipe(
                         HttpError.mapTo('User lookup failed'),
@@ -145,7 +113,7 @@ const AuthLive = HttpApiBuilder.group(ParametricApi, 'auth', (handlers) =>
                     );
                     yield* audit.log('User.read', { subjectId: userId });
                     return user;
-                }).pipe(Telemetry.span('auth.me'))))
+                })))
             // MFA
             .handle('mfaStatus', () =>
                 Effect.gen(function* () {
@@ -193,21 +161,43 @@ const AuthLive = HttpApiBuilder.group(ParametricApi, 'auth', (handlers) =>
                 )))
             // API keys
             .handle('listApiKeys', () =>
-                Middleware.guarded('auth', 'listApiKeys', 'api', Effect.gen(function* () {
+                authRoute.api('listApiKeys', Effect.gen(function* () {
                     yield* Middleware.feature('enableApiKeys');
                     const { userId } = yield* Context.Request.sessionOrFail;
                     const keys = yield* repositories.apiKeys.byUser(userId).pipe(HttpError.mapTo('API key list failed'));
                     yield* audit.log('ApiKey.list', { details: { count: keys.length }, subjectId: userId });
                     return { data: keys };
-                }).pipe(Telemetry.span('auth.apiKeys.list'))))
+                })))
             .handle('createApiKey', ({ payload }) =>
-                Middleware.guarded('auth', 'createApiKey', 'mutation', Middleware.feature('enableApiKeys').pipe(Effect.andThen(_handleApiKeyOperation('create', repositories, audit, payload))) as Effect.Effect<
-                    Effect.Effect.Success<ReturnType<typeof _handleApiKeyOperation>>,
-                    Exclude<Effect.Effect.Error<ReturnType<typeof _handleApiKeyOperation>>, HttpError.NotFound>,
-                    Effect.Effect.Context<ReturnType<typeof _handleApiKeyOperation>>
-                >))
+                authRoute.mutation('createApiKey', Middleware.feature('enableApiKeys').pipe(
+                    Effect.andThen(Effect.gen(function* () {
+                        yield* _csrf;
+                        const [{ userId }, metrics, tenantId] = yield* Effect.all([Context.Request.sessionOrFail, MetricsService, Context.Request.currentTenantId]);
+                        const pair = yield* Crypto.pair.pipe(HttpError.mapTo('Key generation failed'));
+                        const token = Redacted.value(pair.token);
+                        const [hash, encrypted] = yield* Effect.all([
+                            Crypto.hmac(tenantId, token).pipe(HttpError.mapTo('Key hashing failed')),
+                            Crypto.encrypt(token).pipe(HttpError.mapTo('Key encryption failed')),
+                        ]);
+                        const record = yield* repositories.apiKeys.insert({
+                            deletedAt: Option.none(),
+                            encrypted: Buffer.from(encrypted),
+                            expiresAt: Option.fromNullable(payload.expiresAt),
+                            hash,
+                            lastUsedAt: Option.none(),
+                            name: payload.name,
+                            updatedAt: undefined,
+                            userId,
+                        }).pipe(HttpError.mapTo('API key insert failed'));
+                        yield* Effect.all([
+                            MetricsService.inc(metrics.auth.apiKeys, MetricsService.label({ operation: 'create' })),
+                            audit.log('ApiKey.create', { details: { name: record.name }, subjectId: record.id }),
+                        ], { discard: true });
+                        return { ...record, apiKey: Redacted.value(pair.token) };
+                    })),
+                )))
             .handle('deleteApiKey', ({ path: { id } }) =>
-                Middleware.guarded('auth', 'deleteApiKey', 'mutation', Middleware.feature('enableApiKeys').pipe(
+                authRoute.mutation('deleteApiKey', Middleware.feature('enableApiKeys').pipe(
                     Effect.andThen(_csrf),
                     Effect.andThen(Effect.Do),
                     Effect.bind('session', constant(Context.Request.sessionOrFail)),
@@ -226,19 +216,40 @@ const AuthLive = HttpApiBuilder.group(ParametricApi, 'auth', (handlers) =>
                         MetricsService.inc(metrics.auth.apiKeys, MetricsService.label({ operation: 'delete' })),
                     ], { discard: true })),
                     Effect.as({ success: true } as const),
-                    Telemetry.span('auth.apiKeys.delete'),
                 )))
             .handle('rotateApiKey', ({ path: { id } }) =>
-                Middleware.guarded('auth', 'rotateApiKey', 'mutation', Middleware.feature('enableApiKeys').pipe(Effect.andThen(_handleApiKeyOperation('rotate', repositories, audit, { id })))))
+                authRoute.mutation('rotateApiKey',
+                    Middleware.feature('enableApiKeys').pipe(
+                        Effect.andThen(Effect.gen(function* () {
+                            yield* _csrf;
+                            const [{ userId }, metrics, tenantId] = yield* Effect.all([Context.Request.sessionOrFail, MetricsService, Context.Request.currentTenantId]);
+                            const pair = yield* Crypto.pair.pipe(HttpError.mapTo('Key generation failed'));
+                            const token = Redacted.value(pair.token);
+                            const [hash, encrypted] = yield* Effect.all([
+                                Crypto.hmac(tenantId, token).pipe(HttpError.mapTo('Key hashing failed')),
+                                Crypto.encrypt(token).pipe(HttpError.mapTo('Key encryption failed')),
+                            ]);
+                            const keyOption = yield* repositories.apiKeys.one([{ field: 'id', value: id }]).pipe(HttpError.mapTo('API key lookup failed'));
+                            yield* Option.match(keyOption.pipe(Option.filter((apiKey) => apiKey.userId === userId)), {
+                                onNone: () => Effect.fail(HttpError.NotFound.of('apikey', id)),
+                                onSome: Effect.succeed,
+                            });
+                            const record = yield* repositories.apiKeys.set(id, { encrypted: Buffer.from(encrypted), hash }).pipe(HttpError.mapTo('API key rotation failed'));
+                            yield* Effect.all([
+                                MetricsService.inc(metrics.auth.apiKeys, MetricsService.label({ operation: 'rotate' })),
+                                audit.log('ApiKey.update', { details: { keyId: id, name: record.name }, subjectId: userId }),
+                            ], { discard: true });
+                            return { ...record, apiKey: Redacted.value(pair.token) };
+                        })),
+                    ),
+                ))
             // OAuth account linking
             .handle('linkProvider', ({ path: { provider }, payload: { externalId } }) =>
-                Middleware.guarded('auth', 'linkProvider', 'mutation', Middleware.feature('enableOAuth').pipe(
+                authRoute.mutation('linkProvider', Middleware.feature('enableOAuth').pipe(
                     Effect.andThen(_csrf),
                     Effect.andThen(Effect.Do),
                     Effect.bind('session', constant(Context.Request.sessionOrFail)),
-                    Effect.bind('existing', ({ session }) => repositories.oauthAccounts.byUser(session.userId).pipe(
-                        HttpError.mapTo('OAuth account lookup failed'),
-                    )),
+                    Effect.bind('existing', ({ session }) => repositories.oauthAccounts.byUser(session.userId).pipe(HttpError.mapTo('OAuth account lookup failed'),)),
                     Effect.filterOrFail(
                         flow(
                             Struct.get('existing'),
@@ -249,9 +260,7 @@ const AuthLive = HttpApiBuilder.group(ParametricApi, 'auth', (handlers) =>
                         ),
                         constant(HttpError.Conflict.of('oauth_account', `Provider ${provider} is already linked`)),
                     ),
-                    Effect.bind('externalAccount', constant(repositories.oauthAccounts.byExternal(provider, externalId).pipe(
-                        HttpError.mapTo('OAuth account conflict check failed'),
-                    ))),
+                    Effect.bind('externalAccount', constant(repositories.oauthAccounts.byExternal(provider, externalId).pipe(HttpError.mapTo('OAuth account conflict check failed'),))),
                     Effect.let('linkAction', ({ externalAccount, session }) => {
                         const account = Option.getOrNull(externalAccount);
                         return {
@@ -281,13 +290,11 @@ const AuthLive = HttpApiBuilder.group(ParametricApi, 'auth', (handlers) =>
                     Telemetry.span('auth.link.provider', { 'oauth.provider': provider }),
                 )))
             .handle('unlinkProvider', ({ path: { provider } }) =>
-                Middleware.guarded('auth', 'unlinkProvider', 'mutation', Middleware.feature('enableOAuth').pipe(
+                authRoute.mutation('unlinkProvider', Middleware.feature('enableOAuth').pipe(
                     Effect.andThen(_csrf),
                     Effect.andThen(Effect.Do),
                     Effect.bind('session', constant(Context.Request.sessionOrFail)),
-                    Effect.bind('accounts', ({ session }) => repositories.oauthAccounts.byUser(session.userId).pipe(
-                        HttpError.mapTo('OAuth account lookup failed'),
-                    )),
+                    Effect.bind('accounts', ({ session }) => repositories.oauthAccounts.byUser(session.userId).pipe(HttpError.mapTo('OAuth account lookup failed'),)),
                     Effect.let('activeAccounts', ({ accounts }) => Arr.filter(accounts, flow(Struct.get('deletedAt'), Option.isNone))),
                     Effect.let('matchProvider', constant(flow(Struct.get('provider') as (a: { provider: string }) => string, (p: string) => p === provider))),
                     Effect.bind('target', ({ activeAccounts, matchProvider }) => Option.match(

@@ -22,8 +22,8 @@ const _drivers = {
 // --- [TYPES] -----------------------------------------------------------------
 
 type _Asset = { readonly content: string; readonly hash?: string; readonly type: string; readonly name?: string; readonly mime?: string; readonly ordinal: number };
-type _Row = Either.Either<_Asset, TransferError.Parse>;
-type _Stream = Stream.Stream<_Row, TransferError.Fatal>;
+type _Row = Either.Either<_Asset, InstanceType<typeof Parse>>;
+type _Stream = Stream.Stream<_Row, InstanceType<typeof Fatal>>;
 
 // --- [ERRORS] ----------------------------------------------------------------
 
@@ -284,13 +284,9 @@ function export_<E, R>(stream: _Out<E, R>, fmt: _BinaryFormat, opts?: { readonly
 function export_<E, R>(stream: _Out<E, R>, fmt: keyof typeof _formats, opts?: { readonly name?: string }): Stream.Stream<Uint8Array, E, R> | Effect.Effect<{ readonly data: string; readonly name: string; readonly count: number }, E, R> {
     return Match.value(fmt).pipe(
         Match.when((f): f is _TextFormat => _formats[f].kind === 'text', (f) =>
-            Stream.unwrap(Effect.succeed(Stream.map(_text[f](stream), (s) => new TextEncoder().encode(s))).pipe(
-                Telemetry.span('transfer.export.text', { metrics: false, 'transfer.format': f }),
-            )),
+            Stream.unwrap(Effect.succeed(Stream.map(_text[f](stream), (s) => new TextEncoder().encode(s))).pipe(Telemetry.span('transfer.export.text', { metrics: false, 'transfer.format': f }),)),
         ),
-        Match.when((f): f is _BinaryFormat => _formats[f].kind === 'binary', (f) =>
-            _binary[f](stream, opts?.name).pipe(Telemetry.span('transfer.export.binary', { metrics: false, 'transfer.format': f })),
-        ),
+        Match.when((f): f is _BinaryFormat => _formats[f].kind === 'binary', (f) => _binary[f](stream, opts?.name).pipe(Telemetry.span('transfer.export.binary', { metrics: false, 'transfer.format': f })),),
         Match.exhaustive,
     );
 }

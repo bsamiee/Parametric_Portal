@@ -15,7 +15,6 @@ import { JobService } from '@parametric-portal/server/infra/jobs';
 import { WebhookService } from '@parametric-portal/server/infra/webhooks';
 import { Middleware } from '@parametric-portal/server/middleware';
 import { AuditService } from '@parametric-portal/server/observe/audit';
-import { Telemetry } from '@parametric-portal/server/observe/telemetry';
 import { StreamingService } from '@parametric-portal/server/platform/streaming';
 import { Crypto } from '@parametric-portal/server/security/crypto';
 import { PolicyService } from '@parametric-portal/server/security/policy';
@@ -28,12 +27,11 @@ import { Array as Arr, Cause, Effect, Encoding, Match, Option, pipe, Struct } fr
 const AdminLive = HttpApiBuilder.group(ParametricApi, 'admin', (handlers) =>
     Effect.gen(function* () {
         const [database, jobs, eventBus, audit, webhooks, policy, notifications, features, lifecycle] = yield* Effect.all([DatabaseService, JobService, EventBus, AuditService, WebhookService, PolicyService, NotificationService, FeatureService, TenantLifecycleService]);
+        const admin = Middleware.resource('admin');
         return handlers
-            .handle('listUsers', ({ urlParams }) => Middleware.guarded('admin', 'listUsers', 'api', database.users.page([], { cursor: urlParams.cursor, limit: urlParams.limit }).pipe(
-                HttpError.mapTo('User list failed'),
-                Telemetry.span('admin.listUsers'),
-            )))
-            .handle('listSessions', ({ urlParams }) => Middleware.guarded('admin', 'listSessions', 'api', database.sessions.page(
+            .handle('listUsers', ({ urlParams }) => admin.api('listUsers',database.users.page([], { cursor: urlParams.cursor, limit: urlParams.limit }),))
+            .handle('listSessions', ({ urlParams }) => admin.api('listSessions',
+                database.sessions.page(
                     pipe(
                         Match.value(urlParams),
                         Match.when({ userId: Match.defined }, ({ userId }) => [{ field: 'userId' as const, value: userId }]),
@@ -41,37 +39,27 @@ const AdminLive = HttpApiBuilder.group(ParametricApi, 'admin', (handlers) =>
                         Match.orElse(() => []),
                     ),
                     { cursor: urlParams.cursor, limit: urlParams.limit },
-                ).pipe(HttpError.mapTo('Session list failed'),
-                Telemetry.span('admin.listSessions'),
-            )))
-            .handle('deleteSession', ({ path }) => Middleware.guarded('admin', 'deleteSession', 'mutation', database.sessions.softDelete(path.id).pipe(
+                ),
+            ))
+            .handle('deleteSession', ({ path }) => admin.mutation('deleteSession', database.sessions.softDelete(path.id).pipe(
                 Effect.mapError((error) => Cause.isNoSuchElementException(error) ? HttpError.NotFound.of('session', path.id) : HttpError.Internal.of('Session delete failed', error)),
                 Effect.tap(() => audit.log('Session.delete', { details: { sessionId: path.id } })),
                 Effect.as({ success: true as const }),
-                Telemetry.span('admin.deleteSession'),
             )))
-            .handle('revokeSessionsByIp', ({ payload }) => Middleware.guarded('admin', 'revokeSessionsByIp', 'mutation', Context.Request.currentTenantId.pipe(
+            .handle('revokeSessionsByIp', ({ payload }) => admin.mutation('revokeSessionsByIp',
+                Context.Request.currentTenantId.pipe(
                 Effect.flatMap((appId) => database.sessions.softDeleteByIp(appId, payload.ipAddress)),
-                HttpError.mapTo('Session revoke failed'),
                 Effect.tap((revoked) => audit.log('Session.revokeByIp', { details: { ipAddress: payload.ipAddress, revoked } })),
-                Effect.map((revoked) => ({ revoked })),
-                Telemetry.span('admin.revokeSessionsByIp'),
-            )))
-            .handle('listJobs', ({ urlParams }) => Middleware.guarded('admin', 'listJobs', 'api', database.jobs.page([], { cursor: urlParams.cursor, limit: urlParams.limit }).pipe(
-                HttpError.mapTo('Job list failed'),
-                Telemetry.span('admin.listJobs'),
-            )))
-            .handle('cancelJob', ({ path }) => Middleware.guarded('admin', 'cancelJob', 'mutation', jobs.cancel(path.id).pipe(
+                Effect.map((revoked) => ({ revoked })),),
+            ))
+            .handle('listJobs', ({ urlParams }) => admin.api('listJobs', database.jobs.page([], { cursor: urlParams.cursor, limit: urlParams.limit }),))
+            .handle('cancelJob', ({ path }) => admin.mutation('cancelJob', jobs.cancel(path.id).pipe(
                 Effect.mapError((error) => error.reason === 'NotFound' ? HttpError.NotFound.of('job', path.id) : HttpError.Internal.of('Job cancel failed', error)),
                 Effect.tap(() => audit.log('Job.cancel', { details: { jobId: path.id } })),
                 Effect.as({ success: true as const }),
-                Telemetry.span('admin.cancelJob'),
             )))
-            .handle('listDlq', ({ urlParams }) => Middleware.guarded('admin', 'listDlq', 'api', database.jobDlq.listPending({ cursor: urlParams.cursor, limit: urlParams.limit }).pipe(
-                HttpError.mapTo('DLQ list failed'),
-                Telemetry.span('admin.listDlq'),
-            )))
-            .handle('replayDlq', ({ path }) => Middleware.guarded('admin', 'replayDlq', 'mutation', database.jobDlq.one([{ field: 'id', value: path.id }]).pipe(
+            .handle('listDlq', ({ urlParams }) => admin.api('listDlq', database.jobDlq.listPending({ cursor: urlParams.cursor, limit: urlParams.limit }),))
+            .handle('replayDlq', ({ path }) => admin.mutation('replayDlq', database.jobDlq.one([{ field: 'id', value: path.id }]).pipe(
                 HttpError.mapTo('dlq lookup failed'),
                 Effect.filterOrFail(Option.isSome, constant(HttpError.NotFound.of('dlq', path.id))),
                 Effect.map(({ value }) => value),
@@ -88,76 +76,60 @@ const AdminLive = HttpApiBuilder.group(ParametricApi, 'admin', (handlers) =>
                 Effect.catchAll((error: unknown) => Effect.fail(HttpError.Internal.of('DLQ replay failed', error))),
                 Effect.tap(() => audit.log('Dlq.replay', { details: { dlqId: path.id } })),
                 Effect.as({ success: true as const }),
-                Telemetry.span('admin.replayDlq'),
             )))
-            .handle('listNotifications', ({ urlParams }) => Middleware.guarded('admin', 'listNotifications', 'api', notifications.list({
-                after:  urlParams.after,
-                before: urlParams.before,
-                cursor: urlParams.cursor,
-                limit:  urlParams.limit,
-            }).pipe(
-                HttpError.mapTo('Notification list failed'),
-                Telemetry.span('admin.listNotifications'),
-            )))
-            .handle('replayNotification', ({ path }) => Middleware.guarded('admin', 'replayNotification', 'mutation', notifications.replay(path.id).pipe(
-                HttpError.mapTo('Notification replay failed'),
-                Effect.tap(() => audit.log('Job.replay', { details: { notificationId: path.id } })),
-                Effect.as({ success: true as const }),
-                Telemetry.span('admin.replayNotification'),
-            )))
-            .handleRaw('events', constant(Middleware.guarded('admin', 'events', 'realtime', Context.Request.currentTenantId.pipe(
+            .handle('listNotifications', ({ urlParams }) => admin.api('listNotifications',
+                notifications.list({
+                    after:  urlParams.after,
+                    before: urlParams.before,
+                    cursor: urlParams.cursor,
+                    limit:  urlParams.limit,
+                }),
+            ))
+            .handle('replayNotification', ({ path }) => admin.mutation('replayNotification',
+                notifications.replay(path.id).pipe(
+                    Effect.tap(() => audit.log('Job.replay', { details: { notificationId: path.id } })),
+                    Effect.as({ success: true as const }),
+                ),
+            ))
+            .handleRaw('events', constant(admin.realtime('events', Context.Request.currentTenantId.pipe(
                 Effect.andThen((tenantId) => StreamingService.sse({
                     filter:    (envelope) => envelope.event.tenantId === tenantId,
                     name:      'admin.events',
                     serialize: (envelope) => ({data: JSON.stringify(envelope.event), event: 'domain' as const, id: envelope.event.eventId,}),
                     source:    eventBus.stream(),
                 })),
-                Telemetry.span('admin.events'),
             ))))
-            .handle('queryDbObservability', ({ payload }) => Middleware.guarded('admin', 'queryDbObservability', 'api', database.observability.query(payload).pipe(
-                HttpError.mapTo('queryDbObservability failed'),
-                Effect.map((sections) => ({ sections })),
-                Telemetry.span('admin.queryDbObservability'),
-            )))
-            .handle('listPermissions', () => Middleware.guarded('admin', 'listPermissions', 'api', policy.list().pipe(
-                HttpError.mapTo('Permission list failed'),
-                Effect.map(Arr.map(({ action, resource, role }) => ({ action, resource, role }))),
-                Telemetry.span('admin.listPermissions'),
-            )))
-            .handle('grantPermission', ({ payload }) => Middleware.guarded('admin', 'grantPermission', 'mutation', policy.grant(payload).pipe(
-                HttpError.mapTo('Permission grant failed'),
-                Effect.map((permission) => ({ action: permission.action, resource: permission.resource, role: permission.role })),
-                Effect.tap((permission) => audit.log('Permission.create', { details: permission })),
-                Telemetry.span('admin.grantPermission'),
-            )))
-            .handle('revokePermission', ({ payload }) => Middleware.guarded('admin', 'revokePermission', 'mutation', policy.revoke(payload).pipe(
-                HttpError.mapTo('Permission revoke failed'),
-                Effect.tap(() => audit.log('Permission.revoke', { details: payload })),
-                Effect.as({ success: true as const }),
-                Telemetry.span('admin.revokePermission'),
-            )))
-            .handle('listTenants', () => Middleware.guarded('admin', 'listTenants', 'api', database.apps.find([]).pipe(
-                HttpError.mapTo('Tenant list failed'),
-                Telemetry.span('admin.listTenants'),
-            )))
-            .handle('createTenant', ({ payload }) => Middleware.guarded('admin', 'createTenant', 'mutation', lifecycle.transition({ _tag: 'provision', ...payload }).pipe(
+            .handle('queryDbObservability', ({ payload }) => admin.api('queryDbObservability', database.observability.query(payload).pipe(Effect.map((sections) => ({ sections }))),))
+            .handle('listPermissions', () => admin.api('listPermissions', policy.list().pipe(Effect.map(Arr.map(({ action, resource, role }) => ({ action, resource, role })))),))
+            .handle('grantPermission', ({ payload }) => admin.mutation('grantPermission',
+                policy.grant(payload).pipe(
+                    Effect.map((permission) => ({ action: permission.action, resource: permission.resource, role: permission.role })),
+                    Effect.tap((permission) => audit.log('Permission.create', { details: permission })),
+                ),
+            ))
+            .handle('revokePermission', ({ payload }) => admin.mutation('revokePermission',
+                policy.revoke(payload).pipe(
+                    Effect.tap(() => audit.log('Permission.revoke', { details: payload })),
+                    Effect.as({ success: true as const }),
+                ),
+            ))
+            .handle('listTenants', () => admin.api('listTenants', database.apps.find([]),))
+            .handle('createTenant', ({ payload }) => admin.mutation('createTenant',
+                lifecycle.transition({ _tag: 'provision', ...payload }).pipe(
                 Effect.filterOrFail(
                     (result): result is typeof App.Type => 'id' in result,
-                    constant(HttpError.Internal.of('Provision did not return tenant')),
+                    constant(HttpError.Internal.of('Provision did not return tenant')),),
                 ),
-                HttpError.mapTo('Tenant creation failed'),
-                Telemetry.span('admin.createTenant'),
-            )))
-            .handle('getTenant', ({ path }) => Middleware.guarded('admin', 'getTenant', 'api', database.apps.one([{ field: 'id', value: path.id }]).pipe(
-                HttpError.mapTo('tenant lookup failed'),
+            ))
+            .handle('getTenant', ({ path }) => admin.api('getTenant',
+                database.apps.one([{ field: 'id', value: path.id }]).pipe(
                 Effect.flatMap(Option.match({
                     onNone: () => Effect.fail(HttpError.NotFound.of('tenant', path.id)),
-                    onSome: Effect.succeed,
-                })),
-                Telemetry.span('admin.getTenant'),
-            )))
-            .handle('updateTenant', ({ path, payload }) => Middleware.guarded('admin', 'updateTenant', 'mutation', database.withTransaction(
-                database.apps.readSettings(path.id, 'update').pipe(
+                    onSome: Effect.succeed,})),
+                ),
+            ))
+            .handle('updateTenant', ({ path, payload }) => admin.mutation('updateTenant',
+                database.withTransaction(database.apps.readSettings(path.id, 'update').pipe(
                     Effect.mapError(constant(HttpError.Internal.of('tenant lookup failed'))),
                     Effect.flatMap(Option.match({
                         onNone: () => Effect.fail(HttpError.NotFound.of('tenant', path.id)),
@@ -178,38 +150,21 @@ const AdminLive = HttpApiBuilder.group(ParametricApi, 'admin', (handlers) =>
                     Effect.tap(() => audit.log('App.update', { details: { tenantId: path.id } })),
                     Effect.tap(() => eventBus.publish({ aggregateId: path.id, payload: { _tag: 'app', action: 'settings.updated' }, tenantId: path.id }).pipe(Effect.ignore)),
                     Effect.map(({ updated }) => updated),
-            )).pipe(
-                HttpError.mapTo('Tenant update failed'),
-                Telemetry.span('admin.updateTenant'),
-            )))
-            .handle('deactivateTenant', ({ path }) => Middleware.guarded('admin', 'deactivateTenant', 'mutation', lifecycle.transition({ _tag: 'suspend', tenantId: path.id }).pipe(
-                HttpError.mapTo('Tenant suspension failed'),
-                Effect.as({ success: true as const }),
-                Telemetry.span('admin.deactivateTenant'),
-            )))
-            .handle('resumeTenant', ({ path }) => Middleware.guarded('admin', 'resumeTenant', 'mutation', lifecycle.transition({ _tag: 'resume', tenantId: path.id }).pipe(
-                HttpError.mapTo('Tenant resume failed'),
-                Effect.as({ success: true as const }),
-                Telemetry.span('admin.resumeTenant'),
-            )))
-            .handle('archiveTenant', ({ path }) => Middleware.guarded('admin', 'archiveTenant', 'mutation', lifecycle.transition({ _tag: 'archive', tenantId: path.id }).pipe(
-                HttpError.mapTo('Tenant archive failed'),
-                Effect.as({ success: true as const }),
-                Telemetry.span('admin.archiveTenant'),
-            )))
-            .handle('purgeTenant', ({ path }) => Middleware.guarded('admin', 'purgeTenant', 'mutation', lifecycle.transition({ _tag: 'purge', tenantId: path.id }).pipe(
-                HttpError.mapTo('Tenant purge failed'),
-                Effect.as({ success: true as const }),
-                Telemetry.span('admin.purgeTenant'),
-            )))
-            .handle('getTenantOAuth', ({ path }) => Middleware.guarded('admin', 'getTenantOAuth', 'api', database.apps.readSettings(path.id).pipe(
-                Effect.mapError(constant(HttpError.Internal.of('tenant lookup failed'))),
-                Effect.filterOrFail(Option.isSome, constant(HttpError.NotFound.of('tenant', path.id))),
-                Effect.map(({ value: { settings } }) => settings.oauthProviders),
-                Effect.map(Arr.map(({ clientSecretEncrypted, ...rest }) => ({ ...rest, clientSecretSet: clientSecretEncrypted.length > 0 }))),
-                Effect.map((providers) => ({ providers })),
-                Telemetry.span('admin.getTenantOAuth'),
-            )))
+                )),
+            ))
+            .handle('deactivateTenant', ({ path }) => admin.mutation('deactivateTenant', lifecycle.transition({ _tag: 'suspend', tenantId: path.id }).pipe(Effect.as({ success: true as const }),),))
+            .handle('resumeTenant', ({ path }) => admin.mutation('resumeTenant', lifecycle.transition({ _tag: 'resume', tenantId: path.id }).pipe(Effect.as({ success: true as const }),),))
+            .handle('archiveTenant', ({ path }) => admin.mutation('archiveTenant', lifecycle.transition({ _tag: 'archive', tenantId: path.id }).pipe(Effect.as({ success: true as const }),),))
+            .handle('purgeTenant', ({ path }) => admin.mutation('purgeTenant', lifecycle.transition({ _tag: 'purge', tenantId: path.id }).pipe(Effect.as({ success: true as const }),),))
+            .handle('getTenantOAuth', ({ path }) => admin.api('getTenantOAuth',
+                database.apps.readSettings(path.id).pipe(
+                    Effect.mapError(constant(HttpError.Internal.of('tenant lookup failed'))),
+                    Effect.filterOrFail(Option.isSome, constant(HttpError.NotFound.of('tenant', path.id))),
+                    Effect.map(({ value: { settings } }) => settings.oauthProviders),
+                    Effect.map(Arr.map(({ clientSecretEncrypted, ...rest }) => ({ ...rest, clientSecretSet: clientSecretEncrypted.length > 0 }))),
+                    Effect.map((providers) => ({ providers })),
+                ),
+            ))
             .handle('updateTenantOAuth', Effect.fn(
                 function*({ path, payload }) {
                     const loaded = yield* database.apps.readSettings(path.id, 'update').pipe(
@@ -226,8 +181,7 @@ const AdminLive = HttpApiBuilder.group(ParametricApi, 'admin', (handlers) =>
                                 onNone: constant(
                                     Effect.fromNullable(secretsByProvider[provider.provider]?.[0]).pipe(
                                         Effect.mapError(constant(HttpError.Validation.of('clientSecret', `Missing clientSecret for provider '${provider.provider}'`))),
-                                        Effect.map(Struct.get('clientSecretEncrypted')),
-                                    )
+                                        Effect.map(Struct.get('clientSecretEncrypted')),)
                                 ),
                                 onSome: flow(Crypto.encrypt, Effect.mapError(constant(HttpError.Internal.of('Encryption failed'))), Effect.map(Encoding.encodeBase64)),
                             }),
@@ -244,17 +198,15 @@ const AdminLive = HttpApiBuilder.group(ParametricApi, 'admin', (handlers) =>
                         (providers) => ({ providers }),
                     );
                 },
-                (effect) => Middleware.guarded('admin', 'updateTenantOAuth', 'mutation', effect.pipe(
-                    HttpError.mapTo('Tenant OAuth config update failed'),
-                    Telemetry.span('admin.updateTenantOAuth'),
-                )),
+                (effect) => admin.mutation('updateTenantOAuth', effect,),
             ))
-            .handle('getFeatureFlags', () => Middleware.guarded('admin', 'getFeatureFlags', 'api', features.getAll.pipe(Telemetry.span('admin.getFeatureFlags'),)))
-            .handle('setFeatureFlag', ({ payload }) => Middleware.guarded('admin', 'setFeatureFlag', 'mutation', features.set(payload.flag, payload.value).pipe(
-                Effect.tap(() => audit.log('Feature.update', { details: { flag: payload.flag, value: payload.value } })),
-                Effect.as({ success: true as const }),
-                Telemetry.span('admin.setFeatureFlag'),
-            )));
+            .handle('getFeatureFlags', () => admin.api('getFeatureFlags', features.getAll,))
+            .handle('setFeatureFlag', ({ payload }) => admin.mutation('setFeatureFlag',
+                features.set(payload.flag, payload.value).pipe(
+                    Effect.tap(() => audit.log('Feature.update', { details: { flag: payload.flag, value: payload.value } })),
+                    Effect.as({ success: true as const }),
+                ),
+            ));
     }),
 );
 

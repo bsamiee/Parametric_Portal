@@ -219,11 +219,8 @@ const Circuit = {
 
 namespace Circuit {
     export type Error = InstanceType<typeof CircuitError>;
-    export type ErrorReason = Error['reason'];
     export type Config = NonNullable<Parameters<typeof make>[1]>;
     export type State = CircuitState;
-    export type Context = Option.Option.Value<Effect.Effect.Success<typeof current>>;
-    export type Stats = { readonly lastAccess: number; readonly name: string; readonly state: string };
     export interface Instance {
         readonly dispose: () => void;
         readonly execute: <A, E, R>(eff: Effect.Effect<A, E, R>) => Effect.Effect<A, E | Error, R>;

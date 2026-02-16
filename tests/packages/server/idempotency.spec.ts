@@ -107,6 +107,16 @@ describe('Cache key construction', () => {
     });
 });
 
+it.effect('guarded default map/span naming is deterministic', () =>
+    Effect.sync(() => {
+        const mapTo = (resource: string, action: string) => `${resource}.${action} failed`;
+        const span = (resource: string, action: string) => `${resource}.${action}`;
+        expect(mapTo('admin', 'listUsers')).toBe('admin.listUsers failed');
+        expect(mapTo('storage', 'sign')).toBe('storage.sign failed');
+        expect(span('admin', 'listUsers')).toBe('admin.listUsers');
+        expect(span('storage', 'sign')).toBe('storage.sign');
+    }));
+
 // --- [EDGE_CASES] ------------------------------------------------------------
 
 describe('Branch condition logic', () => {

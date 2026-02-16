@@ -47,20 +47,20 @@ const _exportAssets = (parameters: typeof TransferQuery.Type) =>
         const session = yield* Context.Request.sessionOrFail;
         const appId = context.tenantId;
         const codec = yield* _resolveCodec(parameters.format);
-        const exportFormat = yield* Effect.filterOrFail(Effect.succeed(codec.ext), (ext): ext is Transfer.Format => Object.hasOwn(Transfer.formats, ext), () => HttpError.Validation.of('format', `Unsupported export format: ${parameters.format}`));
-        const isBinaryFormat = (value: Transfer.Format): value is Transfer.BinaryFormat => Transfer.formats[value].kind === 'binary';
+        const exportFormat = yield* Effect.filterOrFail(Effect.succeed(codec.ext), (ext): ext is keyof typeof Transfer.formats => Object.hasOwn(Transfer.formats, ext), () => HttpError.Validation.of('format', `Unsupported export format: ${parameters.format}`));
+        const isBinaryFormat = (value: keyof typeof Transfer.formats): value is Transfer.BinaryFormat => Transfer.formats[value].kind === 'binary';
         const baseStream = Stream.fromIterableEffect(repositories.assets.byFilter(session.userId, {
-            ...(Option.isSome(parameters.after) && { after: parameters.after.value }),
-            ...(Option.isSome(parameters.before) && { before: parameters.before.value }),
+            ...(parameters.after === undefined ? {} : { after: parameters.after }),
+            ...(parameters.before === undefined ? {} : { before: parameters.before }),
             ...(Option.isSome(parameters.typeSlug) && { types: [parameters.typeSlug.value] }),
         }));
         const textStream = baseStream.pipe(Stream.zipWithIndex, Stream.map(([asset, index]) => _mapAsset(asset, index)));
         const binaryStream = baseStream.pipe(
             Stream.mapEffect((asset) => pipe(
                 asset.storageRef,
-                Option.map(adapter.get as (storageKey: string) => Effect.Effect<StorageAdapter.GetResult, unknown>),
+                Option.map((storageKey: string) => adapter.get(storageKey)),
                 Option.map(Effect.map((storageResult) => ({ ...asset, content: Buffer.from(storageResult.body).toString('base64') }))),
-                Option.map(Effect.orElseSucceed(constant(asset))),
+                Option.map(Effect.catchAll(constant(Effect.succeed(asset)))),
                 Option.getOrElse(constant(Effect.succeed(asset))),
             )),
             Stream.zipWithIndex,
@@ -69,15 +69,15 @@ const _exportAssets = (parameters: typeof TransferQuery.Type) =>
         const auditExport = (name: string, count?: number) => audit.log('Asset.export', { details: { count: count ?? null, format: codec.ext, name, userId: session.userId }, subjectId: appId });
         return yield* isBinaryFormat(exportFormat)
             ? Transfer.export(binaryStream, exportFormat).pipe(
-                Effect.tap((result: Transfer.BinaryResult) => Effect.all([
+                Effect.tap((result) => Effect.all([
                     Effect.annotateCurrentSpan('transfer.format', codec.ext),
                     Effect.annotateCurrentSpan('transfer.rows', result.count),
                     MetricsService.inc(metrics.transfer.exports, MetricsService.label({ app: appId, format: codec.ext })),
                     MetricsService.inc(metrics.transfer.rows, MetricsService.label({ app: appId, outcome: 'exported' }), result.count),
                 ], { discard: true })),
                 HttpError.mapTo(`${codec.ext.toUpperCase()} generation failed`),
-                Effect.tap((result: Transfer.BinaryResult) => auditExport(result.name, result.count)),
-                Effect.map((result: Transfer.BinaryResult) => ({ ...result, format: codec.ext })),
+                Effect.tap((result) => auditExport(result.name, result.count)),
+                Effect.map((result) => ({ ...result, format: codec.ext })),
                 Telemetry.span(`transfer.serialize.${codec.ext}`, { metrics: false }),
             )
             : (() => {
@@ -155,7 +155,7 @@ const _importAssets = (parameters: typeof TransferQuery.Type) =>
                     return { appId, content: metadata, deletedAt: Option.none(), hash: Option.some(computedHash), name: Option.some(originalName), status: 'active' as const, storageRef: Option.some(storageKey), type: item.type, updatedAt: undefined, userId: Option.some(session.userId) };
                 })
                 : Effect.succeed({ appId, content: item.content, deletedAt: Option.none(), hash: Option.fromNullable(item.hash), name: Option.fromNullable(item.name), status: 'active' as const, storageRef: Option.none<string>(), type: item.type, updatedAt: undefined, userId: Option.some(session.userId) });
-        const processBatch = (accumulator: { readonly assets: readonly Asset[]; readonly dbFailures: readonly TransferError.Import[] }, batchItems: typeof items) => {
+        const processBatch = (accumulator: { readonly assets: readonly Asset[]; readonly dbFailures: readonly InstanceType<typeof TransferError.Import>[] }, batchItems: typeof items) => {
             const ordinals = batchItems.map((batchItem) => batchItem.ordinal);
             return Effect.forEach(batchItems, prepareItem, { concurrency: 10 }).pipe(
                 Effect.flatMap((prepared) => repositories.assets.put([...prepared]) as Effect.Effect<readonly Asset[], unknown>),
@@ -166,7 +166,7 @@ const _importAssets = (parameters: typeof TransferQuery.Type) =>
                 )),
             );
         };
-        const initial = { assets: [] as readonly Asset[], dbFailures: [] as readonly TransferError.Import[] };
+        const initial = { assets: [] as readonly Asset[], dbFailures: [] as readonly InstanceType<typeof TransferError.Import>[] };
         const { assets, dbFailures } = dryRun
             ? initial
             : yield* repositories.withTransaction(Stream.runFoldEffect(Stream.grouped(Stream.fromIterable(items), Transfer.limits.batchSize), initial, (accumulator, chunk) => processBatch(accumulator, Chunk.toArray(chunk)))).pipe(

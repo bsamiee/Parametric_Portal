@@ -20,13 +20,13 @@ import { Resilience } from '../utils/resilience.ts';
 // --- [SCHEMA] ----------------------------------------------------------------
 
 class NotificationRequest extends S.Class<NotificationRequest>('NotificationRequest')({
-    channel: Notification.fields.channel,
-    data: S.Unknown,
-    dedupeKey: S.optional(S.String),
+    channel:     Notification.fields.channel,
+    data:        S.Unknown,
+    dedupeKey:   S.optional(S.String),
     maxAttempts: S.optionalWith(S.Int.pipe(S.between(1, 10)), { default: () => 5 }),
-    recipient: S.optional(S.String),
-    template: S.NonEmptyTrimmedString,
-    userId: S.optional(S.UUID),
+    recipient:   S.optional(S.String),
+    template:    S.NonEmptyTrimmedString,
+    userId:      S.optional(S.UUID),
 }) {}
 
 // --- [ERRORS] ----------------------------------------------------------------
@@ -256,9 +256,7 @@ class NotificationService extends Effect.Service<NotificationService>()('server/
                 )),
                 { concurrency: 'unbounded' },
             ).pipe(Telemetry.span('notification.send', { metrics: false })),
-            streamMine: () => Stream.unwrap(Context.Request.sessionOrFail.pipe(Effect.map((session) => eventBus.stream().pipe(
-                Stream.filter((envelope) => envelope.event.eventType === 'notification.inApp' && (envelope.event.payload as Record<string, unknown>)?.['userId'] === session.userId),
-            )))),
+            streamMine: () => Stream.unwrap(Context.Request.sessionOrFail.pipe(Effect.map((session) => eventBus.stream().pipe(Stream.filter((envelope) => envelope.event.eventType === 'notification.inApp' && (envelope.event.payload as Record<string, unknown>)?.['userId'] === session.userId),)))),
             updatePreferences: (raw: S.Schema.Encoded<typeof PreferencesSchema>) => Effect.gen(function* () {
                 const preferences = yield* S.decodeUnknown(PreferencesSchema)(raw);
                 const session = yield* Context.Request.sessionOrFail;

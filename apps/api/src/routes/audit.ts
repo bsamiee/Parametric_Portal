@@ -6,9 +6,7 @@ import { HttpApiBuilder } from '@effect/platform';
 import { DatabaseService } from '@parametric-portal/database/repos';
 import { ParametricApi } from '@parametric-portal/server/api';
 import { Context } from '@parametric-portal/server/context';
-import { HttpError } from '@parametric-portal/server/errors';
 import { Middleware } from '@parametric-portal/server/middleware';
-import { Telemetry } from '@parametric-portal/server/observe/telemetry';
 import { Diff } from '@parametric-portal/server/utils/diff';
 import { Array as A, Effect, Option, pipe } from 'effect';
 
@@ -29,28 +27,25 @@ const withDiffs = <T extends { delta: Option.Option<{ readonly old?: unknown; re
 const AuditLive = HttpApiBuilder.group(ParametricApi, 'audit', (handlers) =>
     Effect.gen(function* () {
         const repositories = yield* DatabaseService;
+        const audit = Middleware.resource('audit');
         return handlers
             .handle('getByEntity', ({ path: { subject, subjectId }, urlParams: parameters }) =>
-                Middleware.guarded('audit', 'getByEntity', 'api', Middleware.feature('enableAuditLog').pipe(
+                audit.api('getByEntity', Middleware.feature('enableAuditLog').pipe(
                         Effect.andThen(Context.Request.currentTenantId),
                         Effect.flatMap(() => repositories.audit.bySubject(subject, subjectId, parameters.limit, parameters.cursor, parameters)),
                         Effect.map((result) => ({ ...result, items: withDiffs(result.items, parameters.includeDiff ?? false) })),
-                        HttpError.mapTo('Audit lookup failed'),
-                    )).pipe(Telemetry.span('audit.getByEntity')))
+                    )))
             .handle('getByUser', ({ path: { userId }, urlParams: parameters }) =>
-                Middleware.guarded('audit', 'getByUser', 'api', Middleware.feature('enableAuditLog').pipe(
+                audit.api('getByUser', Middleware.feature('enableAuditLog').pipe(
                         Effect.andThen(Context.Request.currentTenantId),
                         Effect.flatMap(() => repositories.audit.byUser(userId, parameters.limit, parameters.cursor, parameters)),
                         Effect.map((result) => ({ ...result, items: withDiffs(result.items, parameters.includeDiff ?? false) })),
-                        HttpError.mapTo('Audit lookup failed'),
-                    )).pipe(Telemetry.span('audit.getByUser')))
+                    )))
             .handle('getMine', ({ urlParams: parameters }) =>
-                Middleware.guarded('audit', 'getMine', 'api', Middleware.feature('enableAuditLog').pipe(
+                audit.api('getMine', Middleware.feature('enableAuditLog').pipe(
                         Effect.andThen(Effect.all([Context.Request.current, Context.Request.sessionOrFail])),
                         Effect.flatMap(([, session]) => repositories.audit.byUser(session.userId, parameters.limit, parameters.cursor, parameters)),
                         Effect.map((result) => ({ ...result, items: withDiffs(result.items, parameters.includeDiff ?? false) })),
-                        HttpError.mapTo('Audit lookup failed'),
-                        Telemetry.span('audit.getMine'),
                     )));
     }),
 );

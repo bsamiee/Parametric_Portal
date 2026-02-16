@@ -10,7 +10,7 @@ import { SearchRepo } from './search.ts';
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
-const _LIMITS: { defaultAuditWindow: number; defaultPage: number } = { defaultAuditWindow: 60, defaultPage: 100 };
+const _LIMITS: { defaultPage: number } = { defaultPage: 100 };
 
 // --- [REPOSITORIES] ----------------------------------------------------------
 
@@ -74,20 +74,14 @@ const makeAssetRepo = Effect.gen(function* () {
     const repository = yield* repo(Asset, 'assets', { purge: { column: 'deletedAt', defaultDays: 30, table: 'assets' }, resolve: { byHash: 'hash', byType: { field: 'type', many: true }, byUser: { field: 'userId', many: true } }, scoped: 'appId' });
     return { ...repository,
         byFilter: (userId: string, { after, before, ids, types }: { after?: Date; before?: Date; ids?: string[]; types?: string[] } = {}) => repository.find(repository.preds({ after, before, id: ids, type: types, userId })),
-        byUserKeyset: (userId: string, limit: number, cursor?: string) => repository.page([{ field: 'userId', value: userId }], { cursor, limit }),
         findStaleForPurge: (olderThanDays: number) => Clock.currentTimeMillis.pipe(Effect.andThen((now) => repository.find([{ field: 'deletedAt',  op: 'notNull' },{ field: 'deletedAt',  op: 'lt', value: new Date(now - olderThanDays * 24 * 60 * 60 * 1000) },{ field: 'storageRef', op: 'notNull' },])),),
     };
 });
 const makeAuditRepo = Effect.gen(function* () {
-    const repository = yield* repo(AuditLog, 'audit_logs', {
-        functions: { count_audit_by_ip: { args: [{ cast: 'uuid', field: 'appId' }, { cast: 'inet', field: 'ip' }, 'windowMinutes'], params: S.Struct({ appId: S.UUID, ip: S.String, windowMinutes: S.Number }) } },
-        scoped: 'appId',
-    });
+    const repository = yield* repo(AuditLog, 'audit_logs', { scoped: 'appId' });
     return { ...repository,
-        byIp: (ip: string, limit: number, cursor?: string) => repository.page([{ field: 'contextIp', value: ip }], { cursor, limit }),
         bySubject: (type: string, id: string, limit: number, cursor?: string, { after, before, operation }: { after?: Date; before?: Date; operation?: S.Schema.Type<typeof AuditOperationSchema> } = {}) => repository.page([{ field: 'targetType', value: type }, { field: 'targetId', value: id }, ...repository.preds({ after, before, operation })], { cursor, limit }),
         byUser: (userId: string, limit: number, cursor?: string, { after, before, operation }: { after?: Date; before?: Date; operation?: S.Schema.Type<typeof AuditOperationSchema> } = {}) => repository.page(repository.preds({ after, before, operation, userId }), { cursor, limit }),
-        countByIp: (appId: string, ip: string, windowMinutes = _LIMITS.defaultAuditWindow) => repository.fn<number>('count_audit_by_ip', { appId, ip, windowMinutes }),
         log: repository.insert,
     };
 });
@@ -106,29 +100,14 @@ const makeWebauthnCredentialRepo = Effect.gen(function* () {
     };
 });
 const makeJobRepo = Effect.gen(function* () {
-    const repository = yield* repo(Job, 'jobs', {
-        functions: {
-            job_duplicate_exists: {
-                args: ['dedupeKey'],
-                mode: 'scalar',
-                params: S.Struct({ dedupeKey: S.String }),
-                schema: S.Boolean,
-            },
-        },
-        pk: { column: 'job_id' },
-        scoped: 'appId',
-    });
+    const repository = yield* repo(Job, 'jobs', { pk: { column: 'job_id' }, scoped: 'appId' });
     return { ...repository,
-        byDateRange: (after: Date, before: Date, options?: { limit?: number; cursor?: string }) => repository.page(repository.preds({ after, before }), options),
-        byStatus: (status: string, options?: { after?: Date; before?: Date; limit?: number; cursor?: string }) => repository.page([{ field: 'status', value: status }, ...repository.preds({ after: options?.after, before: options?.before })], options),
         countByStatuses: (...statuses: readonly string[]) => repository.count([{ field: 'status', op: 'in', values: [...statuses] }]),
-        isDuplicate: (dedupeKey: string) => repository.fn<boolean>('job_duplicate_exists', { dedupeKey }),
     };
 });
 const makeJobDlqRepo = Effect.gen(function* () {
     const repository = yield* repo(JobDlq, 'job_dlq', { purge: { column: 'replayedAt', defaultDays: 30, table: 'job_dlq' }, resolve: { byRequest: { field: 'contextRequestId', many: true }, bySource: 'sourceId' }, scoped: 'appId' });
     return { ...repository,
-        byErrorReason:  (errorReason: string, options?: { limit?: number; cursor?: string }) => repository.page([{ field: 'errorReason', value: errorReason }], options),
         countPending:   (type?: string) => repository.count(repository.wildcard('type', type)),
         listPending:    (options?: { type?: string; limit?: number; cursor?: string }) => repository.page(repository.wildcard('type', options?.type), options),
         markReplayed:   (id: string) => repository.drop(id),
@@ -156,11 +135,9 @@ const makeNotificationRepo = Effect.gen(function* () {
 const makeKvStoreRepo = Effect.gen(function* () {
     const repository = yield* repo(KvStore, 'kv_store', {
         conflict:  { keys: ['key'], only: ['value', 'expiresAt'] },
-        functions: { delete_kv_by_prefix: { args: ['prefix'], params: S.Struct({ prefix: S.String }) } },
         purge:     { column: 'expiresAt', defaultDays: 30, table: 'kv_store' }, resolve: { byKey: 'key' },
     });
     return { ...repository,
-        deleteByPrefix: (prefix: string) => repository.fn<number>('delete_kv_by_prefix', { prefix }),
         getJson: <A, I, R>(key: string, schema: S.Schema<A, I, R>) => repository.by('byKey', key).pipe(Effect.flatMap(repository.json.decode('value', schema))),
         setJson: <A, I, R>(key: string, jsonValue: A, schema: S.Schema<A, I, R>, expiresAt?: Date) => repository.json.encode(schema)(jsonValue).pipe(Effect.flatMap((encoded) => repository.upsert({ expiresAt, key, value: encoded }))),
     };
@@ -175,9 +152,9 @@ const makeSystemRepo = Effect.gen(function* () {
                 params: S.Struct({ batchSize: S.Number, eventType: S.NullOr(S.String), sinceSequenceId: S.String, sinceTimestamp: S.NullOr(S.Number) }),
                 schema: S.Struct({ payload: S.String, primaryKey: S.String }),
             },
-            outbox_count: { mode: 'scalar', schema: S.Int },
-            purge_journal:         { args: ['days'], params: S.Struct({ days: S.Number }) },
-            purge_tenant:          { args: ['appId'], params: S.Struct({ appId: S.UUID }) },
+            outbox_count:  { mode: 'scalar',  schema: S.Int },
+            purge_journal: { args: ['days'],  params: S.Struct({ days: S.Number }) },
+            purge_tenant:  { args: ['appId'], params: S.Struct({ appId: S.UUID }) },
             query_db_observability: {
                 args: [{ cast: 'jsonb', field: 'sections' }, 'limit'],
                 mode: 'typed',

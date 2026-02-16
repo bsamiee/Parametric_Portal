@@ -17,7 +17,7 @@ const _CONFIG = {
     defaults: { bulkhead: 10, hedgeDelay: Duration.millis(100), threshold: 5, timeout: Duration.seconds(30) },
     nonRetriable: new Set(['Auth', 'Conflict', 'Forbidden', 'Gone', 'NotFound', 'RateLimit', 'Validation']) as ReadonlySet<string>,
     presets: {
-        brief:      _mkSchedule({ base: Duration.millis(50), cap: Duration.seconds(2), maxAttempts: 2 }),
+        brief:      _mkSchedule({ base: Duration.millis(50),  cap: Duration.seconds(2),  maxAttempts: 2 }),
         default:    _mkSchedule({ base: Duration.millis(100), cap: Duration.seconds(10), maxAttempts: 3 }),
         patient:    _mkSchedule({ base: Duration.millis(500), cap: Duration.seconds(30), maxAttempts: 5 }),
         persistent: _mkSchedule({ base: Duration.millis(100), cap: Duration.seconds(30), maxAttempts: 5 }),
@@ -151,22 +151,18 @@ interface Resilience {
     readonly Timeout: typeof TimeoutError;
 }
 namespace Resilience {
-    export type TimeoutError = InstanceType<typeof TimeoutError>;
-    export type BulkheadError = InstanceType<typeof BulkheadError>;
-    export type CircuitError = Circuit.Error;
-    export type Error<E> = E | TimeoutError | BulkheadError | CircuitError;
+    export type Error<E> = E | InstanceType<typeof TimeoutError> | InstanceType<typeof BulkheadError> | Circuit.Error;
     export type SchedulePreset = keyof typeof _CONFIG.presets;
     export type ScheduleConfig = { readonly base: Duration.DurationInput; readonly cap?: Duration.DurationInput; readonly factor?: number; readonly maxAttempts: number };
-    export type RetryMode = SchedulePreset | boolean;
     export type State = ResilienceState | Circuit.State;
     export type Config<A = unknown, E = unknown, R = unknown> = {
         readonly bulkhead?: number | false;
         readonly bulkheadTimeout?: Duration.Duration;
         readonly circuit?: string | false;
-        readonly fallback?: (error: E | TimeoutError | BulkheadError) => Effect.Effect<A, never, R>;
-        readonly onExhaustion?: (error: E | TimeoutError | BulkheadError, operation: string) => Effect.Effect<void, never, R>;
+        readonly fallback?: (error: E | InstanceType<typeof TimeoutError> | InstanceType<typeof BulkheadError>) => Effect.Effect<A, never, R>;
+        readonly onExhaustion?: (error: E | InstanceType<typeof TimeoutError> | InstanceType<typeof BulkheadError>, operation: string) => Effect.Effect<void, never, R>;
         readonly hedge?: number | { readonly attempts: number; readonly delay: Duration.Duration } | false;
-        readonly retry?: RetryMode | Schedule.Schedule<unknown, unknown, never> | false;
+        readonly retry?: SchedulePreset | boolean | Schedule.Schedule<unknown, unknown, never>;
         readonly threshold?: number;
         readonly timeout?: Duration.Duration | false;
     };
