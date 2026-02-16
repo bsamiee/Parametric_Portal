@@ -1,9 +1,10 @@
 /** WebSocket service: rooms, presence, cross-instance pub/sub, Machine lifecycle. */
 import type { Socket } from '@effect/platform';
 import { Machine } from '@effect/experimental';
-import { Array as Arr, Clock, Config, Duration, Effect, Match, Metric, Number as N, Option, Request, Schedule, Schema as S, STM, TMap } from 'effect';
+import { Array as Arr, Clock, Duration, Effect, Match, Metric, Number as N, Option, Request, Schedule, Schema as S, STM, TMap } from 'effect';
 import { apply, constant, flow } from 'effect/Function';
 import { CacheService } from './cache.ts';
+import { Env } from '../env.ts';
 import { MetricsService } from '../observe/metrics.ts';
 import { Telemetry } from '../observe/telemetry.ts';
 import { Resilience } from '../utils/resilience.ts';
@@ -11,13 +12,6 @@ import { Resilience } from '../utils/resilience.ts';
 // --- [CONSTANTS] -------------------------------------------------------------
 
 const _MODEL = { broadcastRoomId: '__broadcast__', key: { meta: (socketId: string) => `ws:meta:${socketId}`, room: (tenantId: string, roomId: string) => `room:${tenantId}:${roomId}` }, lifecycle: { active: 'active', disconnecting: 'disconnecting' }, metaTtl: Duration.hours(2), roomTtl: Duration.minutes(10) } as const;
-const _Tuning = Config.all({
-    broadcastChannel:   Config.string('WS_BROADCAST_CHANNEL').pipe(Config.withDefault('ws:broadcast')),
-    maxRoomsPerSocket:  Config.integer('WS_MAX_ROOMS_PER_SOCKET').pipe(Config.withDefault(10)),
-    pingIntervalMs:     Config.integer('WS_PING_INTERVAL_MS').pipe(Config.withDefault(30_000)),
-    pongTimeoutMs:      Config.integer('WS_PONG_TIMEOUT_MS').pipe(Config.withDefault(90_000)),
-    reaperIntervalMs:   Config.integer('WS_REAPER_INTERVAL_MS').pipe(Config.withDefault(15_000))
-});
 
 // --- [SCHEMA] ----------------------------------------------------------------
 
@@ -80,7 +74,8 @@ class WebSocketService extends Effect.Service<WebSocketService>()('server/WebSoc
     scoped: Effect.gen(function* () {
         const cache = yield* CacheService;
         const metrics = yield* MetricsService;
-        const tuning = yield* _Tuning;
+        const env = yield* Env.Service;
+        const tuning = env.websocket;
         const socketRegistry = yield* STM.commit(TMap.empty<string, {
             readonly actor: Machine.Actor<Machine.Machine.Any>;
             readonly lastPong: number;
@@ -99,19 +94,19 @@ class WebSocketService extends Effect.Service<WebSocketService>()('server/WebSoc
         const labels = MetricsService.label({ service: 'websocket' });
         const _trackRtcEvent = (direction: 'error' | 'inbound' | 'outbound', messageType: string) => Metric.increment(Metric.taggedWithLabels(metrics.rtc.events, MetricsService.label({ direction, message_type: messageType, service: 'websocket' })));
         const _reg = {
-            addRoom: (socketId: string, roomId: string) => _reg.update(socketId, (entry) => ({ ...entry, rooms: [...entry.rooms, roomId] })),
-            entries: () => STM.commit(TMap.toArray(socketRegistry)),
-            get: (socketId: string) => STM.commit(TMap.get(socketRegistry, socketId)),
-            modify: (socketId: string, partial: Partial<_SocketRegistryEntry>) => _reg.update(socketId, (entry) => ({ ...entry, ...partial })),
-            remove: (socketId: string) => STM.commit(TMap.remove(socketRegistry, socketId)),
+            addRoom:    (socketId: string, roomId: string) => _reg.update(socketId, (entry) => ({ ...entry, rooms: [...entry.rooms, roomId] })),
+            entries:    () => STM.commit(TMap.toArray(socketRegistry)),
+            get:        (socketId: string) => STM.commit(TMap.get(socketRegistry, socketId)),
+            modify:     (socketId: string, partial: Partial<_SocketRegistryEntry>) => _reg.update(socketId, (entry) => ({ ...entry, ...partial })),
+            remove:     (socketId: string) => STM.commit(TMap.remove(socketRegistry, socketId)),
             removeRoom: (socketId: string, roomId: string) => _reg.update(socketId, (entry) => ({ ...entry, rooms: Arr.filter(entry.rooms, (id) => id !== roomId) })),
-            set: (socketId: string, entry: _SocketRegistryEntry) => STM.commit(TMap.set(socketRegistry, socketId, entry)),
-            update: (socketId: string, updateFn: (entry: _SocketRegistryEntry) => _SocketRegistryEntry) => STM.commit(TMap.get(socketRegistry, socketId).pipe(STM.flatMap(Option.match({ onNone: () => STM.void, onSome: (entry) => TMap.set(socketRegistry, socketId, updateFn(entry)) })))),
-            values: () => STM.commit(TMap.values(socketRegistry)),
+            set:        (socketId: string, entry: _SocketRegistryEntry) => STM.commit(TMap.set(socketRegistry, socketId, entry)),
+            update:     (socketId: string, updateFn: (entry: _SocketRegistryEntry) => _SocketRegistryEntry) => STM.commit(TMap.get(socketRegistry, socketId).pipe(STM.flatMap(Option.match({ onNone: () => STM.void, onSome: (entry) => TMap.set(socketRegistry, socketId, updateFn(entry)) })))),
+            values:     () => STM.commit(TMap.values(socketRegistry)),
         } as const;
-        const _roomsFor = (socketId: string) => _reg.get(socketId).pipe(Effect.map(Option.match({ onNone: () => [] as ReadonlyArray<string>, onSome: (entry) => entry.rooms })));
+        const _roomsFor =  (socketId: string) => _reg.get(socketId).pipe(Effect.map(Option.match({ onNone: () => [] as ReadonlyArray<string>, onSome: (entry) => entry.rooms })));
         const _touchRoom = (tenantId: string, roomId: string) => cache.sets.touch(_MODEL.key.room(tenantId, roomId), _MODEL.roomTtl);
-        const _fanout = (entries: ReadonlyArray<_SocketRegistryEntry>, payload: typeof _SCHEMA.OutboundMsg.Type, messageType?: string) => Effect.gen(function* () {
+        const _fanout =    (entries: ReadonlyArray<_SocketRegistryEntry>, payload: typeof _SCHEMA.OutboundMsg.Type, messageType?: string) => Effect.gen(function* () {
             const encoded = yield* _CODEC.outbound.encode(payload);
             yield* Option.fromNullable(messageType).pipe(
                 Option.map(_trackRtcEvent.bind(null, 'outbound')),

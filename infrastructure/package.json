@@ -3,6 +3,7 @@
 	"private": true,
 	"type": "module",
 	"dependencies": {
+		"@parametric-portal/server": "workspace:*",
 		"@pulumi/aws": "catalog:",
 		"@pulumi/awsx": "catalog:",
 		"@pulumi/command": "catalog:",

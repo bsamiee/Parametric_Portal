@@ -6,8 +6,9 @@ import { S3, S3ClientInstance } from '@effect-aws/client-s3';
 import { CopyObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { Buffer } from 'node:buffer';
-import { Array as A, Chunk, Config, Duration, Effect, type Either, Exit, Layer, Match, Metric, Option, Redacted, Stream, Struct } from 'effect';
+import { Array as A, Chunk, Duration, Effect, type Either, Exit, Layer, Match, Metric, Option, Redacted, Stream, Struct } from 'effect';
 import { constant } from 'effect/Function';
+import { Env } from '../env.ts';
 import { Context } from '../context.ts';
 import { MetricsService } from '../observe/metrics.ts';
 import { Telemetry } from '../observe/telemetry.ts';
@@ -18,28 +19,17 @@ const _CONFIG = {
     batch:      { concurrency: 10, deleteLimit: 1000 },
     multipart:  { partSize: 5 * 1024 * 1024, threshold: 10 * 1024 * 1024 },
 } as const;
-const _ENV = Config.all({
-    accessKeyId:        Config.redacted('STORAGE_ACCESS_KEY_ID'),
-    bucket:             Config.string('STORAGE_BUCKET'),
-    endpoint:           Config.option(Config.string('STORAGE_ENDPOINT')),
-    forcePathStyle:     Config.boolean('STORAGE_FORCE_PATH_STYLE').pipe(Config.withDefault(false)),
-    maxAttempts:        Config.integer('STORAGE_MAX_ATTEMPTS').pipe(Config.withDefault(3)),
-    region:             Config.string('STORAGE_REGION').pipe(Config.withDefault('us-east-1')),
-    retryMode:          Config.literal('adaptive', 'legacy', 'standard')('STORAGE_RETRY_MODE').pipe(Config.withDefault('standard' as const)),
-    secretAccessKey:    Config.redacted('STORAGE_SECRET_ACCESS_KEY'),
-    sessionToken:       Config.redacted('STORAGE_SESSION_TOKEN').pipe(Config.option),
-});
-const _layer = Layer.unwrapEffect(_ENV.pipe(Effect.map((c) => S3.layer({
+const _layer = Layer.unwrapEffect(Env.Service.pipe(Effect.map((env) => S3.layer({
     credentials: {
-        accessKeyId: Redacted.value(c.accessKeyId),
-        secretAccessKey: Redacted.value(c.secretAccessKey),
-        sessionToken: Option.getOrUndefined(Option.map(c.sessionToken, Redacted.value)),
+        accessKeyId:     Redacted.value(env.storage.accessKeyId),
+        secretAccessKey: Redacted.value(env.storage.secretAccessKey),
+        sessionToken:    Option.getOrUndefined(Option.map(env.storage.sessionToken, Redacted.value)),
     },
-    endpoint: Option.getOrUndefined(c.endpoint),
-    forcePathStyle: c.forcePathStyle,
-    maxAttempts: c.maxAttempts,
-    region: c.region,
-    retryMode: c.retryMode,
+    endpoint:       Option.getOrUndefined(env.storage.endpoint),
+    forcePathStyle: env.storage.forcePathStyle,
+    maxAttempts:    env.storage.maxAttempts,
+    region:         env.storage.region,
+    retryMode:      env.storage.retryMode,
 }))));
 
 // --- [FUNCTIONS] -------------------------------------------------------------
@@ -50,7 +40,8 @@ const _path = (key: string) => Context.Request.currentTenantId.pipe(Effect.map((
 
 class StorageAdapter extends Effect.Service<StorageAdapter>()('server/StorageAdapter', {
     effect: Effect.gen(function* () {
-        const metrics = yield* MetricsService, s3 = yield* S3, { bucket } = yield* _ENV;
+        const metrics = yield* MetricsService, s3 = yield* S3, env = yield* Env.Service;
+        const bucket = env.storage.bucket;
         const track = <A, E, R>(op: string, eff: Effect.Effect<A, E, R>) =>
             Context.Request.currentTenantId.pipe(Effect.flatMap((t) => {
                 const L = MetricsService.label({ op, tenant: t });

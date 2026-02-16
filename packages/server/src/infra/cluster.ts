@@ -7,10 +7,11 @@
 import { ClusterCron, ClusterMetrics, Entity, EntityId, RunnerStorage, Sharding, ShardingConfig, Singleton, Snowflake, SqlMessageStorage, SqlRunnerStorage } from '@effect/cluster';
 import { NodeClusterHttp } from '@effect/platform-node';
 import { Rpc, RpcGroup } from '@effect/rpc';
-import { Array as A, Cause, Clock, Config, Cron, DateTime, Duration, Effect, FiberMap, HashRing, Layer, Metric, Option, Ref, Schedule, Schema as S } from 'effect';
+import { Array as A, Cause, Clock, Cron, DateTime, Duration, Effect, FiberMap, HashRing, Layer, Match, Metric, Option, Ref, Schedule, Schema as S } from 'effect';
 import { Client as DbClient } from '@parametric-portal/database/client';
 import { DatabaseService } from '@parametric-portal/database/repos';
 import { Context } from '../context.ts';
+import { Env } from '../env.ts';
 import { MetricsService } from '../observe/metrics.ts';
 import { Telemetry } from '../observe/telemetry.ts';
 import { CacheService } from '../platform/cache.ts';
@@ -269,39 +270,46 @@ const _ClusterEntityLive = _ClusterEntity.toLayer(Effect.gen(function* () {
 // --- [SERVICES] --------------------------------------------------------------
 
 class ClusterService extends Effect.Service<ClusterService>()('server/Cluster', {
-    dependencies: [_ClusterEntityLive.pipe(Layer.provideMerge(Layer.unwrapEffect(
-        Config.all({
-            environment:    Config.string('NODE_ENV').pipe(Config.withDefault('development')),
-            labelSelector:  Config.string('K8S_LABEL_SELECTOR').pipe(Config.withDefault('app=parametric-portal')),
-            mode:           Config.string('CLUSTER_HEALTH_MODE').pipe(Config.withDefault('auto')),
-            namespace:      Config.string('K8S_NAMESPACE').pipe(Config.withDefault('default')),
-        }).pipe(
-            Effect.map(({ environment, labelSelector, mode, namespace }) => ({
-                httpServerLayer: NodeClusterHttp.layerHttpServer.pipe(Layer.provide(_shardingLayer)),
-                runnerHealth: (mode === 'k8s' || (environment === 'production' && mode === 'auto'))
-                    ? { k8s: { labelSelector, namespace } as const, layer: NodeClusterHttp.layerK8sHttpClient, mode: 'k8s' as const }
-                    : { k8s: undefined, layer: Layer.empty, mode: 'ping' as const },
-            })),
-            Effect.tap(({ runnerHealth }) => Effect.logDebug('Cluster health mode selected', { mode: runnerHealth.mode, useK8s: runnerHealth.mode === 'k8s' })),
-            Effect.map(({ httpServerLayer, runnerHealth }) => NodeClusterHttp.layer({
-                clientOnly: false,
-                runnerHealth: runnerHealth.mode,
-                runnerHealthK8s: runnerHealth.k8s,
-                serialization: _CONFIG.transport.serialization,
-                storage: 'byo',
-                transport: _CONFIG.transport.type,
-            }).pipe(
-                Layer.provideMerge(Layer.mergeAll(
-                    SqlRunnerStorage.layer.pipe(Layer.provide(DbClient.layer)),
-                    SqlMessageStorage.layer.pipe(Layer.provide(DbClient.layer)),
-                    _shardingLayer,
-                    Snowflake.layerGenerator,
-                )),
-                Layer.provideMerge(runnerHealth.layer),
-                Layer.provideMerge(httpServerLayer),
-            )),
+    dependencies: [
+        _ClusterEntityLive.pipe(
+            Layer.provideMerge(
+                Layer.unwrapEffect(
+                    Env.Service.pipe(
+                        Effect.map((env) => {
+                            const runnerHealth = Match.value(env.cluster.healthMode).pipe(
+                                Match.when('k8s', () => ({ k8s: { labelSelector: env.cluster.k8sLabelSelector, namespace: env.cluster.k8sNamespace } as const, layer: NodeClusterHttp.layerK8sHttpClient, mode: 'k8s' as const })),
+                                Match.when('ping', () => ({ k8s: undefined, layer: Layer.empty, mode: 'ping' as const })),
+                                Match.orElse(() =>
+                                    env.app.nodeEnv === 'production'
+                                        ? { k8s: { labelSelector: env.cluster.k8sLabelSelector, namespace: env.cluster.k8sNamespace } as const, layer: NodeClusterHttp.layerK8sHttpClient, mode: 'k8s' as const }
+                                        : { k8s: undefined, layer: Layer.empty, mode: 'ping' as const }),
+                            );
+                            const dbLayer = DbClient.layerFromConfig(env.database);
+                            return { dbLayer, runnerHealth };
+                        }),
+                        Effect.tap(({ runnerHealth }) => Effect.logDebug('Cluster health mode selected', { mode: runnerHealth.mode, useK8s: runnerHealth.mode === 'k8s' })),
+                        Effect.map(({ dbLayer, runnerHealth }) => NodeClusterHttp.layer({
+                            clientOnly: false,
+                            runnerHealth: runnerHealth.mode,
+                            runnerHealthK8s: runnerHealth.k8s,
+                            serialization: _CONFIG.transport.serialization,
+                            storage: 'byo',
+                            transport: _CONFIG.transport.type,
+                        }).pipe(
+                            Layer.provideMerge(Layer.mergeAll(
+                                SqlRunnerStorage.layer.pipe(Layer.provide(dbLayer)),
+                                SqlMessageStorage.layer.pipe(Layer.provide(dbLayer)),
+                                _shardingLayer,
+                                Snowflake.layerGenerator,
+                            )),
+                            Layer.provideMerge(runnerHealth.layer),
+                            Layer.provideMerge(NodeClusterHttp.layerHttpServer.pipe(Layer.provide(_shardingLayer))),
+                        )),
+                    ),
+                ),
+            ),
         ),
-    )))],
+    ],
     effect: Effect.gen(function* () {
         const sharding = yield* Sharding.Sharding;
         yield* Effect.annotateLogsScoped({ 'service.name': 'cluster' });

@@ -1,6 +1,7 @@
 import { it, layer } from '@effect/vitest';
 import { Context } from '@parametric-portal/server/context';
-import { Crypto } from '@parametric-portal/server/security/crypto';
+import { Env } from '@parametric-portal/server/env';
+import { Crypto, type CryptoError } from '@parametric-portal/server/security/crypto';
 import { Array as A, ConfigProvider, Effect, FastCheck as fc, Layer, Logger, LogLevel, Redacted } from 'effect';
 import { createHash } from 'node:crypto';
 import { expect } from 'vitest';
@@ -16,15 +17,33 @@ const SHA256_NIST_VECTORS = [
     { expected: 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad', input: 'abc' },
     { expected: '248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1', input: 'abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq' },
 ] as const;
+const _KEY_V1 = 'cGFyYW1ldHJpYy1wb3J0YWwtY3J5cHRvLWtleS0zMmI=';
+const _KEY_V2 = 'dGVzdC1rZXktdmVyc2lvbi0y';
+const _testEnv = new Map([
+    ['ANTHROPIC_API_KEY',         'anthropic_test'                                        ],
+    ['DATABASE_URL',              'postgres://postgres:postgres@localhost:5432/parametric'],
+    ['DEPLOYMENT_MODE',           'selfhosted'                                            ],
+    ['DOPPLER_CONFIG',            'dev'                                                   ],
+    ['DOPPLER_PROJECT',           'parametric-portal'                                     ],
+    ['DOPPLER_TOKEN',             'doppler_test'                                          ],
+    ['EMAIL_PROVIDER',            'smtp'                                                  ],
+    ['ENCRYPTION_KEY',            _KEY_V1                                                 ],
+    ['GEMINI_API_KEY',            'gemini_test'                                           ],
+    ['OPENAI_API_KEY',            'openai_test'                                           ],
+    ['SMTP_HOST',                 'localhost'                                             ],
+    ['STORAGE_ACCESS_KEY_ID',     'storage_test'                                          ],
+    ['STORAGE_SECRET_ACCESS_KEY', 'storage_secret_test'                                   ],
+]);
+const _multiKeyEnv = new Map([..._testEnv, ['ENCRYPTION_KEYS', JSON.stringify([{ key: _KEY_V1, version: 1 }, { key: _KEY_V2, version: 2 }])]]);
 
 // --- [LAYER] -----------------------------------------------------------------
 
-const _testLayer = Crypto.Service.Default.pipe(
-    Layer.provide(Layer.setConfigProvider(ConfigProvider.fromMap(new Map([['ENCRYPTION_KEY', 'cGFyYW1ldHJpYy1wb3J0YWwtY3J5cHRvLWtleS0zMmI=']])))),
+const _layer = (env: Map<string, string>) => Crypto.Service.Default.pipe(
+    Layer.provideMerge(Env.Service.Default),
+    Layer.provide(Layer.setConfigProvider(ConfigProvider.fromMap(env))),
     Layer.provide(Logger.minimumLogLevel(LogLevel.Warning)),
 );
-
-layer(_testLayer)('Crypto', (it) => {
+layer(_layer(_testEnv))('Crypto', (it) => {
     // --- [ALGEBRAIC: ENCRYPTION] ---------------------------------------------
     // P1: Inverse + Non-determinism - decrypt(encrypt(x)) = x AND encrypt(x) ≠ encrypt(x)
     it.effect.prop('P1: inverse + nondeterminism', { x: _text }, ({ x }) => Effect.gen(function* () {
@@ -34,9 +53,7 @@ layer(_testLayer)('Crypto', (it) => {
     }), { fastCheck: { numRuns: 100 } });
     // P2: Length Invariant - |encrypt(x)| = version + IV + |encode(x)| + tag
     it.effect.prop('P2: length formula', { x: _text }, ({ x }) => Crypto.encrypt(x).pipe(
-        Effect.tap((c) => {
-            expect(c.length).toBe(CIPHER.version + CIPHER.iv + new TextEncoder().encode(x).length + CIPHER.tag);
-        }),
+        Effect.tap((c) => {expect(c.length).toBe(CIPHER.version + CIPHER.iv + new TextEncoder().encode(x).length + CIPHER.tag);}),
         Effect.asVoid,
     ), { fastCheck: { numRuns: 100 } });
     // P3: Tampering Detection - flip bit in ciphertext body -> OP_FAILED
@@ -44,14 +61,17 @@ layer(_testLayer)('Crypto', (it) => {
         const ciphertext = yield* Crypto.encrypt(x);
         const tampered = new Uint8Array(ciphertext);
         (tampered[CIPHER.version + CIPHER.iv] as number) ^= 0x01;
-        expect((yield* Crypto.decrypt(tampered).pipe(Effect.flip)).code).toBe('OP_FAILED');
+        const error = yield* Crypto.decrypt(tampered).pipe(Effect.flip);
+        expect([error.code, error.op]).toEqual(['OP_FAILED', 'decrypt']);
     }), { fastCheck: { numRuns: 100 } });
     // P4: Format Boundaries - version [0,255], minBytes
     it.effect('P4: format boundaries', () => Effect.all([
         Crypto.decrypt(new Uint8Array([0, ...Array.from<number>({ length: 28 }).fill(0)])).pipe(Effect.flip),
         Crypto.decrypt(new Uint8Array(CIPHER.minBytes - 1)).pipe(Effect.flip),
         Crypto.decrypt(new Uint8Array([255, ...crypto.getRandomValues(new Uint8Array(28))])).pipe(Effect.flip),
-    ]).pipe(Effect.map(([v0, minB, v255]) => expect([v0.code, minB.code, v255.code]).toEqual(['INVALID_FORMAT', 'INVALID_FORMAT', 'KEY_NOT_FOUND']))));
+    ]).pipe(Effect.map(([v0, minB, v255]) => expect([v0.code, v0.op, minB.code, minB.op, v255.code, v255.op]).toEqual(
+        ['INVALID_FORMAT', 'decrypt', 'INVALID_FORMAT', 'decrypt', 'KEY_NOT_FOUND', 'decrypt'],
+    ))));
     // P5: Tenant Isolation - different tenants produce different ciphertexts + cross-tenant decrypt fails
     it.effect.prop('P5: tenant isolation', { t1: fc.uuid(), t2: fc.uuid(), x: _nonempty }, ({ t1, t2, x }) => {
         fc.pre(t1 !== t2);
@@ -70,21 +90,22 @@ layer(_testLayer)('Crypto', (it) => {
         const counts = Object.groupBy(bytes, (b) => b);
         expect(A.reduce(A.makeBy(256, (i) => counts[i]?.length ?? 0), 0, (s, o) => s + (o - expected) ** 2 / expected)).toBeLessThan(310.46);
     }));
-    // P10: Reencrypt - passthrough when current version, KEY_NOT_FOUND for unknown
+    // P10: Reencrypt - passthrough when current version, op remapping, KEY_NOT_FOUND for unknown
     it.effect.prop('P10: reencrypt', { x: _nonempty }, ({ x }) => Effect.gen(function* () {
         const cipher = yield* Crypto.encrypt(x);
         const same = yield* Crypto.reencrypt(cipher);
         expect(same).toBe(cipher);
         const faked = new Uint8Array(cipher); faked[0] = 0x02;
-        expect((yield* Crypto.reencrypt(faked).pipe(Effect.flip)).code).toBe('KEY_NOT_FOUND');
+        const error = yield* Crypto.reencrypt(faked).pipe(Effect.flip);
+        expect([error.code, error.op]).toEqual(['KEY_NOT_FOUND', 'reencrypt']);
     }), { fastCheck: { numRuns: 50 } });
     // P11: AAD binding - decrypt with wrong/missing AAD fails
     it.effect.prop('P11: AAD binding', { x: _nonempty }, ({ x }) => Effect.gen(function* () {
         const aad = new TextEncoder().encode('bound-context');
         const cipher = yield* Crypto.encrypt(x, aad);
         expect(yield* Crypto.decrypt(cipher, aad)).toBe(x);
-        expect((yield* Crypto.decrypt(cipher, new TextEncoder().encode('wrong')).pipe(Effect.flip)).code).toBe('OP_FAILED');
-        expect((yield* Crypto.decrypt(cipher).pipe(Effect.flip)).code).toBe('OP_FAILED');
+        const [wrongAad, noAad] = yield* Effect.all([Crypto.decrypt(cipher, new TextEncoder().encode('wrong')).pipe(Effect.flip), Crypto.decrypt(cipher).pipe(Effect.flip)]);
+        expect([wrongAad.code, wrongAad.op, noAad.code, noAad.op]).toEqual(['OP_FAILED', 'decrypt', 'OP_FAILED', 'decrypt']);
     }), { fastCheck: { numRuns: 50 } });
 });
 
@@ -122,3 +143,35 @@ it.effect('P9: pair', () => Effect.gen(function* () {
     const first = A.headNonEmpty(pairs as A.NonEmptyArray<typeof pairs[number]>);
     expect(yield* Crypto.hash(Redacted.value(first.token))).toBe(first.hash);
 }));
+
+// --- [ALGEBRAIC: KEY ROTATION] -----------------------------------------------
+// P12: Multi-key rotation - encrypt v1 → reencrypt under v2 → decrypt → original
+it.effect.prop('P12: key rotation', { x: _nonempty }, ({ x }) => Context.Request.within('rotation-tenant', Effect.gen(function* () {
+    const v1Cipher = yield* Crypto.encrypt(x).pipe(Effect.provide(_layer(_testEnv)));
+    expect(v1Cipher[0]).toBe(1);
+    const rotated = yield* Crypto.reencrypt(v1Cipher).pipe(Effect.provide(_layer(_multiKeyEnv)));
+    expect(rotated[0]).toBe(2);
+    expect(yield* Crypto.decrypt(rotated).pipe(Effect.provide(_layer(_multiKeyEnv)))).toBe(x);
+})), { fastCheck: { numRuns: 50 } });
+// P13: Service init errors - no keys, bad JSON, bad base64, empty list, invalid active version
+it.effect('P13: service init errors', () => {
+    const fail = (env: Map<string, string>) => Effect.scoped(Layer.launch(_layer(env))).pipe(Effect.flip);
+    return Effect.all([
+        fail(new Map([..._testEnv].filter(([key]) => key !== 'ENCRYPTION_KEY'))),
+        fail(new Map([..._testEnv, ['ENCRYPTION_KEYS', '{bad']])),
+        fail(new Map([..._testEnv, ['ENCRYPTION_KEYS', JSON.stringify([{ key: '!!!', version: 1 }])]])),
+        fail(new Map([..._testEnv, ['ENCRYPTION_KEYS', '[]']])),
+        fail(new Map([..._testEnv, ['ENCRYPTION_KEY_VERSION', '0']])),
+        fail(new Map([..._testEnv, ['ENCRYPTION_KEY_VERSION', '2']])),
+    ]).pipe(Effect.tap((errors) => {
+        const typed = errors as ReadonlyArray<CryptoError>;
+        expect(typed.map((error) => [error.code, error.op])).toEqual([
+            ['KEY_NOT_FOUND', 'key'],
+            ['INVALID_FORMAT', 'key'],
+            ['INVALID_FORMAT', 'key'],
+            ['INVALID_FORMAT', 'key'],
+            ['INVALID_FORMAT', 'key'],
+            ['KEY_NOT_FOUND', 'key'],
+        ]);
+    }), Effect.asVoid);
+});

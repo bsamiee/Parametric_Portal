@@ -158,7 +158,7 @@ const _importAssets = (parameters: typeof TransferQuery.Type) =>
         const processBatch = (accumulator: { readonly assets: readonly Asset[]; readonly dbFailures: readonly TransferError.Import[] }, batchItems: typeof items) => {
             const ordinals = batchItems.map((batchItem) => batchItem.ordinal);
             return Effect.forEach(batchItems, prepareItem, { concurrency: 10 }).pipe(
-                Effect.flatMap((prepared) => repositories.assets.insertMany(prepared) as Effect.Effect<readonly Asset[], unknown>),
+                Effect.flatMap((prepared) => repositories.assets.put([...prepared]) as Effect.Effect<readonly Asset[], unknown>),
                 Effect.map((created): typeof accumulator => ({ assets: A.appendAll(accumulator.assets, created), dbFailures: accumulator.dbFailures })),
                 Effect.catchAll((error) => Effect.as(
                     Effect.logError('Batch insert failed', { error: String(error), ordinals }),

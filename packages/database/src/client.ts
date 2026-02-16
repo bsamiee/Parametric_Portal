@@ -30,51 +30,78 @@ const _CONFIG = {
     tenant: {id: {system: '00000000-0000-7000-8000-000000000000', unspecified: '00000000-0000-7000-8000-ffffffffffff',} as const,},
 } as const;
 
+// --- [FUNCTIONS] -------------------------------------------------------------
+
+const _readSslFile = (pathOpt: Option.Option<string>) =>
+    Option.match(pathOpt, {
+        onNone: () => Effect.succeed<string | undefined>(undefined),
+        onSome: (path) => Effect.try(() => readFileSync(path, 'utf8')),
+    });
+const _parsePgOptions = (options: string) =>
+    Array.from(options.matchAll(_CONFIG.pgOptions.extractPattern), (m) => m[0])
+        .map((token) => token.replace(_CONFIG.pgOptions.replacePattern, '').split('=', 2))
+        .filter((parts): parts is [string, string] => (parts[0] ?? '') !== '' && (parts[1] ?? '') !== '');
+const _isValidTrigramThreshold = (value: unknown): value is number =>
+    typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 1;
+const _isValidTrigramThresholds = (values: {
+    readonly similarity: unknown;
+    readonly strictWordSimilarity: unknown;
+    readonly wordSimilarity: unknown;
+}): values is {
+    readonly similarity: number;
+    readonly strictWordSimilarity: number;
+    readonly wordSimilarity: number;
+} =>
+    _isValidTrigramThreshold(values['similarity'])
+    && _isValidTrigramThreshold(values['wordSimilarity'])
+    && _isValidTrigramThreshold(values['strictWordSimilarity']);
+
 // --- [LAYERS] ----------------------------------------------------------------
 
-const _sslConfig = Config.all({
-    caPath:                     Config.string('POSTGRES_SSL_CA').pipe(Config.option),
-    certPath:                   Config.string('POSTGRES_SSL_CERT').pipe(Config.option),
-    enabled:                    Config.boolean('POSTGRES_SSL').pipe(Config.withDefault(false)),
-    keyPath:                    Config.string('POSTGRES_SSL_KEY').pipe(Config.option),
-    minVersion:                 Config.string('POSTGRES_SSL_MIN_VERSION').pipe(Config.withDefault('TLSv1.2')),
-    rejectUnauthorized:         Config.boolean('POSTGRES_SSL_REJECT_UNAUTHORIZED').pipe(Config.withDefault(true)),
-    servername:                 Config.string('POSTGRES_SSL_SERVERNAME').pipe(Config.option),
-}).pipe(Config.mapAttempt(({ caPath, certPath, enabled, keyPath, minVersion, rejectUnauthorized, servername }) =>
-    enabled ? {
-        ca:                     Option.getOrUndefined(Option.map(caPath, (path) => readFileSync(path, 'utf8'))),
-        cert:                   Option.getOrUndefined(Option.map(certPath, (path) => readFileSync(path, 'utf8'))),
-        key:                    Option.getOrUndefined(Option.map(keyPath, (path) => readFileSync(path, 'utf8'))),
-        minVersion:             minVersion as SecureVersion,
-        rejectUnauthorized,
-        servername:             Option.getOrUndefined(servername),
-    } : undefined,
-));
-const _layer = Layer.unwrapEffect(Effect.gen(function* () {
-    const timeouts = yield* Config.all({
-        idleInTransactionMs:    Config.integer('POSTGRES_IDLE_IN_TXN_TIMEOUT_MS').pipe(Config.withDefault(60_000)),
-        lockMs:                 Config.integer('POSTGRES_LOCK_TIMEOUT_MS').pipe(Config.withDefault(10_000)),
-        statementMs:            Config.integer('POSTGRES_STATEMENT_TIMEOUT_MS').pipe(Config.withDefault(30_000)),
-        transactionMs:          Config.integer('POSTGRES_TRANSACTION_TIMEOUT_MS').pipe(Config.withDefault(120_000)),
-    });
-    const timeoutPgOptions = _CONFIG.pgOptions.timeouts.map(([key, timeoutKey]) => [key, String(timeouts[timeoutKey])] as const);
-    const trigramPgOptions = yield* Effect.forEach(_CONFIG.pgOptions.trigramThresholds, ([envName, optionName, defaultValue]) =>
-        Config.number(envName).pipe(
-            Config.withDefault(defaultValue),
-            Config.validate({ message: `${envName} must be between 0 and 1`, validation: (value) => value >= 0 && value <= 1 }),
-            Config.map((value) => [optionName, String(value)] as const),
-        )
-    );
-    const connectionUrl = yield* Config.redacted('DATABASE_URL').pipe(
-        Config.mapAttempt((databaseUrl) => {
-            const parsedUrl = new URL(Redacted.value(databaseUrl));
+const layerFromConfig = (cfg: Record<string, unknown>) =>
+    Layer.unwrapEffect(
+        Effect.gen(function* () {
+            const sslConfig = cfg['ssl'] as Record<string, unknown>;
+            const timeouts = cfg['timeouts'] as Record<string, unknown>;
+            const trigramThresholds = cfg['trigramThresholds'] as Record<string, unknown>;
+            const ssl = (sslConfig['enabled'] as boolean)
+                ? yield* Effect.map(
+                    Effect.all({
+                        ca:   _readSslFile(sslConfig['caPath'] as Option.Option<string>),
+                        cert: _readSslFile(sslConfig['certPath'] as Option.Option<string>),
+                        key:  _readSslFile(sslConfig['keyPath'] as Option.Option<string>),
+                    }),
+                    (certs) => ({
+                        ...certs,
+                        minVersion:         sslConfig['minVersion'] as SecureVersion,
+                        rejectUnauthorized: sslConfig['rejectUnauthorized'] as boolean,
+                        servername:         Option.getOrUndefined(sslConfig['servername'] as Option.Option<string>),
+                    }),
+                )
+                : undefined;
+            const parsedUrl = new URL(Redacted.value(cfg['connectionUrl'] as Redacted.Redacted<string>));
             const normalizedPgOptions = [
-                ...((parsedUrl.searchParams.get('options') ?? '').match(_CONFIG.pgOptions.extractPattern) ?? []), // NOSONAR S3358
-                ...((process.env['PGOPTIONS'] ?? '').match(_CONFIG.pgOptions.extractPattern) ?? []), // NOSONAR S3358
-            ]
-                .map((token) => token.replace(_CONFIG.pgOptions.replacePattern, '').split('=', 2))
-                .filter((parts): parts is [string, string] => (parts[0] ?? '') !== '' && (parts[1] ?? '') !== '')
-                .map(([key, value]) => [key, value] as const);
+                ..._parsePgOptions(parsedUrl.searchParams.get('options') ?? ''),
+                ..._parsePgOptions(cfg['options'] as string),
+            ];
+            const timeoutPgOptions = _CONFIG.pgOptions.timeouts.map(([key, timeoutKey]) => [key, String(timeouts[timeoutKey] as number)] as const);
+            const trigramValues = yield* Effect.filterOrFail(
+                Effect.succeed({
+                    similarity: trigramThresholds['similarity'],
+                    strictWordSimilarity: trigramThresholds['strictWordSimilarity'],
+                    wordSimilarity: trigramThresholds['wordSimilarity'],
+                } as const),
+                _isValidTrigramThresholds,
+                (values) =>
+                    new Error(
+                        `Invalid trigram thresholds: expected similarity, wordSimilarity, and strictWordSimilarity to be numbers in [0,1], got ${JSON.stringify(values)}`,
+                    ),
+            );
+            const trigramThresholdValues = [trigramValues.similarity, trigramValues.wordSimilarity, trigramValues.strictWordSimilarity] as const;
+            const trigramPgOptions = _CONFIG.pgOptions.trigramThresholds.map(([, optionName], index) => [
+                optionName,
+                String(trigramThresholdValues[index]),
+            ] as const);
             parsedUrl.searchParams.set(
                 'options',
                 Array.from(
@@ -82,24 +109,22 @@ const _layer = Layer.unwrapEffect(Effect.gen(function* () {
                     ([key, value]) => `-c ${key}=${value}`,
                 ).join(' '),
             );
-            return Redacted.make(parsedUrl.toString());
+            return PgClient.layerConfig({
+                applicationName:      Config.succeed(cfg['appName'] as string),
+                connectionTTL:        Config.succeed(Duration.millis(cfg['connectionTtlMs'] as number)),
+                connectTimeout:       Config.succeed(Duration.millis(cfg['connectTimeoutMs'] as number)),
+                idleTimeout:          Config.succeed(Duration.millis(cfg['idleTimeoutMs'] as number)),
+                maxConnections:       Config.succeed(cfg['poolMax'] as number),
+                minConnections:       Config.succeed(cfg['poolMin'] as number),
+                spanAttributes:       Config.succeed({ 'service.name': 'database' }),
+                ssl:                  Config.succeed(ssl),
+                transformJson:        Config.succeed(true),
+                transformQueryNames:  Config.succeed(S.camelToSnake),
+                transformResultNames: Config.succeed(S.snakeToCamel),
+                url:                  Config.succeed(Redacted.make(parsedUrl.toString())),
+            });
         }),
     );
-    return PgClient.layerConfig({
-        applicationName:        Config.string('POSTGRES_APP_NAME').pipe(Config.withDefault('parametric-portal')),
-        connectionTTL:          Config.integer('POSTGRES_CONNECTION_TTL_MS').pipe(Config.withDefault(900_000), Config.map(Duration.millis)),
-        connectTimeout:         Config.integer('POSTGRES_CONNECT_TIMEOUT_MS').pipe(Config.withDefault(5_000), Config.map(Duration.millis)),
-        idleTimeout:            Config.integer('POSTGRES_IDLE_TIMEOUT_MS').pipe(Config.withDefault(30_000), Config.map(Duration.millis)),
-        maxConnections:         Config.integer('POSTGRES_POOL_MAX').pipe(Config.withDefault(10)),
-        minConnections:         Config.integer('POSTGRES_POOL_MIN').pipe(Config.withDefault(2)),
-        spanAttributes:         Config.succeed({ 'service.name': 'database' }),
-        ssl:                    _sslConfig,
-        transformJson:          Config.succeed(true),
-        transformQueryNames:    Config.succeed(S.camelToSnake),
-        transformResultNames:   Config.succeed(S.snakeToCamel),
-        url:                    Config.succeed(connectionUrl),
-    });
-}));
 
 // --- [OBJECT] ----------------------------------------------------------------
 
@@ -117,8 +142,8 @@ const Client = (() => {
             return { healthy, latencyMs: Duration.toMillis(duration) };
         });
     const _LOCK_OPS = {
-        acquire:        { fn: 'pg_advisory_xact_lock',     yields: false },
-        sessionAcquire: { fn: 'pg_advisory_lock',          yields: false },
+        acquire:        { fn: 'pg_advisory_xact_lock',      yields: false      },
+        sessionAcquire: { fn: 'pg_advisory_lock',           yields: false      },
         sessionRelease: { fn: 'pg_advisory_unlock',         yields: 'released' },
         sessionTry:     { fn: 'pg_try_advisory_lock',       yields: 'acquired' },
         try:            { fn: 'pg_try_advisory_xact_lock',  yields: 'acquired' },
@@ -132,9 +157,9 @@ const Client = (() => {
         });
     };
     return {
-        health: _health('db.checkHealth', (db) => db`SELECT 1`),
+        health:     _health('db.checkHealth', (db) => db`SELECT 1`),
         healthDeep: _health('db.checkHealthDeep', (db) => db.withTransaction(db`SELECT 1`)),
-        layer: _layer,
+        layerFromConfig,
         listen: {
             raw: (channel: string) => Stream.unwrap(Effect.map(PgClient.PgClient, (pgClient) => pgClient.listen(channel))),
             typed: <A, I>(channel: string, schema: Sch.Schema<A, I, never>) =>

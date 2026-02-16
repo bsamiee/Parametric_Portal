@@ -9,11 +9,12 @@ import { DatabaseService } from '@parametric-portal/database/repos';
 import type { Hex64 } from '@parametric-portal/types/types';
 import { generateAuthenticationOptions, generateRegistrationOptions, verifyAuthenticationResponse, verifyRegistrationResponse, type AuthenticatorTransportFuture } from '@simplewebauthn/server';
 import { Apple, decodeIdToken, generateCodeVerifier, generateState, GitHub, Google, MicrosoftEntraId, type OAuth2Tokens } from 'arctic';
-import { Array as A, Clock, Config, DateTime, Duration, Effect, Encoding, Match, Option, Order, pipe, PrimaryKey, Redacted, Schema as S } from 'effect';
+import { Array as A, Clock, DateTime, Duration, Effect, Encoding, Match, Option, Order, pipe, PrimaryKey, Redacted, Schema as S } from 'effect';
 import { constant, flow, identity } from 'effect/Function';
 import { customAlphabet } from 'nanoid';
 import { randomBytes } from 'node:crypto';
 import { generateSecret, generateURI, verifySync } from 'otplib';
+import { Env } from '../env.ts';
 import { Context } from '../context.ts';
 import { HttpError } from '../errors.ts';
 import { AuditService } from '../observe/audit.ts';
@@ -38,10 +39,6 @@ const _SessionCache = Session.pipe(S.pick('appId', 'expiryAccess', 'id', 'userId
 const _CONFIG = {
     backup: { alphabet: '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ', count: 10, length: 8 },
     oauthRateLimit: { baseMs: 60000, keyPrefix: 'oauth:fail:', maxAttempts: 5, maxMs: 900000, ttl: Duration.minutes(15) },
-    sessionCache:   Config.all({
-        capacity:   Config.integer('SESSION_CACHE_CAPACITY').pipe(Config.withDefault(5000)),
-        ttl:        Config.map(Config.integer('SESSION_CACHE_TTL_SECONDS').pipe(Config.withDefault(300)), Duration.seconds),
-    }),
     totp: { algorithm: 'sha256', digits: 6, epochTolerance: [30, 30] as [number,number], periodMs: 30000, periodSec: 30 },
     webauthn: { challengeKeyPrefix: 'webauthn:challenge:', challengeTtl: Duration.minutes(5), maxCredentialsPerUser: 10 },
 } as const;
@@ -67,17 +64,21 @@ class CacheKey extends S.TaggedRequest<CacheKey>()('CacheKey', {
 
 class AuthService extends Effect.Service<AuthService>()('server/Auth', {
     effect: Effect.gen(function* () {
-        const [db, metrics, audit, issuer, maxSessions, sessionCacheConfig, sqlClient] = yield* Effect.all([
+        const [db, metrics, audit, env, sqlClient] = yield* Effect.all([
             DatabaseService,
             MetricsService,
             AuditService,
-            Config.string('APP_NAME').pipe(Config.withDefault('Parametric Portal')),
-            Config.integer('MAX_SESSIONS_PER_USER').pipe(Config.withDefault(5)),
-            _CONFIG.sessionCache,
+            Env.Service,
             SqlClient.SqlClient,
         ]);
+        const issuer = env.app.appName;
+        const maxSessions = env.auth.maxSessionsPerUser;
+        const sessionCacheConfig = {
+            capacity: env.auth.sessionCacheCapacity,
+            ttl: Duration.seconds(env.auth.sessionCacheTtlSeconds),
+        } as const;
         const _caps = (provider: typeof OAuthProviderSchema.Type) => Context.Request.config.oauth.capabilities[provider];
-        const baseUrl = yield* Config.string('API_BASE_URL').pipe(Config.withDefault('http://localhost:4000'));
+        const baseUrl = env.app.apiBaseUrl;
         const _redirect = (provider: typeof OAuthProviderSchema.Type) => `${baseUrl}/api/auth/oauth/${provider}/callback`;
         const _providerConfig = (provider: typeof OAuthProviderSchema.Type) => Effect.gen(function* () {
             const tenantId = yield* Context.Request.currentTenantId;
@@ -162,11 +163,7 @@ class AuthService extends Effect.Service<AuthService>()('server/Auth', {
         });
         const invalidateSession = (tenantId: string, hashOrToken: string | Redacted.Redacted<string>) => (typeof hashOrToken === 'string' ? Effect.succeed(hashOrToken) : Crypto.hmac(tenantId, Redacted.value(hashOrToken))).pipe(Effect.flatMap((hash) => cache.invalidate(new CacheKey({ id: hash, scope: 'session', tenantId }))), Effect.catchAll((error) => Effect.logWarning('Session cache invalidation failed', { error: String(error), tenantId })), Effect.asVoid);
         const _activeCredentials = (userId: string) => db.webauthnCredentials.byUser(userId).pipe(Effect.map((credentials) => credentials.filter((credential) => Option.isNone(credential.deletedAt))), HttpError.mapTo('WebAuthn credential lookup failed'));
-        const [rpId, rpName, expectedOrigin] = yield* Effect.all([
-            Config.string('WEBAUTHN_RP_ID').pipe(Config.withDefault('localhost')),
-            Config.string('WEBAUTHN_RP_NAME').pipe(Config.withDefault('Parametric Portal')),
-            Config.string('WEBAUTHN_ORIGIN').pipe(Config.withDefault('http://localhost:3000')),
-        ]);
+        const [rpId, rpName, expectedOrigin] = [env.auth.webauthnRpId, env.auth.webauthnRpName, env.auth.webauthnOrigin] as const;
         const oauthEndpoints = {
             callback: (provider: typeof OAuthProviderSchema.Type, code: string, state: string, cookie: string) => Effect.gen(function* () {
                 const tenantId = yield* Context.Request.currentTenantId;

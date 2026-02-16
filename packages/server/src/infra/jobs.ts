@@ -8,11 +8,12 @@ import { ClusterWorkflowEngine, DeliverAt, Entity, EntityId, Sharding, Snowflake
 import { Rpc, RpcClientError } from '@effect/rpc';
 import { Activity, Workflow } from '@effect/workflow';
 import { SqlClient } from '@effect/sql';
-import { Cause, Chunk, Clock, Config, DateTime, Duration, Effect, Fiber, FiberMap, Layer, Mailbox, Match, Metric, Option, pipe, Ref, Schedule, Schema as S, STM, Stream, TMap, TRef } from 'effect';
+import { Cause, Chunk, Clock, DateTime, Duration, Effect, Fiber, FiberMap, Layer, Mailbox, Match, Metric, Option, pipe, Ref, Schedule, Schema as S, STM, Stream, TMap, TRef } from 'effect';
 import { DatabaseService } from '@parametric-portal/database/repos';
 import { Job, JobStatusSchema, type JobDlq } from '@parametric-portal/database/models';
 import { Resilience } from '../utils/resilience.ts';
 import { Context } from '../context.ts';
+import { Env } from '../env.ts';
 import { CacheService } from '../platform/cache.ts';
 import { MetricsService } from '../observe/metrics.ts';
 import { Telemetry } from '../observe/telemetry.ts';
@@ -29,10 +30,6 @@ const _CONFIG = {
     pools: { critical: 4, high: 3, low: 1, normal: 2 },
     retry: {cap: Duration.seconds(30), defect: { base: Duration.millis(100), maxAttempts: 5 }, job: { base: Duration.millis(100), maxAttempts: 5, resetAfter: Duration.minutes(5) },},
 } as const;
-const _DLQ_WATCHER_CFG = Config.all({
-    checkIntervalMs:    Config.integer('JOB_DLQ_CHECK_INTERVAL_MS').pipe(Config.withDefault(Duration.toMillis(_CONFIG.dlqWatcher.checkInterval))),
-    maxRetries:         Config.integer('JOB_DLQ_MAX_RETRIES').pipe(Config.withDefault(_CONFIG.dlqWatcher.maxRetries)),
-});
 const _ErrorReason = S.Literal('NotFound', 'AlreadyCancelled', 'HandlerMissing', 'Validation', 'Processing', 'MaxRetries', 'RunnerUnavailable', 'Timeout');
 const _HistoryEntry = S.Struct({ error: S.optional(S.String), status: JobStatusSchema, timestamp: S.Number });
 const _Progress = S.Struct({ message: S.String, pct: S.Number });
@@ -56,18 +53,19 @@ const _makeDlqWatcher = (submitFn: (type: string, payload: unknown, opts?: { pri
         const database = yield* DatabaseService;
         const sql = yield* SqlClient.SqlClient;
         const eventBus = yield* EventBus;
-        const dlqConfig = yield* _DLQ_WATCHER_CFG;
+        const env = yield* Env.Service;
+        const dlqConfig = env.jobs;
         const _dbRun = <A, E, R>(tenantId: string, effect: Effect.Effect<A, E, R>) => Context.Request.withinSync(tenantId, effect).pipe(Effect.provideService(SqlClient.SqlClient, sql));
         const processDlqEntry = (entry: typeof JobDlq.Type) =>
             Match.value(entry.attempts).pipe(
-                Match.when((attempts) => attempts > dlqConfig.maxRetries, () => Effect.void),
-                Match.when((attempts) => attempts === dlqConfig.maxRetries, (attempts) => eventBus.publish({
+                Match.when((attempts) => attempts > dlqConfig.dlqMaxRetries, () => Effect.void),
+                Match.when((attempts) => attempts === dlqConfig.dlqMaxRetries, (attempts) => eventBus.publish({
                     aggregateId: entry.sourceId,
                     payload: { _tag: 'DlqAlertEvent', action: 'alert', attempts, errorReason: entry.errorReason, sourceId: entry.sourceId, type: entry.type },
                     tenantId: entry.appId,
                 }).pipe(
                     Effect.zipRight(_dbRun(entry.appId, database.jobDlq.set(entry.id, { attempts: attempts + 1 }))),
-                    Effect.tap(() => Effect.logWarning('DLQ entry exceeded max retries, alert emitted', { 'dlq.id': entry.id, 'dlq.max_retries': dlqConfig.maxRetries, 'dlq.type': entry.type })),
+                    Effect.tap(() => Effect.logWarning('DLQ entry exceeded max retries, alert emitted', { 'dlq.id': entry.id, 'dlq.max_retries': dlqConfig.dlqMaxRetries, 'dlq.type': entry.type })),
                     Effect.asVoid,
                 )),
                 Match.orElse(() => _dbRun(entry.appId, database.jobDlq.markReplayed(entry.id)).pipe(
@@ -94,7 +92,7 @@ const _makeDlqWatcher = (submitFn: (type: string, payload: unknown, opts?: { pri
                         app.id,
                             database.jobDlq.page([
                                 { field: 'source', value: 'job' },
-                                { field: 'attempts', op: 'lte', value: dlqConfig.maxRetries },
+                                { field: 'attempts', op: 'lte', value: dlqConfig.dlqMaxRetries },
                             ], { limit: 50 }).pipe(
                             Effect.map((page) => page.items),
                         ),
@@ -478,7 +476,8 @@ class JobService extends Effect.Service<JobService>()('server/Jobs', {
         const counter = yield* STM.commit(TRef.make(0));
         const sharding = yield* Sharding.Sharding;
         const getClient = yield* sharding.makeClient(JobEntity);
-        const dlqConfig = yield* _DLQ_WATCHER_CFG;
+        const env = yield* Env.Service;
+        const dlqConfig = env.jobs;
         const _rpcWithTenant = <A>(jobId: string, run: (tenantId: string) => Effect.Effect<A, unknown, never>) => Context.Request.currentTenantId.pipe(
             Effect.flatMap((tenantId) => run(tenantId).pipe(
                 Effect.mapError((error) => error instanceof JobError
@@ -530,7 +529,7 @@ class JobService extends Effect.Service<JobService>()('server/Jobs', {
                 Telemetry.span('jobs.submit', { 'job.type': type, metrics: false }),
             );
         }
-        yield* cluster.isLocal('jobs-maintenance:dlq').pipe(Effect.flatMap((isLeader) => isLeader ? _makeDlqWatcher(submit) : Effect.void)).pipe(Effect.repeat(Schedule.spaced(Duration.millis(dlqConfig.checkIntervalMs))), Effect.catchAllCause((cause) => Effect.logWarning('DLQ watcher scheduler failed', { cause: String(cause) })), Effect.forkScoped);
+        yield* cluster.isLocal('jobs-maintenance:dlq').pipe(Effect.flatMap((isLeader) => isLeader ? _makeDlqWatcher(submit) : Effect.void)).pipe(Effect.repeat(Schedule.spaced(Duration.millis(dlqConfig.dlqCheckIntervalMs))), Effect.catchAllCause((cause) => Effect.logWarning('DLQ watcher scheduler failed', { cause: String(cause) })), Effect.forkScoped);
         return {
             cancel: (jobId: string) => _rpcWithTenant(jobId, (tenantId) => getClient(jobId)['cancel']({ jobId, tenantId })).pipe(
                 Telemetry.span('jobs.cancel', { 'job.id': jobId, metrics: false }),

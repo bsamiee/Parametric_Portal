@@ -7,8 +7,9 @@ import { Headers, HttpApiBuilder, HttpApiMiddleware, HttpApiSecurity, type HttpA
 import { SqlClient } from '@effect/sql';
 import type { Hex64 } from '@parametric-portal/types/types';
 import { isIP } from 'node:net';
-import { Array as A, Config, Data, Duration, Effect, FiberRef, Layer, Match, Metric, Option, pipe, Redacted, Schema as S } from 'effect';
+import { Array as A, Data, Duration, Effect, FiberRef, Layer, Match, Metric, Option, pipe, Redacted, Schema as S } from 'effect';
 import { constant } from 'effect/Function';
+import { Env } from './env.ts';
 import { Context } from './context.ts';
 import { AuditService } from './observe/audit.ts';
 import { HttpError } from './errors.ts';
@@ -52,16 +53,6 @@ const _IDEMPOTENCY = {
     completedTtl: Duration.hours(24),
     pendingTtl:   Duration.minutes(2),
 } as const;
-const _proxyConfig = Config.all({
-    enabled: Config.map(
-        Config.string('TRUST_PROXY').pipe(Config.withDefault('false')),
-        (raw) => raw === 'true' || raw === '1',
-    ),
-    hops: Config.map(
-        Config.integer('PROXY_HOPS').pipe(Config.withDefault(1)),
-        (raw) => Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : 1,
-    ),
-});
 
 // --- [SCHEMA] ----------------------------------------------------------------
 
@@ -103,16 +94,19 @@ const _security = (hsts: typeof _CONFIG.security.hsts | false = _CONFIG.security
 const _makeRequestContext = (database: { readonly apps: { readonly byNamespace: (namespace: string) => Effect.Effect<Option.Option<{ readonly id: string; readonly namespace: string; readonly status: 'active' | 'suspended' | 'archived' | 'purging' }>, unknown> } }) =>
     HttpMiddleware.make((app) => pipe(Effect.gen(function* () {
         const request = yield* HttpServerRequest.HttpServerRequest;
-        const proxyConfig = yield* _proxyConfig;
+        const env = yield* Env.Service;
+        const proxyHops = Number.isFinite(env.deployment.proxyHops) && env.deployment.proxyHops > 0
+            ? Math.floor(env.deployment.proxyHops)
+            : 1;
         const req = pipe(
-            proxyConfig.enabled
+            env.deployment.trustProxy
                 ? Option.firstSomeOf([
                 pipe(
                     Headers.get(request.headers, Context.Request.Headers.forwardedFor),
                     Option.map((raw) => raw.split(',')),
                     Option.map(A.map((s: string) => s.trim())),
                     Option.map(A.filter((s): s is string => s !== '' && isIP(s) !== 0)),
-                    Option.flatMap((segments) => A.get(segments, Math.max(0, segments.length - proxyConfig.hops - 1))),
+                    Option.flatMap((segments) => A.get(segments, Math.max(0, segments.length - proxyHops - 1))),
                 ),
                 Option.filter(Headers.get(request.headers, Context.Request.Headers.cfConnectingIp), (value) => isIP(value) !== 0),
                 Option.filter(Headers.get(request.headers, Context.Request.Headers.realIp), (value) => isIP(value) !== 0),

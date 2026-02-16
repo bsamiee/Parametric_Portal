@@ -6,17 +6,17 @@ import { expect } from 'vitest';
 // --- [TYPES] -----------------------------------------------------------------
 
 type Asset = { content: string; id: string; ordinal: number; type: string; updatedAt: number };
-type Fmt = 'csv' | 'ndjson' | 'yaml';
+type Fmt =   'csv' | 'ndjson' | 'yaml';
 type Model = { formatsSeen: Set<string>; itemCount: number };
-type Real = { items: readonly Either.Either<{ content: string; ordinal: number; type: string }, unknown>[] };
+type Real =  { items: readonly Either.Either<{ content: string; ordinal: number; type: string }, unknown>[] };
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
-const _safe = fc.string({ maxLength: 32, minLength: 1 }).filter((v) => /^[a-zA-Z][a-zA-Z0-9]*$/.test(v));
-const _item = fc.record({ content: _safe, id: fc.uuid(), type: _safe, updatedAt: fc.integer({ max: 1_700_604_800_000, min: 1_700_000_000_000 }) });
+const _safe =       fc.string({ maxLength: 32, minLength: 1 }).filter((v) => /^[a-zA-Z][a-zA-Z0-9]*$/.test(v));
+const _item =       fc.record({ content: _safe, id: fc.uuid(), type: _safe, updatedAt: fc.integer({ max: 1_700_604_800_000, min: 1_700_000_000_000 }) });
 const _parseError = Arbitrary.make(S.Struct(TransferError.Parse.fields));
 const _fatalError = Arbitrary.make(S.Struct(TransferError.Fatal.fields));
-const _serialize: Record<Fmt, (items: readonly { content: string; type: string }[]) => string> = { csv: (items) => `type,content\n${items.map((i) => `${i.type},${i.content}`).join('\n')}`, ndjson: (items) => items.map((i) => JSON.stringify(i)).join('\n'), yaml: (items) => items.map((i) => `---\ntype: ${i.type}\ncontent: ${i.content}`).join('\n') } as const; // NOSONAR S3358
+const _serialize:   Record<Fmt, (items: readonly { content: string; type: string }[]) => string> = { csv: (items) => `type,content\n${items.map((i) => `${i.type},${i.content}`).join('\n')}`, ndjson: (items) => items.map((i) => JSON.stringify(i)).join('\n'), yaml: (items) => items.map((i) => `---\ntype: ${i.type}\ncontent: ${i.content}`).join('\n') } as const; // NOSONAR S3358
 
 // --- [ALGEBRAIC: CODEC ROUNDTRIPS] -------------------------------------------
 
@@ -29,7 +29,6 @@ it.effect.prop('P1: text roundtrip', { format: fc.constantFrom<'ndjson' | 'yaml'
     expect(A.map(parsed, (x) => x.content)).toEqual(A.map(items, (x) => x.content));
     format === 'ndjson' && expect(A.map(parsed, (x) => x.content)).toEqual(exported.split('\n').filter(Boolean).map((line) => (JSON.parse(line) as { content: string }).content));
 }), { fastCheck: { numRuns: 60 } });
-
 // P2: Binary codec roundtrip (xlsx, zip)
 it.effect.prop('P2: binary roundtrip', { format: fc.constantFrom<'xlsx' | 'zip'>('xlsx', 'zip'), items: fc.array(_item, { maxLength: 4, minLength: 0 }) }, ({ format, items }) => Effect.gen(function* () {
     const enriched: readonly Asset[] = A.map(items, (item, index) => ({ ...item, ordinal: index + 1 }));
@@ -44,7 +43,6 @@ it.effect.prop('P2: binary roundtrip', { format: fc.constantFrom<'xlsx' | 'zip'>
 
 // P3: Empty inputs = identity stream
 it.effect('P3: empty inputs', () => Effect.all((['ndjson', 'csv', 'yaml'] as const).map((fmt) => Transfer.import('', { format: fmt }).pipe(Stream.runCollect, Effect.map((c) => Chunk.size(c))))).pipe(Effect.map((sizes) => expect(sizes).toEqual([0, 0, 0]))));
-
 // P4: Import modes + row limit + too large entry
 it.effect('P4: modes + limits', () => Effect.all([
     Transfer.import('arbitrary', { format: 'txt', mode: 'file', type: 'doc' }).pipe(Stream.runCollect, Effect.map((c) => Transfer.partition(Chunk.toArray(c)).items[0]?.type)),
@@ -54,7 +52,6 @@ it.effect('P4: modes + limits', () => Effect.all([
     Transfer.import(A.replicate(JSON.stringify({ content: 'x', type: 't' }), 10_001).join('\n'), { format: 'ndjson' }).pipe(Stream.runCollect, Effect.either, Effect.map((r) => Either.isLeft(r) && r.left.code)),
     Transfer.import(`{"type":"t","content":"${'x'.repeat(1_100_000)}"}`, { format: 'ndjson' }).pipe(Stream.runCollect, Effect.map((c) => Transfer.partition(Chunk.toArray(c)).failures[0]?.code)),
 ]).pipe(Effect.map(([file, detect, fallback, csv, rowLimit, tooLarge]) => expect([file, detect, fallback, csv, rowLimit, tooLarge]).toEqual(['doc', 1, 'fallback', 'hello', 'ROW_LIMIT', 'TOO_LARGE']))));
-
 // P5: Path traversal rejected
 it.effect('P5: path security', () => Effect.promise(() => import('jszip').then((m) => m.default)).pipe(
     Effect.flatMap((JSZip) => Effect.all(['../escape.txt', '/etc/passwd'].map((path) => {
@@ -64,8 +61,7 @@ it.effect('P5: path security', () => Effect.promise(() => import('jszip').then((
         return Effect.promise(() => archive.generateAsync({ type: 'arraybuffer' })).pipe(Effect.flatMap((buf) => Transfer.import(buf, { format: 'zip' }).pipe(Stream.runCollect)), Effect.map((c) => Transfer.partition(Chunk.toArray(c)).failures.some((f) => f.code === 'INVALID_PATH')));
     }))),
     Effect.map((results) => expect(results).toEqual([true, true]))));
-
-    // P6: Zip edge cases (bomb, no manifest, invalid format, invalid manifest, hash mismatch)
+// P6: Zip edge cases (bomb, no manifest, invalid format, invalid manifest, hash mismatch)
 it.effect('P6: zip security', () => Effect.promise(() => import('jszip').then((m) => m.default)).pipe(
     Effect.flatMap((JSZip) => {
         const bomb = new JSZip(); bomb.file('manifest.json', JSON.stringify({ entries: [{ mime: 'text/plain', name: 'bomb.txt', size: 60_000_000, type: 'text' }], version: 1 })); bomb.file('bomb.txt', 'A'.repeat(1_000), { compression: 'DEFLATE' });
@@ -93,7 +89,6 @@ it.effect('P7: parse errors', () => Effect.all([
     Transfer.import('not: valid: yaml: [',  { format: 'yaml' }).pipe(Stream.runCollect, Effect.map((c) => Transfer.partition(Chunk.toArray(c)).failures[0]?.code)),
     Transfer.import('"unclosed quote\n',    { format: 'csv' }).pipe(Stream.runCollect, Effect.either, Effect.map((r) => Either.isLeft(r) && r.left.code)),
 ]).pipe(Effect.map(([ndjson, missing, csv, yaml, parser]) => expect([ndjson, missing, csv, yaml, parser]).toEqual(['INVALID_RECORD', 'MISSING_TYPE', 'MISSING_TYPE', 'INVALID_RECORD', 'PARSER_ERROR']))));
-
 // P8: Schema-derived error shapes (absorbs schema-arb P4/P5)
 it.effect.prop('P8: error schemas', { fatal: _fatalError, parse: _parseError }, ({ parse, fatal }) => Effect.sync(() => {
     expect(['DECOMPRESS', 'HASH_MISMATCH', 'INVALID_PATH', 'INVALID_RECORD', 'MISSING_TYPE', 'SCHEMA_MISMATCH', 'TOO_LARGE']).toContain(parse.code);
@@ -102,13 +97,11 @@ it.effect.prop('P8: error schemas', { fatal: _fatalError, parse: _parseError }, 
     expect(['ARCHIVE_LIMIT', 'COMPRESSION_RATIO', 'INVALID_FORMAT', 'INVALID_MANIFEST', 'PARSER_ERROR', 'ROW_LIMIT', 'UNSUPPORTED']).toContain(fatal.code);
     expect(fatal.detail === undefined || typeof fatal.detail === 'string').toBe(true);
 }), { fastCheck: { numRuns: 100 } });
-
 // P9: Multi-input array import + D7 single-line edge case
 it.effect('P9: multi-input', () => Effect.all([
     Transfer.import(['{"type":"x","content":"1"}', '{"type":"y","content":"2"}'], { format: 'ndjson' }).pipe(Stream.runCollect, Effect.map((c) => Transfer.partition(Chunk.toArray(c))), Effect.map((r) => [r.items.length, r.items[0]?.content, r.items[1]?.content])),
     Transfer.import('{"type":"doc","content":"hello world"}', { format: 'ndjson', type: 'doc' }).pipe(Stream.runCollect, Effect.map((c) => Transfer.partition(Chunk.toArray(c)).items[0]?.content)),
 ]).pipe(Effect.tap(([multi, single]) => { expect(multi).toEqual([2, '1', '2']); expect(single).toBe((JSON.parse('{"type":"doc","content":"hello world"}') as { content: string }).content); })));
-
 // P10: Partition separates Either + XML CDATA + exports
 it.effect('P10: partition + xml + exports', () => Effect.all([
     Effect.sync(() => Transfer.partition([Either.right({ content: 'a', ordinal: 1, type: 't' }), Either.left(new TransferError.Parse({ code: 'INVALID_RECORD', ordinal: 2 })), Either.right({ content: 'b', ordinal: 3, type: 't' })])),
@@ -136,7 +129,6 @@ class ImportCommand implements fc.AsyncCommand<Model, Real> {
     }
     toString = () => `Import(${this.format}, ${this.items.length} items)`;
 }
-
 class VerifyCommand implements fc.AsyncCommand<Model, Real> {
     check = (model: Readonly<Model>) => model.itemCount > 0;
     async run(model: Model, real: Real): Promise<void> {
@@ -152,7 +144,6 @@ const _allCommands = [
     fc.tuple(fc.constantFrom<Fmt>('ndjson', 'yaml', 'csv'), fc.array(_safe.map((content) => ({ content, type: 'doc' })), { maxLength: 4, minLength: 1 })).map(([format, items]) => new ImportCommand(format, items)),
     fc.constant(new VerifyCommand()),
 ];
-
 // P11: Model-based command sequence -- import operations across formats are composable
 it.effect('P11: model-based import', () => Effect.promise(() => fc.assert(
     fc.asyncProperty(fc.commands(_allCommands, { size: '-1' }), async (cmds) => {
@@ -160,7 +151,6 @@ it.effect('P11: model-based import', () => Effect.promise(() => fc.assert(
         await fc.asyncModelRun(setup, cmds);
     }), { numRuns: 30 },
 )));
-
 // P12: Multi-format accumulation -- model.formatsSeen tracks all exercised formats
 it.effect('P12: format coverage', () => Effect.promise(() => fc.assert(
     fc.asyncProperty(fc.commands(_allCommands, { maxCommands: 8, size: '-1' }), async (cmds) => {

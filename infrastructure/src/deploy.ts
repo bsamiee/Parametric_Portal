@@ -5,8 +5,8 @@ import * as docker from '@pulumi/docker';
 import * as k8s from '@pulumi/kubernetes';
 import * as pulumi from '@pulumi/pulumi';
 import * as random from '@pulumi/random';
-import { identity, Match } from 'effect';
-import { RuntimeEnv } from './runtime-env.ts';
+import { identity, Match, Option } from 'effect';
+import { Env } from '@parametric-portal/server/env';
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
@@ -41,22 +41,13 @@ prometheus.remote_write "default" { endpoint { url = "${promUrl}/api/v1/write" }
         Match.when((d): d is string => d.startsWith('http://') || d.startsWith('https://'), identity),
         Match.orElse((d) => `https://${d}`)
     ),
-    cloud: (env: NodeJS.ProcessEnv) => ({
-        api: { cpu: _Ops.text(env, 'CLOUD_API_CPU'), domain: _Ops.text(env, 'CLOUD_API_DOMAIN'), image: _Ops.text(env, 'API_IMAGE'), maxReplicas: _Ops.number(env, 'CLOUD_API_MAX_REPLICAS'), memory: _Ops.text(env, 'CLOUD_API_MEMORY'), minReplicas: _Ops.number(env, 'CLOUD_API_MIN_REPLICAS'), replicas: _Ops.number(env, 'CLOUD_API_REPLICAS') },
-        azCount: _Ops.number(env, 'CLOUD_AZ_COUNT'),
-        db: { cacheNodeType: _Ops.text(env, 'CLOUD_CACHE_NODE_TYPE'), dbClass: _Ops.text(env, 'CLOUD_DB_CLASS'), dbStorageGi: _Ops.number(env, 'CLOUD_DB_STORAGE_GB') },
-        hpa: { cpuTarget: _Ops.number(env, 'CLOUD_HPA_CPU_TARGET'), memoryTarget: _Ops.number(env, 'CLOUD_HPA_MEMORY_TARGET') },
-        observe: { grafanaStorageGi: _Ops.number(env, 'CLOUD_GRAFANA_STORAGE_GB'), prometheusStorageGi: _Ops.number(env, 'CLOUD_PROMETHEUS_STORAGE_GB'), retentionDays: _Ops.number(env, 'CLOUD_OBSERVE_RETENTION_DAYS') },
-    }),
-    compact: (values: Record<string, pulumi.Input<string> | undefined>) => Object.fromEntries(Object.entries(values).filter(([, value]) => value !== undefined)) as Record<string, pulumi.Input<string>>,
-    dockerEnvs: (vars: Record<string, pulumi.Input<string>>) => Object.entries(vars).map(([name, value]) => pulumi.interpolate`${name}=${value}`),
+    compact:      (values: Record<string, pulumi.Input<string> | undefined>) => Object.fromEntries(Object.entries(values).filter(([, value]) => value !== undefined)) as Record<string, pulumi.Input<string>>,
+    dockerEnvs:   (vars: Record<string, pulumi.Input<string>>) => Object.entries(vars).map(([name, value]) => pulumi.interpolate`${name}=${value}`),
     dockerHealth: (tests: string[]) => ({ ..._CONFIG.docker.health, tests }),
-    dockerNets: (networkId: pulumi.Input<string>) => [{ name: pulumi.output(networkId) }],
-    dockerPort: (port: number) => ({ external: port, internal: port }),
-    dockerVol: (stack: string, id: string, name: string, path: string) => [{ containerPath: path, volumeName: new docker.Volume(`${stack}-${id}`, { name }).name }],
-    fail: (message: string): never => {
-        throw new pulumi.RunError(message);
-    },
+    dockerNets:   (networkId: pulumi.Input<string>) => [{ name: pulumi.output(networkId) }],
+    dockerPort:   (port: number) => ({ external: port, internal: port }),
+    dockerVol:    (stack: string, id: string, name: string, path: string) => [{ containerPath: path, volumeName: new docker.Volume(`${stack}-${id}`, { name }).name }],
+    fail:         (message: string): never => {throw new pulumi.RunError(message);},
     garageConfig: (rpcSecret: pulumi.Input<string>, adminToken: pulumi.Input<string>) => pulumi.interpolate`metadata_dir = "/data/meta"
 data_dir = "/data/blocks"
 db_engine = "lmdb"
@@ -73,65 +64,68 @@ api_bind_addr = "[::]:${_CONFIG.ports.garageS3}"
 [admin]
 api_bind_addr = "[::]:${_CONFIG.ports.garageAdmin}"
 admin_token = "${adminToken}"`,
-    grafana: (promUrl: pulumi.Input<string>) => pulumi.interpolate`apiVersion: 1\ndatasources:\n  - name: Prometheus\n    type: prometheus\n    access: proxy\n    url: ${promUrl}\n    isDefault: true`,
-    httpHealth: (path: string, port: number) => ({ interval: '10s', retries: 3, startPeriod: '30s', tests: ['CMD', 'wget', '--spider', '-q', `http://localhost:${port}${path}`], timeout: '5s' }),
-    k8sEnv: [{ name: 'K8S_CONTAINER_NAME', value: 'api' }, { name: 'K8S_DEPLOYMENT_NAME', value: _CONFIG.names.computeDeployment }, { name: 'K8S_NAMESPACE', valueFrom: { fieldRef: { fieldPath: 'metadata.namespace' } } }, { name: 'K8S_NODE_NAME', valueFrom: { fieldRef: { fieldPath: 'spec.nodeName' } } }, { name: 'K8S_POD_NAME', valueFrom: { fieldRef: { fieldPath: 'metadata.name' } } }],
-    k8sUrl: (ns: pulumi.Input<string>, name: pulumi.Input<string>, port: number) => pulumi.interpolate`http://${name}.${ns}.svc.cluster.local:${port}`,
-    meta: (namespace: pulumi.Input<string>, component: string, name?: string) => ({ labels: { component, stack: _CONFIG.names.stack, tier: 'observe' }, namespace, ...(name ? { name } : {}) }),
-    mode: (env: NodeJS.ProcessEnv) => {
-        const mode = env['DEPLOYMENT_MODE'];
-        return mode === 'cloud' || mode === 'selfhosted' ? mode : _Ops.fail('[MISSING_ENV] DEPLOYMENT_MODE must be cloud or selfhosted');
-    },
-    names: { alloy: 'observe-alloy', api: 'compute-api', grafana: 'observe-grafana', prometheus: 'observe-prometheus' } as const,
-    number: (env: NodeJS.ProcessEnv, name: string) => { const value = Number(_Ops.text(env, name)); return Number.isFinite(value) ? value : _Ops.fail(`[INVALID_ENV] ${name} must be numeric`); },
+    grafana:        (promUrl: pulumi.Input<string>) => pulumi.interpolate`apiVersion: 1\ndatasources:\n  - name: Prometheus\n    type: prometheus\n    access: proxy\n    url: ${promUrl}\n    isDefault: true`,
+    httpHealth:     (path: string, port: number) => ({ interval: '10s', retries: 3, startPeriod: '30s', tests: ['CMD', 'wget', '--spider', '-q', `http://localhost:${port}${path}`], timeout: '5s' }),
+    k8sEnv:         [{ name: 'K8S_CONTAINER_NAME', value: 'api' }, { name: 'K8S_DEPLOYMENT_NAME', value: _CONFIG.names.computeDeployment }, { name: 'K8S_NAMESPACE', valueFrom: { fieldRef: { fieldPath: 'metadata.namespace' } } }, { name: 'K8S_NODE_NAME', valueFrom: { fieldRef: { fieldPath: 'spec.nodeName' } } }, { name: 'K8S_POD_NAME', valueFrom: { fieldRef: { fieldPath: 'metadata.name' } } }],
+    k8sUrl:         (ns: pulumi.Input<string>, name: pulumi.Input<string>, port: number) => pulumi.interpolate`http://${name}.${ns}.svc.cluster.local:${port}`,
+    meta:           (namespace: pulumi.Input<string>, component: string, name?: string) => ({ labels: { component, stack: _CONFIG.names.stack, tier: 'observe' }, namespace, ...(name ? { name } : {}) }),
+    names:          { alloy: 'observe-alloy', api: 'compute-api', grafana: 'observe-grafana', prometheus: 'observe-prometheus' } as const,
+    number:         (env: NodeJS.ProcessEnv, name: string) => { const value = Number(_Ops.text(env, name)); return Number.isFinite(value) ? value : _Ops.fail(`[INVALID_ENV] ${name} must be numeric`); },
     optionalSecret: (env: NodeJS.ProcessEnv, name: string) => env[name] && env[name] !== '' ? pulumi.secret(env[name]) : undefined,
-    prometheus: (alloyHost: string) => `global:\n  scrape_interval: 15s\nscrape_configs:\n  - job_name: alloy\n    static_configs: [{ targets: ["${alloyHost}:${_CONFIG.ports.alloyMetrics}"] }]\n  - job_name: prometheus\n    static_configs: [{ targets: ["localhost:${_CONFIG.ports.prometheus}"] }]`,
-    runtime: (args: {
+    prometheus:     (alloyHost: string) => `global:\n  scrape_interval: 15s\nscrape_configs:\n  - job_name: alloy\n    static_configs: [{ targets: ["${alloyHost}:${_CONFIG.ports.alloyMetrics}"] }]\n  - job_name: prometheus\n    static_configs: [{ targets: ["localhost:${_CONFIG.ports.prometheus}"] }]`,
+    runtime:        (args: {
         apiDomain: string;
         data: {
-            bucketName: pulumi.Input<string>;
-            cacheHost: pulumi.Input<string>;
-            cachePort: pulumi.Input<number>;
-            dbHost: pulumi.Input<string>;
-            dbPort: pulumi.Input<number>;
+            bucketName:      pulumi.Input<string>;
+            cacheHost:       pulumi.Input<string>;
+            cachePort:       pulumi.Input<number>;
+            dbHost:          pulumi.Input<string>;
+            dbPort:          pulumi.Input<number>;
             storageEndpoint: pulumi.Input<string>;
-            storageRegion: pulumi.Input<string>;
+            storageRegion:   pulumi.Input<string>;
         };
         env: NodeJS.ProcessEnv;
         mode: 'cloud' | 'selfhosted';
         observe: { collectorEndpoint: pulumi.Input<string> };
         namespace?: pulumi.Input<string>;
-    }) => RuntimeEnv.collect({
-        derived: _Ops.compact({
-            API_BASE_URL: _Ops.apiBaseUrl(args.apiDomain),
-            CLUSTER_HEALTH_MODE: args.mode === 'cloud' ? 'k8s' : 'ping',
-            K8S_LABEL_SELECTOR: args.mode === 'cloud' ? `app=${_CONFIG.k8s.labels.app}` : undefined,
-            K8S_NAMESPACE: args.namespace,
-            NODE_ENV: args.env['NODE_ENV'] ?? 'development',
-            OTEL_EXPORTER_OTLP_ENDPOINT: args.observe.collectorEndpoint,
-            OTEL_LOGS_EXPORTER: 'none',
-            OTEL_METRICS_EXPORTER: 'otlp',
-            OTEL_TRACES_EXPORTER: 'none',
-            POSTGRES_HOST: args.data.dbHost,
-            POSTGRES_PORT: pulumi.interpolate`${args.data.dbPort}`,
-            PROXY_HOPS: args.mode === 'cloud' ? '1' : '0',
-            REDIS_HOST: args.data.cacheHost,
-            REDIS_PORT: pulumi.interpolate`${args.data.cachePort}`,
-            REDIS_TLS: args.mode === 'cloud' ? 'true' : 'false',
-            STORAGE_BUCKET: args.data.bucketName,
-            STORAGE_ENDPOINT: args.mode === 'selfhosted' ? args.data.storageEndpoint : undefined,
-            STORAGE_FORCE_PATH_STYLE: args.mode === 'selfhosted' ? 'true' : undefined,
-            STORAGE_REGION: args.data.storageRegion,
-            TRUST_PROXY: args.mode === 'cloud' ? 'true' : 'false',
-        }),
-        env: args.env,
-        mode: args.mode,
-    }),
-    secret: (env: NodeJS.ProcessEnv, name: string) => pulumi.secret(_Ops.text(env, name)),
+    }) => {
+        const projection = Env.runtimeProjection({ env: args.env, mode: args.mode });
+        const secretVars = Object.fromEntries(projection.secretNames.map((name) => [name, _Ops.secret(args.env, name)] as const));
+        return {
+            envVars: {
+                ...projection.configVars,
+                ..._Ops.compact({
+                    API_BASE_URL:                _Ops.apiBaseUrl(args.apiDomain),
+                    CLUSTER_HEALTH_MODE:         args.mode === 'cloud' ? 'k8s' : 'ping',
+                    K8S_LABEL_SELECTOR:          args.mode === 'cloud' ? `app=${_CONFIG.k8s.labels.app}` : undefined,
+                    K8S_NAMESPACE:               args.namespace,
+                    NODE_ENV:                    args.env['NODE_ENV'] ?? 'development',
+                    OTEL_EXPORTER_OTLP_ENDPOINT: args.observe.collectorEndpoint,
+                    OTEL_LOGS_EXPORTER:          'none',
+                    OTEL_METRICS_EXPORTER:       'otlp',
+                    OTEL_TRACES_EXPORTER:        'none',
+                    POSTGRES_HOST:               args.data.dbHost,
+                    POSTGRES_PORT:               pulumi.interpolate`${args.data.dbPort}`,
+                    POSTGRES_SSL:                args.mode === 'cloud' ? 'true' : 'false',
+                    PROXY_HOPS:                  args.mode === 'cloud' ? '1' : '0',
+                    REDIS_HOST:                  args.data.cacheHost,
+                    REDIS_PORT:                  pulumi.interpolate`${args.data.cachePort}`,
+                    REDIS_TLS:                   args.mode === 'cloud' ? 'true' : 'false',
+                    // REDIS_TLS_CA: Not derived -- schema (Plan 03-01) declares it optional via S.Redacted. Node.js default CA store covers ElastiCache. Available as secret passthrough via Doppler if needed.
+                    STORAGE_BUCKET:              args.data.bucketName,
+                    STORAGE_ENDPOINT:            args.mode === 'selfhosted' ? args.data.storageEndpoint : undefined,
+                    STORAGE_FORCE_PATH_STYLE:    args.mode === 'selfhosted' ? 'true' : undefined,
+                    STORAGE_REGION:              args.data.storageRegion,
+                    TRUST_PROXY:                 args.mode === 'cloud' ? 'true' : 'false',
+                }),
+            },
+            secretVars,
+        };
+    },
+    secret:        (env: NodeJS.ProcessEnv, name: string) => pulumi.secret(_Ops.text(env, name)),
     securityGroup: (stack: string, name: string, port: number, vpcId: pulumi.Input<string>) => new aws.ec2.SecurityGroup(`${stack}-${name}`, { egress: [{ cidrBlocks: ['0.0.0.0/0'], fromPort: 0, protocol: '-1', toPort: 0 }], ingress: [{ cidrBlocks: [_CONFIG.aws.cidr], fromPort: port, protocol: 'tcp', toPort: port }], vpcId }),
-    selfhosted: (env: NodeJS.ProcessEnv) => ({ acmeEmail: _Ops.text(env, 'ACME_EMAIL'), api: { domain: env['SELFHOSTED_API_DOMAIN'] ?? '', image: _Ops.text(env, 'API_IMAGE') }, observe: { retentionDays: _Ops.number(env, 'SELFHOSTED_OBSERVE_RETENTION_DAYS') } }),
-    text: (env: NodeJS.ProcessEnv, name: string) => env[name] && env[name] !== '' ? env[name] : _Ops.fail(`[MISSING_ENV] ${name} is required`),
-    traefikCmd: (email: string) => ['--providers.docker=true', '--providers.docker.exposedByDefault=false', '--entrypoints.web.address=:80', '--entrypoints.websecure.address=:443', '--entrypoints.web.http.redirections.entrypoint.to=websecure', '--certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web', '--certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json', `--certificatesresolvers.letsencrypt.acme.email=${email}`],
+    text:          (env: NodeJS.ProcessEnv, name: string) => env[name] && env[name] !== '' ? env[name] : _Ops.fail(`[MISSING_ENV] ${name} is required`),
+    traefikCmd:    (email: string) => ['--providers.docker=true', '--providers.docker.exposedByDefault=false', '--entrypoints.web.address=:80', '--entrypoints.websecure.address=:443', '--entrypoints.web.http.redirections.entrypoint.to=websecure', '--certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web', '--certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json', `--certificatesresolvers.letsencrypt.acme.email=${email}`],
     traefikLabels: (domain: string, port: number) => [{ label: 'traefik.enable', value: 'true' }, { label: 'traefik.http.routers.api.rule', value: domain ? `Host(\`${domain}\`)` : 'PathPrefix(`/`)' }, { label: 'traefik.http.routers.api.entrypoints', value: 'websecure' }, { label: 'traefik.http.routers.api.tls.certresolver', value: 'letsencrypt' }, { label: 'traefik.http.services.api.loadbalancer.server.port', value: `${port}` }],
 };
 const _k8sObserve = (stack: string, namespace: pulumi.Input<string>, items: ReadonlyArray<{ cmd: string[]; config: pulumi.Input<string>; configFile: string; configPath: string; dataPath: string; image: string; name: 'grafana' | 'prometheus'; port: number; storageGi: number }>) => items.map((item) => {
@@ -145,12 +139,12 @@ const _k8sObserve = (stack: string, namespace: pulumi.Input<string>, items: Read
 // --- [DISPATCH_TABLES] -------------------------------------------------------
 
 const _DEPLOY = {
-    cloud: (args: { env: NodeJS.ProcessEnv; stack: string }) => {
-        const input = _Ops.cloud(args.env);
+    cloud: (args: { deployInput: Extract<ReturnType<typeof Env.deploy>, { readonly mode: 'cloud' }>; env: NodeJS.ProcessEnv; stack: string }) => {
+        const input = args.deployInput;
         const ns = new k8s.core.v1.Namespace(`${args.stack}-parametric-ns`, { metadata: { name: _CONFIG.k8s.namespace } });
         const vpc = new awsx.ec2.Vpc(`${args.stack}-data-vpc`, { cidrBlock: _CONFIG.aws.cidr, enableDnsHostnames: true, enableDnsSupport: true, natGateways: { strategy: 'Single' }, numberOfAvailabilityZones: input.azCount, tags: { Name: 'data-vpc' } });
         const dbSubnet = new aws.rds.SubnetGroup(`${args.stack}-data-db-subnets`, { subnetIds: vpc.privateSubnetIds });
-        const cloudPreloadLibraries = args.env['CLOUD_POSTGRES_SHARED_PRELOAD_LIBRARIES'];
+        const cloudPreloadLibraries = Option.getOrUndefined(input.postgresSharedPreloadLibraries);
         const dbParams = new aws.rds.ParameterGroup(`${args.stack}-data-db-params`, {
             family: 'postgres18',
             parameters: [
@@ -160,9 +154,9 @@ const _DEPLOY = {
                 ...(cloudPreloadLibraries ? [{ applyMethod: 'pending-reboot', name: 'shared_preload_libraries', value: cloudPreloadLibraries }] : []),
             ],
         });
-        const rds = new aws.rds.Instance(`${args.stack}-data-rds`, { allocatedStorage: input.db.dbStorageGi, backupRetentionPeriod: _CONFIG.aws.backupRetentionDays, dbName: 'parametric', dbSubnetGroupName: dbSubnet.name, engine: 'postgres', engineVersion: '18.2', finalSnapshotIdentifier: 'data-final', instanceClass: input.db.dbClass, parameterGroupName: dbParams.name, password: _Ops.secret(args.env, 'POSTGRES_PASSWORD'), skipFinalSnapshot: false, storageEncrypted: true, username: 'postgres', vpcSecurityGroupIds: [_Ops.securityGroup(args.stack, 'data-db-sg', _CONFIG.ports.postgres, vpc.vpcId).id] });
+        const rds = new aws.rds.Instance(`${args.stack}-data-rds`, { allocatedStorage: input.dbStorageGb, backupRetentionPeriod: _CONFIG.aws.backupRetentionDays, dbName: 'parametric', dbSubnetGroupName: dbSubnet.name, engine: 'postgres', engineVersion: '18.2', finalSnapshotIdentifier: 'data-final', instanceClass: input.dbClass, parameterGroupName: dbParams.name, password: _Ops.secret(args.env, 'POSTGRES_PASSWORD'), skipFinalSnapshot: false, storageEncrypted: true, username: 'postgres', vpcSecurityGroupIds: [_Ops.securityGroup(args.stack, 'data-db-sg', _CONFIG.ports.postgres, vpc.vpcId).id] });
         const cacheSubnet = new aws.elasticache.SubnetGroup(`${args.stack}-data-cache-subnets`, { subnetIds: vpc.privateSubnetIds });
-        const redis = new aws.elasticache.ReplicationGroup(`${args.stack}-data-redis`, { atRestEncryptionEnabled: true, authToken: _Ops.secret(args.env, 'REDIS_PASSWORD'), automaticFailoverEnabled: true, description: 'parametric redis', engine: 'redis', engineVersion: '7.1', nodeType: input.db.cacheNodeType, numCacheClusters: _CONFIG.aws.redisClusters, port: _CONFIG.ports.redis, securityGroupIds: [_Ops.securityGroup(args.stack, 'data-cache-sg', _CONFIG.ports.redis, vpc.vpcId).id], subnetGroupName: cacheSubnet.name, transitEncryptionEnabled: true });
+        const redis = new aws.elasticache.ReplicationGroup(`${args.stack}-data-redis`, { atRestEncryptionEnabled: true, authToken: _Ops.secret(args.env, 'REDIS_PASSWORD'), automaticFailoverEnabled: true, description: 'parametric redis', engine: 'redis', engineVersion: '7.1', nodeType: input.cacheNodeType, numCacheClusters: _CONFIG.aws.redisClusters, port: _CONFIG.ports.redis, securityGroupIds: [_Ops.securityGroup(args.stack, 'data-cache-sg', _CONFIG.ports.redis, vpc.vpcId).id], subnetGroupName: cacheSubnet.name, transitEncryptionEnabled: true });
         const bucket = new aws.s3.Bucket(`${args.stack}-data-bucket`, { bucket: `parametric-assets-${args.stack}`, forceDestroy: false });
         new aws.s3.BucketVersioning(`${args.stack}-data-bucket-versioning`, { bucket: bucket.id, versioningConfiguration: { status: 'Enabled' } });
         new aws.s3.BucketServerSideEncryptionConfiguration(`${args.stack}-data-bucket-encryption`, { bucket: bucket.id, rules: [{ applyServerSideEncryptionByDefault: { sseAlgorithm: 'AES256' } }] });
@@ -175,8 +169,8 @@ const _DEPLOY = {
         new k8s.apps.v1.DaemonSet(`${args.stack}-observe-alloy`, { metadata: _Ops.meta(ns.metadata.name, 'alloy'), spec: { selector: { matchLabels: { app: 'alloy' } }, template: { metadata: { labels: { app: 'alloy', stack: _CONFIG.names.stack, tier: 'observe' } }, spec: alloyPod } } });
         new k8s.core.v1.Service(`${args.stack}-observe-alloy-svc`, { metadata: _Ops.meta(ns.metadata.name, 'alloy', 'alloy'), spec: { ports: [{ name: 'grpc', port: _CONFIG.ports.alloyGrpc }, { name: 'http', port: _CONFIG.ports.alloyHttp }, { name: 'metrics', port: _CONFIG.ports.alloyMetrics }], selector: { app: 'alloy' } } });
         _k8sObserve(args.stack, ns.metadata.name, [
-            { cmd: ['--config.file=/etc/prometheus/prometheus.yml', '--storage.tsdb.path=/prometheus', '--web.enable-remote-write-receiver', `--storage.tsdb.retention.time=${input.observe.retentionDays}d`], config: _Ops.prometheus('alloy'), configFile: 'prometheus.yml', configPath: '/etc/prometheus', dataPath: '/prometheus', image: _CONFIG.images.prometheus, name: 'prometheus', port: _CONFIG.ports.prometheus, storageGi: input.observe.prometheusStorageGi },
-            { cmd: [], config: _Ops.grafana(promUrl), configFile: 'datasources.yaml', configPath: '/etc/grafana/provisioning/datasources', dataPath: '/var/lib/grafana', image: _CONFIG.images.grafana, name: 'grafana', port: _CONFIG.ports.grafana, storageGi: input.observe.grafanaStorageGi },
+            { cmd: ['--config.file=/etc/prometheus/prometheus.yml', '--storage.tsdb.path=/prometheus', '--web.enable-remote-write-receiver', `--storage.tsdb.retention.time=${input.observeRetentionDays}d`], config: _Ops.prometheus('alloy'), configFile: 'prometheus.yml', configPath: '/etc/prometheus', dataPath: '/prometheus', image: _CONFIG.images.prometheus, name: 'prometheus', port: _CONFIG.ports.prometheus, storageGi: input.prometheusStorageGb },
+            { cmd: [], config: _Ops.grafana(promUrl), configFile: 'datasources.yaml', configPath: '/etc/grafana/provisioning/datasources', dataPath: '/var/lib/grafana', image: _CONFIG.images.grafana, name: 'grafana', port: _CONFIG.ports.grafana, storageGi: input.grafanaStorageGb },
         ]);
         const observe = { collectorEndpoint: _Ops.k8sUrl(ns.metadata.name, 'alloy', _CONFIG.ports.alloyHttp), grafanaEndpoint: _Ops.k8sUrl(ns.metadata.name, 'grafana', _CONFIG.ports.grafana), prometheusEndpoint: _Ops.k8sUrl(ns.metadata.name, 'prometheus', _CONFIG.ports.prometheus) };
         const runtime = _Ops.runtime({ apiDomain: input.api.domain, data, env: args.env, mode: 'cloud', namespace: ns.metadata.name, observe });
@@ -197,25 +191,26 @@ const _DEPLOY = {
         const podSpec = { containers: [apiContainer], terminationGracePeriodSeconds: 30 };
         const deploy = new k8s.apps.v1.Deployment(`${args.stack}-${_CONFIG.names.computeDeployment}`, { metadata: computeMeta, spec: { replicas: input.api.replicas, selector: { matchLabels: _CONFIG.k8s.labels }, template: { metadata: { labels: _CONFIG.k8s.labels }, spec: podSpec } } });
         const service = new k8s.core.v1.Service(`${args.stack}-compute-svc`, { metadata: computeMeta, spec: { ports: [{ name: 'http', port: _CONFIG.ports.api, protocol: 'TCP', targetPort: _CONFIG.ports.api }], selector: _CONFIG.k8s.labels, type: 'ClusterIP' } });
-        new k8s.autoscaling.v2.HorizontalPodAutoscaler(`${args.stack}-compute-hpa`, { metadata: computeMeta, spec: { maxReplicas: input.api.maxReplicas, metrics: [{ resource: { name: 'cpu', target: { averageUtilization: input.hpa.cpuTarget, type: 'Utilization' } }, type: 'Resource' }, { resource: { name: 'memory', target: { averageUtilization: input.hpa.memoryTarget, type: 'Utilization' } }, type: 'Resource' }], minReplicas: input.api.minReplicas, scaleTargetRef: { apiVersion: 'apps/v1', kind: 'Deployment', name: deploy.metadata.name } } });
+        new k8s.autoscaling.v2.HorizontalPodAutoscaler(`${args.stack}-compute-hpa`, { metadata: computeMeta, spec: { maxReplicas: input.api.maxReplicas, metrics: [{ resource: { name: 'cpu', target: { averageUtilization: input.hpaCpuTarget, type: 'Utilization' } }, type: 'Resource' }, { resource: { name: 'memory', target: { averageUtilization: input.hpaMemoryTarget, type: 'Utilization' } }, type: 'Resource' }], minReplicas: input.api.minReplicas, scaleTargetRef: { apiVersion: 'apps/v1', kind: 'Deployment', name: deploy.metadata.name } } });
         new k8s.networking.v1.Ingress(`${args.stack}-compute-ingress`, { metadata: { ...computeMeta, annotations: _CONFIG.k8s.ingress }, spec: { rules: [{ host: input.api.domain, http: { paths: [{ backend: { service: { name: service.metadata.name, port: { number: _CONFIG.ports.api } } }, path: '/', pathType: 'Prefix' }] } }], tls: [{ hosts: [input.api.domain], secretName: 'compute-tls' }] } });
         return { compute: { apiEndpoint: _Ops.k8sUrl(ns.metadata.name, service.metadata.name, _CONFIG.ports.api) }, data, network: { id: pulumi.output(''), privateSubnetIds: pulumi.output(vpc.privateSubnetIds), publicSubnetIds: pulumi.output(vpc.publicSubnetIds), vpcId: pulumi.output(vpc.vpcId) }, observe };
     },
-    selfhosted: (args: { env: NodeJS.ProcessEnv; stack: string }) => {
-        const input = _Ops.selfhosted(args.env);
+    selfhosted: (args: { deployInput: Extract<ReturnType<typeof Env.deploy>, { readonly mode: 'selfhosted' }>; env: NodeJS.ProcessEnv; stack: string }) => {
+        const input = args.deployInput;
+        const domain = Option.getOrElse(input.api.domain, () => '');
         const network = new docker.Network(`${args.stack}-data-net`, { name: _CONFIG.names.network });
         const nets = _Ops.dockerNets(network.id);
-        const selfhostedPreloadLibraries = args.env['SELFHOSTED_POSTGRES_SHARED_PRELOAD_LIBRARIES'];
+        const selfhostedPreloadLibraries = Option.getOrUndefined(input.postgresSharedPreloadLibraries);
         const postgres = new docker.Container(`${args.stack}-data-pg`, {
-            command: ['postgres', '-c', 'max_replication_slots=10', '-c', 'wal_level=logical', ...(selfhostedPreloadLibraries ? ['-c', `shared_preload_libraries=${selfhostedPreloadLibraries}`] : [])],
-            envs: [pulumi.interpolate`POSTGRES_PASSWORD=${_Ops.secret(args.env, 'POSTGRES_PASSWORD')}`, 'POSTGRES_DB=parametric', 'POSTGRES_USER=postgres'],
-            healthcheck: _Ops.dockerHealth(['CMD-SHELL', 'pg_isready -U postgres']),
-            image: _CONFIG.images.postgres,
-            name: 'data-postgres',
+            command:          ['postgres', '-c', 'max_replication_slots=10', '-c', 'wal_level=logical', ...(selfhostedPreloadLibraries ? ['-c', `shared_preload_libraries=${selfhostedPreloadLibraries}`] : [])],
+            envs:             [pulumi.interpolate`POSTGRES_PASSWORD=${_Ops.secret(args.env, 'POSTGRES_PASSWORD')}`, 'POSTGRES_DB=parametric', 'POSTGRES_USER=postgres'],
+            healthcheck:      _Ops.dockerHealth(['CMD-SHELL', 'pg_isready -U postgres']),
+            image:            _CONFIG.images.postgres,
+            name:             'data-postgres',
             networksAdvanced: nets,
-            ports: [_Ops.dockerPort(_CONFIG.ports.postgres)],
-            restart: _CONFIG.docker.restart,
-            volumes: _Ops.dockerVol(args.stack, 'data-db-vol', 'data-db-data', '/var/lib/postgresql/data'),
+            ports:            [_Ops.dockerPort(_CONFIG.ports.postgres)],
+            restart:          _CONFIG.docker.restart,
+            volumes:          _Ops.dockerVol(args.stack, 'data-db-vol', 'data-db-data', '/var/lib/postgresql/data'),
         });
         const redis = new docker.Container(`${args.stack}-data-redis`, { command: pulumi.output(_Ops.optionalSecret(args.env, 'REDIS_PASSWORD')).apply((password) => password ? ['redis-server', '--appendonly', 'yes', '--requirepass', password] : ['redis-server', '--appendonly', 'yes']), healthcheck: _Ops.dockerHealth(['CMD', 'redis-cli', 'ping']), image: _CONFIG.images.redis, name: 'data-redis', networksAdvanced: nets, ports: [_Ops.dockerPort(_CONFIG.ports.redis)], restart: _CONFIG.docker.restart, volumes: _Ops.dockerVol(args.stack, 'data-cache-vol', 'data-cache-data', '/data') });
         const garageRpcSecret = new random.RandomString(`${args.stack}-garage-rpc-secret`, { length: 64, special: false });
@@ -237,10 +232,10 @@ docker exec ${garage.name} garage bucket allow --read --write --owner ${_CONFIG.
         const data = { bucketName: pulumi.output(_CONFIG.names.bucket), cacheEndpoint: pulumi.interpolate`${redis.name}:${_CONFIG.ports.redis}`, cacheHost: redis.name, cachePort: pulumi.output(_CONFIG.ports.redis), dbEndpoint: pulumi.interpolate`${postgres.name}:${_CONFIG.ports.postgres}`, dbHost: postgres.name, dbPort: pulumi.output(_CONFIG.ports.postgres), storageEndpoint: pulumi.interpolate`http://${garage.name}:${_CONFIG.ports.garageS3}`, storageRegion: pulumi.output('us-east-1') };
         const observe = { collectorEndpoint: pulumi.interpolate`http://${_Ops.names.alloy}:${_CONFIG.ports.alloyHttp}`, grafanaEndpoint: pulumi.output(`http://localhost:${_CONFIG.ports.grafana}`), prometheusEndpoint: pulumi.output(`http://localhost:${_CONFIG.ports.prometheus}`) };
         new docker.Container(`${args.stack}-observe-alloy`, { command: ['run', '/etc/alloy/config.alloy'], image: _CONFIG.images.alloy, name: _Ops.names.alloy, networksAdvanced: nets, ports: [_Ops.dockerPort(_CONFIG.ports.alloyGrpc), _Ops.dockerPort(_CONFIG.ports.alloyHttp), _Ops.dockerPort(_CONFIG.ports.alloyMetrics)], uploads: [{ content: _Ops.alloy(pulumi.interpolate`http://${_Ops.names.prometheus}:${_CONFIG.ports.prometheus}`), file: '/etc/alloy/config.alloy' }] });
-        new docker.Container(`${args.stack}-observe-prometheus`, { command: ['--config.file=/etc/prometheus/prometheus.yml', '--storage.tsdb.path=/prometheus', '--web.enable-remote-write-receiver', `--storage.tsdb.retention.time=${input.observe.retentionDays}d`], image: _CONFIG.images.prometheus, name: _Ops.names.prometheus, networksAdvanced: nets, ports: [_Ops.dockerPort(_CONFIG.ports.prometheus)], uploads: [{ content: _Ops.prometheus(_Ops.names.alloy), file: '/etc/prometheus/prometheus.yml' }], volumes: _Ops.dockerVol(args.stack, 'observe-prom-vol', 'observe-prom-data', '/prometheus') });
+        new docker.Container(`${args.stack}-observe-prometheus`, { command: ['--config.file=/etc/prometheus/prometheus.yml', '--storage.tsdb.path=/prometheus', '--web.enable-remote-write-receiver', `--storage.tsdb.retention.time=${input.observeRetentionDays}d`], image: _CONFIG.images.prometheus, name: _Ops.names.prometheus, networksAdvanced: nets, ports: [_Ops.dockerPort(_CONFIG.ports.prometheus)], uploads: [{ content: _Ops.prometheus(_Ops.names.alloy), file: '/etc/prometheus/prometheus.yml' }], volumes: _Ops.dockerVol(args.stack, 'observe-prom-vol', 'observe-prom-data', '/prometheus') });
         new docker.Container(`${args.stack}-observe-grafana`, { envs: [pulumi.interpolate`GF_SECURITY_ADMIN_PASSWORD=${_Ops.secret(args.env, 'GRAFANA_ADMIN_PASSWORD')}`], image: _CONFIG.images.grafana, name: _Ops.names.grafana, networksAdvanced: nets, ports: [_Ops.dockerPort(_CONFIG.ports.grafana)], uploads: [{ content: _Ops.grafana(pulumi.interpolate`http://${_Ops.names.prometheus}:${_CONFIG.ports.prometheus}`), file: '/etc/grafana/provisioning/datasources/datasources.yaml' }], volumes: _Ops.dockerVol(args.stack, 'observe-grafana-vol', 'observe-grafana-data', '/var/lib/grafana') });
-        const runtime = _Ops.runtime({ apiDomain: input.api.domain, data, env: args.env, mode: 'selfhosted', observe });
-        const api = new docker.Container(`${args.stack}-compute-api`, { envs: [..._Ops.dockerEnvs(runtime.envVars), ..._Ops.dockerEnvs(runtime.secretVars)], healthcheck: _Ops.httpHealth('/api/health/liveness', _CONFIG.ports.api), image: input.api.image, labels: _Ops.traefikLabels(input.api.domain, _CONFIG.ports.api), name: _Ops.names.api, networksAdvanced: nets, ports: [_Ops.dockerPort(_CONFIG.ports.api)], restart: _CONFIG.docker.restart });
+        const runtime = _Ops.runtime({ apiDomain: domain, data, env: args.env, mode: 'selfhosted', observe });
+        const api = new docker.Container(`${args.stack}-compute-api`, { envs: [..._Ops.dockerEnvs(runtime.envVars), ..._Ops.dockerEnvs(runtime.secretVars)], healthcheck: _Ops.httpHealth('/api/health/liveness', _CONFIG.ports.api), image: input.api.image, labels: _Ops.traefikLabels(domain, _CONFIG.ports.api), name: _Ops.names.api, networksAdvanced: nets, ports: [_Ops.dockerPort(_CONFIG.ports.api)], restart: _CONFIG.docker.restart });
         new docker.Container(`${args.stack}-compute-traefik`, { command: _Ops.traefikCmd(input.acmeEmail), image: _CONFIG.images.traefik, name: 'compute-traefik', networksAdvanced: nets, ports: [_Ops.dockerPort(_CONFIG.ports.traefikHttp), _Ops.dockerPort(_CONFIG.ports.traefikHttps)], restart: _CONFIG.docker.restart, volumes: [..._CONFIG.traefik.volumes] });
         return { compute: { apiEndpoint: api.ports.apply((ports) => `http://localhost:${ports?.[0]?.external ?? _CONFIG.ports.api}`) }, data, network: { id: pulumi.output(network.id), privateSubnetIds: pulumi.output([]), publicSubnetIds: pulumi.output([]), vpcId: pulumi.output('') }, observe };
     },
@@ -249,8 +244,15 @@ docker exec ${garage.name} garage bucket allow --read --write --owner ${_CONFIG.
 // --- [ENTRY_POINT] -----------------------------------------------------------
 
 const deploy = (args: { env: NodeJS.ProcessEnv; stack: string }) => {
-    const mode = _Ops.mode(args.env);
-    return { ..._DEPLOY[mode](args), mode, stack: args.stack };
+    // Validate canonical runtime env shape at the infrastructure composition root.
+    void Env.runtime(args.env);
+    const deployInput = Env.deploy(args.env);
+    const deployed = Match.value(deployInput).pipe(
+        Match.when({ mode: 'cloud' }, (input) => _DEPLOY.cloud({ deployInput: input, env: args.env, stack: args.stack })),
+        Match.when({ mode: 'selfhosted' }, (input) => _DEPLOY.selfhosted({ deployInput: input, env: args.env, stack: args.stack })),
+        Match.exhaustive,
+    );
+    return { ...deployed, mode: deployInput.mode, stack: args.stack };
 };
 
 // --- [EXPORT] ----------------------------------------------------------------

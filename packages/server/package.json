@@ -13,6 +13,11 @@
             "import": "./src/context.ts",
             "default": "./src/context.ts"
         },
+        "./env": {
+            "types": "./src/env.ts",
+            "import": "./src/env.ts",
+            "default": "./src/env.ts"
+        },
         "./errors": {
             "types": "./src/errors.ts",
             "import": "./src/errors.ts",

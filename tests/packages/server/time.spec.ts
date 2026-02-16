@@ -21,25 +21,20 @@ it.effect('P1: clock zero + adjust', () => Effect.gen(function* () {
     expect(t0).toBe(0);
     expect(t1).toBe(Duration.toMillis(Duration.seconds(42)));
 }));
-
 // P2: Fiber fork/join completes after TestClock.adjust
 it.effect('P2: fiber sleep resolves on adjust', () => Effect.gen(function* () {
     const fiber = yield* Effect.fork(Effect.sleep(Duration.hours(1)).pipe(Effect.as('done')));
     yield* TestClock.adjust(Duration.hours(1));
     expect(yield* Fiber.join(fiber)).toBe('done');
 }));
-
 // P3: Timeout fires under TestClock when duration elapses
 it.effect('P3: timeout under TestClock', () => Effect.gen(function* () {
-    const fiber = yield* Effect.fork(Effect.sleep(Duration.minutes(5)).pipe(
-        Effect.timeoutFail({ duration: Duration.seconds(30), onTimeout: () => 'TIMED_OUT' as const }),
-    ));
+    const fiber = yield* Effect.fork(Effect.sleep(Duration.minutes(5)).pipe(Effect.timeoutFail({ duration: Duration.seconds(30), onTimeout: () => 'TIMED_OUT' as const }),));
     yield* TestClock.adjust(Duration.seconds(30));
     const exit = yield* Fiber.await(fiber);
     expect(Exit.isFailure(exit)).toBe(true);
     Exit.match(exit, { onFailure: (cause) => { expect(String(cause)).toContain('TIMED_OUT'); }, onSuccess: () => { throw new Error('unreachable'); } });
 }));
-
 // P4: Multiple fibers resolve at correct virtual times
 it.effect('P4: concurrent fiber ordering', () => Effect.gen(function* () {
     const log = yield* Ref.make<ReadonlyArray<string>>([]);
@@ -51,7 +46,6 @@ it.effect('P4: concurrent fiber ordering', () => Effect.gen(function* () {
     yield* Fiber.join(Fiber.zip(f1, Fiber.zip(f2, f3)));
     expect(yield* Ref.get(log)).toEqual(['B', 'A', 'C']);
 }));
-
 // P5: Schedule.exponential doubles delays under TestClock (no jitter)
 it.effect('P5: exponential backoff progression', () => Effect.gen(function* () {
     const attempts = yield* Ref.make(0);
@@ -68,7 +62,6 @@ it.effect('P5: exponential backoff progression', () => Effect.gen(function* () {
     yield* Fiber.join(fiber);
     expect(yield* Ref.get(attempts)).toBe(4);
 }));
-
 // P6: Schedule.spaced fires at regular intervals (ping/reaper pattern)
 it.effect('P6: spaced schedule fires N times', () => Effect.gen(function* () {
     const count = yield* Ref.make(0);
@@ -90,7 +83,6 @@ it.effect('P7: staleness threshold', () => Effect.gen(function* () {
     yield* TestClock.adjust(Duration.millis(1));
     expect((yield* Clock.currentTimeMillis) >= staleThresholdMs).toBe(true);
 }));
-
 // P9: Deferred + TestClock -- completes only after time passes
 it.effect('P9: deferred gate with clock', () => Effect.gen(function* () {
     const gate = yield* Deferred.make<string>();

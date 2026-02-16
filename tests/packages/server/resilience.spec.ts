@@ -27,7 +27,6 @@ layer(_testLayer)('Resilience: Pipeline', (it) => {
         expect(Exit.isFailure(exit)).toBe(true);
         Exit.match(exit, { onFailure: (cause) => { expect(String(cause)).toContain('TimeoutError'); }, onSuccess: () => { throw new Error('unreachable'); } });
     }));
-
     // C2: Retry exhaustion — 'brief' preset (recurs(1)) propagates failure after 2 total attempts
     it.scoped('C2: retry exhaustion with brief preset', () => Effect.gen(function* () {
         const counter = yield* Ref.make(0);
@@ -38,7 +37,6 @@ layer(_testLayer)('Resilience: Pipeline', (it) => {
         expect(Exit.isFailure(exit)).toBe(true);
         expect(yield* Ref.get(counter)).toBe(2);
     }));
-
     // C3: Non-retriable error bypass — Auth error skips retries entirely
     it.scoped('C3: non-retriable Auth bypasses retry', () => Effect.gen(function* () {
         const counter = yield* Ref.make(0);
@@ -49,7 +47,6 @@ layer(_testLayer)('Resilience: Pipeline', (it) => {
         expect(Exit.isFailure(exit)).toBe(true);
         expect(yield* Ref.get(counter)).toBe(1);
     }));
-
     // C4: Fallback invocation — failing effect triggers fallback value
     it.scoped('C4: fallback on failure', () => Effect.gen(function* () {
         const result = yield* Resilience.run('fallback-test', Effect.fail(_FROZEN_ERROR), {
@@ -87,7 +84,6 @@ layer(_testLayer)('Resilience: Circuit', (it) => {
         expect(exit._tag).toBe('Left');
     }));
 });
-
 // C6b: HalfOpen -- cooldown elapses, probe succeeds, circuit resets to Closed
 it.scopedLive('C6b: halfOpen probe resets circuit', () => Effect.gen(function* () {
     const circuit = yield* Circuit.make('half-open-probe', { breaker: { _tag: 'consecutive', threshold: 2 }, halfOpenAfter: Duration.millis(100), metrics: false, persist: false }).pipe(Effect.provide(_testLayer));

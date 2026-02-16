@@ -4,10 +4,11 @@ import * as PersistenceRedis from '@effect/experimental/Persistence/Redis';
 import { layer as rateLimiterLayer, layerStoreMemory, RateLimitExceeded, RateLimiter } from '@effect/experimental/RateLimiter';
 import { layerStore as layerStoreRedis } from '@effect/experimental/RateLimiter/Redis';
 import { HttpMiddleware, HttpServerRequest, HttpServerResponse } from '@effect/platform';
-import { Clock, Config, Data, Duration, Effect, Layer, Match, Metric, Option, PrimaryKey, Redacted, Schedule, Schema as S, type Scope } from 'effect';
+import { Clock, Data, Duration, Effect, Layer, Match, Metric, Option, PrimaryKey, Redacted, Schedule, Schema as S, type Scope } from 'effect';
 import { constant, flow } from 'effect/Function';
 import Redis, { type RedisOptions } from 'ioredis';
 import { Context } from '../context.ts';
+import { Env } from '../env.ts';
 import { HttpError } from '../errors.ts';
 import { MetricsService } from '../observe/metrics.ts';
 import { Telemetry } from '../observe/telemetry.ts';
@@ -29,61 +30,21 @@ const _parseNodes = (raw: string) => raw.split(',').flatMap((entry) => {
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
-const _redisConfig = Config.all({
-    autoPipeline:                   Config.boolean('REDIS_AUTO_PIPELINE').pipe(Config.withDefault(false)),
-    autoResendUnfulfilledCommands:  Config.boolean('REDIS_AUTO_RESEND_UNFULFILLED').pipe(Config.withDefault(true)),
-    autoResubscribe:                Config.boolean('REDIS_AUTO_RESUBSCRIBE').pipe(Config.withDefault(true)),
-    blockingTimeout:                Config.integer('REDIS_BLOCKING_TIMEOUT').pipe(Config.option),
-    commandTimeout:                 Config.integer('REDIS_COMMAND_TIMEOUT').pipe(Config.option),
-    connectionName:                 Config.string('REDIS_CONNECTION_NAME').pipe(Config.withDefault('parametric-portal')),
-    connectTimeout:                 Config.integer('REDIS_CONNECT_TIMEOUT').pipe(Config.withDefault(5000)),
-    db:                             Config.integer('REDIS_DB').pipe(Config.option),
-    disableClientInfo:              Config.boolean('REDIS_DISABLE_CLIENT_INFO').pipe(Config.withDefault(false)),
-    enableOfflineQueue:             Config.boolean('REDIS_ENABLE_OFFLINE_QUEUE').pipe(Config.withDefault(true)),
-    enableReadyCheck:               Config.boolean('REDIS_READY_CHECK').pipe(Config.withDefault(true)),
-    host:                           Config.string('REDIS_HOST').pipe(Config.withDefault('localhost')),
-    keepAlive:                      Config.integer('REDIS_KEEP_ALIVE').pipe(Config.withDefault(0)),
-    lazyConnect:                    Config.boolean('REDIS_LAZY_CONNECT').pipe(Config.withDefault(false)),
-    maxLoadingRetryTime:            Config.integer('REDIS_MAX_LOADING_RETRY_TIME').pipe(Config.withDefault(10000)),
-    maxRetriesPerRequest:           Config.integer('REDIS_MAX_RETRIES_PER_REQUEST').pipe(Config.withDefault(20)),
-    mode:                           Config.literal('standalone', 'sentinel')('REDIS_MODE').pipe(Config.withDefault('standalone' as const)),
-    noDelay:                        Config.boolean('REDIS_NO_DELAY').pipe(Config.withDefault(true)),
-    password:                       Config.redacted('REDIS_PASSWORD').pipe(Config.option),
-    port:                           Config.integer('REDIS_PORT').pipe(Config.withDefault(6379)),
-    prefix:                         Config.string('CACHE_PREFIX').pipe(Config.withDefault('persist:')),
-    retryBaseMs:                    Config.integer('REDIS_RETRY_BASE_MS').pipe(Config.withDefault(50)),
-    retryCapMs:                     Config.integer('REDIS_RETRY_CAP_MS').pipe(Config.withDefault(2000)),
-    retryMaxAttempts:               Config.integer('REDIS_MAX_RETRIES').pipe(Config.withDefault(3)),
-    sentinelCommandTimeout:         Config.integer('REDIS_SENTINEL_COMMAND_TIMEOUT').pipe(Config.option),
-    sentinelFailoverDetector:       Config.boolean('REDIS_SENTINEL_FAILOVER_DETECTOR').pipe(Config.withDefault(false)),
-    sentinelName:                   Config.string('REDIS_SENTINEL_NAME').pipe(Config.withDefault('mymaster')),
-    sentinelNodes:                  Config.string('REDIS_SENTINEL_NODES').pipe(Config.withDefault('')),
-    sentinelPassword:               Config.redacted('REDIS_SENTINEL_PASSWORD').pipe(Config.option),
-    sentinelRole:                   Config.literal('master', 'slave')('REDIS_SENTINEL_ROLE').pipe(Config.withDefault('master' as const)),
-    sentinelTls:                    Config.boolean('REDIS_SENTINEL_TLS').pipe(Config.withDefault(false)),
-    sentinelUsername:               Config.redacted('REDIS_SENTINEL_USERNAME').pipe(Config.option),
-    socketTimeout:                  Config.integer('REDIS_SOCKET_TIMEOUT').pipe(Config.withDefault(15000)),
-    tlsCa:                          Config.redacted('REDIS_TLS_CA').pipe(Config.option),
-    tlsCert:                        Config.redacted('REDIS_TLS_CERT').pipe(Config.option),
-    tlsEnabled:                     Config.boolean('REDIS_TLS').pipe(Config.withDefault(false)),
-    tlsKey:                         Config.redacted('REDIS_TLS_KEY').pipe(Config.option),
-    tlsRejectUnauthorized:          Config.boolean('REDIS_TLS_REJECT_UNAUTHORIZED').pipe(Config.withDefault(true)),
-    tlsServername:                  Config.string('REDIS_TLS_SERVERNAME').pipe(Config.option),
-    username:                       Config.string('REDIS_USERNAME').pipe(Config.option),
-}).pipe(Config.map((config) => {
+const _redisConfig = Env.Service.pipe(Effect.map((env) => {
+    const config = { ...env.cache.redis, prefix: env.cache.prefix };
     const optValue = (opt: Option.Option<Redacted.Redacted>) => Option.getOrUndefined(Option.map(opt, Redacted.value));
     const tls = config.tlsEnabled ? { ca: optValue(config.tlsCa), cert: optValue(config.tlsCert), key: optValue(config.tlsKey), rejectUnauthorized: config.tlsRejectUnauthorized, servername: Option.getOrUndefined(config.tlsServername) } : undefined;
     const retryStrategy = (times: number) => times > config.retryMaxAttempts ? null : Math.min(times * config.retryBaseMs, config.retryCapMs);
     const baseOpts = {
         autoResendUnfulfilledCommands: config.autoResendUnfulfilledCommands, autoResubscribe: config.autoResubscribe,
-        blockingTimeout: Option.getOrUndefined(config.blockingTimeout), commandTimeout: Option.getOrElse(config.commandTimeout, () => config.socketTimeout),
-        connectionName: config.connectionName, connectTimeout: config.connectTimeout, db: Option.getOrUndefined(config.db),
-        disableClientInfo: config.disableClientInfo, enableAutoPipelining: config.autoPipeline,
-        enableOfflineQueue: config.enableOfflineQueue, enableReadyCheck: config.enableReadyCheck,
-        keepAlive: config.keepAlive, keyPrefix: config.prefix, lazyConnect: config.lazyConnect,
-        maxLoadingRetryTime: config.maxLoadingRetryTime, maxRetriesPerRequest: config.maxRetriesPerRequest,
-        noDelay: config.noDelay, password: optValue(config.password), retryStrategy, socketTimeout: config.socketTimeout,
-        tls, username: Option.getOrUndefined(config.username),
+        blockingTimeout:               Option.getOrUndefined(config.blockingTimeout), commandTimeout: Option.getOrElse(config.commandTimeout, () => config.socketTimeout),
+        connectionName:                config.connectionName, connectTimeout: config.connectTimeout, db: Option.getOrUndefined(config.db),
+        disableClientInfo:             config.disableClientInfo, enableAutoPipelining: config.autoPipeline,
+        enableOfflineQueue:            config.enableOfflineQueue, enableReadyCheck: config.enableReadyCheck,
+        keepAlive:                     config.keepAlive, keyPrefix: config.prefix, lazyConnect: config.lazyConnect,
+        maxLoadingRetryTime:           config.maxLoadingRetryTime, maxRetriesPerRequest: config.maxRetriesPerRequest,
+        noDelay:                       config.noDelay, password: optValue(config.password), retryStrategy, socketTimeout: config.socketTimeout,
+        tls, username:                 Option.getOrUndefined(config.username),
     } as const;
     const withHost = { ...baseOpts, host: config.host, port: config.port };
     return Match.value(config.mode).pipe(
@@ -371,9 +332,9 @@ class CacheService extends Effect.Service<CacheService>()('server/CacheService',
             Effect.catchAll((error) => Effect.logWarning('Redis SET NX failed (fail-closed)', { error: String(error) }).pipe(Effect.as({ alreadyExists: true, key }))),
         );
     static readonly Layer = CacheService.Default.pipe(Layer.provideMerge(rateLimiterLayer), Layer.provideMerge(Layer.unwrapEffect(
-        Config.all({ prefix: Config.string('RATE_LIMIT_PREFIX').pipe(Config.withDefault('rl:')), redisOpts: _redisConfig, store: Config.literal('redis', 'memory')('RATE_LIMIT_STORE').pipe(Config.withDefault('redis' as const)) }).pipe(
-            Effect.map(({ prefix, redisOpts, store }) => Match.value(store).pipe(
-                Match.when('redis', () => layerStoreRedis({ ...redisOpts.redisOpts, prefix })),
+        Effect.all({ env: Env.Service, redisOpts: _redisConfig }).pipe(
+            Effect.map(({ env, redisOpts }) => Match.value(env.cache.rateLimitStore).pipe(
+                Match.when('redis', () => layerStoreRedis({ ...redisOpts.redisOpts, prefix: env.cache.rateLimitPrefix })),
                 Match.when('memory', () => layerStoreMemory),
                 Match.exhaustive,
             )),
