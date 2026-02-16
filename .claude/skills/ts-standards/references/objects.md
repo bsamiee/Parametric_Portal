@@ -3,84 +3,76 @@
 
 <br>
 
-Every data definition starts as a schema. `S.Class` for plain data, `S.TaggedClass` for discriminated variants, `S.TaggedRequest` for request/response contracts. Projections use `pick`/`omit`/`partial` at call site -- never parallel struct definitions. Error schemas belong in `errors.md`. Type extraction and namespace patterns belong in `types.md`.
+Every data definition starts as a schema. Prefer schema classes for durable domain objects (Hash/Equal, codecs, projections). Derive projections with `pick`/`omit`/`partial` from the canonical schema. Use `S.transform` when you genuinely have **two** representations (wire vs domain) and need a bidirectional codec.
+
+Error schemas live in `errors.md`. Type organization and narrowing live in `types.md`.
 
 ---
 ## S.Class
 
-`S.Class` omits the `_tag` discriminant -- use for plain data objects that do not participate in unions. Static factories convert between representations without exposing the full constructor.
+`S.Class` is plain data (no `_tag`). It is appropriate for records that do not participate in discriminated unions.
 
 ```typescript
-import { Effect, HashMap, Option, Schema as S } from 'effect';
+import { HashMap, Option, Schema as S } from 'effect';
 
-const _RequestData = S.Struct({
-    ipAddress: S.OptionFromSelf(S.String),
-    requestId: S.String,
-    tenantId:  S.String,
-    userId:    S.optional(S.String),
-});
-
-class Serializable extends S.Class<Serializable>('app/Context.Serializable')({
+class RequestContext extends S.Class<RequestContext>('app/RequestContext')({
     ipAddress: S.optional(S.String),
     requestId: S.String,
-    runnerId:  S.optional(S.NonEmptyTrimmedString),
     tenantId:  S.String,
     userId:    S.optional(S.String),
-}) {
-    static readonly fromData = (ctx: typeof _RequestData.Type): Serializable =>
-        new Serializable({
-            ipAddress: Option.getOrUndefined(ctx.ipAddress),
-            requestId: ctx.requestId,
-            tenantId:  ctx.tenantId,
-        });
-}
+}) {static readonly ip = (ctx: RequestContext) => Option.fromNullable(ctx.ipAddress);}
 
-// S.Class auto-implements Hash + Equal — HashMap/HashSet ready
-const sessionMap = HashMap.make(['sess-1', new Serializable({ requestId: 'r1', tenantId: 't1' })],);
-const found = HashMap.get(sessionMap, 'sess-1'); // Option<Serializable>
+// Hash + Equal are derived automatically — HashMap/HashSet ready
+const byRequestId = HashMap.fromIterable([[ 'r1', new RequestContext({ requestId: 'r1', tenantId: 't1' }) ]] as const);
 ```
 
----
-## S.TaggedClass with Projections
+*Rule:* define exactly one canonical schema for the object; lift “internal convenience” into functions (e.g. `Option.fromNullable`) instead of parallel structs.
 
-`S.TaggedClass` auto-injects `_tag` for union membership. `S.pick`, `S.omit`, `S.partial` derive subset schemas from the canonical class at call site. Branded fields inline validation and nominal typing in one pipeline.
+---
+## S.TaggedClass + Projections
+
+`S.TaggedClass` auto-injects `_tag` for union membership. Derive projections from the same declaration.
 
 ```typescript
 import { Array, Schema as S } from 'effect';
 
-const NodeId = S.UUID.pipe(S.brand('NodeId'));
+const LineItemId = S.UUID.pipe(S.brand('LineItemId'));
 
 class LineItem extends S.TaggedClass<LineItem>()('LineItem', {
+    id:        LineItemId,
     sku:       S.NonEmptyTrimmedString,
     quantity:  S.Int.pipe(S.positive(), S.brand('Quantity')),
     currency:  S.Literal('USD', 'EUR', 'GBP'),
     unitPrice: S.Positive,
 }) {}
 
-const CreateLineItem =  LineItem.pipe(S.omit('_tag'));
-const PatchLineItem =   LineItem.pipe(S.pick('quantity', 'unitPrice'), S.partial);
-const LineItemSummary = LineItem.pipe(S.pick('sku', 'quantity'));
-
-// Array module: structural equality enables dedupe/groupBy without custom comparators
-const unique =                  Array.dedupe(items);
-const byCurrency =              Array.groupBy(items, (item) => item.currency);
-const [expensive, affordable] = Array.partition(items, (item) => item.unitPrice > 100);
+const projection = {
+    create:  LineItem.pipe(S.omit('_tag')),
+    patch:   LineItem.pipe(S.pick('quantity', 'unitPrice'), S.partial),
+    summary: LineItem.pipe(S.pick('sku', 'quantity')),
+} as const;
+const unique =     Array.dedupe(items);
+const byCurrency = Array.groupBy(items, (item) => item.currency);
 ```
 
-*Recursive Union:* `S.suspend(() => Tree)` breaks the circular reference. The `const Tree` schema value uses inline `Leaf | Branch` in its type annotation.
+---
+## Recursive Unions
+
+Break cycles with `S.suspend`. The union type is written inline (no module-level aliases).
 
 ```typescript
 import { Schema as S } from 'effect';
 
+const NodeId = S.UUID.pipe(S.brand('NodeId'));
+
 class Leaf extends S.TaggedClass<Leaf>()('Leaf', {
-    id:     NodeId,
-    label:  S.NonEmptyTrimmedString,
+    id: NodeId,
+    label: S.NonEmptyTrimmedString,
     weight: S.Positive,
 }) {}
-
 class Branch extends S.TaggedClass<Branch>()('Branch', {
-    id:       NodeId,
-    label:    S.NonEmptyTrimmedString,
+    id: NodeId,
+    label: S.NonEmptyTrimmedString,
     children: S.Array(S.suspend((): S.Schema<Leaf | Branch> => Tree)),
 }) {}
 
@@ -88,95 +80,53 @@ const Tree: S.Schema<Leaf | Branch> = S.Union(Leaf, Branch);
 ```
 
 ---
-## S.TaggedRequest with PrimaryKey
+## S.TaggedRequest + PrimaryKey
 
-`failure`, `payload`, and `success` define the complete type signature at compile time. `PrimaryKey.symbol` provides deterministic key computation for cache storage and invalidation routing.
+`failure`, `payload`, `success` define the full type signature. `PrimaryKey.symbol` yields deterministic cache keys.
 
 ```typescript
-import { Effect, PrimaryKey, Schema as S } from 'effect';
+import { PrimaryKey, Schema as S } from 'effect';
 
 class CacheKey extends S.TaggedRequest<CacheKey>()('CacheKey', {
     failure: ServiceError,
     payload: { id: S.String, scope: S.String, tenantId: S.String },
     success: S.Unknown,
-}) {
-    [PrimaryKey.symbol]() {return `${this.scope}:${this.tenantId}:${this.id}`;}
-}
-
-const result = yield* cache.get(
-    new CacheKey({ id: hash, scope: 'session', tenantId }),
-);
+}) {[PrimaryKey.symbol]() { return `${this.scope}:${this.tenantId}:${this.id}`; }}
 ```
 
-*Type-Safe Lookup:* `cache.get(new CacheKey({...}))` returns `Effect.Effect<Success, Failure>` -- type parameters inferred from the TaggedRequest definition. Request dispatch patterns belong in `matching.md`.
-
 ---
-## Schema Codecs and Transforms
+## Codecs and Transforms
 
-Branded pipelines chain validation and branding. `S.parseJson` decodes from JSON string to typed struct in one step. `S.transform` maps between encoded (wire) and decoded (domain) representations. `S.attachPropertySignature` injects discriminants without modifying the base schema.
+Use branded pipelines for validation + nominal typing. Use `S.transform` for computed/derived fields with explicit encode/decode.
 
 ```typescript
-import { Data, DateTime, Equal, Schema as S } from 'effect';
+import { DateTime, Schema as S } from 'effect';
 
 const Email = S.Trimmed.pipe(
     S.pattern(/^[^@\s]+@[^@\s]+\.[^@\s]+$/),
     S.brand('Email'),
 );
-
-const _Pkce = S.parseJson(S.Struct({
-    exp:      S.Number,
-    provider: S.String,
-    state:    S.String,
-    verifier: S.optional(S.String),
-}));
-
 const Interval = S.transform(
     S.Struct({ start: S.DateTimeUtc, end: S.DateTimeUtc }),
     S.Struct({ start: S.DateTimeUtc, end: S.DateTimeUtc, durationMs: S.Number }),
     {
         strict: true,
         decode: ({ start, end }) => ({
-            start, end,
+            start,
+            end,
             durationMs: DateTime.toEpochMillis(end) - DateTime.toEpochMillis(start),
         }),
         encode: ({ start, end }) => ({ start, end }),
     },
 );
-
-class Metric extends S.Class<Metric>('Metric')({
-    name:       S.NonEmptyTrimmedString,
-    value:      S.Number,
-    unit:       S.Literal('ms', 'bytes', 'count'),
-    recordedAt: S.DateTimeUtc,
-}) {}
-
-const TimestampedMetric = Metric.pipe(S.attachPropertySignature('version', 1 as const),);
-
-// Data.struct: ad-hoc structural equality for records without a full Schema class
-const point =       Data.struct({ x: 1, y: 2 });
-Equal.equals(point, Data.struct({ x: 1, y: 2 })); // true — structural, not reference
-// Use HashSet.make(point, ...) for deduplication of ad-hoc values
 ```
 
 ---
-## Immutable Collections
-
-Schema classes implement `Hash` and `Equal` automatically -- `HashMap` and `HashSet` provide O(1) immutable lookups on schema-typed values. Use `HashMap` for indexed access by key. Use `HashSet` for membership testing and set algebra.
-
-```typescript
-import { HashMap, HashSet, Schema as S } from 'effect';
-
-// HashMap: indexed lookup by branded key
-const userIndex = HashMap.fromIterable(users.map((user) => [user.id, user] as const),);
-const lookup =    HashMap.get(userIndex, userId); // Option<User>
-const updated =   HashMap.modify(userIndex, userId, (user) => ({ ...user, tier: 'pro' }));
-
-// HashSet: membership + set algebra on schema types
-const activePerms = HashSet.fromIterable(permissions);
-const required =    HashSet.make(Permission.Read(), Permission.Write());
-const hasAll =      HashSet.isSubset(required, activePerms);
-const revoked =     HashSet.difference(activePerms, required);
-```
+## Rules
+- One canonical schema per object; derive projections via `pick`/`omit`/`partial`.
+- Use `S.TaggedClass` for unions, `S.Class` otherwise.
+- Use `S.suspend` for recursion.
+- Use `S.transform` only when you truly have multiple representations.
 
 ---
 ## Quick Reference
@@ -193,5 +143,4 @@ const revoked =     HashSet.difference(activePerms, required);
 |   [8]   | **`S.brand`**                   | Nominal type refinement                 | Pipeline: `S.String.pipe(S.pattern, S.brand)`             |
 |   [9]   | **`HashMap.fromIterable`**      | Indexed lookup by key                   | O(1) get/set, immutable, Hash+Equal                       |
 |  [10]   | **`HashSet.fromIterable`**      | Membership testing, set algebra         | O(1) has, union/intersection/difference                   |
-|  [11]   | **`Data.struct`**               | Ad-hoc structural equality              | Auto Hash+Equal without Schema class                      |
-|  [12]   | **`Array.groupBy/dedupe`**      | Functional array transforms             | Replaces imperative loops                                 |
+|  [11]   | **`Array.groupBy/dedupe`**      | Functional array transforms             | Replaces imperative loops                                 |

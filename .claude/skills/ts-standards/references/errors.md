@@ -3,70 +3,87 @@
 
 <br>
 
-`Data.TaggedError` for internal orchestration (in-memory, no serialization). `Schema.TaggedError` when errors cross wire boundaries (HTTP, RPC, cache). Error unions stay small (3-5 per service). Boundary collapse is always exhaustive via `Match.tag` inside `Effect.mapError`. For union type derivation from constructor maps, see `types.md`.
+Use `Data.TaggedError` for internal failure algebras (in-memory, orchestrated via the error channel). Use `Schema.TaggedError` for boundary failure algebras (wire-safe, codec + OpenAPI/status metadata). Keep unions small by collapsing *reasons* into a single tagged error with a closed `S.Literal` field.
+
+For constructor-map union derivation (no manual unions), see `types.md`.
 
 ---
-## Data.TaggedError -- Internal Failures
-
-*Domain Algebra:* Small union of tagged variants. Each carries only the data needed for recovery or logging. Yieldable in `Effect.gen` without `Effect.fail`.
+## Data.TaggedError
+*Internal algebra:* yieldable in `Effect.gen`, minimal overhead, structural `Hash` + `Equal`.
 
 ```typescript
-import { Data, Effect, Schema as S } from 'effect';
+import { Data, Effect, Option, Schema as S } from 'effect';
 
 class NotFound extends Data.TaggedError('NotFound')<{
     readonly entity: string;
     readonly id:     S.UUID.Type;
 }> {}
-
 class Stale extends Data.TaggedError('Stale')<{
     readonly entity:   string;
     readonly expected: number;
     readonly actual:   number;
 }> {}
 
-class Malformed extends Data.TaggedError('Malformed')<{
-    readonly issues: ReadonlyArray<S.NonEmptyTrimmedString.Type>;
-}> {}
-
-const program = Effect.gen(function* () {
-    const entity = yield* loadEntity('abc');
-    yield* new Stale({ entity: 'Invoice', expected: 3, actual: entity.revision });
-});
+const requireEntity = Effect.fn('Entity.require')(
+    (entity: string, found: Option.Option<{ readonly revision: number }>, id: S.UUID.Type) =>
+        Option.match(found, {
+            onNone: () => new NotFound({ entity, id }),
+            onSome: Effect.succeed,
+        }),
+);
+const requireFresh = Effect.fn('Entity.requireFresh')(
+    (entity: string, expected: number, actual: number) =>
+        Effect.succeed(actual).pipe(
+            Effect.filterOrFail(
+                (rev) => rev === expected,
+                () => new Stale({ entity, expected, actual }),
+            ),
+        ),
+);
 ```
 
-*Yieldable:* `yield* new Stale({...})` short-circuits the generator into the error channel -- no `Effect.fail` wrapper needed. Both `Data.TaggedError` and `Schema.TaggedError` support this.
+*Rule:* internal errors are **data**: tagged variants with only recovery-relevant fields.
 
 ---
-## Schema.TaggedError -- Boundary Failures
-
-*Wire-Safe Algebra:* `Schema.TaggedError` with `HttpApiSchema.annotations` as third argument. The platform reads `status` for HTTP responses and `description` for OpenAPI generation. Static factory hides the full schema payload.
+## Schema.TaggedError
+*Boundary algebra:* wire-safe, status-coded, OpenAPI described. Prefer `static of/from` so callers never construct schema payloads directly.
 
 ```typescript
 import { HttpApiSchema } from '@effect/platform';
-import { Schema as S } from 'effect';
+import { Option, Schema as S } from 'effect';
 
 class ApiNotFound extends S.TaggedError<ApiNotFound>()('ApiNotFound', {
-    message:  S.String,
     resource: S.String,
     id:       S.optional(S.String),
-}, HttpApiSchema.annotations({description: 'Resource not found', status: 404,})
-) {
+    message:  S.String,
+}, HttpApiSchema.annotations({
+    description: 'Resource not found',
+    status: 404,
+})) {
     static readonly of = (resource: string, id?: string) =>
-        new ApiNotFound({ message: `${resource}${id ? `/${id}` : ''}`, resource, id });
+        new ApiNotFound({
+            resource,
+            id,
+            message: Option.fromNullable(id).pipe(
+                Option.match({
+                    onNone: () => resource,
+                    onSome: (x) => `${resource}/${x}`,
+                }),
+            ),
+        });
 }
 
 class ApiConflict extends S.TaggedError<ApiConflict>()('ApiConflict', {
     message: S.String,
-}, HttpApiSchema.annotations({description: 'Revision conflict', status: 409,})
-) {}
-
-class ApiValidation extends S.TaggedError<ApiValidation>()('ApiValidation', {
-    message: S.String,
-}, HttpApiSchema.annotations({description: 'Validation failure', status: 422,})
-) {}
+}, HttpApiSchema.annotations({
+    description: 'Revision conflict',
+    status: 409,
+})) {}
 ```
 
-*Discriminated Reason:* `S.Literal` creates a closed set of failure reasons. Consumers match on `error.reason` instead of parsing message strings.
+---
+## Multi-reason Boundary Errors
+*Closed reason set:* consumers match on `reason`, not message strings.
 
 ```typescript
 import { HttpApiSchema } from '@effect/platform';
@@ -91,58 +108,38 @@ class AuthError extends S.TaggedError<AuthError>()('AuthError', {
 }
 ```
 
-*`static of` vs `static from`:* `of` takes positional args (simple errors). `from` takes a discriminated `reason` as first arg (multi-reason errors). Both hide the full schema payload from consumers.
-
 ---
 ## Boundary Collapse
-
-*Exhaustive Mapping:* `Effect.mapError` + `Match.exhaustive` transforms internal domain unions into boundary-safe unions. No variant leaks -- the compiler enforces coverage of every `_tag`.
+*Exhaustive mapping:* collapse internal errors into boundary-safe errors at the boundary (HTTP/RPC/cache). Use `Match.valueTags` so any `_tag` union (TaggedError, TaggedClass, taggedEnum values) maps exhaustively.
 
 ```typescript
-import { Effect, Match, Schema as S } from 'effect';
-import { HttpApiSchema } from '@effect/platform';
+import { Effect, Match } from 'effect';
 
-// NotFound and Stale defined above — collapse to boundary-safe union:
-
-class ApiNotFound extends S.TaggedError<ApiNotFound>()('ApiNotFound', {
-    message: S.String,
-}, HttpApiSchema.annotations({ status: 404 })) {}
-
-class ApiConflict extends S.TaggedError<ApiConflict>()('ApiConflict', {
-    message: S.String,
-}, HttpApiSchema.annotations({ status: 409 })) {}
-
-const collapse = <A, R>(program: Effect.Effect<A, NotFound | Stale, R>,
+// NotFound, Stale (Data.TaggedError) collapse to ApiNotFound | ApiConflict (Schema.TaggedError):
+const collapse = <A, R>(
+    program: Effect.Effect<A, NotFound | Stale, R>,
 ): Effect.Effect<A, ApiNotFound | ApiConflict, R> =>
     program.pipe(
-        Effect.mapError(
-            Match.type<NotFound | Stale>().pipe(
-                Match.tag('NotFound', ({ entity, id }) =>
-                    new ApiNotFound({ message: `${entity}:${id}` }),
-                ),
-                Match.tag('Stale', ({ entity, expected, actual }) =>
+        Effect.mapError((e) =>
+            Match.valueTags(e, {
+                NotFound: ({ entity, id }) => ApiNotFound.of(entity, `${id}`),
+                Stale: ({ entity, expected, actual }) =>
                     new ApiConflict({ message: `${entity}@${expected}/${actual}` }),
-                ),
-                Match.exhaustive,
-            ),
+            }),
         ),
     );
 ```
 
-*Selective Recovery:* `Effect.catchTag` removes one variant from the error union. The remaining union narrows automatically.
+---
+## Selective Recovery
+`Effect.catchTag` eliminates one variant; the remaining union narrows automatically.
 
 ```typescript
 import { Data, Effect } from 'effect';
 
-class NotFound extends Data.TaggedError('NotFound')<{
-    readonly entity: string;
-}> {}
+class Unauthorized extends Data.TaggedError('Unauthorized')<{ readonly reason: string }> {}
 
-class Unauthorized extends Data.TaggedError('Unauthorized')<{
-    readonly reason: string;
-}> {}
-
-const recover = <R>(
+const recoverNotFound = <R>(
     program: Effect.Effect<void, NotFound | Unauthorized, R>,
 ): Effect.Effect<void, Unauthorized, R> =>
     program.pipe(
@@ -151,13 +148,8 @@ const recover = <R>(
 ```
 
 ---
-## Quick Reference
-
-| [INDEX] | [PATTERN]                                     | [WHEN]                             | [KEY_TRAIT]                                        |
-| :-----: | --------------------------------------------- | ---------------------------------- | -------------------------------------------------- |
-|   [1]   | `Data.TaggedError`                            | Internal orchestration             | Yieldable, structural equality, no schema overhead |
-|   [2]   | `S.TaggedError` + `HttpApiSchema.annotations` | Wire boundaries (HTTP, RPC)        | Status code, OpenAPI description, encode/decode    |
-|   [3]   | `S.Literal` Reason Field                      | Multi-reason error with closed set | Match on `error.reason`, not message strings       |
-|   [4]   | `static of` / `static from`                   | Ergonomic construction             | Hides full schema payload from consumers           |
-|   [5]   | `Effect.mapError` + `Match.exhaustive`        | Boundary collapse                  | Transforms domain union->boundary union, no leaks  |
-|   [6]   | `Effect.catchTag`                             | Selective recovery                 | Removes one variant, narrows remaining union       |
+## Rules
+- Internal: `Data.TaggedError` (small union, yieldable).
+- Boundary: `Schema.TaggedError` + `HttpApiSchema.annotations` (status + docs + codec).
+- Keep unions small via **reason literals** on a single error instead of many variants.
+- Boundary collapse is a **total function**: exhaustive `Match.valueTags` inside `Effect.mapError`.
