@@ -1,9 +1,14 @@
 ---
 name: ts-standards
+type: standard
+depth: full
 description: >-
-  ALWAYS apply when editing, reviewing, or scaffolding any .ts/.tsx file.
-  Schema-first authoring with Effect; exhaustive dispatch via tagged unions;
-  capability-grouped services; namespace-merged types; no branching.
+  Enforces schema-first TypeScript + Effect authoring conventions: tagged-union
+  dispatch, Effect.Service capability groups, namespace-merged types, no
+  imperative branching. Use when editing, creating, reviewing, or refactoring
+  any .ts/.tsx module, implementing Effect services or layers, defining schemas
+  or error algebras, scaffolding new domain modules, or applying codebase style
+  standards to TypeScript code.
 ---
 
 # [H1][TS-STANDARDS]
@@ -69,6 +74,7 @@ Load exactly one reference unless the task spans multiple domains.
 - **Tagged union dispatch** — `matching.md`
 - **Services and layers** — `services.md`
 - **Type extraction and narrowing** — `types.md`
+- **Compliance checklists** — `validation.md`
 
 ---
 ## [4][TEMPLATES]
@@ -76,5 +82,6 @@ Load exactly one reference unless the task spans multiple domains.
 
 <br>
 
-- **Domain module (entity-centric)** — `domain.template.md`
-- **Service module (capability-centric)** — `service.template.md`
+- **Entity module (entity-centric)** — `entity.module.template.md`
+- **Service module (capability-centric)** — `service.module.template.md`
+- **Utility module (pure functions)** — `utility.module.template.md`

@@ -175,12 +175,20 @@ function is(err: unknown, reason?: CircuitError['reason']): boolean {
 
 // biome-ignore lint/correctness/noUnusedVariables: const+namespace merge
 const Circuit = {
-    clear: () => CircuitState.pipe(Effect.flatMap(({ lastAccess, registry }) => STM.commit(
-        TMap.keys(registry).pipe(
-            STM.flatMap((keys) => TMap.removeAll(registry, keys)),
-            STM.zipRight(TMap.keys(lastAccess).pipe(STM.flatMap((keys) => TMap.removeAll(lastAccess, keys)))),
+    clear: () => CircuitState.pipe(
+        Effect.flatMap(({ lastAccess, registry }) =>
+            STM.commit(
+                TMap.toArray(registry).pipe(
+                    STM.flatMap((entries) => STM.forEach(entries, ([circuitName]) => TMap.remove(registry, circuitName), { discard: true })),
+                    STM.zipRight(
+                        TMap.toArray(lastAccess).pipe(
+                            STM.flatMap((entries) => STM.forEach(entries, ([circuitName]) => TMap.remove(lastAccess, circuitName), { discard: true })),
+                        ),
+                    ),
+                ),
+            ),
         ),
-    ))),
+    ),
     current,
     Error: CircuitError,
     gc: (maxIdleMs = _CONFIG.defaults.gcIdleMs) => CircuitState.pipe(

@@ -35,20 +35,20 @@ The PostToolUse hook (`.claude/hooks/validate-spec.sh`) validates every `*.spec.
 
 Stryker injects code mutants (operator swaps, conditional negations, statement deletions, string mutations). Circular tests re-derive source logic and compute the same wrong answer as mutated source -- mutant survives.
 
-| [LEVEL] | [SCORE] | [ACTION]                                        |
-| :-----: | :-----: | ----------------------------------------------- |
-|  high   |   80    | Target -- tests are contract-driven             |
-|   low   |   60    | Investigate -- likely mirrors implementation    |
-|  break  |   50    | Build fails -- test is circular or tautological |
+| [INDEX] | [LEVEL] | [SCORE] | [ACTION]                                        |
+| :-----: | :-----: | :-----: | ----------------------------------------------- |
+|   [1]   |  high   |   80    | Target -- tests are contract-driven             |
+|   [2]   |   low   |   60    | Investigate -- likely mirrors implementation    |
+|   [3]   |  break  |   50    | Build fails -- test is circular or tautological |
 
 **Kill strategies by mutant type:**
 
-| [MUTANT_TYPE]            | [WHAT_KILLS_IT]                           |
-| ------------------------ | ----------------------------------------- |
-| Arithmetic operator swap | Algebraic law with cross-validated result |
-| Conditional negation     | Property covering both branches           |
-| Statement deletion       | Test that depends on deleted operation    |
-| String mutation          | Known-answer vector comparison            |
+| [INDEX] | [MUTANT_TYPE]            | [WHAT_KILLS_IT]                           |
+| :-----: | ------------------------ | ----------------------------------------- |
+|   [1]   | Arithmetic operator swap | Algebraic law with cross-validated result |
+|   [2]   | Conditional negation     | Property covering both branches           |
+|   [3]   | Statement deletion       | Test that depends on deleted operation    |
+|   [4]   | String mutation          | Known-answer vector comparison            |
 
 ---
 ## [2][ANTI_PATTERNS]
@@ -58,12 +58,20 @@ Stryker injects code mutants (operator swaps, conditional negations, statement d
 
 Hook rules catch syntactic violations. These anti-patterns catch **semantic** issues that require judgment:
 
-| [INDEX] | [FORBIDDEN]              | [REPLACEMENT]                                          |
-| :-----: | ------------------------ | ------------------------------------------------------ |
-|   [1]   | Hardcoded test arrays    | `it.each(CONSTANT_TABLE)` or `Effect.forEach(VECTORS)` |
-|   [2]   | Magic numbers            | Named constants with `as const`                        |
-|   [3]   | Re-deriving source logic | Algebraic law or external oracle                       |
-|   [4]   | Hand-rolled arbitraries  | `Arbitrary.make(Schema)` from @effect/schema           |
+| [INDEX] | [FORBIDDEN]                                                          | [REPLACEMENT]                                                                     |
+| :-----: | -------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
+|   [1]   | Hardcoded test arrays                                                | `it.each(CONSTANT_TABLE)` or `Effect.forEach(VECTORS)`                            |
+|   [2]   | Magic numbers                                                        | Named constants with `as const`                                                   |
+|   [3]   | Re-deriving source logic                                             | Algebraic law or external oracle                                                  |
+|   [4]   | Hand-rolled arbitraries                                              | `Arbitrary.make(Schema)` from @effect/schema                                      |
+|   [5]   | Mock call-count assertions (`toHaveBeenCalledWith`) as primary test  | Test observable output or algebraic property                                      |
+|   [6]   | Deep `vi.mock` of internal modules (>10 lines of mock setup)         | `layer()` with `Layer.succeed(Tag, stub)` or integration test with testcontainers |
+|   [7]   | Testing mock wiring (did fn get called?)                             | Test return value shape, error tag, or behavioral property                        |
+|   [8]   | Thin wrapper mock factories (`_mkAudit = () => ({ log: vi.fn(…) })`) | Inline literal at `_provide` call site; reserve `_mk*` for 2+ configurable fields |
+|   [9]   | Duplicated `Effect.gen` + `pipe` + `_provide` across 3+ tests        | Extract `_transition`-style helper in `[FUNCTIONS]` section                       |
+|  [10]   | Multi-line arbitrary definitions spanning 3+ lines                   | Compress to single `fc.tuple(…).map(…)` expression                                |
+
+**Mock compression pattern:** Mock factories constructing a single-field object (`{ method: vi.fn(() => Effect.void) }`) are thin wrappers adding indirection without value. Inline the literal directly into `_provide` or `Effect.provideService`. Reserve named `_mk*` factories for mocks with 2+ configurable fields or conditional behavior (e.g., `_mkDb({ a?: …, ns?: …, set?: … })`).
 
 ---
 ## [3][ORACLE_INDEPENDENCE]
@@ -84,14 +92,14 @@ A test is **implementation-confirming** when changing internal algorithm (preser
 
 **Oracle classification:**
 
-| [ORACLE_TYPE]            | [STATUS]     | [EXAMPLE]                               |
-| ------------------------ | ------------ | --------------------------------------- |
-| Algebraic law            | Independent  | `g(f(x)) = x` (inverse)                 |
-| External reference impl  | Independent  | `createHash('sha256')` from node:crypto |
-| Standards vectors        | Independent  | NIST FIPS 180-4, RFC 4231, RFC 6902     |
-| Schema-derived arbitrary | Independent  | `Arbitrary.make(Schema)` for inputs     |
-| Manually computed        | Verify       | Hand-calculate, document derivation     |
-| Source output pasted     | **Circular** | **Replace** with law or oracle          |
+| [INDEX] | [ORACLE_TYPE]            | [STATUS]     | [EXAMPLE]                               |
+| :-----: | ------------------------ | ------------ | --------------------------------------- |
+|   [1]   | Algebraic law            | Independent  | `g(f(x)) = x` (inverse)                 |
+|   [2]   | External reference impl  | Independent  | `createHash('sha256')` from node:crypto |
+|   [3]   | Standards vectors        | Independent  | NIST FIPS 180-4, RFC 4231, RFC 6902     |
+|   [4]   | Schema-derived arbitrary | Independent  | `Arbitrary.make(Schema)` for inputs     |
+|   [5]   | Manually computed        | Verify       | Hand-calculate, document derivation     |
+|   [6]   | Source output pasted     | **Circular** | **Replace** with law or oracle          |
 
 ---
 ## [4][DETERMINISM_AND_ISOLATION]

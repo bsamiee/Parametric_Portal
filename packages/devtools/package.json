@@ -29,7 +29,6 @@
         "vite": "catalog:"
     },
     "devDependencies": {
-        "@fast-check/vitest": "catalog:",
         "@types/react": "catalog:",
         "@types/react-dom": "catalog:",
         "fast-check": "catalog:",

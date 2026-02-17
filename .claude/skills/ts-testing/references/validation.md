@@ -27,11 +27,11 @@ The PostToolUse hook enforces 13 structural rules on every `*.spec.ts` edit. Str
 
 [CRITICAL] **95% per-file** on statements, branches, and functions. Measured independently per source module -- aggregate scores are insufficient.
 
-| [SIGNAL]            | [INTERPRETATION]                     | [REMEDIATION]                                       |
-| ------------------- | ------------------------------------ | --------------------------------------------------- |
-| Uncovered branches  | Missing edge case or error path      | Add `[EDGE_CASES]` section with boundary conditions |
-| Uncovered function  | Public API method untested           | Add property or Effect.all aggregation covering it  |
-| Uncovered statement | Dead code or missed conditional path | Verify code reachability; add targeted assertion    |
+| [INDEX] | [SIGNAL]            | [INTERPRETATION]                     | [REMEDIATION]                                       |
+| :-----: | ------------------- | ------------------------------------ | --------------------------------------------------- |
+|   [1]   | Uncovered branches  | Missing edge case or error path      | Add `[EDGE_CASES]` section with boundary conditions |
+|   [2]   | Uncovered function  | Public API method untested           | Add property or Effect.all aggregation covering it  |
+|   [3]   | Uncovered statement | Dead code or missed conditional path | Verify code reachability; add targeted assertion    |
 
 **Remediation pattern:** Identify uncovered branches in HTML report -> add `Effect.all` aggregation for boundary enumeration -> re-run coverage -> confirm improvement above 95%.
 
@@ -69,13 +69,13 @@ Run Stryker after semantic gate passes. Analyze surviving mutants to determine i
 
 <br>
 
-| [GATE] | [CHECK]                 | [ON_FAIL]                            |
-| :----: | ----------------------- | ------------------------------------ |
-|   1    | Hook structural rules   | Fix line-specific error, re-edit     |
-|   2    | Coverage (>= 95%)       | Add EDGE_CASES section               |
-|   3    | Oracle independence     | Replace with algebraic law or vector |
-|   4    | Generator quality       | Switch to Arbitrary.make(Schema)     |
-|   5    | Mutation score (>= 80%) | Analyze survivors, strengthen tests  |
+| [INDEX] | [GATE] | [CHECK]                 | [ON_FAIL]                            |
+| :-----: | :----: | ----------------------- | ------------------------------------ |
+|   [1]   |   1    | Hook structural rules   | Fix line-specific error, re-edit     |
+|   [2]   |   2    | Coverage (>= 95%)       | Add EDGE_CASES section               |
+|   [3]   |   3    | Oracle independence     | Replace with algebraic law or vector |
+|   [4]   |   4    | Generator quality       | Switch to Arbitrary.make(Schema)     |
+|   [5]   |   5    | Mutation score (>= 80%) | Analyze survivors, strengthen tests  |
 
 [REFERENCE] Thresholds: SKILL.md section 2. Hook rules: [→guardrails.md](./guardrails.md) section 1.1.
 
@@ -85,17 +85,17 @@ Run Stryker after semantic gate passes. Analyze surviving mutants to determine i
 
 <br>
 
-| [SYMPTOM]                       | [ROOT_CAUSE]                               | [FIX]                                                 |
-| ------------------------------- | ------------------------------------------ | ----------------------------------------------------- |
-| Hook blocks edit                | One of 13 structural rules violated        | Read error message, fix specific line                 |
-| Mutation score < 60%            | Test re-derives source logic               | Replace with algebraic law or external oracle         |
-| Property flaky                  | Generator produces inconsistent edge cases | Add `fc.pre()` constraint or tighten arbitrary bounds |
-| Coverage below 95%              | Missing branch or edge case                | Add `[EDGE_CASES]` with boundary conditions           |
-| False positive assertion        | Expression-form returns Assertion object   | Switch to block syntax `{ expect(...); }`             |
-| Import order violation          | Imports not in canonical sequence          | Reorder: @effect/vitest -> @pp/* -> effect -> vitest  |
-| LOC exceeds 175                 | Spec too verbose                           | Pack properties, use Effect.all aggregation           |
-| Schema-derived arb type error   | Schema has unsupported combinator          | Fall back to hand-rolled `fc.*` arbitrary             |
-| Model-based timeout             | Command sequences too long                 | Reduce `numRuns` to 15-30, limit `maxCommands`        |
-| TestClock test hangs            | Effect not forked before clock adjustment  | `Effect.fork` -> `TestClock.adjust` -> `Fiber.await`  |
-| Shrinking produces large output | Arbitrary space too broad for domain       | Add `maxLength`, `maxDepth`, `filter()` constraints   |
-| Surviving mutant (equivalent)   | Mutant is semantically identical           | Verify equivalence, exclude from score analysis       |
+| [INDEX] | [SYMPTOM]                       | [ROOT_CAUSE]                               | [FIX]                                                 |
+| :-----: | ------------------------------- | ------------------------------------------ | ----------------------------------------------------- |
+|   [1]   | Hook blocks edit                | One of 13 structural rules violated        | Read error message, fix specific line                 |
+|   [2]   | Mutation score < 60%            | Test re-derives source logic               | Replace with algebraic law or external oracle         |
+|   [3]   | Property flaky                  | Generator produces inconsistent edge cases | Add `fc.pre()` constraint or tighten arbitrary bounds |
+|   [4]   | Coverage below 95%              | Missing branch or edge case                | Add `[EDGE_CASES]` with boundary conditions           |
+|   [5]   | False positive assertion        | Expression-form returns Assertion object   | Switch to block syntax `{ expect(...); }`             |
+|   [6]   | Import order violation          | Imports not in canonical sequence          | Reorder: @effect/vitest -> @pp/* -> effect -> vitest  |
+|   [7]   | LOC exceeds 175                 | Spec too verbose                           | Pack properties, use Effect.all aggregation           |
+|   [8]   | Schema-derived arb type error   | Schema has unsupported combinator          | Fall back to hand-rolled `fc.*` arbitrary             |
+|   [9]   | Model-based timeout             | Command sequences too long                 | Reduce `numRuns` to 15-30, limit `maxCommands`        |
+|  [10]   | TestClock test hangs            | Effect not forked before clock adjustment  | `Effect.fork` -> `TestClock.adjust` -> `Fiber.await`  |
+|  [11]   | Shrinking produces large output | Arbitrary space too broad for domain       | Add `maxLength`, `maxDepth`, `filter()` constraints   |
+|  [12]   | Surviving mutant (equivalent)   | Mutant is semantically identical           | Verify equivalence, exclude from score analysis       |

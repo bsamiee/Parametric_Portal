@@ -197,16 +197,47 @@ _bootstrap() {
 
 # --- [TESTING] ----------------------------------------------------------------
 
+_assert_eq() { [[ "$1" == "$2" ]] || die "ASSERT ${FUNCNAME[1]}:${BASH_LINENO[0]}: expected '${2}' got '${1}'"; }
+_assert_ne() { [[ "$1" != "$2" ]] || die "ASSERT ${FUNCNAME[1]}:${BASH_LINENO[0]}: '${1}' should differ"; }
 _self_test() {
-    _parse_stack_map "dev=dev,prod=prod"
-    [[ "${STACK_CONFIG[dev]}" == "dev" ]] && [[ "${STACK_CONFIG[prod]}" == "prod" ]] || die "self-test failed"
-    _info "Self-test passed"
+    _info "Running self-tests..."
+    local rc
+    # _parse_stack_map — valid pairs, order, duplicate last-wins, regex rejection
+    _parse_stack_map "dev=dev,staging=stg,prod=prod"
+    _assert_eq "${STACK_CONFIG[dev]}" "dev"; _assert_eq "${STACK_CONFIG[staging]}" "stg"; _assert_eq "${STACK_CONFIG[prod]}" "prod"
+    _assert_eq "$(IFS=' '; printf '%s' "${STACK_ORDER[*]}")" "dev staging prod"
+    ACTIVE_STACK=a; _parse_stack_map "a=first,a=second"; _assert_eq "${STACK_CONFIG[a]}" "second"; ACTIVE_STACK="${DEFAULT_ACTIVE_STACK}"
+    rc=0; (ACTIVE_STACK=a; _parse_stack_map "a=x") 2>/dev/null || rc=$?; _assert_eq "${rc}" 0
+    rc=0; (_parse_stack_map "bad@=val") 2>/dev/null || rc=$?; _assert_ne "${rc}" 0
+    rc=0; (_parse_stack_map "k=v.1") 2>/dev/null || rc=$?; _assert_ne "${rc}" 0
+    rc=0; (_parse_stack_map "") 2>/dev/null || rc=$?; _assert_ne "${rc}" 0
+    # _parse_args — flag mutation, commutativity
+    DRY_RUN=false; PROJECT="${DEFAULT_PROJECT}"; _parse_args -n; _assert_eq "${DRY_RUN}" "true"
+    DRY_RUN=false; PROJECT="${DEFAULT_PROJECT}"; _parse_args --project myproj -n; _assert_eq "${PROJECT}" "myproj"; _assert_eq "${DRY_RUN}" "true"
+    DRY_RUN=false; PROJECT="${DEFAULT_PROJECT}"; _parse_args -n --project myproj; _assert_eq "${PROJECT}" "myproj"; _assert_eq "${DRY_RUN}" "true"
+    # _retry — immediate success, exhaustion
+    _retry 3 1 true; _assert_eq $? 0
+    rc=0; (_retry 1 1 false) 2>/dev/null || rc=$?; _assert_eq "${rc}" 1
+    # _run_mutating — DRY_RUN branches
+    rc=0; (DRY_RUN=true; _run_mutating "t" false) 2>/dev/null || rc=$?; _assert_eq "${rc}" 0
+    rc=0; (DRY_RUN=false; _run_mutating "t" true) 2>/dev/null || rc=$?; _assert_eq "${rc}" 0
+    rc=0; (DRY_RUN=false; _run_mutating "t" false) 2>/dev/null || rc=$?; _assert_ne "${rc}" 0
+    # _cleanup — both branches (LOCK_FD set vs unset)
+    rc=0; (unset LOCK_FD; _cleanup) 2>/dev/null || rc=$?; _assert_eq "${rc}" 0
+    rc=0; (exec {LOCK_FD}>/dev/null; _cleanup) 2>/dev/null || rc=$?; _assert_eq "${rc}" 0
+    # die → exit 1, die_usage → exit 2
+    rc=0; (die "x") 2>/dev/null || rc=$?; _assert_eq "${rc}" 1
+    rc=0; (die_usage "x") 2>/dev/null || rc=$?; _assert_eq "${rc}" 2
+    # _log — level filtering
+    _assert_eq "$(LOG_LEVEL=1; _log INFO "x" 2>&1 | wc -l | tr -d ' ')" "1"
+    _assert_eq "$(LOG_LEVEL=1; _log DEBUG "x" 2>&1 | wc -l | tr -d ' ')" "0"
+    # _require_cmd — existing passes, missing fails
+    _require_cmd bash ""; rc=0; (_require_cmd __no_such_cmd__ "") 2>/dev/null || rc=$?; _assert_ne "${rc}" 0
+    _info "All tests passed"
 }
 
 # --- [EXPORT] -----------------------------------------------------------------
 
-trap _on_err ERR
-trap _cleanup EXIT
 _main() {
     _parse_args "$@"
     _parse_stack_map "${STACK_MAP}"
@@ -219,4 +250,13 @@ _main() {
     _info "Bootstrap complete"
     return "${EX_OK}"
 }
-_main "$@"
+case "${BASH_SOURCE[0]}" in
+    "$0")
+        trap _on_err ERR
+        trap _cleanup EXIT
+        _main "$@"
+        ;;
+    *)
+        :
+        ;;
+esac

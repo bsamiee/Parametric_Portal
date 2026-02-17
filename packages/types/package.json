@@ -58,7 +58,6 @@
         "uuid": "catalog:"
     },
     "devDependencies": {
-        "@fast-check/vitest": "catalog:",
         "@types/node": "catalog:",
         "fast-check": "catalog:",
         "ts-essentials": "catalog:",

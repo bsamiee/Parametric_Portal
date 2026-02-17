@@ -14,9 +14,7 @@
 import { Duration, Effect, Option, Schedule, STM, TMap } from 'effect';
 
 class ConfigService extends Effect.Service<ConfigService>()('app/ConfigService', {
-    succeed: {
-        get: (key: string) => Effect.succeed(`value:${key}`),
-    },
+    succeed: { get: (key: string) => Effect.succeed(`value:${key}`) },
 }) {}
 
 class StorageService extends Effect.Service<StorageService>()('app/StorageService', {
@@ -30,12 +28,9 @@ class StorageService extends Effect.Service<StorageService>()('app/StorageServic
             write: Effect.fn('StorageService.write')(
                 (path: string, data: Uint8Array) =>
                     Effect.succeed({ path: `${basePath}/${path}`, bytes: data.length }).pipe(
-                        Effect.retry({
-                            schedule: Schedule.exponential(Duration.millis(50)).pipe(
-                                Schedule.jittered,
-                                Schedule.intersect(Schedule.recurs(3)),
-                            ),
-                        }),
+                        Effect.retry({ schedule: Schedule.exponential(Duration.millis(50)).pipe(
+                            Schedule.jittered, Schedule.intersect(Schedule.recurs(3)),
+                        ) }),
                     ),
             ),
         } as const;
@@ -55,10 +50,7 @@ class DatabaseService extends Effect.Service<DatabaseService>()('app/DatabaseSer
         const query = Effect.fn('DatabaseService.query')(function* (sql: string) {
             const cached = yield* STM.commit(TMap.get(cache, sql));
             return yield* Option.match(cached, {
-                onNone: () =>
-                    Effect.tryPromise(() => pool.query(sql)).pipe(
-                        Effect.tap((rows) => STM.commit(TMap.set(cache, sql, rows))),
-                    ),
+                onNone: () => Effect.tryPromise(() => pool.query(sql)).pipe(Effect.tap((rows) => STM.commit(TMap.set(cache, sql, rows)))),
                 onSome: Effect.succeed,
             });
         });
@@ -86,9 +78,7 @@ class FeatureService extends Effect.Service<FeatureService>()('app/Features', {
     scoped: Effect.gen(function* () {
         const [store, eventBus] = yield* Effect.all([DataStore, EventBus]);
         class FlagCacheKey extends S.TaggedRequest<FlagCacheKey>()('FlagCacheKey', {
-            failure: ServiceError,
-            payload: { tenantId: S.String },
-            success: FlagsSchema,
+            failure: ServiceError, payload: { tenantId: S.String }, success: FlagsSchema,
         }) {[PrimaryKey.symbol]() {return `flags:${this.tenantId}`;}}
         const cache = yield* CacheService.cache<FlagCacheKey, never, never>({
             lookup: (key) => store.loadFlags(key.tenantId),
@@ -96,18 +86,13 @@ class FeatureService extends Effect.Service<FeatureService>()('app/Features', {
             timeToLive: Duration.minutes(5),
         });
         const invalidateFlag = (event: { tenantId: string }) => cache.invalidate(new FlagCacheKey({ tenantId: event.tenantId }));
-        yield* Effect.forkScoped(
-            eventBus.subscribe('settings.updated').pipe(
-                Stream.groupedWithin(32, Duration.seconds(1)),
-                Stream.mapEffect((batch) =>
-                    Effect.forEach(batch, invalidateFlag, { concurrency: 'inherit', discard: true }),
-                ),
-                Stream.catchAll(() => Stream.empty),
-                Stream.run(Sink.drain),
-            ),
-        );
+        yield* Effect.forkScoped(eventBus.subscribe('settings.updated').pipe(
+            Stream.groupedWithin(32, Duration.seconds(1)),
+            Stream.mapEffect((batch) => Effect.forEach(batch, invalidateFlag, { concurrency: 'inherit', discard: true })),
+            Stream.catchAll(() => Stream.empty), Stream.run(Sink.drain),
+        ));
         const isEnabled = Effect.fn('FeatureService.isEnabled')(function* (flagName: string) {
-            const tenantId = yield* RequestContext.currentTenantId;
+            const { tenantId } = yield* Context.Request.current;
             const flags = yield* cache.get(new FlagCacheKey({ tenantId }));
             return Math.abs(Hash.string(`${tenantId}:${flagName}`) % 100) < flags[flagName];
         });
@@ -129,18 +114,14 @@ import { Duration, Effect, Option, Schema as S } from 'effect';
 const _makeKv = (redis: RedisConnection) => ({
     get: <A, I = A, R = never>(key: string, schema: S.Schema<A, I, R>) =>
         _runRedis('get', () => redis.get(key)).pipe(
-            Effect.andThen((raw) =>
-                raw === null
-                    ? Effect.succeed(Option.none<A>())
-                    : S.decode(S.parseJson(schema))(raw).pipe(Effect.map(Option.some)),
-            ),
+            Effect.andThen((raw) => raw === null
+                ? Effect.succeed(Option.none<A>())
+                : S.decode(S.parseJson(schema))(raw).pipe(Effect.map(Option.some))),
             Effect.catchAll(() => Effect.succeed(Option.none<A>())),
         ),
     set: (key: string, value: unknown, ttl: Duration.Duration) =>
         S.encode(S.parseJson(S.Unknown))(value).pipe(
-            Effect.andThen((json) =>
-                _runRedis('set', () => redis.set(key, json, 'PX', Duration.toMillis(ttl))),
-            ),
+            Effect.andThen((json) => _runRedis('set', () => redis.set(key, json, 'PX', Duration.toMillis(ttl)))),
             Effect.ignore,
         ),
 }) as const;
@@ -148,8 +129,7 @@ const _makeKv = (redis: RedisConnection) => ({
 class CacheService extends Effect.Service<CacheService>()('app/CacheService', {
     scoped: Effect.gen(function* () {
         const redis = yield* Effect.acquireRelease(
-            Effect.sync(() => createConnection()),
-            (conn) => Effect.promise(() => conn.quit()),
+            Effect.sync(() => createConnection()), (conn) => Effect.promise(() => conn.quit()),
         );
         return { kv: _makeKv(redis) } as const;
     }),
@@ -181,25 +161,17 @@ class FeatureService extends Effect.Service<FeatureService>()('app/FeatureServic
     dependencies: [DatabaseService.Default, ConfigService.Default],
     effect: Effect.gen(function* () {
         const database = yield* DatabaseService;
-        return {
-            query: Effect.fn('FeatureService.query')(
-                (id: string) => database.read.query(`SELECT * WHERE id = '${id}'`),
-            ),
-        } as const;
+        // Parameterized query: `$1` placeholder + `[id]` param array prevents SQL injection; always prefer this over string interpolation
+        return { query: Effect.fn('FeatureService.query')((id: string) => database.read.query('SELECT * FROM features WHERE id = $1', [id])) } as const;
     }),
 }) {}
 // Composition root -- single assembly point, each service constructed once
 const LiveLayer = FeatureService.Default.pipe(Layer.provideMerge(InfraLayer));
 // Test override -- replace any layer without lifecycle overhead
-const TestLayer = FeatureService.Default.pipe(
-    Layer.provideMerge(Layer.mergeAll(
-        Layer.succeed(DatabaseService, {
-            read: { query: (_sql: string) => Effect.succeed([]) },
-            write: { execute: (_sql: string) => Effect.void },
-        }),
-        ConfigService.Default,
-    )),
-);
+const TestLayer = FeatureService.Default.pipe(Layer.provideMerge(Layer.mergeAll(
+    Layer.succeed(DatabaseService, { read: { query: (_sql: string, _params?: ReadonlyArray<unknown>) => Effect.succeed([]) }, write: { execute: (_sql: string) => Effect.void } }),
+    ConfigService.Default,
+)));
 ```
 
 ---

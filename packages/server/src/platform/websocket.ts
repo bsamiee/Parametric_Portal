@@ -338,8 +338,14 @@ class WebSocketService extends Effect.Service<WebSocketService>()('server/WebSoc
     static readonly ErrorReason = S.Literal('send_failed', 'room_limit', 'not_in_room', 'invalid_message', 'disconnecting');
     static readonly InboundMsg = _SCHEMA.InboundMsg;
     static readonly OutboundMsg = _SCHEMA.OutboundMsg;
+    static readonly Command = _SCHEMA.Command;
+    static readonly Signal = _SCHEMA.Signal;
+    static readonly TransportEnvelope = _SCHEMA.TransportEnvelope;
     static readonly encodeOutbound = _CODEC.outbound.encode;
     static readonly decodeInbound = _CODEC.inbound.decode;
+    static readonly encodeTransport = _CODEC.transport.encode;
+    static readonly decodeTransport = _CODEC.transport.decode;
+    static readonly keys = _MODEL.key;
     static readonly Error = WsError;
 }
 

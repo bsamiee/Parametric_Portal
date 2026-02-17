@@ -8,12 +8,12 @@ import { expect, test } from '@playwright/test';
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
-const B = Object.freeze({
+const B = {
     apps: {
         api: { baseURL: 'http://localhost:4000', healthPath: '/api/health/liveness' },
         parametric_icons: { baseURL: 'http://localhost:3001', title: /Parametric Icons/i },
     },
-} as const);
+} as const;
 
 // --- [TESTS] -----------------------------------------------------------------
 

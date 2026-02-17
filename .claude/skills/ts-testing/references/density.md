@@ -7,18 +7,20 @@ Density is the ratio of verified behavior to test LOC. Techniques ordered by cov
 ## [1][TECHNIQUE_CATALOG]
 >**Dictum:** *Select the highest-multiplier technique that fits the property shape.*
 
-| [INDEX] | [TECHNIQUE]              | [MULTIPLIER]  | [MECHANISM]                                       |
-| :-----: | ------------------------ | ------------- | ------------------------------------------------- |
-|   [1]   | `it.effect.prop` PBT     | 50-200x       | Single universally-quantified property            |
-|   [2]   | Property packing         | 2-4x          | Multiple laws sharing one arbitrary shape         |
-|   [3]   | `Effect.all` aggregation | Nx1           | N independent ops, single structural expect       |
-|   [4]   | Table-driven vectors     | Nx1           | N vectors, single parameterized test body         |
-|   [5]   | Symmetric iteration      | 2x            | `[[x,y],[y,x]] as const` + forEach                |
-|   [6]   | Statistical batching     | Bulk          | `fc.sample()` + distribution analysis             |
-|   [7]   | Schema-derived arbs      | Synced        | `Arbitrary.make(S)` eliminates hand-rolled gens   |
-|   [8]   | `fc.pre()` filtering     | Constrain     | Preconditions without if/else branching           |
-|   [9]   | Model-based commands     | Stateful      | Arbitrary command interleavings via fc.commands() |
-|  [10]   | External oracle vectors  | Authoritative | RFC/NIST vectors as `as const` + forEach          |
+| [INDEX] | [TECHNIQUE]              | [MULTIPLIER]  | [MECHANISM]                                                  |
+| :-----: | ------------------------ | ------------- | ------------------------------------------------------------ |
+|   [1]   | `it.effect.prop` PBT     | 50-200x       | Single universally-quantified property                       |
+|   [2]   | Property packing         | 2-4x          | Multiple laws sharing one arbitrary shape                    |
+|   [3]   | `Effect.all` aggregation | Nx1           | N independent ops, single structural expect                  |
+|   [4]   | Table-driven vectors     | Nx1           | N vectors, single parameterized test body                    |
+|   [5]   | Symmetric iteration      | 2x            | `[[x,y],[y,x]] as const` + forEach                           |
+|   [6]   | Statistical batching     | Bulk          | `fc.sample()` + distribution analysis                        |
+|   [7]   | Schema-derived arbs      | Synced        | `Arbitrary.make(S)` eliminates hand-rolled gens              |
+|   [8]   | `fc.pre()` filtering     | Constrain     | Preconditions without if/else branching                      |
+|   [9]   | Model-based commands     | Stateful      | Arbitrary command interleavings via fc.commands()            |
+|  [10]   | External oracle vectors  | Authoritative | RFC/NIST vectors as `as const` + forEach                     |
+|  [11]   | `fc.scheduler()` races   | Concurrent    | Adversarial interleaving of async/fiber operations           |
+|  [12]   | Orchestration extraction | LOC/3         | Extract repeated service-call pattern to helper, merge tests |
 
 **Selection heuristic:** Start at [1]. Drop to lower-multiplier techniques only when the property shape or cost prevents a higher one.
 
@@ -37,12 +39,13 @@ it.effect.prop('inverse', { x: _json, y: _json }, ({ x, y }) =>
 
 ### [2.1][NUMRUNS_CALIBRATION]
 
-| [TECHNIQUE]        | [NUMRUNS] | [RATIONALE]                          |
-| ------------------ | :-------: | ------------------------------------ |
-| Algebraic PBT      |  100-200  | Cheap generation, high value per run |
-| Schema-derived PBT |  50-100   | Moderate generation cost             |
-| Model-based        |   15-30   | Expensive setup per command sequence |
-| Security isolation |    50     | Costly cross-tenant operations       |
+| [INDEX] | [TECHNIQUE]        | [NUMRUNS] | [RATIONALE]                          |
+| :-----: | ------------------ | :-------: | ------------------------------------ |
+|   [1]   | Algebraic PBT      |  100-200  | Cheap generation, high value per run |
+|   [2]   | Schema-derived PBT |  50-100   | Moderate generation cost             |
+|   [3]   | Model-based        |   15-30   | Expensive setup per command sequence |
+|   [4]   | Security isolation |    50     | Costly cross-tenant operations       |
+|   [5]   | Scheduler races    |   15-30   | Each run explores different ordering |
 
 ---
 ## [3][PROPERTY_PACKING]
@@ -50,6 +53,7 @@ it.effect.prop('inverse', { x: _json, y: _json }, ({ x, y }) =>
 
 **Pack when:** Same arbitrary parameters, same numRuns, laws form a logical group.
 **Split when:** Different arbitrary shapes, mixed success/failure expectations, unrelated operations.
+**Merge edge cases when:** Same mock factory parameters, same `_provide` wiring, tests exercise different branches of same `Match`/pipeline. Extract repeated service-call orchestration into `[FUNCTIONS]` helper, then aggregate assertions with `Effect.all` + destructuring. Reduces 3 tests (~30 LOC) to 1 test (~12 LOC).
 
 ```typescript
 // 4 laws packed: determinism + reflexivity + equivalence + symmetry
@@ -139,7 +143,7 @@ const _error = Arbitrary.make(S.Struct(ErrorType.fields));
 Bias toward edge cases without separate properties:
 ```typescript
 const _input = fc.oneof(
-    { weight: 1, arbitrary: fc.constant('') },                          // Edge case
+    { weight: 1, arbitrary: fc.constant('') },                            // Edge case
     { weight: 8, arbitrary: fc.string({ minLength: 1, maxLength: 64 }) }, // Typical
 );
 ```
@@ -184,10 +188,43 @@ Structural `toEqual` on `Effect.all` results kills more mutants than individual 
 ## [11][DENSITY_METRICS]
 >**Dictum:** *Measure density to prevent regression.*
 
-| [METRIC]                  | [TARGET] | [MEASUREMENT]                                    |
-| ------------------------- | -------- | ------------------------------------------------ |
-| Generated cases per suite | 2,500+   | Sum of numRuns across all `it.effect.prop` calls |
-| Test-to-source LOC ratio  | ~1.2     | Test LOC / source LOC (lower = denser)           |
-| Assertions per test       | 2-6      | Property packing sweet spot                      |
+| [INDEX] | [METRIC]                  | [TARGET] | [MEASUREMENT]                                    |
+| :-----: | ------------------------- | -------- | ------------------------------------------------ |
+|   [1]   | Generated cases per suite | 2,500+   | Sum of numRuns across all `it.effect.prop` calls |
+|   [2]   | Test-to-source LOC ratio  | ~1.2     | Test LOC / source LOC (lower = denser)           |
+|   [3]   | Assertions per test       | 2-6      | Property packing sweet spot                      |
 
 [REFERENCE] Hard thresholds (LOC cap, coverage, mutation): SKILL.md section 2.
+
+---
+## [12][CONSOLIDATION]
+>**Dictum:** *Consolidate related edge cases into fewer, denser assertions.*
+
+**When to consolidate edge cases:**
+- 3+ edge cases testing the same function's error paths -- aggregate into `Effect.all` with `Effect.flip`
+- Multiple schema validation checks -- single `it.effect.prop` with `S.decodeUnknownEither`
+- Multiple delegate method tests -- property: "all delegate keys exist and return Effects"
+
+```typescript
+// Consolidated error paths: 3 edge cases in one assertion
+it.effect('error paths', () => Effect.all([
+    Module.parse('invalid').pipe(Effect.flip, Effect.map((e) => e._tag)),
+    Module.parse('').pipe(Effect.flip, Effect.map((e) => e._tag)),
+    Module.parse(null).pipe(Effect.flip, Effect.map((e) => e._tag)),
+]).pipe(Effect.map((tags) => { expect(tags).toEqual(['InvalidRecord', 'EmptyInput', 'NullInput']); })));
+```
+
+**When NOT to consolidate:**
+- Different services under test
+- Different layer configurations needed
+- Different preconditions or lifecycle requirements
+
+**Orchestration extraction pattern:**
+When 3+ tests invoke the same service method through identical `Effect.gen` + `pipe` boilerplate, extract the orchestration:
+```typescript
+// Before: duplicated in every test (3+ LOC each occurrence)
+Effect.gen(function* () { return yield* (yield* Svc).method(cmd); }).pipe((e) => _provide(e, db));
+// After: single helper in [FUNCTIONS], called with varying mock configs
+const _invoke = (cmd: Input, db = _mkDb()) =>
+    Effect.gen(function* () { return yield* (yield* Svc).method(cmd); }).pipe((e) => _provide(e, db));
+```

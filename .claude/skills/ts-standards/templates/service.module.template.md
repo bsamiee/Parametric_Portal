@@ -1,31 +1,30 @@
-# [H1][SERVICE]
+# [H1][SERVICE_MODULE]
 >**Dictum:** *Capability-grouped services centralize dependency, lifecycle, and composition.*
 
 <br>
 
 Produces one self-contained service module: dependency tag(s), scoped resource acquisition, traced methods, stream batch processing, retry policy, and a single layer assembly point.
 
-**Workflow:** fill placeholders, remove guidance comments, verify `tsc --noEmit`.
+**Budget:** 225 LOC cap per module. See SKILL.md section 2 for contracts.
+**References:** `services.md` (patterns), `errors.md` (failure algebra), `objects.md` (schema), `types.md` (const+namespace merge).
+**Workflow:** fill placeholders, remove guidance blocks, verify `pnpm exec nx run-many -t typecheck`.
 
 **Placeholders**
 
-| [INDEX] | [PLACEHOLDER]           | [PURPOSE]                                             |
-| :-----: | ----------------------- | ----------------------------------------------------- |
-|   [1]   | `${ServiceName}`        | PascalCase service class name                         |
-|   [2]   | `${service-tag}`        | Fully qualified service tag string                    |
-|   [3]   | `${DepTag}`             | Primary dependency context tag (PascalCase)           |
-|   [4]   | `${dep-tag}`            | String identifier for dependency tag                  |
-|   [5]   | `${dep-interface}`      | Dependency interface fields (read/write capabilities) |
-|   [6]   | `${resource-acquire}`   | Effect producing managed resource handle              |
-|   [7]   | `${resource-release}`   | Finalizer effect consuming resource handle            |
-|   [8]   | `${service-methods}`    | Traced service method definitions (`Effect.fn`)       |
-|   [9]   | `${stream-source-type}` | Type of elements in inbound stream                    |
-|  [10]   | `${stream-process}`     | Element-to-Effect function for batch processing       |
-|  [11]   | `${dep-layer}`          | Layer expression providing the dependency             |
-|  [12]   | `${read-return}`        | Destructured read methods for return object           |
-|  [13]   | `${write-return}`       | Destructured write methods for return object          |
-|  [14]   | `${static-delegate}`    | Static delegate name                                  |
-|  [15]   | `${static-body}`        | Effect expression accessing instance method           |
+| [INDEX] | [PLACEHOLDER]           | [PURPOSE]                                                          |
+| :-----: | ----------------------- | ------------------------------------------------------------------ |
+|   [1]   | `${ServiceName}`        | PascalCase service class name                                      |
+|   [2]   | `${service-tag}`        | Fully qualified service tag string                                 |
+|   [3]   | `${DepTag}`             | Primary dependency context tag (PascalCase)                        |
+|   [4]   | `${dep-tag}`            | String identifier for dependency tag                               |
+|   [5]   | `${dep-interface}`      | Dependency interface fields (read/write capabilities)              |
+|   [6]   | `${resource-acquire}`   | Effect producing managed resource handle                           |
+|   [7]   | `${resource-release}`   | Finalizer effect consuming resource handle                         |
+|   [8]   | `${service-methods}`    | Traced method defs (`Effect.fn`); return as `{ read, write }`      |
+|   [9]   | `${stream-source-type}` | Type of elements in inbound stream                                 |
+|  [10]   | `${stream-process}`     | Element-to-Effect function for batch processing                    |
+|  [11]   | `${dep-layer}`          | Layer expression providing the dependency                          |
+|  [12]   | `${static-access}`      | Static delegate: name + `Effect.andThen` accessing instance method |
 
 ```typescript
 import { Context, Data, Duration, Effect, Layer, Option, Schedule, STM, Stream, TMap, Schema as S } from 'effect';
@@ -70,10 +69,10 @@ class ${ServiceName} extends Effect.Service<${ServiceName}>()('${service-tag}', 
         });
         yield* Effect.addFinalizer(() => Effect.log('${ServiceName} shutting down'));
         yield* Effect.log('${ServiceName} initialized');
-        return { observe: { drain }, read: { ${read-return} }, write: { ${write-return} } } as const;
+        return { observe: { drain }, read: { /* destructure read methods */ }, write: { /* destructure write methods */ } } as const;
     }),
 }) {
-    static readonly ${static-delegate} = ${ServiceName}.pipe(Effect.andThen((s) => ${static-body}),);
+    ${static-access}
 }
 
 // --- [LAYER] -----------------------------------------------------------------

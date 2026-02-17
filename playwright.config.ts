@@ -73,7 +73,7 @@ const B = Object.freeze({
 
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 
-const isCI = (): boolean => process.env.CI === 'true';
+const isCI = (): boolean => process.env['CI'] === 'true';
 const buildWebServer = (app: AppConfig) => ({
     command: app.command,
     reuseExistingServer: !isCI(),

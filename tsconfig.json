@@ -13,6 +13,7 @@
         { "path": "./packages/server" },
         { "path": "./packages/theme" },
         { "path": "./packages/types" },
-        { "path": "./tools" }
+        { "path": "./tools" },
+        { "path": "./tests" }
     ]
 }

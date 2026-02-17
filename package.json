@@ -7,11 +7,19 @@
         "apps/*",
         "packages/*"
     ],
+    "//test-scripts": {
+        "test": "Run all root-tests once (clears vitest cache, detects hanging processes)",
+        "test:watch": "Watch mode for root-tests with incremental reruns",
+        "test:coverage": "Run root-tests with v8 coverage (clears stale cache + reports)",
+        "test:mutate": "Stryker mutation testing (incremental; pnpm test:mutate:force for fresh run)",
+        "test:mutate:force": "Stryker mutation testing with --force (bypasses incremental cache)",
+        "test:ui": "Vitest UI with coverage enabled in browser",
+        "test:debug": "Single-threaded run with Node inspector for debugging"
+    },
     "scripts": {
-        "clean": "rm -rf .nx/cache node_modules/.cache packages/*/dist apps/*/dist packages/*/.vite-inspect apps/*/.vite-inspect",
+        "clean": "rm -rf .nx/cache node_modules/.cache packages/*/dist apps/*/dist packages/*/.vite-inspect apps/*/.vite-inspect test-results/mutation/stryker-incremental.json",
         "e2e": "nx e2e",
         "e2e:report": "playwright show-report test-results/e2e-report",
-        "e2e:ui": "nx e2e --ui",
         "nx:affected": "nx affected -t build,test,typecheck,check",
         "nx:build": "nx run-many -t build",
         "nx:build:libs": "nx run-many -t build --projects=@parametric-portal/types,@parametric-portal/theme,@parametric-portal/runtime,@parametric-portal/components,@parametric-portal/devtools",
@@ -21,17 +29,18 @@
         "nx:test": "nx run-many -t test",
         "nx:typecheck": "nx run-many -t typecheck",
         "prepare": "lefthook install",
-        "quality": "pnpm exec nx run-many -t typecheck,check,infra:lint && knip && sherif",
-        "quality:affected": "pnpm exec nx affected -t typecheck,check,infra:lint --base=origin/main && knip && sherif",
+        "quality": "pnpm exec nx run-many -t typecheck,check,infra:lint && knip --treat-config-hints-as-errors && sherif",
+        "quality:affected": "pnpm exec nx affected -t typecheck,check,infra:lint --base=origin/main && knip --treat-config-hints-as-errors && sherif",
         "reset": "pnpm clean && pnpm install && pnpm nx:build:libs",
         "sonar": "pnpm nx affected -t test -- --coverage && npx @sonar/scan",
-        "sonar:scan": "npx @sonar/scan",
         "sonar:status": "curl -sf -u \"${SONAR_TOKEN}:\" 'https://sonarcloud.io/api/qualitygates/project_status?projectKey=bsamiee_Parametric_Portal' | jq -r '.projectStatus.status'",
+        "test": "rm -rf node_modules/.vitest && vitest run --project root-tests --reporter tree --reporter hanging-process",
+        "test:coverage": "rm -rf node_modules/.vitest coverage && vitest run --project root-tests --coverage",
+        "test:debug": "vitest run --project root-tests --no-file-parallelism --inspect-brk",
         "test:mutate": "stryker run",
-        "test:server": "vitest run --project root-tests tests/packages/server/",
-        "test:unit": "vitest run --project root-tests",
-        "tools:knip": "knip",
-        "tools:sherif": "sherif",
+        "test:mutate:force": "stryker run --force",
+        "test:ui": "vitest --ui --project root-tests --coverage.enabled",
+        "test:watch": "vitest --project root-tests",
         "tools:tokens": "tsx tools/scripts/count-tokens.ts"
     },
     "devDependencies": {
@@ -42,7 +51,6 @@
         "@effect/platform": "catalog:",
         "@effect/platform-browser": "catalog:",
         "@effect/vitest": "catalog:",
-        "@fast-check/vitest": "catalog:",
         "@mermaid-js/mermaid-cli": "catalog:",
         "@nx/docker": "catalog:",
         "@nx/js": "catalog:",
@@ -83,6 +91,7 @@
         "fast-check": "catalog:",
         "happy-dom": "catalog:",
         "immer": "catalog:",
+        "jsdom": "catalog:",
         "jspdf": "catalog:",
         "jszip": "catalog:",
         "knip": "catalog:",
@@ -124,7 +133,8 @@
     },
     "knip": {
         "ignoreBinaries": [
-            "hadolint"
+            "hadolint",
+            "jq"
         ],
         "ignore": [
             ".nx/**"
@@ -134,6 +144,18 @@
                 "entry": [
                     ".github/scripts/*.ts",
                     "tools/scripts/*.ts"
+                ],
+                "ignoreDependencies": [
+                    "^@(fast-check|mermaid-js|octokit|radix-ui|tanstack)/",
+                    "^@effect/(experimental|platform-browser|vitest)$",
+                    "^@nx/(js|react)$",
+                    "^@types/(k6|react|react-dom)$",
+                    "^(babel-plugin-react-compiler|browserslist|class-variance-authority|clsx|cmdk|date-fns|fast-check|immer|jspdf|jszip|lucide-react|react-aria|react-compiler-runtime|react-stately|tailwind-merge|tailwindcss|testcontainers|zustand)$"
+                ]
+            },
+            "infrastructure": {
+                "entry": [
+                    "src/platform.ts"
                 ]
             },
             "packages/database": {

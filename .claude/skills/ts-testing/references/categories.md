@@ -14,9 +14,10 @@
 | [INDEX] | **Category** | [LOCATION]              | [ENV]    | [KEY_TOOLS]                  | [ROUTE_WHEN]                      |
 | :-----: | ------------ | ----------------------- | -------- | ---------------------------- | --------------------------------- |
 |   [1]   | Unit (PBT)   | `tests/packages/{pkg}/` | node     | @effect/vitest, fast-check   | Pure functions, domain logic.     |
-|   [2]   | Integration  | `tests/integration/`    | node     | testcontainers, MSW          | Database, Redis, HTTP boundaries. |
-|   [3]   | System       | `tests/system/`         | node     | Full Layer stack, mock edges | Cross-service orchestration.      |
-|   [4]   | E2E          | `tests/e2e/`            | chromium | Playwright, agent pipeline   | User-facing flows, visual checks. |
+|   [2]   | App          | `tests/apps/{app}/`     | node     | @effect/vitest, fast-check   | App bootstrap, migration, config. |
+|   [3]   | Integration  | `tests/integration/`    | node     | testcontainers, MSW          | Database, Redis, HTTP boundaries. |
+|   [4]   | System       | `tests/system/`         | node     | Full Layer stack, mock edges | Cross-service orchestration.      |
+|   [5]   | E2E          | `tests/e2e/`            | chromium | Playwright, agent pipeline   | User-facing flows, visual checks. |
 
 ---
 ## [2][UNIT_PBT]
@@ -75,6 +76,34 @@
 **Routing Decision:** Modules communicating with PostgreSQL, Redis, or external HTTP services. Verify SQL queries, cache operations, HTTP client behavior.
 
 ---
+## [3.5][CONTRACT]
+>**Dictum:** *Contract tests verify structural compatibility across package boundaries.*
+
+<br>
+
+**Environment:** node (root-tests or packages-node Vitest project).<br>
+**Tools:** `@effect/vitest` (`it.effect`, `it.effect.prop`, `layer`), `Schema.decodeUnknown`, `Effect.provideService`, `Arbitrary.make`.
+
+**Contract tests** verify that:
+1. Package A's exported schemas decode values Package B produces
+2. Service tags are structurally compatible across boundaries
+3. Layer composition succeeds when connecting real package exports
+
+**No mocks** -- uses real schemas and service tags with `Layer.succeed` for minimal fakes.
+
+**Patterns:**
+
+| [INDEX] | **Pattern**        | [MECHANISM]                                                         |
+| :-----: | ------------------ | ------------------------------------------------------------------- |
+|   [1]   | Schema roundtrip   | `S.decodeUnknown(ExportedSchema)(generated_input)` succeeds         |
+|   [2]   | Service tag shape  | `Effect.provideService(ServiceTag, minimal_impl)` compiles and runs |
+|   [3]   | Layer merge        | `Layer.merge(PkgA.Default, PkgB.Default)` builds without error      |
+|   [4]   | Decode PBT         | `it.effect.prop` with `Arbitrary.make(SchemaFromPkgA)` roundtrips   |
+|   [5]   | Cross-package type | Values produced by PkgB decode through PkgA's schema                |
+
+**Routing Decision:** Cross-package schema compatibility, service tag structural checks, layer composition verification. Use when two packages share types or services at their boundary.
+
+---
 ## [4][SYSTEM]
 >**Dictum:** *System tests verify cross-service orchestration via Layer composition.*
 
@@ -128,11 +157,14 @@
 
 <br>
 
-| [INDEX] | **Technique**       | [SCOPE]                | [MECHANISM]                                        |
-| :-----: | ------------------- | ---------------------- | -------------------------------------------------- |
-|   [1]   | Mutation testing    | All unit + integration | Stryker injects mutants; kill-ratio enforcement.   |
-|   [2]   | Security properties | Unit PBT + integration | Proto pollution, tenant isolation, path traversal. |
-|   [3]   | TestClock patterns  | Unit + system          | Deterministic time via `TestClock.adjust`.         |
-|   [4]   | Schema-derived arbs | Unit PBT + integration | `Arbitrary.make(Schema)` from domain schemas.      |
+| [INDEX] | **Technique**        | [SCOPE]                | [MECHANISM]                                        |
+| :-----: | -------------------- | ---------------------- | -------------------------------------------------- |
+|   [1]   | Mutation testing     | All unit + integration | Stryker injects mutants; kill-ratio enforcement.   |
+|   [2]   | Security properties  | Unit PBT + integration | Proto pollution, tenant isolation, path traversal. |
+|   [3]   | TestClock patterns   | Unit + system          | Deterministic time via `TestClock.adjust`.         |
+|   [4]   | Schema-derived arbs  | Unit PBT + integration | `Arbitrary.make(Schema)` from domain schemas.      |
+|   [5]   | Race detection       | Unit + integration     | `fc.scheduler()` adversarial async interleaving.   |
+|   [6]   | Type-level tests     | Unit PBT               | `expectTypeOf` + `@ts-expect-error` assertions.    |
+|   [7]   | Benchmark regression | Unit + system          | `vitest bench` for perf-sensitive hot paths.       |
 
 [REFERENCE] Mutation defense: [→guardrails.md](./guardrails.md) — Validation: [→validation.md](./validation.md).
