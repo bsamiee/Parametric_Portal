@@ -4,18 +4,22 @@
     "private": true,
     "type": "module",
     "scripts": {
-        "test": "vitest run --config ../vitest.config.ts --project root-tests",
-        "test:coverage": "vitest run --config ../vitest.config.ts --project root-tests --coverage"
+        "test": "vitest run --root .. --project root-tests --reporter tree --reporter hanging-process",
+        "typecheck": "tsc --project tsconfig.json --noEmit && biome check ."
     },
     "devDependencies": {
-        "@types/node": "catalog:",
+        "@dopplerhq/node-sdk": "catalog:",
+        "@effect-aws/client-s3": "catalog:",
+        "@effect/platform": "catalog:",
+        "@parametric-portal/infrastructure": "workspace:*",
+        "@effect/sql": "catalog:",
+        "@effect/sql-pg": "catalog:",
         "@effect/vitest": "catalog:",
+        "@parametric-portal/database": "workspace:*",
         "@parametric-portal/server": "workspace:*",
         "@parametric-portal/types": "workspace:*",
         "@playwright/test": "catalog:",
-        "@stryker-mutator/core": "catalog:",
-        "@stryker-mutator/typescript-checker": "catalog:",
-        "@stryker-mutator/vitest-runner": "catalog:",
+        "@types/node": "catalog:",
         "effect": "catalog:",
         "fast-check": "catalog:",
         "jszip": "catalog:",

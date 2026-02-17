@@ -124,21 +124,8 @@ Consumers reference: `@v1.0.0` (exact), `@v1` (latest v1.x), `@SHA` (most secure
 | [INDEX] | [RUNTIME]       | [STATUS]                                                  |
 | :-----: | --------------- | --------------------------------------------------------- |
 |   [1]   | **`node24`**    | Required — use `using: 'node24'` for JavaScript actions.  |
-|   [2]   | **`node20`**    | Deprecated — forced migration to node24 on March 4, 2026. |
-|   [3]   | **`node16`**    | Removed — actions fail at runtime.                        |
-|   [4]   | **`docker`**    | Stable — `using: 'docker'` with `image: 'Dockerfile'`.    |
-|   [5]   | **`composite`** | Stable — `using: 'composite'` with `steps:`.              |
-
-**Node 24 migration timeline:**
-
-| [INDEX] | [DATE]             | [EVENT]                                                                                           |
-| :-----: | ------------------ | ------------------------------------------------------------------------------------------------- |
-|   [1]   | **Fall 2025**      | Runner v2.328+ supports node20 and node24 side-by-side.                                           |
-|   [2]   | **March 4, 2026**  | node24 forced default. node20 actions fail unless `ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION=true`. |
-|   [3]   | **April 30, 2026** | Node.js 20 reaches upstream EOL.                                                                  |
-|   [4]   | **Summer 2026**    | node20 fully removed — environment variable override stops working.                               |
-
-**Early testing:** Set `FORCE_JAVASCRIPT_ACTIONS_TO_NODE24=true` as workflow env var. node24 is incompatible with macOS 13.4 and earlier; ARM32 self-hosted runners unsupported.
+|   [2]   | **`docker`**    | Stable — `using: 'docker'` with `image: 'Dockerfile'`.    |
+|   [3]   | **`composite`** | Stable — `using: 'composite'` with `steps:`.              |
 
 **Toolkit:** `@actions/core@3.x`, `@actions/github@9.x`. Bundle with `@vercel/ncc@0.38.x build index.js --minify`.
 

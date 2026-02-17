@@ -3,7 +3,7 @@
 
 <br>
 
-Exhaustive pattern matching over tagged unions via `Data.taggedEnum`, `Match.type`, `Match.value`, `Match.valueTags`. Concrete enums use direct `$match`/`$is`. Generic enums via `Data.TaggedEnum.WithGenerics` propagate type parameters through constructors and built-in matchers. For error-specific matching (boundary collapse), see `errors.md`.
+Exhaustive pattern matching over tagged unions via `Data.taggedEnum`, `Match.type`, `Match.value`, `Match.valueTags`. Concrete enums use `$match`/`$is`; generic enums via `WithGenerics` propagate type parameters. For error-specific matching, see `errors.md`.
 
 ---
 ## Concrete Tagged Enum
@@ -36,25 +36,22 @@ const terminals =  pending.filter(isTerminal);
 ---
 ## Generic Tagged Enum
 
-`Data.TaggedEnum.WithGenerics<N>` declares N type slots (`this['A']`, `this['B']`, ...) that flow into variant field types. `$match` inherits generic parameters from the constructor and enforces exhaustiveness without explicit type annotation. `$is` returns a type predicate that narrows the generic union to a specific variant.
+`Data.TaggedEnum.WithGenerics<N>` declares N type slots (`this['A']`, `this['B']`) flowing into variant fields. `$match` inherits generic parameters and enforces exhaustiveness; `$is` narrows the generic union to a specific variant.
 
 ```typescript
 import { Data, Effect } from 'effect';
 
 interface OpDef extends Data.TaggedEnum.WithGenerics<2> {
     readonly taggedEnum: {
-        readonly Validate:  { readonly input: this['A'] };
-        readonly Transform: { readonly input: this['A']; readonly format: string };
-        readonly Publish:   { readonly input: this['A']; readonly target: this['B'] };
+        readonly Validate: { readonly input: this['A'] }; readonly Transform: { readonly input: this['A']; readonly format: string };
+        readonly Publish: { readonly input: this['A']; readonly target: this['B'] };
     };
 }
 const Op = Data.taggedEnum<OpDef>();
 type Op<A, B> = Data.TaggedEnum.Value<OpDef, [A, B]>;
 // $match — exhaustive, type params inferred from constructor
 const label = Op.$match(Op.Validate({ input: 42 }), {
-    Validate:  ({ input }) => `validate:${input}`,
-    Transform: ({ format }) => `transform:${format}`,
-    Publish:   ({ target }) => `publish:${target}`,
+    Validate: ({ input }) => `validate:${input}`, Transform: ({ format }) => `transform:${format}`, Publish: ({ target }) => `publish:${target}`,
 });
 // $is — type guard narrowing, composable with filter/filterOrFail
 const publishOps = <A, B>(ops: ReadonlyArray<Op<A, B>>) => ops.filter(Op.$is('Publish'));
@@ -80,14 +77,11 @@ type Command = Data.TaggedEnum<{
     readonly Retire: { readonly id: string; readonly at: Date };
 }>;
 const { Stage, Commit, Retire } = Data.taggedEnum<Command>();
-const execute = (
-    deps: {
-        readonly stage:  (payload: ReadonlyArray<number>, revision: number) => Effect.Effect<void>;
-        readonly commit: (id: string, revision: number) => Effect.Effect<void>;
-        readonly retire: (id: string, at: Date) => Effect.Effect<void>;
-    },
-    command: Command,
-) =>
+const execute = (deps: {
+    readonly stage: (payload: ReadonlyArray<number>, revision: number) => Effect.Effect<void>;
+    readonly commit: (id: string, revision: number) => Effect.Effect<void>;
+    readonly retire: (id: string, at: Date) => Effect.Effect<void>;
+}, command: Command) =>
     Match.type<Command>().pipe(
         Match.tag('Stage',  ({ payload, revision }) => deps.stage(payload, revision)),
         Match.tag('Commit', ({ id, revision }) => deps.commit(id, revision)),
@@ -118,8 +112,7 @@ const escalation = (priority: Priority, retryable: boolean): number =>
     );
 ```
 
-*Match.when:* Accepts partial structural patterns or predicate functions. Narrowing applies automatically.
-*Match.orElse:* Fallback for open-ended matching. Use `Match.exhaustive` only when the union is fully enumerable.
+*Match.when:* Partial structural patterns or predicates with automatic narrowing. *Match.orElse:* Fallback for open-ended matching; use `Match.exhaustive` only when the union is fully enumerable.
 
 ---
 ## Match.valueTags
@@ -149,17 +142,9 @@ const nodeCount = (tree: Leaf | Branch): number =>
 // Reuse Op from above — Effect.fn wraps dispatch with tracing span
 const execute = Effect.fn('Op.execute')(
     <A, B>(op: Op<A, B>): Effect.Effect<string> =>
-        Effect.succeed(Op.$match(op, {
-            Validate:  () => 'validated',
-            Transform: ({ format }) => `transformed:${format}`,
-            Publish:   ({ target }) => `published:${target}`,
-        })),
+        Effect.succeed(Op.$match(op, { Validate: () => 'validated', Transform: ({ format }) => `transformed:${format}`, Publish: ({ target }) => `published:${target}` })),
 );
-const batch = Effect.forEach(
-    [Op.Validate({ input: 42 }), Op.Transform({ input: 42, format: 'json' })],
-    execute,
-    { concurrency: 3 },
-);
+const batch = Effect.forEach([Op.Validate({ input: 42 }), Op.Transform({ input: 42, format: 'json' })], execute, { concurrency: 3 });
 ```
 
 *Reuse:* `Op` is defined once (Generic Tagged Enum section) and dispatched here with `Effect.fn` tracing. One enum definition, multiple dispatch surfaces.
@@ -174,10 +159,8 @@ import { Data, Option } from 'effect';
 
 interface StateDef extends Data.TaggedEnum.WithGenerics<2> {
     readonly taggedEnum: {
-        readonly Idle:    {};
-        readonly Loading: { readonly startedAt: number };
-        readonly Ready:   { readonly data: this['A'] };
-        readonly Failed:  { readonly error: this['B'] };
+        readonly Idle: {}; readonly Loading: { readonly startedAt: number };
+        readonly Ready: { readonly data: this['A'] }; readonly Failed: { readonly error: this['B'] };
     };
 }
 const _enum = Data.taggedEnum<StateDef>();
@@ -188,13 +171,10 @@ const RemoteData = {
     loading: (startedAt: number): RemoteData<never, never> => _enum.Loading({ startedAt }),
     ready:   <A>(data: A): RemoteData<A, never> => _enum.Ready({ data }),
     failed:  <E>(error: E): RemoteData<never, E> => _enum.Failed({ error }),
-    getData: <A, E>(state: RemoteData<A, E>): Option.Option<A> =>
-        _enum.$match(state, {
-            Idle:    () => Option.none(),
-            Loading: () => Option.none(),
-            Ready:   ({ data }) => Option.some(data),
-            Failed:  () => Option.none(),
-        }),
+    getData: <A, E>(state: RemoteData<A, E>): Option.Option<A> => _enum.$match(state, {
+        Idle: () => Option.none(), Loading: () => Option.none(),
+        Ready: ({ data }) => Option.some(data), Failed: () => Option.none(),
+    }),
 } as const;
 type RemoteData<A, E> = Data.TaggedEnum.Value<StateDef, [A, E]>;
 namespace RemoteData { export type Of<A = unknown, E = unknown> = RemoteData<A, E>; }

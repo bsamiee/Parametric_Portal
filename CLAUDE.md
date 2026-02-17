@@ -26,6 +26,28 @@ Operate as senior developer in bleeding-edge Nx/Vite/Effect monorepo with workfl
 - [NEVER] Run bare `nx` commands; use `pnpm exec nx` (ensures correct binary resolution).
 
 ---
+## [1.1][COMMANDS]
+>**Dictum:** *Prescribed commands prevent hallucination.*
+
+<br>
+
+[CRITICAL]: Use exact commands — [NEVER] invent flags, bare `nx`, or `npx nx`.
+
+| [INDEX] | [TASK]          | [COMMAND]                                                                 |
+| :-----: | :-------------- | :------------------------------------------------------------------------ |
+|   [1]   | typecheck       | `pnpm exec nx run-many -t typecheck`                                      |
+|   [2]   | lint            | `npx @biomejs/biome check <files>` *(no Nx target — direct only)*         |
+|   [3]   | quality gate    | `pnpm quality` *(typecheck + biome + knip + sherif)*                      |
+|   [4]   | test (root)     | `pnpm test` *(clears vitest cache; `tests/` dir only)*                    |
+|   [5]   | test (packages) | `pnpm exec nx run-many -t test`                                           |
+|   [6]   | test (affected) | `pnpm exec nx affected -t test --base=main`                               |
+|   [7]   | test (coverage) | `pnpm test:coverage`                                                      |
+|   [8]   | test (mutation) | `pnpm test:mutate` *(incremental; `pnpm clean` first for fresh baseline)* |
+|   [9]   | cache clear     | `pnpm exec nx reset`                                                      |
+|  [10]   | full reset      | `pnpm reset` *(clean + install + rebuild)*                                |
+|  [11]   | single target   | `pnpm exec nx run <project>:<target>`                                     |
+
+---
 ## [2][PHILOSOPHY]
 >**Dictum:** *Philosophy principles guide implementation.*
 

@@ -1,11 +1,13 @@
-# [H1][DOMAIN]
+# [H1][ENTITY_MODULE]
 >**Dictum:** *Entity-centric modules unify schema, command algebra, failure algebra, projections, and execution.*
 
 <br>
 
 Produces one self-contained domain module: schema, projections, command constructors, failure constructors, and a single polymorphic entrypoint (`execute`).
 
-**Workflow:** fill placeholders, remove guidance comments, verify `tsc --noEmit`.
+**Budget:** 225 LOC cap per module. See SKILL.md section 2 for contracts.
+**References:** `objects.md` (schema), `matching.md` (dispatch), `errors.md` (failure algebra), `types.md` (const+namespace merge).
+**Workflow:** fill placeholders, remove guidance blocks, verify `pnpm exec nx run-many -t typecheck`.
 
 **Placeholders**
 

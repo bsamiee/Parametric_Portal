@@ -166,7 +166,6 @@
         "@tanstack/react-virtual": "catalog:",
         "@use-gesture/react": "catalog:",
         "clsx": "catalog:",
-        "colorjs.io": "catalog:",
         "effect": "catalog:",
         "lucide-react": "catalog:",
         "motion": "catalog:",

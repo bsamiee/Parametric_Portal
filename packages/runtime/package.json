@@ -78,7 +78,6 @@
     },
     "devDependencies": {
         "@effect/vitest": "catalog:",
-        "@fast-check/vitest": "catalog:",
         "@testing-library/react": "catalog:",
         "@types/react": "catalog:",
         "@vitest/browser-playwright": "catalog:",

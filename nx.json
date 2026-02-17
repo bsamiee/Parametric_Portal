@@ -295,6 +295,15 @@
             "inputs": ["testing", "^production"],
             "outputs": ["{projectRoot}/coverage", "{workspaceRoot}/test-results"]
         },
+        "test:mutate": {
+            "cache": true,
+            "inputs": ["testing", "^production"],
+            "outputs": [
+                "{workspaceRoot}/test-results/mutation/index.html",
+                "{workspaceRoot}/test-results/mutation/mutation.json",
+                "{workspaceRoot}/test-results/mutation/stryker-incremental.json"
+            ]
+        },
         "test:ui": {
             "cache": false,
             "executor": "nx:run-commands",

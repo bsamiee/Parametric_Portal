@@ -192,7 +192,7 @@ class MetricsService extends Effect.Service<MetricsService>()('server/Metrics', 
         Effect.gen(function* () {
             const metrics = yield* MetricsService;
             const req = yield* HttpServerRequest.HttpServerRequest;
-            const path = (req.url.split('?')[0] ?? '/').split('/').map((seg) =>
+            const path = req.url.split('?')[0]?.split('/').map((seg) =>
                 seg ? ([
                     [/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i, ':uuid'],
                     [/^\d+$/, ':id'],

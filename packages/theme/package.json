@@ -45,7 +45,6 @@
         "effect": "catalog:"
     },
     "devDependencies": {
-        "@fast-check/vitest": "catalog:",
         "fast-check": "catalog:",
         "ts-essentials": "catalog:",
         "typescript": "catalog:",

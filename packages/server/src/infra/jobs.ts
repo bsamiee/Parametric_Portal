@@ -552,6 +552,10 @@ class JobService extends Effect.Service<JobService>()('server/Jobs', {
     }),
 }) {
     static readonly Error = JobError;
+    static readonly Payload = JobPayload;
+    static readonly State = JobState;
+    static readonly StatusEvent = JobStatusEvent;
+    static readonly StatusModel = _STATUS_MODEL;
     static readonly replay = (dlqId: string) => JobService.pipe(Effect.flatMap((jobs) => Telemetry.span(
         Effect.flatMap(DatabaseService, (database) => database.jobDlq.one([{ field: 'id', value: dlqId }])).pipe(
             Effect.flatMap(Option.match({

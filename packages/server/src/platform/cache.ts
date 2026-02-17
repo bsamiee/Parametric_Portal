@@ -27,6 +27,48 @@ const _parseNodes = (raw: string) => raw.split(',').flatMap((entry) => {
     const port = Number(portRaw);
     return host !== '' && Number.isInteger(port) && port >= 1 && port <= 65_535 ? [{ host, port }] : [];
 });
+const _makeKv = (redis: Pick<Redis, 'del' | 'get' | 'set'>) => ({
+    del: (key: string) => _runRedis('del', () => redis.del(key)).pipe(Effect.ignore),
+    get: <A, I = A, R = never>(key: string, schema: S.Schema<A, I, R>) => _runRedis('get', () => redis.get(key)).pipe(
+        Effect.flatMap((value) => value === null ? Effect.succeed(Option.none<A>()) : S.decode(S.parseJson(schema))(value).pipe(Effect.map(Option.some))),
+        Effect.catchAll((error) => Effect.logWarning('cache.kv.get failed', { error: String(error), key }).pipe(Effect.as(Option.none<A>()))),
+    ),
+    set: (key: string, value: unknown, ttl: Duration.Duration) => S.encode(S.parseJson(S.Unknown))(value).pipe(Effect.flatMap((json) => _runRedis('set', () => redis.set(key, json, 'PX', Duration.toMillis(ttl)))), Effect.ignore),
+}) as const;
+const _makeSets = (redis: Pick<Redis, 'expire' | 'sadd' | 'smembers' | 'srem'>) => ({
+    add: (key: string, ...members: readonly string[]) => Match.value(members.length).pipe(
+        Match.when(0, () => Effect.void),
+        Match.orElse(() => _runRedis('sadd', () => redis.sadd(key, ...members)).pipe(Effect.ignore)),
+    ),
+    members: (key: string) => _runRedis('smembers', () => redis.smembers(key)).pipe(Effect.orElseSucceed(() => [] as readonly string[])),
+    remove: (key: string, ...members: readonly string[]) => Match.value(members.length).pipe(
+        Match.when(0, () => Effect.void),
+        Match.orElse(() => _runRedis('srem', () => redis.srem(key, ...members)).pipe(Effect.ignore)),
+    ),
+    touch: (key: string, ttl: Duration.Duration) =>
+        _runRedis('expire', () => redis.expire(key, Math.max(1, Math.ceil(Duration.toSeconds(ttl))))).pipe(Effect.ignore),
+}) as const;
+const _makeKeyRegistry = () => {
+    const refs = new Map<string, Map<string, number>>();
+    const register = (storeId: string, key: string) => {
+        const storeKeys = refs.get(storeId) ?? new Map<string, number>();
+        storeKeys.set(key, (storeKeys.get(key) ?? 0) + 1);
+        refs.set(storeId, storeKeys);
+    };
+    const unregister = (storeId: string, key: string) => {
+        const storeKeys = refs.get(storeId) ?? new Map<string, number>();
+        const nextRefs = Math.max(0, (storeKeys.get(key) ?? 0) - 1);
+        nextRefs === 0 ? storeKeys.delete(key) : storeKeys.set(key, nextRefs);
+        storeKeys.size === 0 ? refs.delete(storeId) : refs.set(storeId, storeKeys);
+    };
+    return { refs, register, unregister } as const;
+};
+const _invalidateLocal = (refs: Map<string, Map<string, number>>, reactivity: { readonly invalidate: (keys: ReadonlyArray<string>) => Effect.Effect<void> }, mode: 'key' | 'pattern', storeId: string, target: string) => {
+    const keys = mode === 'key'
+        ? [target]
+        : [...(refs.get(storeId)?.keys() ?? [])].filter((key) => new RegExp(`^${target.replaceAll(/[$()*+.?[\\\]^{|}]/g, String.raw`\$&`).replaceAll(String.raw`\*`, '.*')}$`).test(key)); // NOSONAR S3358
+    return Effect.forEach(keys, (key) => reactivity.invalidate([`${storeId}:${key}`]), { discard: true }).pipe(Effect.as(keys.length));
+};
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
@@ -86,24 +128,8 @@ class CacheService extends Effect.Service<CacheService>()('server/CacheService',
         subscriber.on('error', (error) => { Effect.runFork(Effect.logError('Redis subscriber error', { error: String(error), mode: config.mode })); });
         const reactivity = yield* Reactivity.make;
         const invalidationChannel = `${config.redisOpts.keyPrefix}cache:invalidate`;
-        const registeredKeyRefs = new Map<string, Map<string, number>>();
-        const registerCacheKey = (storeId: string, key: string) => {
-            const storeKeys = registeredKeyRefs.get(storeId) ?? new Map<string, number>();
-            storeKeys.set(key, (storeKeys.get(key) ?? 0) + 1);
-            registeredKeyRefs.set(storeId, storeKeys);
-        };
-        const unregisterCacheKey = (storeId: string, key: string) => {
-            const storeKeys = registeredKeyRefs.get(storeId) ?? new Map<string, number>();
-            const nextRefs = Math.max(0, (storeKeys.get(key) ?? 0) - 1);
-            nextRefs === 0 ? storeKeys.delete(key) : storeKeys.set(key, nextRefs);
-            storeKeys.size === 0 ? registeredKeyRefs.delete(storeId) : registeredKeyRefs.set(storeId, storeKeys);
-        };
-        const invalidateLocal = (mode: 'key' | 'pattern', storeId: string, target: string) => {
-            const keys = mode === 'key'
-                ? [target]
-                : [...(registeredKeyRefs.get(storeId)?.keys() ?? [])].filter((key) => new RegExp(`^${target.replaceAll(/[$()*+.?[\\\]^{|}]/g, String.raw`\$&`).replaceAll(String.raw`\*`, '.*')}$`).test(key)); // NOSONAR S3358
-            return Effect.forEach(keys, (key) => reactivity.invalidate([`${storeId}:${key}`]), { discard: true }).pipe(Effect.as(keys.length));
-        };
+        const keyRegistry = _makeKeyRegistry();
+        const invalidateLocal = (mode: 'key' | 'pattern', storeId: string, target: string) => _invalidateLocal(keyRegistry.refs, reactivity, mode, storeId, target);
         const _InvSchema = S.parseJson(S.Struct({ mode: S.Literal('key', 'pattern'), storeId: S.String, target: S.String }));
         const publishInvalidation = (payload: typeof _InvSchema.Type) => S.encode(_InvSchema)(payload).pipe(
             Effect.flatMap((json) => _runRedis('publish', () => redis.publish(invalidationChannel, json))), Effect.timeout(Duration.seconds(2)), Effect.ignore,
@@ -112,27 +138,8 @@ class CacheService extends Effect.Service<CacheService>()('server/CacheService',
         subscriber.on('message', (channel, raw) => channel === invalidationChannel && Effect.runFork(
             S.decode(_InvSchema)(raw).pipe(Effect.flatMap((payload) => invalidateLocal(payload.mode, payload.storeId, payload.target)), Effect.catchAll((error) => Effect.logWarning('Malformed invalidation message', { channel, error: String(error) }))),
         ));
-        const kv = {
-            del: (key: string) => _runRedis('del', () => redis.del(key)).pipe(Effect.ignore),
-            get: <A, I = A, R = never>(key: string, schema: S.Schema<A, I, R>) => _runRedis('get', () => redis.get(key)).pipe(
-                Effect.flatMap((value) => value === null ? Effect.succeed(Option.none<A>()) : S.decode(S.parseJson(schema))(value).pipe(Effect.map(Option.some))),
-                Effect.catchAll((error) => Effect.logWarning('cache.kv.get failed', { error: String(error), key }).pipe(Effect.as(Option.none<A>()))),
-            ),
-            set: (key: string, value: unknown, ttl: Duration.Duration) => S.encode(S.parseJson(S.Unknown))(value).pipe(Effect.flatMap((json) => _runRedis('set', () => redis.set(key, json, 'PX', Duration.toMillis(ttl)))), Effect.ignore),
-        } as const;
-        const sets = {
-            add: (key: string, ...members: readonly string[]) => Match.value(members.length).pipe(
-                Match.when(0, () => Effect.void),
-                Match.orElse(() => _runRedis('sadd', () => redis.sadd(key, ...members)).pipe(Effect.ignore)),
-            ),
-            members: (key: string) => _runRedis('smembers', () => redis.smembers(key)).pipe(Effect.orElseSucceed(() => [] as readonly string[])),
-            remove: (key: string, ...members: readonly string[]) => Match.value(members.length).pipe(
-                Match.when(0, () => Effect.void),
-                Match.orElse(() => _runRedis('srem', () => redis.srem(key, ...members)).pipe(Effect.ignore)),
-            ),
-            touch: (key: string, ttl: Duration.Duration) =>
-                _runRedis('expire', () => redis.expire(key, Math.max(1, Math.ceil(Duration.toSeconds(ttl))))).pipe(Effect.ignore),
-        } as const;
+        const kv = _makeKv(redis);
+        const sets = _makeSets(redis);
         const pubsub = {
             duplicate: Effect.sync(() => redis.duplicate()),
             publish: (channel: string, payload: string) => _runRedis('publish', () => redis.publish(channel, payload)),
@@ -147,8 +154,8 @@ class CacheService extends Effect.Service<CacheService>()('server/CacheService',
             _reactivity: reactivity,
             _redis: redis,
             _redisOpts: config.redisOpts,
-            _registerCacheKey: registerCacheKey,
-            _unregisterCacheKey: unregisterCacheKey,
+            _registerCacheKey: keyRegistry.register,
+            _unregisterCacheKey: keyRegistry.unregister,
             kv,
             pubsub,
             sets,
@@ -350,4 +357,4 @@ declare namespace CacheService {
 
 // --- [EXPORT] ----------------------------------------------------------------
 
-export { CacheService };
+export { CacheService, _invalidateLocal, _makeKeyRegistry, _makeKv, _makeSets, _parseNodes, _redisConfig, _runRedis };

@@ -74,6 +74,28 @@ it.effect.prop('det + nondet', { x: _arb }, ({ x }) => Effect.gen(function* () {
 }));
 ```
 
+### [1.4][CONCURRENCY_LAWS]
+
+| [INDEX] | [LAW]               | [FORMULA]                                              | [WHEN_TO_USE]                                |
+| :-----: | ------------------- | ------------------------------------------------------ | -------------------------------------------- |
+|   [1]   | Interruption safety | Fiber interrupt preserves consistent state             | Services managing fibers or long-running ops |
+|   [2]   | Resource bracket    | `acquireRelease` cleans up on success, failure, abort  | Pool connections, file handles, locks        |
+|   [3]   | Ref atomicity       | Concurrent `Ref.update` calls produce consistent state | Shared mutable state across fibers           |
+
+**Interruption safety** -- fork a fiber, interrupt it, verify no resource leak or inconsistent state.
+**Resource bracket** -- `Effect.acquireRelease(acquire, release)` guarantees `release` runs even under interruption. Verify via `it.scoped`.
+**Ref atomicity** -- concurrent `Ref.update` with `Effect.fork` + `Fiber.join`; final value equals sequential application.
+
+### [1.5][TYPE_LEVEL_LAWS]
+
+| [INDEX] | [LAW]               | [MECHANISM]                                        | [WHEN_TO_USE]                       |
+| :-----: | ------------------- | -------------------------------------------------- | ----------------------------------- |
+|   [1]   | Type assertion      | `expectTypeOf(fn).returns.toMatchTypeOf<T>()`      | Exported function return types      |
+|   [2]   | Negative assertion  | `// @ts-expect-error` above invalid call           | Branded types reject raw primitives |
+|   [3]   | Schema type extract | `expectTypeOf<typeof S.Type>().toEqualTypeOf<T>()` | Schema infers expected domain type  |
+
+**Type-level tests** run at compile time -- zero runtime cost. Use alongside algebraic PBT to verify type narrowing, branded type rejection, and schema type inference.
+
 ---
 ## [2][TESTING_STRATEGIES]
 >**Dictum:** *Strategies define HOW to obtain expected values when algebraic laws alone are insufficient.*
@@ -109,11 +131,11 @@ it.effect.prop('differential', { x: _arb }, ({ x }) => Effect.gen(function* () {
 
 Chi-squared uniformity for randomness validation. Parameters:
 
-| [PARAM]            | [VALUE]   | [RATIONALE]                          |
-| ------------------ | --------- | ------------------------------------ |
-| Sample count       | 600+      | Sufficient power for 256-bucket dist |
-| Degrees of freedom | N-1 (255) | 256 byte values minus 1              |
-| Alpha              | 0.01      | Critical value 310.46, FP rate <1%   |
+| [INDEX] | [PARAM]            | [VALUE]   | [RATIONALE]                          |
+| :-----: | ------------------ | --------- | ------------------------------------ |
+|   [1]   | Sample count       | 600+      | Sufficient power for 256-bucket dist |
+|   [2]   | Degrees of freedom | N-1 (255) | 256 byte values minus 1              |
+|   [3]   | Alpha              | 0.01      | Critical value 310.46, FP rate <1%   |
 
 ```typescript
 it.effect('uniformity', () => Effect.gen(function* () {
@@ -177,12 +199,14 @@ it.effect.prop('tenant isolation', { t1: fc.uuid(), t2: fc.uuid(), x: _arb }, ({
 5. **Check domain invariants** -- security boundaries? Size limits? Error codes?
 6. **Pack compatible laws** -- laws sharing the same arbitrary shape go in one `it.effect.prop`.
 
-| [SIGNATURE]            | [CANDIDATE_LAWS]                                                |
-| ---------------------- | --------------------------------------------------------------- |
-| `encode: A -> B`       | Inverse (with decode), determinism, length formula              |
-| `decode: B -> A`       | Inverse (with encode), tampering detection, format bounds       |
-| `diff: (A,A)->P`       | Identity, immutability, homomorphism (composition), equivalence |
-| `hash: A -> H`         | Determinism, reflexivity, differential oracle, known-answer     |
-| `compare: (A,A)->Bool` | Reflexive, symmetric, transitive (equivalence relation)         |
-| `import: S -> [A]`     | Inverse (with export), annihilation, boundary limits            |
-| `normalize: A -> A`    | Idempotent, determinism, preservation                           |
+| [INDEX] | [SIGNATURE]             | [CANDIDATE_LAWS]                                                |
+| :-----: | ----------------------- | --------------------------------------------------------------- |
+|   [1]   | `encode: A -> B`        | Inverse (with decode), determinism, length formula              |
+|   [2]   | `decode: B -> A`        | Inverse (with encode), tampering detection, format bounds       |
+|   [3]   | `diff: (A,A)->P`        | Identity, immutability, homomorphism (composition), equivalence |
+|   [4]   | `hash: A -> H`          | Determinism, reflexivity, differential oracle, known-answer     |
+|   [5]   | `compare: (A,A)->Bool`  | Reflexive, symmetric, transitive (equivalence relation)         |
+|   [6]   | `import: S -> [A]`      | Inverse (with export), annihilation, boundary limits            |
+|   [7]   | `normalize: A -> A`     | Idempotent, determinism, preservation                           |
+|   [8]   | `fork/join: A -> Fiber` | Interruption safety, resource bracket, Ref atomicity            |
+|   [9]   | `Layer.provide: L -> E` | Resource bracket, layer merge correctness                       |

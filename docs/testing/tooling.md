@@ -118,17 +118,16 @@ Configured in `nx.json` plugins array. No manual target configuration required.
 ## [7][COMMANDS]
 >**Dictum:** *Consolidated command reference accelerates execution.*
 
-| [INDEX] | [COMMAND]                       | [PURPOSE]                     |
-| :-----: | ------------------------------- | ----------------------------- |
-|   [1]   | `pnpm exec nx test`             | Run all unit tests            |
-|   [2]   | `pnpm exec nx test @scope/pkg`  | Package-specific tests        |
-|   [3]   | `pnpm exec nx run-many -t test` | Parallel test across projects |
-|   [4]   | `pnpm vitest --ui`              | Open Vitest UI dashboard      |
-|   [5]   | `pnpm vitest --coverage`        | Generate coverage report      |
-|   [6]   | `pnpm test:mutate`              | Run Stryker mutation testing  |
-|   [7]   | `pnpm e2e`                      | Run E2E tests                 |
-|   [8]   | `pnpm e2e:ui`                   | Playwright UI mode            |
-|   [9]   | `pnpm e2e:report`               | View Playwright HTML report   |
+| [INDEX] | [COMMAND]                       | [PURPOSE]                             |
+| :-----: | ------------------------------- | ------------------------------------- |
+|   [1]   | `pnpm exec nx test`             | Run all unit tests                    |
+|   [2]   | `pnpm exec nx test @scope/pkg`  | Package-specific tests                |
+|   [3]   | `pnpm exec nx run-many -t test` | Parallel test across projects         |
+|   [4]   | `pnpm vitest --ui`              | Open Vitest UI dashboard              |
+|   [5]   | `pnpm vitest --coverage`        | Generate coverage report              |
+|   [6]   | `pnpm test:mutate`              | Run Stryker mutation testing          |
+|   [7]   | `pnpm e2e`                      | Run E2E tests (`-- --ui` for UI mode) |
+|   [8]   | `pnpm e2e:report`               | View Playwright HTML report           |
 
 | [INDEX] | [PATH]                     | [CONTENT]                         |
 | :-----: | -------------------------- | --------------------------------- |
