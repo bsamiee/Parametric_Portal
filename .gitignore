@@ -67,6 +67,14 @@ test-results/mutation/stryker-incremental.json
 .vite/
 .scannerwork/
 
+# --- [.NET_ARTIFACTS] ---------------------------------------------------------
+**/bin/
+**/obj/
+**/TestResults/
+diagnostics.sarif
+*.rsuser
+*.suo
+
 # --- [ENVIRONMENT_VARIABLES] --------------------------------------------------
 .env
 .env.local

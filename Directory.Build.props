@@ -1,0 +1,55 @@
+<Project>
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Deterministic>true</Deterministic>
+    <Optimize>true</Optimize>
+    <CheckForOverflowUnderflow>true</CheckForOverflowUnderflow>
+    <AllowUnsafeBlocks>false</AllowUnsafeBlocks>
+
+    <EnableNETAnalyzers>true</EnableNETAnalyzers>
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+    <AnalysisLevel>latest-all</AnalysisLevel>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <ErrorLog Condition="'$(CI)' == 'true'">diagnostics.sarif,version=2.1</ErrorLog>
+
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+    <RestoreLockedMode Condition="'$(CI)' == 'true'">true</RestoreLockedMode>
+    <NuGetAudit>true</NuGetAudit>
+    <NuGetAuditLevel>high</NuGetAuditLevel>
+
+    <LanguageExtCoreVersion>4.4.9</LanguageExtCoreVersion>
+    <FluentValidationVersion>12.1.1</FluentValidationVersion>
+    <ThinktectureRuntimeExtensionsVersion>10.0.0</ThinktectureRuntimeExtensionsVersion>
+    <PollyCoreVersion>8.6.5</PollyCoreVersion>
+    <NodaTimeVersion>3.3.0</NodaTimeVersion>
+    <OpenTelemetryVersion>1.15.0</OpenTelemetryVersion>
+    <SerilogAspNetCoreVersion>10.0.0</SerilogAspNetCoreVersion>
+    <SerilogSinkConsoleVersion>6.1.1</SerilogSinkConsoleVersion>
+    <SerilogSinkOpenTelemetryVersion>4.2.0</SerilogSinkOpenTelemetryVersion>
+    <SerilogEnricherDemystifierVersion>1.0.3</SerilogEnricherDemystifierVersion>
+    <SerilogExceptionsVersion>5.4.0</SerilogExceptionsVersion>
+
+    <ContinuousIntegrationBuild Condition="'$(CI)' == 'true'">true</ContinuousIntegrationBuild>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="LanguageExt.Core"                             Version="$(LanguageExtCoreVersion)" />
+    <PackageReference Include="FluentValidation"                             Version="$(FluentValidationVersion)" />
+    <PackageReference Include="Thinktecture.Runtime.Extensions"              Version="$(ThinktectureRuntimeExtensionsVersion)" />
+    <PackageReference Include="Polly.Core"                                   Version="$(PollyCoreVersion)" />
+    <PackageReference Include="NodaTime"                                     Version="$(NodaTimeVersion)" />
+    <PackageReference Include="OpenTelemetry.Extensions.Hosting"             Version="$(OpenTelemetryVersion)" />
+    <PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="$(OpenTelemetryVersion)" />
+    <PackageReference Include="OpenTelemetry.Instrumentation.AspNetCore"     Version="$(OpenTelemetryVersion)" />
+    <PackageReference Include="OpenTelemetry.Instrumentation.Http"           Version="$(OpenTelemetryVersion)" />
+    <PackageReference Include="OpenTelemetry.Instrumentation.Runtime"        Version="$(OpenTelemetryVersion)" />
+    <PackageReference Include="Serilog.AspNetCore"                           Version="$(SerilogAspNetCoreVersion)" />
+    <PackageReference Include="Serilog.Sinks.Console"                        Version="$(SerilogSinkConsoleVersion)" />
+    <PackageReference Include="Serilog.Sinks.OpenTelemetry"                  Version="$(SerilogSinkOpenTelemetryVersion)" />
+    <PackageReference Include="Serilog.Enrichers.Demystifier"                Version="$(SerilogEnricherDemystifierVersion)" />
+    <PackageReference Include="Serilog.Exceptions"                           Version="$(SerilogExceptionsVersion)" />
+  </ItemGroup>
+</Project>

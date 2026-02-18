@@ -80,8 +80,8 @@ const makeAssetRepo = Effect.gen(function* () {
 const makeAuditRepo = Effect.gen(function* () {
     const repository = yield* repo(AuditLog, 'audit_logs', { scoped: 'appId' });
     return { ...repository,
-        bySubject: (type: string, id: string, limit: number, cursor?: string, { after, before, operation }: { after?: Date; before?: Date; operation?: S.Schema.Type<typeof AuditOperationSchema> } = {}) => repository.page([{ field: 'targetType', value: type }, { field: 'targetId', value: id }, ...repository.preds({ after, before, operation })], { cursor, limit }),
-        byUser: (userId: string, limit: number, cursor?: string, { after, before, operation }: { after?: Date; before?: Date; operation?: S.Schema.Type<typeof AuditOperationSchema> } = {}) => repository.page(repository.preds({ after, before, operation, userId }), { cursor, limit }),
+        bySubject: (type: string, id: string, limit: number, cursor?: string, { after, before, operation }: { after?: Date; before?: Date; operation?: S.Schema.Type<typeof AuditOperationSchema> } = {}) => repository.page([{ field: 'targetType', value: type }, { field: 'targetId', value: id }, ...repository.preds({ after, before, operation })], { limit, ...(cursor !== undefined ? { cursor } : {}) }),
+        byUser: (userId: string, limit: number, cursor?: string, { after, before, operation }: { after?: Date; before?: Date; operation?: S.Schema.Type<typeof AuditOperationSchema> } = {}) => repository.page(repository.preds({ after, before, operation, userId }), { limit, ...(cursor !== undefined ? { cursor } : {}) }),
         log: repository.insert,
     };
 });

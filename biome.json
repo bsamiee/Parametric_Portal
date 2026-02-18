@@ -4,7 +4,7 @@
     "vcs": { "enabled": true, "clientKind": "git", "useIgnoreFile": true, "defaultBranch": "main" },
     "files": {
         "ignoreUnknown": true,
-        "includes": ["**", "!.claude/settings.json", "!.github/n8n-workflows", "!.mcp.json"]
+        "includes": ["**", "!.claude/settings.json", "!.github/n8n-workflows", "!.mcp.json", "!**/packages.lock.json"]
     },
     "assist": {
         "actions": { "source": { "useSortedProperties": "on", "organizeImports": "on", "useSortedKeys": "on" } }

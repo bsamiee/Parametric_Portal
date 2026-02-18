@@ -5,6 +5,22 @@
     "namedInputs": {
         "default": ["{projectRoot}/**/*", "sharedGlobals"],
         "docker": ["{projectRoot}/Dockerfile", "{projectRoot}/.dockerignore", "production"],
+        "dotnetShared": [
+            "{workspaceRoot}/Directory.Build.props",
+            "{workspaceRoot}/Directory.Build.targets",
+            { "runtime": "dotnet --version" }
+        ],
+        "dotnetSources": [
+            "{projectRoot}/**/*.cs",
+            "{projectRoot}/**/*.csproj",
+            "{projectRoot}/**/*.fsproj",
+            "{projectRoot}/**/*.vbproj",
+            "{projectRoot}/**/*.props",
+            "{projectRoot}/**/*.targets",
+            "{projectRoot}/**/*.json",
+            "{projectRoot}/**/*.config",
+            "dotnetShared"
+        ],
         "infrastructure": [
             "{workspaceRoot}/infrastructure/**/*.yaml",
             "{workspaceRoot}/.github/workflows/*.yml",
@@ -82,6 +98,37 @@
                 "defaultPlatform": "linux/amd64"
             },
             "plugin": "@nx/docker"
+        },
+        {
+            "exclude": ["tools/**/*", "**/node_modules/**", "**/dist/**", "**/bin/**", "**/obj/**"],
+            "include": ["apps/**/*.csproj", "apps/**/*.fsproj", "apps/**/*.vbproj"],
+            "options": {
+                "build": {
+                    "targetName": "build:cs"
+                },
+                "clean": {
+                    "targetName": "clean:cs"
+                },
+                "pack": {
+                    "targetName": "pack:cs"
+                },
+                "publish": {
+                    "targetName": "publish:cs"
+                },
+                "restore": {
+                    "targetName": "restore:cs"
+                },
+                "run": {
+                    "targetName": "run:cs"
+                },
+                "test": {
+                    "targetName": "test:cs"
+                },
+                "watch": {
+                    "targetName": "watch:cs"
+                }
+            },
+            "plugin": "@nx/dotnet"
         },
         {
             "include": ["playwright.config.ts"],
@@ -200,6 +247,15 @@
             "inputs": ["production", "^production", "{workspaceRoot}/vite.factory.ts"],
             "outputs": ["{projectRoot}/dist/**/*.js", "{projectRoot}/dist/**/*.d.ts", "{projectRoot}/dist/**/*.map"]
         },
+        "build:cs": {
+            "dependsOn": ["restore:cs", "^build:cs"],
+            "inputs": ["dotnetSources", "^dotnetSources"],
+            "outputs": ["{projectRoot}/bin", "{projectRoot}/obj"]
+        },
+        "clean:cs": {
+            "cache": false,
+            "inputs": ["dotnetSources", "^dotnetSources"]
+        },
         "dev": {
             "cache": false,
             "configurations": {
@@ -275,6 +331,16 @@
                 "cwd": "{workspaceRoot}"
             }
         },
+        "pack:cs": {
+            "dependsOn": ["build:cs"],
+            "inputs": ["dotnetSources", "^dotnetSources"],
+            "outputs": ["{projectRoot}/bin/**/*.nupkg"]
+        },
+        "publish:cs": {
+            "dependsOn": ["build:cs"],
+            "inputs": ["dotnetSources", "^dotnetSources"],
+            "outputs": ["{projectRoot}/bin/**/publish"]
+        },
         "pwa:icons": {
             "cache": false,
             "executor": "nx:run-commands",
@@ -291,9 +357,23 @@
                 "cwd": "{projectRoot}"
             }
         },
+        "restore:cs": {
+            "cache": false,
+            "inputs": ["dotnetSources", "^dotnetSources"]
+        },
+        "run:cs": {
+            "cache": false,
+            "continuous": true
+        },
         "test": {
             "inputs": ["testing", "^production"],
             "outputs": ["{projectRoot}/coverage", "{workspaceRoot}/test-results"]
+        },
+        "test:cs": {
+            "cache": true,
+            "dependsOn": ["build:cs"],
+            "inputs": ["dotnetSources", "^dotnetSources"],
+            "outputs": ["{projectRoot}/TestResults", "{workspaceRoot}/test-results"]
         },
         "test:mutate": {
             "cache": true,
@@ -321,6 +401,10 @@
                 "command": "tsc --project tsconfig.json --noEmit",
                 "cwd": "{projectRoot}"
             }
+        },
+        "watch:cs": {
+            "cache": false,
+            "continuous": true
         }
     },
     "useInferencePlugins": false,

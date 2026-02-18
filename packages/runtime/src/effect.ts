@@ -26,7 +26,7 @@ const _buildResult = <A, E>(state: AsyncState.Of<A, E>) => ({
 }) as const;
 const _withMiddleware = <A, E, R>(
     effect: Effect.Effect<A, E, R>,
-    config: { readonly retry?: RuntimeEffect.RetryConfig<E>; readonly timeout?: Duration.DurationInput },): Effect.Effect<A, E, R> =>
+    config: { readonly retry?: RuntimeEffect.RetryConfig<E> | undefined; readonly timeout?: Duration.DurationInput | undefined },): Effect.Effect<A, E, R> =>
     effect.pipe(
         config.timeout ? Effect.timeoutFail({ duration: config.timeout, onTimeout: () => new Error('Timeout') as E }) : identity,
         config.retry ? Effect.retry({ schedule: config.retry.schedule, while: config.retry.while }) : identity,

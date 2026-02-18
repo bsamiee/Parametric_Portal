@@ -78,7 +78,7 @@ import json, sys, subprocess
 from pathlib import Path
 B: Final = {
     "fmt": {".py": ["ruff", "format"], ".ts": ["biome", "format", "--write"]},
-    "chk": {".py": ["basedpyright", "--outputjson"]},
+    "chk": {".py": ["pyright", "--outputjson"]},
 }
 run = lambda cmd, p: subprocess.run([*cmd, str(p)], capture_output=True, text=True, timeout=30)
 slim = lambda out: "\n".join(f"{e['range']['start']['line']}:{e['message']}" for e in json.loads(out).get("generalDiagnostics", [])[:5])

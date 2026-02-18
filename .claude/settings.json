@@ -32,7 +32,7 @@
   "hooks": {
     "SessionStart": [
       {
-        "matcher": "startup|resume",
+        "matcher": "startup|resume|compact",
         "hooks": [
           {
             "type": "command",

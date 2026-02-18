@@ -20,7 +20,11 @@ const ENV = Object.freeze({
 // --- Pure Functions ----------------------------------------------------------
 
 const CMD = Object.freeze({
-    cs: { build: 'dotnet build', lint: 'dotnet format --verify-no-changes', test: 'dotnet test' },
+    cs: {
+        build: 'nx run-many -t build:cs',
+        lint: "find apps -name '*.csproj' -exec env -u DOTNET_ROOT dotnet format --verify-no-changes {} \\;",
+        test: 'nx run-many -t test:cs',
+    },
     ts: { build: 'nx run-many -t typecheck', lint: 'nx run-many -t check', test: 'nx run-many -t test' },
 } as const)[ENV.lang];
 

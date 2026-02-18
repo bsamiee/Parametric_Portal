@@ -52,6 +52,7 @@
         "@effect/platform-browser": "catalog:",
         "@effect/vitest": "catalog:",
         "@mermaid-js/mermaid-cli": "catalog:",
+        "@nx/dotnet": "catalog:",
         "@nx/docker": "catalog:",
         "@nx/js": "catalog:",
         "@nx/playwright": "catalog:",

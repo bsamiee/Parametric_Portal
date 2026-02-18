@@ -154,7 +154,7 @@ def _format_xml(skills: list[SkillEntry], targets: frozenset[str]) -> str:
 <br>
 
 ```toml
-[tool.basedpyright]
+[tool.pyright]
 typeCheckingMode = "all"
 pythonVersion = "3.14"
 
@@ -165,5 +165,5 @@ select = ["E", "F", "W", "B", "I", "UP", "ANN", "S", "C90"]
 
 | [GATE] | [COMMAND]                             |
 | ------ | ------------------------------------- |
-| Type   | `basedpyright .`                      |
+| Type   | `pyright .`                           |
 | Lint   | `ruff check --fix . && ruff format .` |

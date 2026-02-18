@@ -47,6 +47,11 @@ jobs:
       - name: Setup Environment
         uses: ./.github/actions/node-env
 
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@baa11fbfe1d6520db94683bd5c7a3818018e4309 # v5.1.0
+        with:
+          dotnet-version: 9.0.x
+
       - name: Restore Nx Cache
         uses: actions/cache@v4
         with:
@@ -91,6 +96,28 @@ jobs:
         if: steps.auto-fix.outputs.has-changes != 'true'
         run: pnpm exec nx affected -t lint,typecheck,build --parallel=4
 
+      - name: .NET Quality Gates (Restore, Build)
+        if: steps.auto-fix.outputs.has-changes != 'true'
+        run: |
+          set -euo pipefail
+          cs_projects="$(pnpm exec nx show projects --withTarget=build:cs --json)"
+          if [ "$cs_projects" = "[]" ]; then
+            echo "[INFO] No .NET projects with build:cs target found."
+            exit 0
+          fi
+          pnpm exec nx affected -t restore:cs,build:cs --parallel=2
+
+      - name: .NET Format Gate
+        if: steps.auto-fix.outputs.has-changes != 'true'
+        run: |
+          set -euo pipefail
+          cs_projects="$(pnpm exec nx show projects --withTarget=build:cs --json)"
+          if [ "$cs_projects" = "[]" ]; then
+            echo "[INFO] No .NET projects with build:cs target found."
+            exit 0
+          fi
+          find apps -name '*.csproj' -exec env -u DOTNET_ROOT dotnet format --verify-no-changes {} \;
+
       - name: Get Playwright version
         if: steps.auto-fix.outputs.has-changes != 'true'
         id: playwright-version
@@ -115,6 +142,38 @@ jobs:
       - name: Test
         if: steps.auto-fix.outputs.has-changes != 'true'
         run: pnpm exec nx affected -t test -- --coverage
+
+      - name: .NET Test
+        if: steps.auto-fix.outputs.has-changes != 'true'
+        run: |
+          set -euo pipefail
+          cs_projects="$(pnpm exec nx show projects --withTarget=test:cs --json)"
+          if [ "$cs_projects" = "[]" ]; then
+            echo "[INFO] No .NET projects with test:cs target found."
+            exit 0
+          fi
+          pnpm exec nx affected -t test:cs --parallel=2
+
+      - name: Biome SARIF Report
+        if: steps.auto-fix.outputs.has-changes != 'true'
+        continue-on-error: true
+        run: npx @biomejs/biome ci --reporter=sarif --reporter-file=biome-results.sarif .
+
+      - name: Upload Biome SARIF
+        if: always() && steps.auto-fix.outputs.has-changes != 'true'
+        uses: github/codeql-action/upload-sarif@5d4e8d1aca955e8d8589aabd499c5cae939e33c7 # v4.31.9
+        with:
+          sarif_file: biome-results.sarif
+          category: biome
+        continue-on-error: true
+
+      - name: Upload .NET SARIF
+        if: always() && steps.auto-fix.outputs.has-changes != 'true'
+        uses: github/codeql-action/upload-sarif@5d4e8d1aca955e8d8589aabd499c5cae939e33c7 # v4.31.9
+        with:
+          sarif_file: apps/dotnet-service/diagnostics.sarif
+          category: dotnet-roslyn
+        continue-on-error: true
 
       - name: Upload Coverage
         if: always()
@@ -247,16 +306,19 @@ jobs:
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
 
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@baa11fbfe1d6520db94683bd5c7a3818018e4309 # v5.1.0
+        with:
+          dotnet-version: 9.0.x
+
       - uses: github/codeql-action/init@5d4e8d1aca955e8d8589aabd499c5cae939e33c7 # v4.31.9
         with:
-          languages: javascript-typescript
+          languages: javascript-typescript,csharp
           queries: security-and-quality
 
       - uses: github/codeql-action/autobuild@5d4e8d1aca955e8d8589aabd499c5cae939e33c7 # v4.31.9
 
       - uses: github/codeql-action/analyze@5d4e8d1aca955e8d8589aabd499c5cae939e33c7 # v4.31.9
-        with:
-          category: '/language:javascript-typescript'
 
   secrets-scan:
     name: Secrets Scanning

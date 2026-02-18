@@ -1,0 +1,270 @@
+{
+  "version": 1,
+  "dependencies": {
+    "net10.0": {
+      "FluentValidation": {
+        "type": "Direct",
+        "requested": "[12.1.1, )",
+        "resolved": "12.1.1",
+        "contentHash": "EPpkIe1yh1a0OXyC100oOA8WMbZvqUu5plwhvYcb7oSELfyUZzfxV48BLhvs3kKo4NwG7MGLNgy1RJiYtT8Dpw=="
+      },
+      "LanguageExt.Core": {
+        "type": "Direct",
+        "requested": "[4.4.9, )",
+        "resolved": "4.4.9",
+        "contentHash": "K9VGWkThJkaomifa3zcmwysw1BaSqIZZPZc6trBnJN8u9mpmA/cMMwCWEa/v7bPv/+NnG6PbyIDB7HtxBX7yCQ==",
+        "dependencies": {
+          "Microsoft.Bcl.AsyncInterfaces": "7.0.0"
+        }
+      },
+      "NodaTime": {
+        "type": "Direct",
+        "requested": "[3.3.0, )",
+        "resolved": "3.3.0",
+        "contentHash": "zmUEQPp9yXyGAqWSBhxfwdDhRh4EV04lvYn4P5bUb6dTz1m5AXTYaeSLQ447YLPI2Ge5VGFj20G2DWg5gtiXZg=="
+      },
+      "OpenTelemetry.Exporter.OpenTelemetryProtocol": {
+        "type": "Direct",
+        "requested": "[1.15.0, )",
+        "resolved": "1.15.0",
+        "contentHash": "VH8ANc/js9IRvfYt0Q2UaAxNCOWm+IU+vWrtoH7pfx4oWPVdISUt+9uWfBCFMWZg5WzQip5dhslyDjeyZXXfSQ==",
+        "dependencies": {
+          "OpenTelemetry": "1.15.0"
+        }
+      },
+      "OpenTelemetry.Extensions.Hosting": {
+        "type": "Direct",
+        "requested": "[1.15.0, )",
+        "resolved": "1.15.0",
+        "contentHash": "RixjKyB1pbYGhWdvPto4KJs+exdQknJsnjUO9WszdLles5Vcd0EYzxPNJdwmLjYfP+Jfbr4B5nktM4ZgeHSWtg==",
+        "dependencies": {
+          "OpenTelemetry": "1.15.0"
+        }
+      },
+      "OpenTelemetry.Instrumentation.AspNetCore": {
+        "type": "Direct",
+        "requested": "[1.15.0, )",
+        "resolved": "1.15.0",
+        "contentHash": "mte1nRYefxjed2syXgVWq3UCfMKO7MkebvTZmf0O1aLgVgCktLsVjQ6mftyjIbWGBBCHN0wg+Glxj8BSFS70pQ==",
+        "dependencies": {
+          "OpenTelemetry.Api.ProviderBuilderExtensions": "[1.15.0, 2.0.0)"
+        }
+      },
+      "OpenTelemetry.Instrumentation.Http": {
+        "type": "Direct",
+        "requested": "[1.15.0, )",
+        "resolved": "1.15.0",
+        "contentHash": "uToc7bUp8IEdb0ny9mKsL6FrrYelINPzxxiSShJgOf4XmQc4Azww6S5RjRj24YhsOn2a1MABOrxfVTZXtDk4Eg==",
+        "dependencies": {
+          "OpenTelemetry.Api.ProviderBuilderExtensions": "[1.15.0, 2.0.0)"
+        }
+      },
+      "OpenTelemetry.Instrumentation.Runtime": {
+        "type": "Direct",
+        "requested": "[1.15.0, )",
+        "resolved": "1.15.0",
+        "contentHash": "OOvpqR/j2Pb6+tWhHNODIbSJ53Or/MDtTiXEyrsWI02K2lLAgvBFcxUOrHggS/8015cYR3AdSaXv6NZrkz5yQA==",
+        "dependencies": {
+          "OpenTelemetry.Api": "[1.15.0, 2.0.0)"
+        }
+      },
+      "Polly.Core": {
+        "type": "Direct",
+        "requested": "[8.6.5, )",
+        "resolved": "8.6.5",
+        "contentHash": "t+sUVrIwvo7UmsgHGgOG9F0GDZSRIm47u2ylH17Gvcv1q5hNEwgD5GoBlFyc0kh/pebmPyrAgvGsR/65ZBaXlg=="
+      },
+      "Serilog.AspNetCore": {
+        "type": "Direct",
+        "requested": "[10.0.0, )",
+        "resolved": "10.0.0",
+        "contentHash": "a/cNa1mY4On1oJlfGG1wAvxjp5g7OEzk/Jf/nm7NF9cWoE7KlZw1GldrifUBWm9oKibHkR7Lg/l5jy3y7ACR8w==",
+        "dependencies": {
+          "Serilog": "4.3.0",
+          "Serilog.Extensions.Hosting": "10.0.0",
+          "Serilog.Formatting.Compact": "3.0.0",
+          "Serilog.Settings.Configuration": "10.0.0",
+          "Serilog.Sinks.Console": "6.1.1",
+          "Serilog.Sinks.Debug": "3.0.0",
+          "Serilog.Sinks.File": "7.0.0"
+        }
+      },
+      "Serilog.Enrichers.Demystifier": {
+        "type": "Direct",
+        "requested": "[1.0.3, )",
+        "resolved": "1.0.3",
+        "contentHash": "+4Kf7eomQs1TMPcsF097g0GqiChpjgNMBf9bFpSjGGijT1q+aDWo9xMcWJjowF1o5zyE6TD6QInzajfo6RkmRw==",
+        "dependencies": {
+          "Ben.Demystifier": "0.4.1",
+          "Serilog": "2.11.0"
+        }
+      },
+      "Serilog.Exceptions": {
+        "type": "Direct",
+        "requested": "[5.4.0, )",
+        "resolved": "5.4.0",
+        "contentHash": "lvj5k8XkjKhn4A9llOwPwVL5n42OpWGtsoLY4dOwTJg98NxFxQn1jSWOnTeHJtW1JUzXXRvG3JHSwoETZll5KA==",
+        "dependencies": {
+          "Serilog": "2.8.0",
+          "System.Reflection.TypeExtensions": "4.7.0"
+        }
+      },
+      "Serilog.Sinks.Console": {
+        "type": "Direct",
+        "requested": "[6.1.1, )",
+        "resolved": "6.1.1",
+        "contentHash": "8jbqgjUyZlfCuSTaJk6lOca465OndqOz3KZP6Cryt/IqZYybyBu7GP0fE/AXBzrrQB3EBmQntBFAvMVz1COvAA==",
+        "dependencies": {
+          "Serilog": "4.0.0"
+        }
+      },
+      "Serilog.Sinks.OpenTelemetry": {
+        "type": "Direct",
+        "requested": "[4.2.0, )",
+        "resolved": "4.2.0",
+        "contentHash": "PzMCyE5G19tjr5IZEi5qg+4UU5QrxBEoBEMu/hhYybTrGKXqUDiSGWKZNUDBgelaVKqLADlsmlJVyKce5SyPrg==",
+        "dependencies": {
+          "Google.Protobuf": "3.30.1",
+          "Grpc.Net.Client": "2.70.0",
+          "Serilog": "4.2.0"
+        }
+      },
+      "Thinktecture.Runtime.Extensions": {
+        "type": "Direct",
+        "requested": "[10.0.0, )",
+        "resolved": "10.0.0",
+        "contentHash": "SMD8CMaZ0XTaapBLbCdZueU4z+eSFrRC21wibeI4u8vQ5HkgiEB8DBV88tg4rIB1nmYIopl54j8zYKlnUtYucA==",
+        "dependencies": {
+          "Thinktecture.Runtime.Extensions.SourceGenerator": "10.0.0"
+        }
+      },
+      "Ben.Demystifier": {
+        "type": "Transitive",
+        "resolved": "0.4.1",
+        "contentHash": "axFeEMfmEORy3ipAzOXG/lE+KcNptRbei3F0C4kQCdeiQtW+qJW90K5iIovITGrdLt8AjhNCwk5qLSX9/rFpoA=="
+      },
+      "Google.Protobuf": {
+        "type": "Transitive",
+        "resolved": "3.30.1",
+        "contentHash": "HeWXDQBabQn/sCGicbeLJ0HMunknfC4FdLrOQOsaMJHcpqx3HVIpyyJqTrqJlWnza870twhOb+rBcaTiC/TlNA=="
+      },
+      "Grpc.Core.Api": {
+        "type": "Transitive",
+        "resolved": "2.70.0",
+        "contentHash": "66UotvWcSIq41oiQhLWcQACyKPM4umxXNiht5DQTLZJfNwEswWOcS7Z0xIEHyNIBE7ZpjotH22bEjTkvhPxmVw=="
+      },
+      "Grpc.Net.Client": {
+        "type": "Transitive",
+        "resolved": "2.70.0",
+        "contentHash": "xNv0FFCVJa5S1beUtye82WFCxKThuE1jbN8DO1x1Rj8VSIWXLBUmfSID5a1fGzsU2R/EMfwPoWclJ2RMfQuGXw==",
+        "dependencies": {
+          "Grpc.Net.Common": "2.70.0"
+        }
+      },
+      "Grpc.Net.Common": {
+        "type": "Transitive",
+        "resolved": "2.70.0",
+        "contentHash": "rBdEUMyCwa+iB8mqC6JKyPbj3SBHHkReJj/yy/XKJI63GcG6w9DJMMGTVcYHqq4Ci2W4m0HT4jt2pFfFscar8g==",
+        "dependencies": {
+          "Grpc.Core.Api": "2.70.0"
+        }
+      },
+      "Microsoft.Bcl.AsyncInterfaces": {
+        "type": "Transitive",
+        "resolved": "7.0.0",
+        "contentHash": "3aeMZ1N0lJoSyzqiP03hqemtb1BijhsJADdobn/4nsMJ8V1H+CrpuduUe4hlRdx+ikBQju1VGjMD1GJ3Sk05Eg=="
+      },
+      "Microsoft.Extensions.DependencyModel": {
+        "type": "Transitive",
+        "resolved": "10.0.0",
+        "contentHash": "RFYJR7APio/BiqdQunRq6DB+nDB6nc2qhHr77mlvZ0q0BT8PubMXN7XicmfzCbrDE/dzhBnUKBRXLTcqUiZDGg=="
+      },
+      "OpenTelemetry": {
+        "type": "Transitive",
+        "resolved": "1.15.0",
+        "contentHash": "7mS/oZFF8S6xyqGQfMU1btp0nXJQUPWV535Vp/XMLYwRAUv36xQN+U4vufWBF1+z4HnRTOwuFHtUSGnHbyN6FQ==",
+        "dependencies": {
+          "OpenTelemetry.Api.ProviderBuilderExtensions": "1.15.0"
+        }
+      },
+      "OpenTelemetry.Api": {
+        "type": "Transitive",
+        "resolved": "1.15.0",
+        "contentHash": "vk5OGdf6K9kQScCWo3bRjhDWCv6Pqw92IpX4dlARZ8B1WL7/2NGTDtCkkw42eQf7UdwyoHKzVvMH/PtL8d6z7w=="
+      },
+      "OpenTelemetry.Api.ProviderBuilderExtensions": {
+        "type": "Transitive",
+        "resolved": "1.15.0",
+        "contentHash": "OnuSUlRpGvowkOzGFQfy+KZFu0cITfKfh2IYJJiZskxVJiOuexwOOuvfDAgpJdmTzVWAHjYdz2shcHZaJ06UjQ==",
+        "dependencies": {
+          "OpenTelemetry.Api": "1.15.0"
+        }
+      },
+      "Serilog": {
+        "type": "Transitive",
+        "resolved": "4.3.0",
+        "contentHash": "+cDryFR0GRhsGOnZSKwaDzRRl4MupvJ42FhCE4zhQRVanX0Jpg6WuCBk59OVhVDPmab1bB+nRykAnykYELA9qQ=="
+      },
+      "Serilog.Extensions.Hosting": {
+        "type": "Transitive",
+        "resolved": "10.0.0",
+        "contentHash": "E7juuIc+gzoGxgzFooFgAV8g9BfiSXNKsUok9NmEpyAXg2odkcPsMa/Yo4axkJRlh0se7mkYQ1GXDaBemR+b6w==",
+        "dependencies": {
+          "Serilog": "4.3.0",
+          "Serilog.Extensions.Logging": "10.0.0"
+        }
+      },
+      "Serilog.Extensions.Logging": {
+        "type": "Transitive",
+        "resolved": "10.0.0",
+        "contentHash": "vx0kABKl2dWbBhhqAfTOk53/i8aV/5VaT3a6il9gn72Wqs2pM7EK2OB6No6xdqK2IaY6Zf9gdjLuK9BVa2rT+Q==",
+        "dependencies": {
+          "Serilog": "4.2.0"
+        }
+      },
+      "Serilog.Formatting.Compact": {
+        "type": "Transitive",
+        "resolved": "3.0.0",
+        "contentHash": "wQsv14w9cqlfB5FX2MZpNsTawckN4a8dryuNGbebB/3Nh1pXnROHZov3swtu3Nj5oNG7Ba+xdu7Et/ulAUPanQ==",
+        "dependencies": {
+          "Serilog": "4.0.0"
+        }
+      },
+      "Serilog.Settings.Configuration": {
+        "type": "Transitive",
+        "resolved": "10.0.0",
+        "contentHash": "LNq+ibS1sbhTqPV1FIE69/9AJJbfaOhnaqkzcjFy95o+4U+STsta9mi97f1smgXsWYKICDeGUf8xUGzd/52/uA==",
+        "dependencies": {
+          "Microsoft.Extensions.DependencyModel": "10.0.0",
+          "Serilog": "4.3.0"
+        }
+      },
+      "Serilog.Sinks.Debug": {
+        "type": "Transitive",
+        "resolved": "3.0.0",
+        "contentHash": "4BzXcdrgRX7wde9PmHuYd9U6YqycCC28hhpKonK7hx0wb19eiuRj16fPcPSVp0o/Y1ipJuNLYQ00R3q2Zs8FDA==",
+        "dependencies": {
+          "Serilog": "4.0.0"
+        }
+      },
+      "Serilog.Sinks.File": {
+        "type": "Transitive",
+        "resolved": "7.0.0",
+        "contentHash": "fKL7mXv7qaiNBUC71ssvn/dU0k9t0o45+qm2XgKAlSt19xF+ijjxyA3R6HmCgfKEKwfcfkwWjayuQtRueZFkYw==",
+        "dependencies": {
+          "Serilog": "4.2.0"
+        }
+      },
+      "System.Reflection.TypeExtensions": {
+        "type": "Transitive",
+        "resolved": "4.7.0",
+        "contentHash": "VybpaOQQhqE6siHppMktjfGBw1GCwvCqiufqmP8F1nj7fTUNtW35LOEt3UZTEsECfo+ELAl/9o9nJx3U91i7vA=="
+      },
+      "Thinktecture.Runtime.Extensions.SourceGenerator": {
+        "type": "Transitive",
+        "resolved": "10.0.0",
+        "contentHash": "pc08h1dR+QUEdAxZLd5yMfYfvtb4EshmNOfmBbjMOJMKTFL3ASecX5U6vALra8TcIOonfeL6V2zwKoJCuCGPDQ=="
+      }
+    }
+  }
+}

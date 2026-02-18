@@ -5,6 +5,7 @@
         "allowUnusedLabels": false,
         "customConditions": ["types", "import"],
         "erasableSyntaxOnly": true,
+        "exactOptionalPropertyTypes": true,
         "forceConsistentCasingInFileNames": true,
         "isolatedDeclarations": false,
         "isolatedModules": true,

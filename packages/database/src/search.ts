@@ -210,7 +210,12 @@ class SearchRepo extends Effect.Service<SearchRepo>()('database/Search', {
             execute: (parameters) => {
                 const hasCursor = parameters.cursorRank !== undefined && parameters.cursorId !== undefined;
                 const cursorFilter = hasCursor ? sql`WHERE (paged.rank, paged.entity_id) < (${parameters.cursorRank}, ${parameters.cursorId}::uuid)` : sql``;
-                const { ctes, query } = _buildRankedCtes(parameters);
+                const { ctes, query } = _buildRankedCtes({
+                    entityTypes: parameters.entityTypes, includeGlobal: parameters.includeGlobal, scopeId: parameters.scopeId, term: parameters.term,
+                    ...(parameters.embeddingJson !== undefined ? { embeddingJson: parameters.embeddingJson } : {}),
+                    ...(parameters.dimensions !== undefined ? { dimensions: parameters.dimensions } : {}),
+                    ...(parameters.model !== undefined ? { model: parameters.model } : {}),
+                });
                 const snippetExpr = parameters.includeSnippets
                     ? sql`ts_headline(${_CONFIG.regconfig}::regconfig, coalesce(documents.display_text, '') || ' ' || coalesce(documents.content_text, '') || ' ' || coalesce((SELECT string_agg(value, ' ') FROM jsonb_each_text(coalesce(documents.metadata, '{}'::jsonb))), ''), ${query}, ${_CONFIG.snippet.opts})`
                     : sql`NULL`;
