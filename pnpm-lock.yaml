@@ -9,6 +9,9 @@ catalogs:
     '@anthropic-ai/tokenizer':
       specifier: 0.0.4
       version: 0.0.4
+    '@ast-grep/cli':
+      specifier: 0.40.5
+      version: 0.40.5
     '@aws-sdk/client-s3':
       specifier: 3.992.0
       version: 3.992.0
@@ -468,6 +471,9 @@ importers:
       '@anthropic-ai/tokenizer':
         specifier: 'catalog:'
         version: 0.0.4
+      '@ast-grep/cli':
+        specifier: 'catalog:'
+        version: 0.40.5
       '@berenddeboer/nx-biome':
         specifier: 'catalog:'
         version: 1.0.2(@nx/devkit@22.5.1(nx@22.5.1(@swc-node/register@1.11.1(@swc/core@1.15.11(@swc/helpers@0.5.18))(@swc/types@0.1.25)(typescript@6.0.0-dev.20251125))(@swc/core@1.15.11(@swc/helpers@0.5.18))))
@@ -1509,6 +1515,55 @@ packages:
 
   '@asamuzakjp/nwsapi@2.3.9':
     resolution: {integrity: sha512-n8GuYSrI9bF7FFZ/SjhwevlHc8xaVlb/7HmHelnc/PZXBD2ZR49NnN9sMMuDdEGPeeRQ5d0hqlSlEpgCX3Wl0Q==}
+
+  '@ast-grep/cli-darwin-arm64@0.40.5':
+    resolution: {integrity: sha512-T9CzwJ1GqQhnANdsu6c7iT1akpvTVMK+AZrxnhIPv33Ze5hrXUUkqan+j4wUAukRJDqU7u94EhXLSLD+5tcJ8g==}
+    engines: {node: '>= 10'}
+    cpu: [arm64]
+    os: [darwin]
+
+  '@ast-grep/cli-darwin-x64@0.40.5':
+    resolution: {integrity: sha512-ez9b2zKvXU8f4ghhjlqYvbx6tWCKJTuVlNVqDDfjqwwhGeiTYfnzMlSVat4ElYRMd21gLtXZIMy055v2f21Ztg==}
+    engines: {node: '>= 10'}
+    cpu: [x64]
+    os: [darwin]
+
+  '@ast-grep/cli-linux-arm64-gnu@0.40.5':
+    resolution: {integrity: sha512-VXa2L1IEYD66AMb0GuG7VlMMbPmEGoJUySWDcwSZo/D9neiry3MJ41LQR5oTG2HyhIPBsf9umrXnmuRq66BviA==}
+    engines: {node: '>= 10'}
+    cpu: [arm64]
+    os: [linux]
+    libc: [glibc]
+
+  '@ast-grep/cli-linux-x64-gnu@0.40.5':
+    resolution: {integrity: sha512-GQC5162eIOWXR2eQQ6Knzg7/8Trp5E1ODJkaErf0IubdQrZBGqj5AAcQPcWgPbbnmktjIp0H4NraPpOJ9eJ22A==}
+    engines: {node: '>= 10'}
+    cpu: [x64]
+    os: [linux]
+    libc: [glibc]
+
+  '@ast-grep/cli-win32-arm64-msvc@0.40.5':
+    resolution: {integrity: sha512-YiZdnQZsSlXQTMsZJop/Ux9MmUGfuRvC2x/UbFgrt5OBSYxND+yoiMc0WcA3WG+wU+tt4ZkB5HUea3r/IkOLYA==}
+    engines: {node: '>= 10'}
+    cpu: [arm64]
+    os: [win32]
+
+  '@ast-grep/cli-win32-ia32-msvc@0.40.5':
+    resolution: {integrity: sha512-MHkCxCITVTr8sY9CcVqNKbfUzMa3Hc6IilGXad0Clnw2vNmPfWqSky+hU/UTerr5YHWwWfAVURH7ANZgirtx0Q==}
+    engines: {node: '>= 10'}
+    cpu: [ia32]
+    os: [win32]
+
+  '@ast-grep/cli-win32-x64-msvc@0.40.5':
+    resolution: {integrity: sha512-/MJ5un7yxlClaaxou9eYl+Kr2xr/yTtYtTq5aLBWjPWA6dmmJ1nAJgx5zKHVuplFXFBrFDQk3paEgAETMTGcrA==}
+    engines: {node: '>= 10'}
+    cpu: [x64]
+    os: [win32]
+
+  '@ast-grep/cli@0.40.5':
+    resolution: {integrity: sha512-yVXL7Gz0WIHerQLf+MVaVSkhIhidtWReG5akNVr/JS9OVCVkSdz7gWm7H8jVv2M9OO1tauuG76K3UaRGBPu5lQ==}
+    engines: {node: '>= 12.0.0'}
+    hasBin: true
 
   '@aws-crypto/crc32@5.2.0':
     resolution: {integrity: sha512-nLbCWqQNgUiwwtFsen1AdzAtvuLRsQS8rYgMuxCrdKf9kOssamGLuPwyTY9wyYblNr9+1XM8v6zoDTPPSIeANg==}
@@ -12009,6 +12064,39 @@ snapshots:
       lru-cache: 11.2.6
 
   '@asamuzakjp/nwsapi@2.3.9': {}
+
+  '@ast-grep/cli-darwin-arm64@0.40.5':
+    optional: true
+
+  '@ast-grep/cli-darwin-x64@0.40.5':
+    optional: true
+
+  '@ast-grep/cli-linux-arm64-gnu@0.40.5':
+    optional: true
+
+  '@ast-grep/cli-linux-x64-gnu@0.40.5':
+    optional: true
+
+  '@ast-grep/cli-win32-arm64-msvc@0.40.5':
+    optional: true
+
+  '@ast-grep/cli-win32-ia32-msvc@0.40.5':
+    optional: true
+
+  '@ast-grep/cli-win32-x64-msvc@0.40.5':
+    optional: true
+
+  '@ast-grep/cli@0.40.5':
+    dependencies:
+      detect-libc: 2.1.2
+    optionalDependencies:
+      '@ast-grep/cli-darwin-arm64': 0.40.5
+      '@ast-grep/cli-darwin-x64': 0.40.5
+      '@ast-grep/cli-linux-arm64-gnu': 0.40.5
+      '@ast-grep/cli-linux-x64-gnu': 0.40.5
+      '@ast-grep/cli-win32-arm64-msvc': 0.40.5
+      '@ast-grep/cli-win32-ia32-msvc': 0.40.5
+      '@ast-grep/cli-win32-x64-msvc': 0.40.5
 
   '@aws-crypto/crc32@5.2.0':
     dependencies:

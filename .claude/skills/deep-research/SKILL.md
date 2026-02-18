@@ -1,7 +1,5 @@
 ---
 name: deep-research
-type: simple
-depth: extended
 user-invocable: false
 description: >-
   Orchestrates two-round parallel agent research with Exa orientation, breadth-first discovery, and depth-focused synthesis. Use when conducting comprehensive research, exploring complex topics requiring multi-source validation, or synthesizing findings from distributed investigation streams.

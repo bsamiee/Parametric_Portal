@@ -1,6 +1,5 @@
 ---
 name: observability-stack
-depth: full
 description: >-
     Generates Pulumi TypeScript observability infrastructure for Grafana Alloy 1.13, Prometheus 3.5+, Grafana 12.3 across K8s/Docker. Use when deploying metrics stacks, provisioning alert rules/dashboards, or migrating cloud↔selfhosted observability.
 ---

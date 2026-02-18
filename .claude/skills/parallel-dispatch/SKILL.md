@@ -1,7 +1,5 @@
 ---
 name: parallel-dispatch
-type: simple
-depth: base
 user-invocable: false
 description: >-
   Orchestrates concurrent workstreams via Task tool, decomposing non-trivial

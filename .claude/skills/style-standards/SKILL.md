@@ -1,7 +1,5 @@
 ---
 name: style-standards
-type: standard
-depth: extended
 description: >-
     Enforces LLM-optimized style compliance for documentation and code. Use when creating/modifying markdown (headers, lists, Dictums, separators), code
     organization (comments, dividers, naming), or validating voice (grammar, tone, imperative phrasing) and formatting against taxonomy/whitespace standards.

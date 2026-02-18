@@ -1,7 +1,5 @@
 ---
 name: bash-script-generator
-type: standard
-depth: extended
 description: >-
   Generates production-ready bash 5.2+/5.3 scripts with strict mode, immutable locals,
   dispatch tables, middleware composition, metadata-driven help, ERR traps, atomic I/O,

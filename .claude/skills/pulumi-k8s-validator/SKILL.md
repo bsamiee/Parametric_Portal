@@ -1,7 +1,5 @@
 ---
 name: pulumi-k8s-validator
-type: standard
-depth: base
 description: >-
   Validates Pulumi Kubernetes TypeScript infrastructure via type checks, preview diffs, security audits, and production readiness. Use when auditing existing .ts files with @pulumi/kubernetes resources. Does NOT generate new resources.
 ---

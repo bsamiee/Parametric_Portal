@@ -1,7 +1,5 @@
 ---
 name: command-builder
-type: standard
-depth: base
 description: >-
     Generates slash commands with YAML frontmatter, $ARGUMENTS/positional params, and tool permissions. Use when creating .claude/commands/*.md files or fixing command routing.
 ---

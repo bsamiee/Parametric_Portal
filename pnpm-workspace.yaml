@@ -9,6 +9,7 @@ catalog:
   '@aws-sdk/client-s3': 3.992.0
   '@aws-sdk/client-sesv2': 3.992.0
   '@aws-sdk/s3-request-presigner': 3.992.0
+  '@ast-grep/cli': 0.40.5
   '@berenddeboer/nx-biome': 1.0.2
   '@biomejs/biome': 2.4.2
   '@dopplerhq/node-sdk': 1.3.0
@@ -172,6 +173,7 @@ fetchRetryMintimeout: 10000
 linkWorkspacePackages: deep
 
 onlyBuiltDependencies:
+  - '@ast-grep/cli'
   - '@biomejs/biome'
   - '@pulumi/command'
   - '@swc/core'

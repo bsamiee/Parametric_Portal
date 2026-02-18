@@ -1,5 +1,5 @@
 <Project>
-  <PropertyGroup>
+  <PropertyGroup Label="Language and Build">
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
@@ -7,20 +7,25 @@
     <Optimize>true</Optimize>
     <CheckForOverflowUnderflow>true</CheckForOverflowUnderflow>
     <AllowUnsafeBlocks>false</AllowUnsafeBlocks>
+  </PropertyGroup>
 
-    <EnableNETAnalyzers>true</EnableNETAnalyzers>
+  <PropertyGroup Label="Analysis">
     <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
     <AnalysisLevel>latest-all</AnalysisLevel>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
-    <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <ErrorLog Condition="'$(CI)' == 'true'">diagnostics.sarif,version=2.1</ErrorLog>
+  </PropertyGroup>
 
+  <PropertyGroup Label="Restore and CI">
     <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
     <RestoreLockedMode Condition="'$(CI)' == 'true'">true</RestoreLockedMode>
     <NuGetAudit>true</NuGetAudit>
     <NuGetAuditLevel>high</NuGetAuditLevel>
+    <ContinuousIntegrationBuild Condition="'$(CI)' == 'true'">true</ContinuousIntegrationBuild>
+  </PropertyGroup>
 
-    <LanguageExtCoreVersion>4.4.9</LanguageExtCoreVersion>
+  <PropertyGroup Label="Package Versions">
+    <LanguageExtCoreVersion>5.0.0-beta-77</LanguageExtCoreVersion>
     <FluentValidationVersion>12.1.1</FluentValidationVersion>
     <ThinktectureRuntimeExtensionsVersion>10.0.0</ThinktectureRuntimeExtensionsVersion>
     <PollyCoreVersion>8.6.5</PollyCoreVersion>
@@ -29,27 +34,50 @@
     <SerilogAspNetCoreVersion>10.0.0</SerilogAspNetCoreVersion>
     <SerilogSinkConsoleVersion>6.1.1</SerilogSinkConsoleVersion>
     <SerilogSinkOpenTelemetryVersion>4.2.0</SerilogSinkOpenTelemetryVersion>
-    <SerilogEnricherDemystifierVersion>1.0.3</SerilogEnricherDemystifierVersion>
     <SerilogExceptionsVersion>5.4.0</SerilogExceptionsVersion>
-
-    <ContinuousIntegrationBuild Condition="'$(CI)' == 'true'">true</ContinuousIntegrationBuild>
+    <MicrosoftVisualStudioThreadingAnalyzersVersion>17.14.15</MicrosoftVisualStudioThreadingAnalyzersVersion>
+    <MeziantouAnalyzerVersion>3.0.1</MeziantouAnalyzerVersion>
+    <MicrosoftExtensionsHttpResilienceVersion>10.3.0</MicrosoftExtensionsHttpResilienceVersion>
+    <SerilogExpressionsVersion>5.0.0</SerilogExpressionsVersion>
+    <NpgsqlVersion>10.0.1</NpgsqlVersion>
+    <NpgsqlOpenTelemetryVersion>10.0.1</NpgsqlOpenTelemetryVersion>
+    <TestcontainersPostgreSqlVersion>4.10.0</TestcontainersPostgreSqlVersion>
+    <FsCheckVersion>3.3.2</FsCheckVersion>
+    <BenchmarkDotNetVersion>0.15.8</BenchmarkDotNetVersion>
   </PropertyGroup>
 
-  <ItemGroup>
-    <PackageReference Include="LanguageExt.Core"                             Version="$(LanguageExtCoreVersion)" />
-    <PackageReference Include="FluentValidation"                             Version="$(FluentValidationVersion)" />
-    <PackageReference Include="Thinktecture.Runtime.Extensions"              Version="$(ThinktectureRuntimeExtensionsVersion)" />
-    <PackageReference Include="Polly.Core"                                   Version="$(PollyCoreVersion)" />
-    <PackageReference Include="NodaTime"                                     Version="$(NodaTimeVersion)" />
-    <PackageReference Include="OpenTelemetry.Extensions.Hosting"             Version="$(OpenTelemetryVersion)" />
+  <ItemGroup Label="Global Libraries">
+    <PackageReference Include="LanguageExt.Core" Version="$(LanguageExtCoreVersion)" />
+    <PackageReference Include="FluentValidation" Version="$(FluentValidationVersion)" />
+    <PackageReference Include="Thinktecture.Runtime.Extensions" Version="$(ThinktectureRuntimeExtensionsVersion)" />
+    <PackageReference Include="Polly.Core" Version="$(PollyCoreVersion)" />
+    <PackageReference Include="NodaTime" Version="$(NodaTimeVersion)" />
+    <PackageReference Include="OpenTelemetry.Extensions.Hosting" Version="$(OpenTelemetryVersion)" />
     <PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="$(OpenTelemetryVersion)" />
-    <PackageReference Include="OpenTelemetry.Instrumentation.AspNetCore"     Version="$(OpenTelemetryVersion)" />
-    <PackageReference Include="OpenTelemetry.Instrumentation.Http"           Version="$(OpenTelemetryVersion)" />
-    <PackageReference Include="OpenTelemetry.Instrumentation.Runtime"        Version="$(OpenTelemetryVersion)" />
-    <PackageReference Include="Serilog.AspNetCore"                           Version="$(SerilogAspNetCoreVersion)" />
-    <PackageReference Include="Serilog.Sinks.Console"                        Version="$(SerilogSinkConsoleVersion)" />
-    <PackageReference Include="Serilog.Sinks.OpenTelemetry"                  Version="$(SerilogSinkOpenTelemetryVersion)" />
-    <PackageReference Include="Serilog.Enrichers.Demystifier"                Version="$(SerilogEnricherDemystifierVersion)" />
-    <PackageReference Include="Serilog.Exceptions"                           Version="$(SerilogExceptionsVersion)" />
+    <PackageReference Include="OpenTelemetry.Instrumentation.AspNetCore" Version="$(OpenTelemetryVersion)" />
+    <PackageReference Include="OpenTelemetry.Instrumentation.Http" Version="$(OpenTelemetryVersion)" />
+    <PackageReference Include="OpenTelemetry.Instrumentation.Runtime" Version="$(OpenTelemetryVersion)" />
+    <PackageReference Include="Serilog.AspNetCore" Version="$(SerilogAspNetCoreVersion)" />
+    <PackageReference Include="Serilog.Sinks.Console" Version="$(SerilogSinkConsoleVersion)" />
+    <PackageReference Include="Serilog.Sinks.OpenTelemetry" Version="$(SerilogSinkOpenTelemetryVersion)" />
+    <PackageReference Include="Serilog.Exceptions" Version="$(SerilogExceptionsVersion)" />
+    <PackageReference Include="Microsoft.Extensions.Http.Resilience" Version="$(MicrosoftExtensionsHttpResilienceVersion)" />
+    <PackageReference Include="Serilog.Expressions" Version="$(SerilogExpressionsVersion)" />
+    <PackageReference Include="Npgsql" Version="$(NpgsqlVersion)" />
+    <PackageReference Include="Npgsql.OpenTelemetry" Version="$(NpgsqlOpenTelemetryVersion)" />
+  </ItemGroup>
+
+  <ItemGroup Label="Analyzer Packages">
+    <PackageReference Include="Microsoft.VisualStudio.Threading.Analyzers" Version="$(MicrosoftVisualStudioThreadingAnalyzersVersion)" PrivateAssets="all" />
+    <PackageReference Include="Meziantou.Analyzer" Version="$(MeziantouAnalyzerVersion)" PrivateAssets="all" />
+  </ItemGroup>
+
+  <ItemGroup Label="Test Packages" Condition="'$(IsTestProject)' == 'true'">
+    <PackageReference Include="Testcontainers.PostgreSql" Version="$(TestcontainersPostgreSqlVersion)" PrivateAssets="all" />
+    <PackageReference Include="FsCheck" Version="$(FsCheckVersion)" PrivateAssets="all" />
+  </ItemGroup>
+
+  <ItemGroup Label="Benchmark Packages" Condition="'$(IsBenchmarkProject)' == 'true'">
+    <PackageReference Include="BenchmarkDotNet" Version="$(BenchmarkDotNetVersion)" PrivateAssets="all" />
   </ItemGroup>
 </Project>

@@ -1,7 +1,5 @@
 ---
 name: hooks-builder
-type: standard
-depth: extended
 description: >-
   Creates Claude Code hooks executing shell commands, prompt evaluations, or multi-turn agents at 15 lifecycle events. Use when building PreToolUse validation, PostToolUse formatting, PermissionRequest auto-approval, Stop/SubagentStop evaluation, TeammateIdle prevention, TaskCompleted gating, Setup provisioning, SessionStart context injection, or deterministic agent control via blocking/non-blocking hooks.
 ---

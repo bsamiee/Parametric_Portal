@@ -1,7 +1,5 @@
 ---
 name: hostinger-tools
-type: complex
-depth: base
 user-invocable: false
 description: >-
   Executes Hostinger API operations managing VPS instances, Docker Compose, DNS, domains, billing, firewalls, SSH keys, snapshots. Use when controlling

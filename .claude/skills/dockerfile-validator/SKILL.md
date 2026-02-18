@@ -1,7 +1,5 @@
 ---
 name: dockerfile-validator
-type: complex
-depth: extended
 description: >-
   Validates existing Dockerfiles through 5-stage pipeline (hadolint syntax, Checkov CKV policies, secret detection, BuildKit features, optimization). Use when checking syntax, finding security issues, auditing best practices, or analyzing layer efficiency. Not for generating Dockerfiles (use dockerfile-generator instead).
 ---

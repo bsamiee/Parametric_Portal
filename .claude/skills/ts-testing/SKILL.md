@@ -1,7 +1,5 @@
 ---
 name: ts-testing
-type: standard
-depth: extended
 description: >-
   Generates dense law-driven test suites for Effect modules via algebraic PBT
   using Vitest, @effect/vitest, fast-check. Enforces 175 LOC cap, 95% per-file

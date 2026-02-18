@@ -1,7 +1,5 @@
 ---
 name: k8s-debug
-type: complex
-depth: extended
 description: >-
   Diagnoses Kubernetes pod failures, network connectivity, deployment rollouts,
   HPA scaling, and EKS cluster issues. Use when debugging CrashLoopBackOff,

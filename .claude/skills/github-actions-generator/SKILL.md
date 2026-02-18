@@ -1,7 +1,5 @@
 ---
 name: github-actions-generator
-type: standard
-depth: full
 description: >-
   Generates GitHub Actions workflows and custom actions (composite/Docker/JavaScript)
   with SHA-pinned supply chain security, SLSA attestation, OIDC federation, and

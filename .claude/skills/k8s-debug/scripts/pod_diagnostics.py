@@ -35,9 +35,9 @@ from _collectors import (
 
 # --- [CONSTANTS] --------------------------------------------------------------
 
-DEFAULT_NAMESPACE: Final = "parametric"
-DEFAULT_CONTAINER: Final = "api"
-SEPARATOR: Final = "=" * 80
+DEFAULT_NAMESPACE: Final = 'parametric'
+DEFAULT_CONTAINER: Final = 'api'
+SEPARATOR: Final = '=' * 80
 
 
 # --- [TYPES] -----------------------------------------------------------------
@@ -64,20 +64,21 @@ class SectionResult:
 # --- [DIAGNOSTIC_TABLE] -------------------------------------------------------
 
 DIAGNOSTIC_TABLE: Final[tuple[DiagnosticEntry, ...]] = (
-    DiagnosticEntry(label="POD STATUS", command=status),
-    DiagnosticEntry(label="POD DESCRIPTION", command=describe),
-    DiagnosticEntry(label="EVENTS", command=events),
-    DiagnosticEntry(label="CONTAINER LOGS", command=logs),
-    DiagnosticEntry(label="RESOURCE USAGE", command=resources),
-    DiagnosticEntry(label="RESOURCE LIMITS", command=limits),
-    DiagnosticEntry(label="PROBE CONFIG", command=probes),
-    DiagnosticEntry(label="SIDECAR CONTAINERS", command=sidecar_status),
-    DiagnosticEntry(label="NODE INFO", command=node),
-    DiagnosticEntry(label="ENV VARS", command=env_vars),
+    DiagnosticEntry(label='POD STATUS', command=status),
+    DiagnosticEntry(label='POD DESCRIPTION', command=describe),
+    DiagnosticEntry(label='EVENTS', command=events),
+    DiagnosticEntry(label='CONTAINER LOGS', command=logs),
+    DiagnosticEntry(label='RESOURCE USAGE', command=resources),
+    DiagnosticEntry(label='RESOURCE LIMITS', command=limits),
+    DiagnosticEntry(label='PROBE CONFIG', command=probes),
+    DiagnosticEntry(label='SIDECAR CONTAINERS', command=sidecar_status),
+    DiagnosticEntry(label='NODE INFO', command=node),
+    DiagnosticEntry(label='ENV VARS', command=env_vars),
 )
 
 
 # --- [COMPOSITION] ------------------------------------------------------------
+
 
 def _run_diagnostic(pod: str, namespace: str, container: str, entry: DiagnosticEntry) -> SectionResult:
     """Execute a single diagnostic entry, producing an immutable result.
@@ -106,7 +107,7 @@ def _format_section(result: SectionResult) -> str:
     Returns:
         Formatted string with section header and output.
     """
-    return f"\n## {result.label} ##\n{result.output}"
+    return f'\n## {result.label} ##\n{result.output}'
 
 
 def _format_report(header: str, results: tuple[SectionResult, ...]) -> str:
@@ -120,16 +121,17 @@ def _format_report(header: str, results: tuple[SectionResult, ...]) -> str:
         Complete report string with separator, header, and all sections.
     """
     return reduce(
-        lambda accumulator, section: f"{accumulator}{_format_section(section)}",
+        lambda accumulator, section: f'{accumulator}{_format_section(section)}',
         results,
-        f"{SEPARATOR}\n{header}\n{SEPARATOR}",
+        f'{SEPARATOR}\n{header}\n{SEPARATOR}',
     )
 
 
 # --- [ENTRY_POINT] ------------------------------------------------------------
 
+
 @contextmanager
-def _output(path: str | None) -> Generator[TextIO, None, None]:
+def _output(path: str | None) -> Generator[TextIO]:
     """Context-managed output file or stdout.
 
     Args:
@@ -143,12 +145,12 @@ def _output(path: str | None) -> Generator[TextIO, None, None]:
             yield sys.stdout
         case filepath:
             target = Path(filepath)
-            handle = target.open("w")
+            handle = target.open('w')
             try:
                 yield handle
             finally:
                 handle.close()
-                sys.stderr.write(f"Written to: {target}\n")
+                sys.stderr.write(f'Written to: {target}\n')
 
 
 def main() -> int:
@@ -157,29 +159,26 @@ def main() -> int:
     Returns:
         Exit code: 0 for success.
     """
-    parser = argparse.ArgumentParser(description="Kubernetes pod diagnostics")
-    parser.add_argument("pod", help="Pod name")
-    parser.add_argument("-n", "--namespace", default=DEFAULT_NAMESPACE)
-    parser.add_argument("-c", "--container", default=DEFAULT_CONTAINER)
-    parser.add_argument("-o", "--output", help="Output file path")
+    parser = argparse.ArgumentParser(description='Kubernetes pod diagnostics')
+    parser.add_argument('pod', help='Pod name')
+    parser.add_argument('-n', '--namespace', default=DEFAULT_NAMESPACE)
+    parser.add_argument('-c', '--container', default=DEFAULT_CONTAINER)
+    parser.add_argument('-o', '--output', help='Output file path')
     args = parser.parse_args()
 
     header = (
-        f"Pod Diagnostics: {args.pod}"
-        f" (ns: {args.namespace}, container: {args.container})"
-        f" @ {datetime.now(UTC).isoformat()}"
+        f'Pod Diagnostics: {args.pod}'
+        f' (ns: {args.namespace}, container: {args.container})'
+        f' @ {datetime.now(UTC).isoformat()}'
     )
-    results = tuple(
-        _run_diagnostic(args.pod, args.namespace, args.container, entry)
-        for entry in DIAGNOSTIC_TABLE
-    )
+    results = tuple(_run_diagnostic(args.pod, args.namespace, args.container, entry) for entry in DIAGNOSTIC_TABLE)
     report = _format_report(header, results)
 
     with _output(args.output) as destination:
-        destination.write(report + "\n")
+        destination.write(report + '\n')
 
     return 0
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     sys.exit(main())

@@ -6,7 +6,7 @@ description: >-
   reading specific sections or folders, or providing skill instructions to orchestrating agents.
 tools: Read, Glob, Grep, Bash
 model: sonnet
-skills: skill-builder
+skills: skill-creator
 color: green
 ---
 
@@ -18,7 +18,7 @@ Read skill folder (full or targeted section). Structure knowledge for main agent
 
 <br>
 
-Read `.claude/skills/skill-builder/SKILL.md` first. Internalize:
+Read `.claude/skills/skill-creator/SKILL.md` first. Internalize:
 - **Dictum** — WHY statement after H1/H2 headers
 - **Tasks** — Numbered workflow steps
 - **Scope** — Domain boundaries
@@ -87,7 +87,7 @@ This meta-structure applies to ALL skills.
 **Full read output:**
 ```markdown
 # [H1][{SKILL_NAME}]
-{frontmatter: name, type, depth, description}
+{frontmatter: name, description}
 {Dictum from H1}
 {Tasks list}
 {Scope block if present}

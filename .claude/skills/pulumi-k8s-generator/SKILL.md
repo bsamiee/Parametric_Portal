@@ -1,7 +1,5 @@
 ---
 name: pulumi-k8s-generator
-type: standard
-depth: extended
 description: >-
   Generates production-ready Pulumi K8s TypeScript resources following deploy.ts
   patterns. Use when creating new Deployments, Services, Ingress, Gateway API,

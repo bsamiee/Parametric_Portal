@@ -1,7 +1,5 @@
 ---
 name: bash-script-validator
-type: standard
-depth: extended
 description: >-
   Validates existing .sh/.bash scripts via ShellCheck 0.11.0+ static analysis, syntax/security/portability
   checks. Use when debugging SC codes, auditing shell scripts, or checking shell best practices.

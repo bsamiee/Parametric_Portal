@@ -6,8 +6,12 @@
         "default": ["{projectRoot}/**/*", "sharedGlobals"],
         "docker": ["{projectRoot}/Dockerfile", "{projectRoot}/.dockerignore", "production"],
         "dotnetShared": [
+            "{workspaceRoot}/.editorconfig",
+            "{workspaceRoot}/global.json",
             "{workspaceRoot}/Directory.Build.props",
             "{workspaceRoot}/Directory.Build.targets",
+            "{workspaceRoot}/Directory.Packages.props",
+            "{workspaceRoot}/NuGet.config",
             { "runtime": "dotnet --version" }
         ],
         "dotnetSources": [
@@ -40,6 +44,7 @@
             "!{projectRoot}/tsconfig.spec.json",
             "!{projectRoot}/**/*.tsbuildinfo"
         ],
+        "python": ["{workspaceRoot}/**/*.py", "{workspaceRoot}/pyproject.toml"],
         "sharedGlobals": [
             "{workspaceRoot}/nx.json",
             "{workspaceRoot}/tsconfig.base.json",
@@ -67,7 +72,6 @@
             "sharedGlobals"
         ]
     },
-    "nxCloudAccessToken": "",
     "parallel": 4,
     "plugins": [
         {
@@ -84,85 +88,46 @@
         {
             "exclude": ["tools/**/*", "**/node_modules/**", "**/dist/**"],
             "include": ["apps/*/vite.config.ts", "packages/*/vite.config.ts"],
-            "options": {
-                "testMode": "run",
-                "testTargetName": "test"
-            },
+            "options": { "testMode": "run", "testTargetName": "test" },
             "plugin": "@nx/vitest"
         },
         {
             "exclude": ["tools/**/*", "**/node_modules/**", "**/dist/**"],
             "include": ["apps/*/Dockerfile"],
-            "options": {
-                "buildTargetName": "docker:build",
-                "defaultPlatform": "linux/amd64"
-            },
+            "options": { "buildTargetName": "docker:build", "defaultPlatform": "linux/amd64" },
             "plugin": "@nx/docker"
         },
         {
             "exclude": ["tools/**/*", "**/node_modules/**", "**/dist/**", "**/bin/**", "**/obj/**"],
             "include": ["apps/**/*.csproj", "apps/**/*.fsproj", "apps/**/*.vbproj"],
             "options": {
-                "build": {
-                    "targetName": "build:cs"
-                },
-                "clean": {
-                    "targetName": "clean:cs"
-                },
-                "pack": {
-                    "targetName": "pack:cs"
-                },
-                "publish": {
-                    "targetName": "publish:cs"
-                },
-                "restore": {
-                    "targetName": "restore:cs"
-                },
-                "run": {
-                    "targetName": "run:cs"
-                },
-                "test": {
-                    "targetName": "test:cs"
-                },
-                "watch": {
-                    "targetName": "watch:cs"
-                }
+                "build": { "targetName": "build:cs" }, "clean": { "targetName": "clean:cs" },
+                "pack": { "targetName": "pack:cs" }, "publish": { "targetName": "publish:cs" },
+                "restore": { "targetName": "restore:cs" }, "run": { "targetName": "run:cs" },
+                "test": { "targetName": "test:cs" }, "watch": { "targetName": "watch:cs" }
             },
             "plugin": "@nx/dotnet"
         },
         {
             "include": ["playwright.config.ts"],
-            "options": {
-                "targetName": "e2e"
-            },
+            "options": { "targetName": "e2e" },
             "plugin": "@nx/playwright/plugin"
         },
         {
             "exclude": ["tools/**/*", "**/node_modules/**", "**/dist/**", "**/.nx/**", "**/.vite/**"],
             "include": ["apps/*/biome.json", "packages/*/biome.json", "biome.json"],
-            "options": {
-                "targetName": "check"
-            },
+            "options": { "targetName": "check" },
             "plugin": "@berenddeboer/nx-biome"
         }
     ],
-    "pluginsConfig": {
-        "@nx/js": {
-            "projectsAffectedByDependencyUpdates": "auto"
-        }
-    },
+    "pluginsConfig": { "@nx/js": { "projectsAffectedByDependencyUpdates": "auto" } },
     "release": {
         "changelog": {
             "projectChangelogs": false,
             "workspaceChangelog": {
                 "createRelease": "github",
                 "file": "./CHANGELOG.md",
-                "renderOptions": {
-                    "applyUsernameToAuthors": true,
-                    "authors": true,
-                    "commitReferences": true,
-                    "versionTitleDate": true
-                }
+                "renderOptions": { "applyUsernameToAuthors": true, "authors": true, "commitReferences": true, "versionTitleDate": true }
             }
         },
         "conventionalCommits": {
@@ -171,76 +136,30 @@
                 "headerPattern": "^\\[?([A-Za-z]+)!?\\]?!?(?:\\(([^)]*)\\))?:\\s*(.+)$"
             },
             "types": {
-                "build": {
-                    "changelog": false
-                },
-                "chore": {
-                    "changelog": false
-                },
-                "ci": {
-                    "changelog": false
-                },
-                "docs": {
-                    "changelog": {
-                        "title": "[DOCUMENTATION]"
-                    },
-                    "semverBump": "none"
-                },
-                "feat": {
-                    "changelog": {
-                        "title": "[FEATURES]"
-                    },
-                    "semverBump": "minor"
-                },
-                "fix": {
-                    "changelog": {
-                        "title": "[BUG_FIXES]"
-                    },
-                    "semverBump": "patch"
-                },
-                "perf": {
-                    "changelog": {
-                        "title": "[PERFORMANCE]"
-                    },
-                    "semverBump": "patch"
-                },
-                "refactor": {
-                    "changelog": {
-                        "title": "[REFACTORING]"
-                    },
-                    "semverBump": "patch"
-                },
-                "style": {
-                    "changelog": false
-                },
-                "test": {
-                    "changelog": false
-                }
+                "build": { "changelog": false },
+                "chore": { "changelog": false },
+                "ci": { "changelog": false },
+                "docs": { "changelog": { "title": "[DOCUMENTATION]" }, "semverBump": "none" },
+                "feat": { "changelog": { "title": "[FEATURES]" }, "semverBump": "minor" },
+                "fix": { "changelog": { "title": "[BUG_FIXES]" }, "semverBump": "patch" },
+                "perf": { "changelog": { "title": "[PERFORMANCE]" }, "semverBump": "patch" },
+                "refactor": { "changelog": { "title": "[REFACTORING]" }, "semverBump": "patch" },
+                "style": { "changelog": false },
+                "test": { "changelog": false }
             }
         },
-        "git": {
-            "commit": true,
-            "commitMessage": "chore(release): {version}",
-            "tag": true
-        },
+        "git": { "commit": true, "commitMessage": "chore(release): {version}", "tag": true },
         "projects": ["packages/*"],
-        "version": {
-            "conventionalCommits": true,
-            "fallbackCurrentVersionResolver": "disk"
-        }
+        "version": { "conventionalCommits": true, "fallbackCurrentVersionResolver": "disk" }
     },
-    "sync": {
-        "disabledTaskSyncGenerators": ["@nx/js:typescript-sync"]
-    },
+    "sync": { "disabledTaskSyncGenerators": ["@nx/js:typescript-sync"] },
     "targetDefaults": {
         "analyze": {
             "cache": false,
             "continuous": true,
             "dependsOn": ["build"],
             "executor": "nx:run-commands",
-            "options": {
-                "command": "npx serve .vite -l 8080"
-            }
+            "options": { "command": "pnpm exec serve .vite -l 8080" }
         },
         "build": {
             "dependsOn": ["^build"],
@@ -252,10 +171,7 @@
             "inputs": ["dotnetSources", "^dotnetSources"],
             "outputs": ["{projectRoot}/bin", "{projectRoot}/obj"]
         },
-        "clean:cs": {
-            "cache": false,
-            "inputs": ["dotnetSources", "^dotnetSources"]
-        },
+        "clean:cs": { "cache": false, "inputs": ["dotnetSources", "^dotnetSources"] },
         "dev": {
             "cache": false,
             "configurations": {
@@ -286,42 +202,23 @@
             },
             "continuous": true
         },
-        "docker:build": {
-            "dependsOn": ["build"],
-            "inputs": ["docker"]
-        },
+        "docker:build": { "dependsOn": ["build"], "inputs": ["docker"] },
         "hadolint": {
             "cache": true,
             "executor": "nx:run-commands",
             "inputs": ["docker"],
-            "options": {
-                "command": "hadolint Dockerfile",
-                "cwd": "{projectRoot}"
-            }
-        },
-        "infra:lint": {
-            "cache": true,
-            "executor": "nx:run-commands",
-            "inputs": ["infrastructure"],
-            "options": {
-                "command": "yamllint infrastructure/ .github/workflows/ && hadolint apps/api/Dockerfile && actionlint && for dir in infrastructure/projects/*/overlays/prod; do [[ \"$dir\" == *\"_template\"* ]] && continue; kustomize build \"$dir\" | kubeconform -strict -ignore-missing-schemas -summary || exit 1; done && echo '[OK] All projects valid'",
-                "cwd": "{workspaceRoot}"
-            }
+            "options": { "command": "hadolint Dockerfile", "cwd": "{projectRoot}" }
         },
         "inspect:build": {
             "cache": false,
             "dependsOn": ["build"],
             "executor": "nx:run-commands",
-            "options": {
-                "command": "npx serve .vite-inspect -l 8081"
-            }
+            "options": { "command": "pnpm exec serve .vite-inspect -l 8081" }
         },
         "inspect:dev": {
             "cache": false,
             "executor": "nx:run-commands",
-            "options": {
-                "command": "echo 'Open http://localhost:5173/__inspect/ in browser' && nx dev"
-            }
+            "options": { "command": "echo 'Open http://localhost:5173/__inspect/ in browser' && pnpm exec nx dev" }
         },
         "k8s:diff": {
             "cache": false,
@@ -331,86 +228,42 @@
                 "cwd": "{workspaceRoot}"
             }
         },
-        "pack:cs": {
-            "dependsOn": ["build:cs"],
-            "inputs": ["dotnetSources", "^dotnetSources"],
-            "outputs": ["{projectRoot}/bin/**/*.nupkg"]
-        },
-        "publish:cs": {
-            "dependsOn": ["build:cs"],
-            "inputs": ["dotnetSources", "^dotnetSources"],
-            "outputs": ["{projectRoot}/bin/**/publish"]
-        },
+        "pack:cs": { "dependsOn": ["build:cs"], "inputs": ["dotnetSources", "^dotnetSources"], "outputs": ["{projectRoot}/bin/**/*.nupkg"] },
+        "publish:cs": { "dependsOn": ["build:cs"], "inputs": ["dotnetSources", "^dotnetSources"], "outputs": ["{projectRoot}/bin/**/publish"] },
         "pwa:icons": {
             "cache": false,
             "executor": "nx:run-commands",
-            "options": {
-                "command": "tsx --no-warnings tools/scripts/generate-pwa-icons.ts",
-                "cwd": "{projectRoot}"
-            }
+            "options": { "command": "tsx --no-warnings tools/scripts/generate-pwa-icons.ts", "cwd": "{projectRoot}" }
         },
         "pwa:icons:watch": {
             "cache": false,
             "executor": "nx:run-commands",
-            "options": {
-                "command": "tsx watch tools/scripts/generate-pwa-icons.ts",
-                "cwd": "{projectRoot}"
-            }
+            "options": { "command": "tsx watch tools/scripts/generate-pwa-icons.ts", "cwd": "{projectRoot}" }
         },
-        "restore:cs": {
-            "cache": false,
-            "inputs": ["dotnetSources", "^dotnetSources"]
-        },
-        "run:cs": {
-            "cache": false,
-            "continuous": true
-        },
-        "test": {
-            "inputs": ["testing", "^production"],
-            "outputs": ["{projectRoot}/coverage", "{workspaceRoot}/test-results"]
-        },
+        "restore:cs": { "cache": false, "inputs": ["dotnetSources", "^dotnetSources"] },
+        "run:cs": { "cache": false, "continuous": true },
+        "test": { "inputs": ["testing", "^production"], "outputs": ["{projectRoot}/coverage", "{workspaceRoot}/test-results"] },
         "test:cs": {
             "cache": true,
             "dependsOn": ["build:cs"],
             "inputs": ["dotnetSources", "^dotnetSources"],
             "outputs": ["{projectRoot}/TestResults", "{workspaceRoot}/test-results"]
         },
-        "test:mutate": {
-            "cache": true,
-            "inputs": ["testing", "^production"],
-            "outputs": [
-                "{workspaceRoot}/test-results/mutation/index.html",
-                "{workspaceRoot}/test-results/mutation/mutation.json",
-                "{workspaceRoot}/test-results/mutation/stryker-incremental.json"
-            ]
-        },
+        "test:mutate": { "cache": true, "inputs": ["testing", "^production"], "outputs": ["{workspaceRoot}/test-results/mutation"] },
         "test:ui": {
             "cache": false,
             "executor": "nx:run-commands",
-            "options": {
-                "command": "vitest --ui",
-                "cwd": "{workspaceRoot}"
-            }
+            "options": { "command": "vitest --ui", "cwd": "{workspaceRoot}" }
         },
         "typecheck": {
             "cache": true,
             "dependsOn": ["^typecheck"],
             "executor": "nx:run-commands",
             "inputs": ["typescript", "sharedGlobals"],
-            "options": {
-                "command": "tsc --project tsconfig.json --noEmit",
-                "cwd": "{projectRoot}"
-            }
+            "options": { "command": "tsc --project tsconfig.json --noEmit", "cwd": "{projectRoot}" }
         },
-        "watch:cs": {
-            "cache": false,
-            "continuous": true
-        }
+        "watch:cs": { "cache": false, "continuous": true }
     },
     "useInferencePlugins": false,
-    "useLegacyCache": false,
-    "workspaceLayout": {
-        "appsDir": "apps",
-        "libsDir": "packages"
-    }
+    "workspaceLayout": { "appsDir": "apps", "libsDir": "packages" }
 }

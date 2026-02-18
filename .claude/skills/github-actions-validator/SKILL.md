@@ -1,7 +1,5 @@
 ---
 name: github-actions-validator
-type: standard
-depth: full
 description: >-
   Validates GitHub Actions workflows via actionlint, act dry-run, and 11 security checks.
   Use when auditing CI/CD security, checking supply chain compliance (SHA pinning, harden-runner,

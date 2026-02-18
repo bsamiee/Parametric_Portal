@@ -1,6 +1,5 @@
 ---
 name: logql-generator
-depth: extended
 description: >-
   Generates LogQL queries for Grafana Loki 3.0-3.6 log aggregation and metric extraction. Use when building Loki queries, dashboards, alerts, or optimizing pipeline performance with bloom filters, structured metadata, pattern matching, and approx_topk aggregations.
 ---

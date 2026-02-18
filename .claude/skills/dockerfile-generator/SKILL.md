@@ -1,7 +1,5 @@
 ---
 name: dockerfile-generator
-type: complex
-depth: extended
 description: >-
   Generates production-ready multi-stage Dockerfiles and .dockerignore files with BuildKit features, pnpm monorepo support, OCI labels, and security hardening.
   Use when creating or writing Dockerfiles for Node.js, Python, Go, Java, or Rust. Does not validate (use dockerfile-validator).

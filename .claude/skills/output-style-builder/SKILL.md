@@ -1,7 +1,5 @@
 ---
 name: output-style-builder
-type: standard
-depth: extended
 description: >-
   Creates structured output formats (JSON/YAML/Markdown-KV/XML) and response style scope
   configurations via accuracy-token tradeoff analysis. Use when defining agent schemas,

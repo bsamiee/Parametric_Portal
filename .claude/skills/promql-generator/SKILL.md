@@ -1,6 +1,5 @@
 ---
 name: promql-generator
-depth: full
 description: >-
     Generates PromQL queries with RED/USE/SLO patterns, native histograms, recording rules, and alerting expressions. Use when creating new queries from requirements; excludes validation (use promql-validator).
 ---

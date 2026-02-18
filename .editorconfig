@@ -8,6 +8,16 @@ trim_trailing_whitespace = true
 indent_style = space
 indent_size = 4
 
+[*.{ts,tsx,js,jsx,mts,cts}]
+indent_style = space
+indent_size = 4
+max_line_length = 120
+
+[*.py]
+indent_style = space
+indent_size = 4
+max_line_length = 120
+
 [*.cs]
 # --- [NAMESPACE_AND_IMPORTS] -----------------------------------------------
 csharp_style_namespace_declarations = file_scoped:error                       # Keep namespace declarations concise and modern.
@@ -16,7 +26,7 @@ dotnet_style_require_accessibility_modifiers = always:error                   # 
 csharp_using_directive_placement = outside_namespace:error                    # Keep using directives outside namespace blocks.
 dotnet_sort_system_directives_first = true                                    # Keep System usings ordered first.
 dotnet_separate_import_directive_groups = false                               # Avoid blank-line grouping in imports.
-dotnet_diagnostic.IDE0005.severity = error                                    # Remove unused using directives.
+dotnet_diagnostic.IDE0005.severity = none                                     # Disabled on build: requires GenerateDocumentationFile=true.
 
 # --- [TYPE_EXPLICITNESS] ----------------------------------------------------
 csharp_style_var_for_built_in_types = false:error                             # Use explicit built-in types instead of var.
@@ -39,7 +49,6 @@ csharp_style_pattern_matching_over_as_with_null_check = true:error            # 
 csharp_style_prefer_pattern_matching = true:error                             # Use pattern syntax in place of older idioms.
 csharp_style_prefer_not_pattern = true:error                                  # Prefer is not pattern syntax.
 csharp_style_prefer_extended_property_pattern = true:error                    # Prefer extended property patterns for nested checks.
-csharp_style_prefer_relational_pattern = true:error                           # Prefer relational patterns for comparisons.
 csharp_style_prefer_switch_expression = true:error                            # Prefer switch expressions over switch statements.
 csharp_style_prefer_null_check_over_type_check = true:error                   # Prefer direct null checks over type checks.
 dotnet_style_prefer_conditional_expression_over_return = true:error           # Prefer conditional expressions over branching returns.
@@ -104,35 +113,77 @@ csharp_new_line_before_finally = false                                        # 
 csharp_new_line_before_members_in_object_initializers = false                 # Keep object initializers compact unless wrapped by length.
 csharp_new_line_before_members_in_anonymous_types = false                     # Keep anonymous type initializers compact.
 csharp_new_line_between_query_expression_clauses = false                      # Keep query clauses compact unless forced to wrap.
+dotnet_style_allow_multiple_blank_lines_experimental = false                  # Disallow consecutive blank lines for denser deterministic files.
+csharp_style_allow_blank_lines_between_consecutive_braces_experimental = false # Disallow blank lines between adjacent brace blocks.
+csharp_style_allow_blank_line_after_colon_in_constructor_initializer_experimental = false # Disallow blank lines after constructor initializer colon.
+csharp_style_allow_blank_line_after_token_in_arrow_expression_clause_experimental = false # Disallow blank lines after arrow expression tokens.
+csharp_style_allow_blank_line_after_token_in_conditional_expression_experimental = false # Disallow blank lines after conditional-expression tokens.
 csharp_preserve_single_line_statements = true                                 # Preserve compact single-line statements.
 csharp_preserve_single_line_blocks = true                                     # Preserve compact single-line block bodies.
 csharp_indent_block_contents = true                                            # Indent block contents consistently.
 csharp_indent_case_contents = true                                             # Indent switch case contents consistently.
 csharp_indent_case_contents_when_block = true                                 # Indent case block contents consistently.
 csharp_indent_switch_labels = true                                            # Indent switch labels under switch blocks.
+csharp_indent_labels = one_less_than_current                                  # Keep labels aligned deterministically relative to surrounding scope.
+csharp_indent_braces = false                                                  # Keep braces aligned to K&R-aligned block indentation.
 csharp_space_after_keywords_in_control_flow_statements = true                 # Require space after control-flow keywords.
 csharp_space_after_cast = false                                               # Avoid trailing space after cast parentheses.
 csharp_space_after_comma = true                                               # Require a space after commas.
 csharp_space_before_comma = false                                             # Disallow a space before commas.
+csharp_space_before_colon_in_inheritance_clause = true                        # Require spacing before inheritance colons.
+csharp_space_after_colon_in_inheritance_clause = true                         # Require spacing after inheritance colons.
 csharp_space_around_binary_operators = before_and_after                       # Require spaces around binary operators.
 csharp_space_between_method_declaration_parameter_list_parentheses = false    # Disallow inner spaces in method declaration parentheses.
+csharp_space_between_method_declaration_empty_parameter_list_parentheses = false # Disallow inner spaces in empty method declaration parentheses.
 csharp_space_between_method_call_parameter_list_parentheses = false           # Disallow inner spaces in method call parentheses.
+csharp_space_between_method_call_empty_parameter_list_parentheses = false     # Disallow inner spaces in empty method call parentheses.
 csharp_space_between_method_declaration_name_and_open_parenthesis = false     # Disallow spaces between method names and opening parentheses.
 csharp_space_between_method_call_name_and_opening_parenthesis = false         # Disallow spaces between invocation name and opening parentheses.
+csharp_space_after_dot = false                                                # Disallow spaces after member-access dots.
+csharp_space_before_dot = false                                               # Disallow spaces before member-access dots.
+csharp_space_after_semicolon_in_for_statement = true                          # Require spacing after semicolons in for statements.
+csharp_space_before_semicolon_in_for_statement = false                        # Disallow spacing before semicolons in for statements.
+csharp_space_before_open_square_brackets = false                              # Disallow spaces before opening indexer brackets.
+csharp_space_between_empty_square_brackets = false                            # Disallow spaces inside empty square brackets.
+csharp_space_between_square_brackets = false                                  # Disallow spaces inside square brackets.
 dotnet_diagnostic.IDE0055.severity = error                                    # Enforce formatter compliance in CI/build.
 
 # --- [QUALITY_ANALYZERS] -----------------------------------------------------
+dotnet_diagnostic.CA1002.severity = error                                     # Avoid exposing mutable List<T> in public APIs.
+dotnet_diagnostic.CA1008.severity = error                                     # Require enums to define a zero-valued member.
+dotnet_diagnostic.CA1021.severity = error                                     # Avoid out parameters for clearer API contracts.
+dotnet_diagnostic.CA1031.severity = error                                     # Prevent catching overly broad exception types.
+dotnet_diagnostic.CA1032.severity = error                                     # Ensure custom exceptions expose standard constructors.
+dotnet_diagnostic.CA1051.severity = error                                     # Disallow visible instance fields; require encapsulation.
+dotnet_diagnostic.CA1054.severity = error                                     # Use Uri instead of string in URI parameters.
+dotnet_diagnostic.CA1055.severity = error                                     # Use Uri instead of string in URI return values.
+dotnet_diagnostic.CA1056.severity = error                                     # Use Uri instead of string in URI properties.
+dotnet_diagnostic.CA1062.severity = error                                     # Validate public method arguments for null.
+dotnet_diagnostic.CA1063.severity = error                                     # Enforce correct IDisposable implementation pattern.
+dotnet_diagnostic.CA1065.severity = error                                     # Avoid throwing exceptions from unexpected members.
+dotnet_diagnostic.CA1066.severity = error                                     # Implement IEquatable<T> when overriding Equals.
+dotnet_diagnostic.CA1068.severity = error                                     # Require CancellationToken as last parameter.
+dotnet_diagnostic.CA1069.severity = error                                     # Prevent duplicate enum values unless explicitly intentional.
+dotnet_diagnostic.CA1304.severity = error                                     # Require explicit culture in culture-sensitive operations.
 dotnet_diagnostic.CA1305.severity = error                                     # Require explicit culture for formatting/parsing.
 dotnet_diagnostic.CA1307.severity = error                                     # Require StringComparison-aware overload usage.
+dotnet_diagnostic.CA1308.severity = error                                     # Prefer uppercase normalization for culture stability.
 dotnet_diagnostic.CA1309.severity = error                                     # Require ordinal string comparisons when intended.
 dotnet_diagnostic.CA1310.severity = error                                     # Require StringComparison argument where applicable.
+dotnet_diagnostic.CA1311.severity = error                                     # Require explicit culture or invariant variants for parsing.
 dotnet_diagnostic.CA1507.severity = error                                     # Prefer nameof over hardcoded parameter/member strings.
+dotnet_diagnostic.CA1508.severity = error                                     # Detect dead/always-constant conditional branches.
 dotnet_diagnostic.CA1510.severity = error                                     # Use ArgumentNullException throw helper methods.
 dotnet_diagnostic.CA1511.severity = error                                     # Use ArgumentException throw helper methods.
 dotnet_diagnostic.CA1512.severity = error                                     # Use ArgumentOutOfRangeException throw helper methods.
 dotnet_diagnostic.CA1513.severity = error                                     # Use ObjectDisposedException throw helper methods.
 dotnet_diagnostic.CA1514.severity = error                                     # Avoid redundant length argument checks.
+dotnet_diagnostic.CA1515.severity = error                                     # Consider limiting unnecessary public API surface.
+dotnet_diagnostic.CA1516.severity = error                                     # Prefer cross-platform intrinsics over architecture-specific APIs.
 dotnet_diagnostic.CA1806.severity = error                                     # Prevent ignoring method results unintentionally.
+dotnet_diagnostic.CA1812.severity = error                                     # Remove internal types that are never instantiated.
+dotnet_diagnostic.CA1819.severity = error                                     # Avoid returning arrays from properties.
+dotnet_diagnostic.CA1820.severity = error                                     # Use Length for empty-string checks.
 dotnet_diagnostic.CA1822.severity = error                                     # Mark members static when no instance state is used.
 dotnet_diagnostic.CA1823.severity = error                                     # Remove unused private fields.
 dotnet_diagnostic.CA1824.severity = error                                     # Mark assemblies with NeutralResourcesLanguageAttribute.
@@ -147,11 +198,13 @@ dotnet_diagnostic.CA1832.severity = error                                     # 
 dotnet_diagnostic.CA1833.severity = error                                     # Prefer Span/Memory views over range copies.
 dotnet_diagnostic.CA1834.severity = error                                     # Prefer StringBuilder.Append(char) for single chars.
 dotnet_diagnostic.CA1835.severity = error                                     # Prefer Memory-based async APIs over array overloads.
+dotnet_diagnostic.CA1836.severity = error                                     # Prefer IsEmpty over Count-based emptiness checks.
 dotnet_diagnostic.CA1841.severity = error                                     # Prefer dictionary-specific contains methods.
 dotnet_diagnostic.CA1842.severity = error                                     # Avoid Task.WhenAll with a single task.
 dotnet_diagnostic.CA1843.severity = error                                     # Avoid Task.WaitAll with a single task.
 dotnet_diagnostic.CA1845.severity = error                                     # Prefer AsSpan over Substring for slicing scenarios.
 dotnet_diagnostic.CA1846.severity = error                                     # Prefer passing spans instead of materialized substrings.
+dotnet_diagnostic.CA1847.severity = error                                     # Prefer string.Contains(char) for single-character checks.
 dotnet_diagnostic.CA1848.severity = error                                     # Use LoggerMessage patterns for efficient logging.
 dotnet_diagnostic.CA1849.severity = error                                     # Prefer async APIs within async methods.
 dotnet_diagnostic.CA1850.severity = error                                     # Prefer static HashData-like APIs where available.
@@ -200,7 +253,6 @@ dotnet_diagnostic.CA2201.severity = error                                     # 
 dotnet_diagnostic.CA2208.severity = error                                     # Construct argument exceptions with correct parameter names.
 dotnet_diagnostic.CA2213.severity = error                                     # Dispose disposable fields when owning lifetime.
 dotnet_diagnostic.CA2214.severity = error                                     # Avoid calling overridable members in constructors.
-dotnet_diagnostic.CA2218.severity = error                                     # Require GetHashCode when Equals is overridden.
 dotnet_diagnostic.CA2219.severity = error                                     # Prevent throwing exceptions in exception-handling clauses.
 dotnet_diagnostic.CA2234.severity = error                                     # Prefer Uri-typed overloads over raw string URI overloads.
 dotnet_diagnostic.CA2241.severity = error                                     # Keep format placeholders aligned with arguments.
@@ -216,4 +268,28 @@ dotnet_diagnostic.CA2253.severity = error                                     # 
 dotnet_diagnostic.CA2254.severity = error                                     # Require static log templates for structured logging.
 dotnet_diagnostic.CA2263.severity = error                                     # Prefer generic overloads when concrete type is known.
 dotnet_diagnostic.CA1801.severity = error                                     # Prevent unused parameter declarations in implementation code.
+
+# --- [THREADING_ANALYZERS] ---------------------------------------------------
+dotnet_diagnostic.VSTHRD003.severity = none                                   # ASP.NET/Core apps can safely await foreign tasks without JTF context.
+dotnet_diagnostic.VSTHRD012.severity = none                                   # JTF injection is not applicable for no-main-thread application hosts.
+dotnet_diagnostic.VSTHRD100.severity = error                                  # Ban async void methods.
+dotnet_diagnostic.VSTHRD101.severity = error                                  # Ban async void lambdas and anonymous delegates.
+dotnet_diagnostic.VSTHRD103.severity = none                                   # Covered by CA1849 and MA0042 to avoid duplicate async-flow diagnostics.
+dotnet_diagnostic.VSTHRD110.severity = error                                  # Require observing/awaiting async call results.
+dotnet_diagnostic.VSTHRD111.severity = error                                  # Require explicit ConfigureAwait intent on awaits.
+
+# --- [MEZIANTOU_ANALYZERS] ---------------------------------------------------
+dotnet_diagnostic.MA0004.severity = none                                      # Covered by VSTHRD111 to avoid duplicate ConfigureAwait diagnostics.
+dotnet_diagnostic.MA0032.severity = error                                     # Require using overloads with CancellationToken when available.
+dotnet_diagnostic.MA0035.severity = error                                     # Ban dangerous threading APIs.
+dotnet_diagnostic.MA0040.severity = none                                      # Covered by CA2016 to avoid duplicate CancellationToken-forwarding diagnostics.
+dotnet_diagnostic.MA0042.severity = error                                     # Ban blocking calls in async-capable methods.
+dotnet_diagnostic.MA0080.severity = error                                     # Require WithCancellation in async enumeration flows.
+dotnet_diagnostic.MA0100.severity = error                                     # Ensure tasks complete before resource disposal boundaries.
+dotnet_diagnostic.MA0110.severity = error                                     # Prefer Regex source generator for constant patterns.
+dotnet_diagnostic.MA0134.severity = none                                      # Covered by VSTHRD110 to avoid duplicate async-observation diagnostics.
+dotnet_diagnostic.MA0155.severity = none                                      # Covered by VSTHRD100 to avoid duplicate async-void diagnostics.
+dotnet_diagnostic.MA0158.severity = error                                     # Prefer System.Threading.Lock over object lock guards.
+MA0032.allowOverloadsWithOptionalParameters = false                           # Require token-aware overload usage even when optional params exist.
+
 dotnet_code_quality_unused_parameters = non_public                            # Restrict unused-parameter enforcement to non-public members.

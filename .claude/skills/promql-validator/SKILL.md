@@ -1,6 +1,5 @@
 ---
 name: promql-validator
-depth: extended
 description: >-
     Validates existing PromQL query syntax, detects anti-patterns, checks best practices, and optimizes performance. Use when validating/auditing/reviewing queries, NOT creating new ones (use promql-generator instead).
 ---

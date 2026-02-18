@@ -37,7 +37,7 @@ const _storage = {
         }),
     putStream: (input: { key: string; stream: Stream.Stream<Uint8Array, unknown>; partSizeBytes?: number }) =>
         Effect.sync(() => {
-            _state.streams.push({ key: input.key, partSizeBytes: input.partSizeBytes });
+            _state.streams.push({ key: input.key, ...(input.partSizeBytes !== undefined && { partSizeBytes: input.partSizeBytes }) });
             return { etag: `etag-${input.key}`, key: input.key, partCount: 1, totalSize: 7, uploadId: 'up-1' };
         }),
     remove: (input: string | ReadonlyArray<string>) => Effect.sync(() => { (Array.isArray(input) ? input : [input]).forEach((key) => { _state.removes.push(key); }); }),

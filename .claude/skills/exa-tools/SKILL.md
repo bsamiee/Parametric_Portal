@@ -1,7 +1,5 @@
 ---
 name: exa-tools
-type: complex
-depth: base
 user-invocable: false
 description: >-
   Executes semantic web search via Exa AI Python CLI. Use when searching for

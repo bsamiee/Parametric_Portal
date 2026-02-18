@@ -1,7 +1,5 @@
 ---
 name: agent-builder
-type: standard
-depth: base
 description: >-
   Creates Claude Code agent files (.claude/agents/*.md) with YAML frontmatter, tool
   permissions, and system prompts. Use when building new agents, configuring agent

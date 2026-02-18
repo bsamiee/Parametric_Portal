@@ -1,7 +1,5 @@
 ---
 name: tavily-tools
-type: complex
-depth: base
 user-invocable: false
 description: >-
   Executes Tavily AI search, extraction, crawling, mapping, and deep research via Python CLI. Use when web search, URL content extraction, site crawling, or multi-step research needed.

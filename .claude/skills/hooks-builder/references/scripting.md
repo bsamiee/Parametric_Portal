@@ -154,16 +154,20 @@ def _format_xml(skills: list[SkillEntry], targets: frozenset[str]) -> str:
 <br>
 
 ```toml
-[tool.pyright]
-typeCheckingMode = "all"
-pythonVersion = "3.14"
+[tool.ty.environment]
+python-version = "3.14"
+
+[tool.ty.rules]
+all = "error"
 
 [tool.ruff]
 target-version = "py314"
+
+[tool.ruff.lint]
 select = ["E", "F", "W", "B", "I", "UP", "ANN", "S", "C90"]
 ```
 
 | [GATE] | [COMMAND]                             |
 | ------ | ------------------------------------- |
-| Type   | `pyright .`                           |
+| Type   | `ty check`                            |
 | Lint   | `ruff check --fix . && ruff format .` |

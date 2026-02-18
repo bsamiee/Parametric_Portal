@@ -1,7 +1,5 @@
 ---
 name: context7-tools
-type: complex
-depth: base
 user-invocable: false
 description: >-
   Queries version-specific library documentation from Context7. Use when fetching API references, code examples,

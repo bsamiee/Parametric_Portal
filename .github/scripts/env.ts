@@ -21,11 +21,15 @@ const ENV = Object.freeze({
 
 const CMD = Object.freeze({
     cs: {
-        build: 'nx run-many -t build:cs',
-        lint: "find apps -name '*.csproj' -exec env -u DOTNET_ROOT dotnet format --verify-no-changes {} \\;",
-        test: 'nx run-many -t test:cs',
+        build: 'pnpm cs:check',
+        lint: 'pnpm cs:check',
+        test: 'pnpm exec nx run-many -t test:cs',
     },
-    ts: { build: 'nx run-many -t typecheck', lint: 'nx run-many -t check', test: 'nx run-many -t test' },
+    ts: {
+        build: 'pnpm ts:check',
+        lint: 'pnpm ts:check',
+        test: 'pnpm exec nx run-many -t test',
+    },
 } as const)[ENV.lang];
 
 // --- Export ------------------------------------------------------------------

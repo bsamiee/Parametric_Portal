@@ -1,7 +1,5 @@
 ---
 name: n8n-builder
-type: standard
-depth: base
 description: >-
     Generates production-ready n8n 2.0+ workflow JSON with nodes, connections, AI
     agents, RAG pipelines, Task Runners, MCP clients, and validation. Use when

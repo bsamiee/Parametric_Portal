@@ -1,7 +1,5 @@
 ---
 name: mermaid-diagramming
-type: standard
-depth: extended
 description: >-
   Generates Mermaid v11+ diagrams with YAML frontmatter, ELK layout, and Dracula theming across 22
   types: flowcharts, sequence diagrams, state machines, ER diagrams, class diagrams, mindmaps,

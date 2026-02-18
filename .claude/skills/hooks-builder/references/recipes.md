@@ -78,16 +78,16 @@ import json, sys, subprocess
 from pathlib import Path
 B: Final = {
     "fmt": {".py": ["ruff", "format"], ".ts": ["biome", "format", "--write"]},
-    "chk": {".py": ["pyright", "--outputjson"]},
+    "chk": {".py": ["ty", "check", "--output-format", "concise"]},
 }
 run = lambda cmd, p: subprocess.run([*cmd, str(p)], capture_output=True, text=True, timeout=30)
-slim = lambda out: "\n".join(f"{e['range']['start']['line']}:{e['message']}" for e in json.loads(out).get("generalDiagnostics", [])[:5])
+slim = lambda out: "\n".join(out.splitlines()[:5])
 def main() -> int:
     path = Path(json.load(sys.stdin).get("tool_input", {}).get("file_path", ""))
     path.exists() and B["fmt"].get(path.suffix) and run(B["fmt"][path.suffix], path)
     chk = B["chk"].get(path.suffix)
     r = chk and path.exists() and run(chk, path)
-    r and r.returncode and print(slim(r.stdout), file=sys.stderr)
+    r and r.returncode and print(slim(r.stdout or r.stderr), file=sys.stderr)
     return 2 if r and r.returncode else 0
 if __name__ == "__main__": sys.exit(main())
 ```

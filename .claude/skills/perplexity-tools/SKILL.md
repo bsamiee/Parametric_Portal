@@ -1,7 +1,5 @@
 ---
 name: perplexity-tools
-type: complex
-depth: base
 user-invocable: false
 description: >-
   Queries Perplexity AI via sonar/sonar-pro/sonar-deep-research/sonar-reasoning-pro models. Use when conducting cited web research, deep technical reports, or complex reasoning problems requiring up-to-date sources.

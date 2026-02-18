@@ -1,7 +1,5 @@
 ---
 name: nx-tools
-type: complex
-depth: base
 user-invocable: false
 description: >-
   Queries Nx monorepo metadata via Python CLI: workspace projects, affected detection, dependency graphs, project.json configs, generator schemas. Use when analyzing monorepo structure, optimizing CI via affected projects, or inspecting workspace topology.

@@ -1,0 +1,132 @@
+[project]
+name = "parametric-portal-python"
+version = "0.1.0"
+requires-python = ">=3.14"
+dependencies = [
+    "anyio",
+    "beartype",
+    "msgspec",
+    "opentelemetry-api",
+    "opentelemetry-instrumentation-logging",
+    "opentelemetry-sdk",
+    "pydantic",
+    "pydantic-settings",
+    "returns",
+    "stamina",
+    "structlog",
+    "typing-extensions",
+    "hypothesis",
+    "pytest",
+    "ruff",
+    "ty",
+]
+
+# === UV ====================================================================
+[tool.uv]
+cache-dir = ".cache/uv"
+managed = true
+package = false
+environments = [
+    "sys_platform == 'darwin'",
+    "sys_platform == 'linux'",
+    "sys_platform == 'win32'",
+]
+required-environments = [
+    "sys_platform == 'darwin'",
+    "sys_platform == 'linux'",
+    "sys_platform == 'win32'",
+]
+
+# [tool.uv.workspace]
+# members = ["apps/python/*", "packages/python/*"]
+# exclude = ["apps/python/_template/*", "packages/python/_template/*"]
+
+# === Ty ====================================================================
+[tool.ty.environment]
+python-version = "3.14"
+python-platform = "all"
+python = ".venv"
+
+[tool.ty.analysis]
+allowed-unresolved-imports = []
+respect-type-ignore-comments = false
+
+[tool.ty.src]
+include = ["."]
+exclude = [
+    ".git",
+    ".claude",
+    ".venv",
+    ".cache",
+    ".nx",
+    "node_modules",
+    "dist",
+    "build",
+    "tmp",
+]
+respect-ignore-files = true
+
+[tool.ty.rules]
+all = "error"
+ignore-comment-unknown-rule = "error"
+invalid-ignore-comment = "error"
+unused-ignore-comment = "error"
+unused-type-ignore-comment = "error"
+
+[tool.ty.terminal]
+error-on-warning = true
+output-format = "full"
+
+# === Mypy ==================================================================
+[tool.mypy]
+cache_dir = ".cache/mypy"
+
+# === Pytest ================================================================
+[tool.pytest.ini_options]
+addopts = "--strict-markers --strict-config -x --tb=short"
+xfail_strict = true
+testpaths = ["tests"]
+
+# === Ruff ==================================================================
+[tool.ruff]
+target-version = "py314"
+line-length = 120
+cache-dir = ".cache/ruff"
+preview = true
+force-exclude = true
+respect-gitignore = true
+src = ["."]
+exclude = [
+    "**/.claude/**",
+    "**/.venv/**",
+    "**/.cache/**",
+    "**/node_modules/**",
+    "**/.mypy_cache/**",
+    "**/.pytest_cache/**",
+    "**/.ruff_cache/**",
+    "**/.history/**",
+    "**/dist/**",
+    "**/build/**",
+    ".git",
+]
+
+[tool.ruff.format]
+preview = true
+quote-style = "preserve"
+indent-style = "space"
+line-ending = "lf"
+skip-magic-trailing-comma = false
+docstring-code-format = true
+
+[tool.ruff.lint]
+select = ["ALL"]
+ignore = ["COM812", "D203", "D213", "ISC001"]
+explicit-preview-rules = true
+future-annotations = true
+fixable = ["ALL"]
+
+[tool.ruff.lint.flake8-annotations]
+allow-star-arg-any = false
+ignore-fully-untyped = false
+mypy-init-return = false
+suppress-none-returning = false
