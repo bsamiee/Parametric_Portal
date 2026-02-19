@@ -44,7 +44,20 @@
             "!{projectRoot}/tsconfig.spec.json",
             "!{projectRoot}/**/*.tsbuildinfo"
         ],
-        "python": ["{workspaceRoot}/**/*.py", "{workspaceRoot}/pyproject.toml"],
+        "python": [
+            "{workspaceRoot}/**/*.py",
+            "{workspaceRoot}/pyproject.toml",
+            "!{workspaceRoot}/.claude/**",
+            "!{workspaceRoot}/.cache/**",
+            "!{workspaceRoot}/.git/**",
+            "!{workspaceRoot}/.nx/**",
+            "!{workspaceRoot}/.venv/**",
+            "!{workspaceRoot}/_TMP/**",
+            "!{workspaceRoot}/coverage/**",
+            "!{workspaceRoot}/dist/**",
+            "!{workspaceRoot}/node_modules/**",
+            "!{workspaceRoot}/test-results/**"
+        ],
         "sharedGlobals": [
             "{workspaceRoot}/nx.json",
             "{workspaceRoot}/tsconfig.base.json",
@@ -99,14 +112,12 @@
         },
         {
             "exclude": ["tools/**/*", "**/node_modules/**", "**/dist/**", "**/bin/**", "**/obj/**"],
-            "include": ["apps/**/*.csproj", "apps/**/*.fsproj", "apps/**/*.vbproj"],
-            "options": {
-                "build": { "targetName": "build:cs" }, "clean": { "targetName": "clean:cs" },
-                "pack": { "targetName": "pack:cs" }, "publish": { "targetName": "publish:cs" },
-                "restore": { "targetName": "restore:cs" }, "run": { "targetName": "run:cs" },
-                "test": { "targetName": "test:cs" }, "watch": { "targetName": "watch:cs" }
-            },
+            "include": ["**/*.csproj", "**/*.fsproj", "**/*.vbproj"],
             "plugin": "@nx/dotnet"
+        },
+        {
+            "options": { "packageManager": "uv" },
+            "plugin": "@nxlv/python"
         },
         {
             "include": ["playwright.config.ts"],
@@ -114,8 +125,11 @@
             "plugin": "@nx/playwright/plugin"
         },
         {
-            "exclude": ["tools/**/*", "**/node_modules/**", "**/dist/**", "**/.nx/**", "**/.vite/**"],
-            "include": ["apps/*/biome.json", "packages/*/biome.json", "biome.json"],
+            "include": ["apps/*/Dockerfile"],
+            "options": { "defaultEngine": "docker", "defaultRegistry": "docker.io" },
+            "plugin": "@nx-tools/nx-container"
+        },
+        {
             "options": { "targetName": "check" },
             "plugin": "@berenddeboer/nx-biome"
         }
@@ -166,12 +180,7 @@
             "inputs": ["production", "^production", "{workspaceRoot}/vite.factory.ts"],
             "outputs": ["{projectRoot}/dist/**/*.js", "{projectRoot}/dist/**/*.d.ts", "{projectRoot}/dist/**/*.map"]
         },
-        "build:cs": {
-            "dependsOn": ["restore:cs", "^build:cs"],
-            "inputs": ["dotnetSources", "^dotnetSources"],
-            "outputs": ["{projectRoot}/bin", "{projectRoot}/obj"]
-        },
-        "clean:cs": { "cache": false, "inputs": ["dotnetSources", "^dotnetSources"] },
+        "check": { "cache": true, "inputs": ["lint", "sharedGlobals"] },
         "dev": {
             "cache": false,
             "configurations": {
@@ -228,8 +237,6 @@
                 "cwd": "{workspaceRoot}"
             }
         },
-        "pack:cs": { "dependsOn": ["build:cs"], "inputs": ["dotnetSources", "^dotnetSources"], "outputs": ["{projectRoot}/bin/**/*.nupkg"] },
-        "publish:cs": { "dependsOn": ["build:cs"], "inputs": ["dotnetSources", "^dotnetSources"], "outputs": ["{projectRoot}/bin/**/publish"] },
         "pwa:icons": {
             "cache": false,
             "executor": "nx:run-commands",
@@ -240,15 +247,7 @@
             "executor": "nx:run-commands",
             "options": { "command": "tsx watch tools/scripts/generate-pwa-icons.ts", "cwd": "{projectRoot}" }
         },
-        "restore:cs": { "cache": false, "inputs": ["dotnetSources", "^dotnetSources"] },
-        "run:cs": { "cache": false, "continuous": true },
         "test": { "inputs": ["testing", "^production"], "outputs": ["{projectRoot}/coverage", "{workspaceRoot}/test-results"] },
-        "test:cs": {
-            "cache": true,
-            "dependsOn": ["build:cs"],
-            "inputs": ["dotnetSources", "^dotnetSources"],
-            "outputs": ["{projectRoot}/TestResults", "{workspaceRoot}/test-results"]
-        },
         "test:mutate": { "cache": true, "inputs": ["testing", "^production"], "outputs": ["{workspaceRoot}/test-results/mutation"] },
         "test:ui": {
             "cache": false,
@@ -258,12 +257,9 @@
         "typecheck": {
             "cache": true,
             "dependsOn": ["^typecheck"],
-            "executor": "nx:run-commands",
-            "inputs": ["typescript", "sharedGlobals"],
-            "options": { "command": "tsc --project tsconfig.json --noEmit", "cwd": "{projectRoot}" }
-        },
-        "watch:cs": { "cache": false, "continuous": true }
+            "inputs": ["typescript", "sharedGlobals"]
+        }
     },
-    "useInferencePlugins": false,
+    "useInferencePlugins": true,
     "workspaceLayout": { "appsDir": "apps", "libsDir": "packages" }
 }

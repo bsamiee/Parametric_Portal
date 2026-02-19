@@ -7,7 +7,7 @@ Produces one self-contained domain module: domain primitives via `readonly recor
 
 **Density:** ~400 LOC signals a refactoring opportunity. No file proliferation; helpers are always a code smell.
 **References:** `effects.md` ([1][4] Fin, Validation), `composition.md` ([1][2][3][4] Pipe, arity collapse, extensions, HKT encoding), `objects.md` ([1][7] topology, boundary adapters), `algorithms.md` ([6] Kleisli), `types.md` ([1][2][7] domain primitives, Newtype, collections), `validation.md` (compliance checklist), `diagnostics.md` ([2] error chain navigation, [3] Fin pipeline probes).
-**Anti-Pattern Awareness:** See `patterns.md` [1] for VAR_INFERENCE, ANEMIC_DOMAIN, PREMATURE_MATCH_COLLAPSE, POSITIONAL_ARGS, HELPER_SPAM, DENSITY_OVER_VOLUME.
+**Anti-Pattern Awareness:** See `patterns.md` [1] for VAR_INFERENCE, ANEMIC_DOMAIN, PREMATURE_MATCH_COLLAPSE, POSITIONAL_ARGS, HELPER_SPAM.
 **Workflow:** Fill placeholders, remove guidance blocks, verify compilation.
 
 ---
@@ -214,9 +214,9 @@ public static class ${ExtensionClass} {
 
 *Domain Primitive + K<F,A> Polymorphism* -- `CreateK<F>` returns `K<F, ${PrimitiveName}>` with `Fallible<F>, Applicative<F>` constraints, making the factory generic over computation context. `Create` is the monomorphic convenience delegating to `CreateK<Fin>(...).As()`. Consumers wanting `Validation` use `CreateK<Validation<Error>>(...).As()`; consumers wanting `Option` use `CreateK<Option>(...).As()`. See `composition.md` [4] for HKT encoding and `.As()` downcast.
 
-*Applicative Validation + Fold Catamorphism* -- `CreateAggregate<F>` is polymorphic: `Validation<Error>` accumulates all errors, `Fin` short-circuits. The `Fold` method on the sealed DU is a catamorphism -- each interpretation is a new set of fold arguments, no new classes. Extension members route through `Fold` for exhaustive queries; direct `switch` only for transitions needing pattern-bound variables. The `_` arm with `UnreachableException` is defensive until C# ships native DU exhaustiveness. See `effects.md` [4], `composition.md` [5].
+*Applicative Validation + Fold Catamorphism* -- `CreateAggregate<F>` is polymorphic: `Validation<Error>` accumulates all errors, `Fin` short-circuits. The `Fold` method on the sealed DU is a catamorphism -- each interpretation is a new set of fold arguments, no new interpreter types. Extension members route through `Fold` for exhaustive queries; direct `switch` only for transitions needing pattern-bound variables. The `_` arm with `UnreachableException` is defensive until C# ships native DU exhaustiveness. See `effects.md` [4], `composition.md` [5].
 
-*Collections and Pipeline Composition* -- `Seq<T>` over `List<T>`/`IEnumerable<T>`; `HashMap<K,V>` over `Dictionary`/`ImmutableDictionary` -- both integrate with `K<F,A>` traits. `Choose` fuses map+filter in a single pass. `Bind`/`Map` chain `Fin<T>` pipelines; reserve `Match` for boundaries only (PREMATURE_MATCH_COLLAPSE). For chaining `A -> Fin<B>` arrows, use `ComposeK` per `algorithms.md` [6]. When a pipeline step fails unexpectedly, insert `Probe.Trace` at the boundary step to surface the dual-channel log without collapsing context (`diagnostics.md` [3]). See `types.md` [7], `composition.md` [1][3].
+*Collections and Pipeline Composition* -- `Seq<T>` over `List<T>`/`IEnumerable<T>`; `HashMap<K,V>` over `Dictionary`/`ImmutableDictionary` -- both implement LanguageExt traits. `Choose` fuses map+filter in a single pass. `Bind`/`Map` chain `Fin<T>` pipelines; reserve `Match` for boundaries only (PREMATURE_MATCH_COLLAPSE). For chaining `A -> Fin<B>` arrows, use `ComposeK` per `algorithms.md` [6]. When a pipeline step fails unexpectedly, insert `Probe.Trace` at the boundary step to surface the dual-channel log without collapsing context (`diagnostics.md` [3]). See `types.md` [7], `composition.md` [1][3].
 
 ---
 **Post-Scaffold Checklist** (from `validation.md`)
@@ -225,5 +225,5 @@ public static class ${ExtensionClass} {
 - [ ] EFFECT_INTEGRITY: `Fin<T>` chains use `Bind`/`Map`; `Match` appears ONLY at boundaries
 - [ ] CONTROL_FLOW: Zero `if`/`else`/`while`/`for`/`foreach`; all dispatch via Fold + switch expressions
 - [ ] SURFACE_QUALITY: No single-call private helpers; no arity spam; named parameters everywhere
-- [ ] DENSITY: ~400 LOC target; dense algebraic composition, not brute-force inlining
+- [ ] DENSITY: ~400 LOC target; algebraic composition compresses logic via polymorphism
 - [ ] DIAGNOSTICS: Unexpected `Fin<T>` failures inspected via `Probe.Trace` (not `Match`); error chains navigated via `Error.Flatten()` (not manual `Inner` walks) -- see `diagnostics.md` [2][3]

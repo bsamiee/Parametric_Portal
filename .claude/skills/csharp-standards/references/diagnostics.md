@@ -172,6 +172,8 @@ public static class FailureIntelligence {
 }
 ```
 
+**Compiler Diagnostic Symptoms** -- common type errors when working with LanguageExt HKT encoding:
+
 | [SYMPTOM] | [CAUSE] | [FIX] |
 | --------- | ------- | ----- |
 | `Cannot convert K<F,A> to Concrete<A>` | downcast boundary omitted | add `.As()` at consumption boundary |

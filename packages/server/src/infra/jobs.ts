@@ -9,6 +9,7 @@ import { Rpc, RpcClientError } from '@effect/rpc';
 import { Activity, Workflow } from '@effect/workflow';
 import { SqlClient } from '@effect/sql';
 import { Cause, Chunk, Clock, DateTime, Duration, Effect, Fiber, FiberMap, Layer, Mailbox, Match, Metric, Option, pipe, Ref, Schedule, Schema as S, STM, Stream, TMap, TRef } from 'effect';
+import { constant } from 'effect/Function';
 import { DatabaseService } from '@parametric-portal/database/repos';
 import { Job, JobStatusSchema, type JobDlq } from '@parametric-portal/database/models';
 import { Resilience } from '../utils/resilience.ts';
@@ -134,7 +135,7 @@ class JobState extends S.Class<JobState>('JobState')({
         state: JobState | null,
         to: typeof JobStatusSchema.Type,
         timestamp: number,
-        opts?: { attempts?: number; error?: string; result?: unknown },): JobState => {
+        opts?: { attempts?: number | undefined; error?: string | undefined; result?: unknown | undefined },): JobState => {
         const base = state ?? new JobState({ attempts: 0, createdAt: timestamp, history: [], status: 'queued' });
         const isIdempotent = base.status === to;
         const isValid = _STATUS_MODEL[base.status].transitions.has(to);
@@ -247,7 +248,7 @@ const JobEntityLive = JobEntity.toLayer(Effect.gen(function* () {
         },
         state: {
             read: _readState,
-            transition: (jobId: string, tenantId: string, status: typeof JobStatusSchema.Type, timestamp: number, options?: { attempts?: number; error?: string; result?: unknown }) => _readState(jobId, tenantId).pipe(
+            transition: (jobId: string, tenantId: string, status: typeof JobStatusSchema.Type, timestamp: number, options?: { attempts?: number | undefined; error?: string | undefined; result?: unknown | undefined }) => _readState(jobId, tenantId).pipe(
                 Effect.map(Option.getOrElse(() => null)),
                 Effect.flatMap((current) => Match.value(current).pipe(
                     Match.when(null, () => Effect.succeed(JobState.transition(null, status, timestamp, options))),
@@ -513,12 +514,18 @@ class JobService extends Effect.Service<JobService>()('server/Jobs', {
                         STM.commit(TRef.modify(counter, (count) => [EntityId.make(`job-${priority}-${count % _CONFIG.pools[priority]}`), count + 1] as const)).pipe(
                             Effect.flatMap((entityId) => Context.Request.withinCluster({ entityId, entityType: 'Job' })(
                                 getClient(entityId)['submit']({
-                                    ...deliverAt, batchId, dedupeKey: opts?.dedupeKey ? `${opts.dedupeKey}:${index}` : undefined,
-                                    ipAddress: Option.getOrUndefined(requestContext.ipAddress),
-                                    maxAttempts: opts?.maxAttempts, payload, priority,
+                                    ...deliverAt,
+                                    payload,
+                                    priority,
                                     requestId: requestContext.requestId,
-                                    scheduledAt: opts?.scheduledAt, tenantId, type,
-                                    userAgent: Option.getOrUndefined(requestContext.userAgent),
+                                    tenantId,
+                                    type,
+                                    ...(batchId === undefined ? {} : { batchId }),
+                                    ...(opts?.dedupeKey === undefined ? {} : { dedupeKey: `${opts.dedupeKey}:${index}` }),
+                                    ...Option.match(requestContext.ipAddress, { onNone: constant({}), onSome: (ipAddress) => ({ ipAddress }) }),
+                                    ...(opts?.maxAttempts === undefined ? {} : { maxAttempts: opts.maxAttempts }),
+                                    ...(opts?.scheduledAt === undefined ? {} : { scheduledAt: opts.scheduledAt }),
+                                    ...Option.match(requestContext.userAgent, { onNone: constant({}), onSome: (userAgent) => ({ userAgent }) }),
                                 }).pipe(Effect.map((result) => result.jobId)),
                             )),
                         ), { concurrency: 'unbounded' });

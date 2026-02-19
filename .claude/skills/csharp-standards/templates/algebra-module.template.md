@@ -3,7 +3,7 @@
 
 <br>
 
-Produces one algebraic abstraction module: query union as a sealed DU with `Fold` catamorphism, a single-method interface dispatching through the fold, an `Atom<HashMap<K,V>>`-backed pure interpreter, a `K<F,A>`-polymorphic interpreter that eliminates `(TResult)(object)` double-casts, an effectful `Eff<RT,T>` interpreter composing with the polymorphic path, a decorator demonstrating composition via fold wrapping, C# 14 extension members on the algebra, `params ReadOnlySpan<T>` batch execution, and applicative boundary validation.
+Produces one algebraic abstraction module: query union as a sealed DU with `Fold` catamorphism, a single-method interface dispatching through the fold, an `Atom<HashMap<K,V>>`-backed pure interpreter, a `K<F,A>`-polymorphic interpreter that eliminates `(TResult)(object)` double-casts, an effectful `Eff<RT,T>` interpreter composing with the polymorphic path, a decorator composing cross-cutting behavior via fold wrapping, C# 14 extension members on the algebra, `params ReadOnlySpan<T>` batch execution, and applicative boundary validation.
 
 **Density:** ~400 LOC signals a refactoring opportunity. No file proliferation; helpers are always a code smell.
 **References:** `composition.md` ([4] HKT encoding, [2] arity collapse, [5] algebraic compression), `effects.md` ([2] Eff pipelines, [7] STM/Atom, [3] @catch), `types.md` ([1] domain primitives, [4] DUs), `objects.md` ([7] boundary adapters), `performance.md` ([7] static lambdas), `validation.md` ([1]-[6] post-scaffold checklist), `algorithms.md` ([1] recursion schemes, [6] Kleisli).
@@ -276,17 +276,17 @@ public static class ${AlgebraName}Boundary {
 
 *Polymorphic Interpreter via K<F,A>* -- `${AlgebraName}Interpret.Execute` parameterizes the effect context via `F : Fallible<F>, Applicative<F>`, eliminating the `(TResult)(object)` double-cast from the monomorphic path. Callers select `F` at the call site and must call `.As()` to downcast `K<F,A>` to the concrete type -- see `composition.md` [4]. The `Eff` interpreter composes with this path when callers need generic effect selection; the monomorphic `${InterfaceName}.Execute` remains for `Fin`-only consumers.
 
-*Atom State + Decorators* -- `Atom<HashMap<K,V>>` provides lock-free atomic state with pure `Swap` transitions (see `effects.md` [7]). Decorators compose by nesting and inspect queries via Fold for cross-cutting concerns. Static lambdas on Fold in hot-path interpreters prevent closure allocation (see `performance.md` [7]); non-static lambdas are acceptable when Fold arms reference instance state. To promote a decorator to full observability, replace `Action<string> log` with `Observe.Outcome` tap on the returned `Fin<TResult>` -- see `observability.md` [4]. For debug-only span wrapping, use `Probe.Span` from a centralized `Diagnostics` module rather than inlining `ActivitySource` -- see `diagnostics.md` [1] and `diagnostics.md` [3].
+*Atom State + Decorators* -- `Atom<HashMap<K,V>>` provides lock-free atomic state with pure `Swap` transitions (see `effects.md` [7]). Decorators compose by nesting and inspect queries via Fold for cross-cutting concerns. Static lambdas on Fold in hot-path interpreters prevent closure allocations (see `performance.md` [7]); non-static lambdas are acceptable when Fold arms reference instance state. To promote a decorator to full observability, replace `Action<string> log` with `Observe.Outcome` tap on the returned `Fin<TResult>` -- see `observability.md` [4]. For debug-only span wrapping, use `Probe.Span` from a centralized `Diagnostics` module rather than inlining `ActivitySource` -- see `diagnostics.md` [1] and `diagnostics.md` [3].
 
-*Foldable/Traversable for Container-Generic Algorithms* -- When batch query results are wrapped in containers, use `Foldable<F>` for Sum/All/Count and `Traversable<F>` for effectful iteration -- see `composition.md` [4]. These are consumer-side concerns, not algebra-internal; import from a shared composition module.
+*Foldable/Traversable for Container-Generic Algorithms* -- When batch query results are wrapped in containers, use `Foldable<F>` for Sum/All/Count and `Traversable<F>` for effectful iteration -- see `composition.md` [4]. These are consumer-side concerns, not algebra-internal; constrain via LanguageExt traits.
 
 ---
 **Post-Scaffold Checklist** (from `validation.md`)
 
 - [ ] TYPE_INTEGRITY: Smart constructor + `Fin<T>` factory on `${AlgebraName}Config`; no `{ get; set; }` bags
 - [ ] EFFECT_INTEGRITY: `Fin<T>` for sync Execute; `K<F,A>` for polymorphic; `Eff<RT,T>` for effectful; no `try`/`catch`
-- [ ] CONTROL_FLOW: Zero `if`/`else`/`for`/`foreach`; all dispatch via Fold + switch expressions
+- [ ] CONTROL_FLOW: Zero `if`/`else`/`while`/`for`/`foreach`; all dispatch via Fold + switch expressions
 - [ ] SURFACE_QUALITY: One `Execute` method; no sibling families; no single-call private helpers
-- [ ] DENSITY: ~260 LOC target; zero `var`; static lambdas where possible; named parameters everywhere
+- [ ] DENSITY: ~400 LOC target; zero `var`; static lambdas where possible; named parameters everywhere
 - [ ] OBSERVABILITY: `${DecoratorName}` uses `Observe.Outcome` tap or delegates to a centralized `Diagnostics` module -- no inline `ActivitySource` creation; see `observability.md` [4], `diagnostics.md` [1]
 - [ ] DIAGNOSTIC_CLEANUP: All `Probe.Span` / `Probe.Tap` calls removed before production; `${DiagnosticLabel}` placeholder resolved; error codes in `${AlgebraName}Errors` carry `int` codes for dashboard use -- see `diagnostics.md` [3], `observability.md` [6]

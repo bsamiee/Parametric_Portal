@@ -183,7 +183,7 @@ public static K<G, K<F, B>> TraverseGeneric<F, G, A, B>(
     Traversable.traverse(f: transform, ta: structure);
 ```
 
-**Middleware-Generic-Over-Monad** -- HKT applied to orchestration patterns. `Functor<TMonad>` suffices because `MapState` applies a pure transform without monadic bind:
+**Middleware Generic Over Monad** -- HKT applied to orchestration patterns. `Functor<TMonad>` suffices because `MapState` applies a pure transform without monadic bind:
 
 ```csharp
 public interface IUniversalStateElevator<TMonad, TState>

@@ -131,6 +131,8 @@
 ### [7.1][FEW_SHOT]
 >**Dictum:** *Quality outweighs quantity.*
 
+<br>
+
 [IMPORTANT] Few-shot performance peaks at 5-25 examples. 100+ cause functional correctness collapse. Distinctive examples (TF-IDF) reduce count by 60%.
 
 ---

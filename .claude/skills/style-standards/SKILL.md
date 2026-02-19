@@ -13,12 +13,12 @@ description: >-
 Govern file creation and modification in monorepo.
 
 **Tasks:**
-1. Read [keywords.md](./references/keywords.md) — Canonical keyword list; all Markers use official terms
-2. (taxonomy) Read [taxonomy.md](./references/taxonomy.md) — Lexicon, references, stati definitions
-3. (voice) Read [voice.md](./references/voice.md) — Grammar, ordering, comments, constraints, naming, density
-4. (formatting) Read [formatting.md](./references/formatting.md) — Structure, typeset, spacing, examples
-5. Apply standards — Implement per domain Guidance and Best-Practices
-6. Validate — Quality gate; see §VALIDATION
+1. Read [keywords.md](./references/keywords.md) — Canonical keyword list; all Markers use official terms.
+2. Read [taxonomy.md](./references/taxonomy.md) — Lexicon, references, stati definitions.
+3. Read [voice.md](./references/voice.md) — Grammar, ordering, comments, constraints, naming, density.
+4. Read [formatting.md](./references/formatting.md) — Structure, typeset, spacing, examples.
+5. Apply per-section Guidance and Best-Practices.
+6. Validate against §VALIDATION checklist.
 
 **Scope:**
 - *Documentation:* Markdown structure, headers, lists, tables, Dictums, separators.
@@ -101,7 +101,7 @@ Applies to documentation and comments. Scope: tone, list semantics, ordering pri
 Separators encode hierarchy. Whitespace: semantic, not cosmetic. Patterns enable rapid reference.
 
 **Guidance:**<br>
-- `Dictum` - Place first after H1/H2. State WHY, not WHAT. Format: `>**Dictum:** *statement*`
+- `Dictum` - Place first after H1/H2. State WHY, not WHAT. Format: `>**Dictum:** *statement*`.
 - `Depth` - H1: File Truth. H2: Smallest agent read unit. H3: Nesting limit. [CRITICAL] H4+ requires new file.
 - `Lists` - Use numbered `1.` for sequence/priority. Use bullet `-` for equivalence/sets.
 - `Labels` - Format parent: `**Bold:**` with colon. Format child: `*Italic:*` for contrast.

@@ -27,31 +27,31 @@ Coding standards references are complementary, not mutually exclusive. Type disc
 **Step 1 -- Foundation (always load first)**
 Cross-cutting references that establish baseline discipline for ALL C# modules.
 
-| [ORDER] | [REFERENCE]     | [ESTABLISHES]                               |
+| [ORDER] | [REFERENCE]     | [FOCUS]          |
 | :-----: | --------------- | ------------------------------------------- |
-|   [1]   | `validation.md` | Compliance checklist and audit heuristics   |
-|   [2]   | `patterns.md`   | Anti-pattern codex with corrective examples |
+|   [1]   | `validation.md` | Compliance checks |
+|   [2]   | `patterns.md`   | Anti-pattern codex |
 
 **Step 2 -- Core (always load second)**
 Domain references covering the type system, object modeling, and computation. Nearly all implementation tasks touch multiple core domains simultaneously.
 
-| [ORDER] | [REFERENCE]      | [ESTABLISHES]                                    |
+| [ORDER] | [REFERENCE]      | [FOCUS]                  |
 | :-----: | ---------------- | ------------------------------------------------ |
-|   [3]   | `types.md`       | Type primitives, sealed DUs, phantom parameters  |
-|   [4]   | `objects.md`     | Object model topology and canonical shapes       |
-|   [5]   | `effects.md`     | ROP pipelines, Eff<RT,T>, IO<A>, error channels  |
-|   [6]   | `composition.md` | LINQ comprehensions, K<F,A>, monadic composition |
+|   [3]   | `types.md`       | primitives, DUs, phantom state |
+|   [4]   | `objects.md`     | object topology |
+|   [5]   | `effects.md`     | Fin/Validation/Eff/IO |
+|   [6]   | `composition.md` | LINQ + `K<F,A>` composition |
 
 **Step 3 -- Specialized (load when task requires)**
-Genuinely specialized domains. Load when the task involves HKT polymorphic algorithms, recursion schemes, hot-path optimization, observability, concurrency, or diagnostics.
+Specialized domains. Load when the task involves HKT polymorphic algorithms, recursion schemes, hot-path optimization, observability, concurrency, or diagnostics.
 
-| [ORDER] | [REFERENCE]        | [LOAD_WHEN]                                                         |
+| [ORDER] | [REFERENCE]        | [LOAD_WHEN]                |
 | :-----: | ------------------ | ------------------------------------------------------------------- |
-|   [7]   | `algorithms.md`    | Recursion schemes, folds, K<F,A> generic algorithms                 |
-|   [8]   | `performance.md`   | Hot paths, TensorPrimitives, Vector512, span code                   |
-|   [9]   | `observability.md` | Structured logging, distributed tracing, metrics, ROP combinators   |
-|  [10]   | `concurrency.md`   | Channels, cancellation, structured parallelism, async streams       |
-|  [11]   | `diagnostics.md`   | Debugging functional code, error chains, pipeline probes, profiling |
+|   [7]   | `algorithms.md`    | recursion schemes, folds, HKTs |
+|   [8]   | `performance.md`   | SIMD/span hot paths |
+|   [9]   | `observability.md` | logs/traces/metrics |
+|  [10]   | `concurrency.md`   | channels + cancellation |
+|  [11]   | `diagnostics.md`   | debugging + profiling |
 
 **Step 4 -- Template (scaffolding only)**
 Load exactly one template when creating a new module from scratch.
@@ -81,7 +81,7 @@ Hold all loaded references stable through task completion.
 
 **Type discipline**
 - **Zero `var`** -- all types explicit in declarations and lambda parameters.
-- **Named parameters** at every domain call site (`Create(candidate: value)`). Framework/LINQ predicate parameters and single-argument lambda invocations may use positional syntax.
+- **Named parameters** at every domain call site (`Create(candidate: value)`). Framework/LINQ predicate parameters and single-argument lambdas may use positional syntax.
 - **`readonly record struct`** for domain primitives; `sealed abstract record` for DUs.
 - **Expression-bodied members** where the body is a single expression.
 - **Primary constructors** preferred per `.editorconfig` (`csharp_style_prefer_primary_constructors = true:error`).
@@ -104,7 +104,7 @@ Hold all loaded references stable through task completion.
 **Surface minimization**
 - **`params ReadOnlySpan<T>`** for arity collapse -- one method owns all arities.
 - **Sealed DU hierarchies** with `private protected` constructors -- closed extension.
-- **`static` lambdas** on hot-path closures -- zero capture bytes.
+- **`static` lambdas** on hot-path closures -- zero closure allocations.
 - **C# 14 extension blocks** for behavior projection without inheritance.
 
 ---
@@ -113,26 +113,26 @@ Hold all loaded references stable through task completion.
 
 <br>
 
-Foundation (`validation.md`, `patterns.md`) and core (`types.md`, `objects.md`, `effects.md`, `composition.md`) are active for every task. The routing table determines which specialized references and templates to add.
+The routing table below selects specialized references and templates to add beyond foundation and core.
 
-| [INDEX] | [TASK]                                  | [ADD_SPECIALIZED]  | [TEMPLATE]                      |
+| [INDEX] | [TASK]                       | [ADD_SPECIALIZED]  | [TEMPLATE]                      |
 | :-----: | --------------------------------------- | ------------------ | ------------------------------- |
-|   [1]   | Scaffold pure domain module             | --                 | `pure-module.template.md`       |
-|   [2]   | Scaffold effectful service module       | --                 | `effect-module.template.md`     |
-|   [3]   | Scaffold algebraic abstraction          | `algorithms.md`    | `algebra-module.template.md`    |
-|   [4]   | Add/refactor object models              | --                 | --                              |
-|   [5]   | Add/refactor domain types or DUs        | --                 | --                              |
-|   [6]   | Add/refactor ROP pipeline or Eff        | --                 | --                              |
-|   [7]   | Add/refactor composition or LINQ        | --                 | --                              |
-|   [8]   | Optimize hot path or span code          | `performance.md`   | --                              |
-|   [9]   | Review or audit existing module         | --                 | --                              |
-|  [10]   | Implement recursion schemes or folds    | `algorithms.md`    | --                              |
-|  [11]   | Implement K<F,A> polymorphic algorithms | `algorithms.md`    | --                              |
-|  [12]   | Vectorize numeric computation           | `performance.md`   | --                              |
-|  [13]   | Add/refactor logging, tracing, metrics  | `observability.md` | --                              |
-|  [14]   | Add/refactor concurrent pipelines       | `concurrency.md`   | --                              |
-|  [15]   | Debug or profile functional code        | `diagnostics.md`   | --                              |
-|  [16]   | Scaffold observable service module      | `observability.md` | `observable-module.template.md` |
+|   [1]   | Scaffold pure domain module  | --                 | `pure-module.template.md`       |
+|   [2]   | Scaffold effect service      | --                 | `effect-module.template.md`     |
+|   [3]   | Scaffold algebra module      | `algorithms.md`    | `algebra-module.template.md`    |
+|   [4]   | Refactor object model        | --                 | --                              |
+|   [5]   | Refactor domain types/DUs    | --                 | --                              |
+|   [6]   | Refactor ROP pipeline        | --                 | --                              |
+|   [7]   | Refactor composition/LINQ    | --                 | --                              |
+|   [8]   | Optimize hot path            | `performance.md`   | --                              |
+|   [9]   | Review existing module       | --                 | --                              |
+|  [10]   | Implement recursion/folds    | `algorithms.md`    | --                              |
+|  [11]   | Implement `K<F,A>` algo      | `algorithms.md`    | --                              |
+|  [12]   | Vectorize numeric code       | `performance.md`   | --                              |
+|  [13]   | Refactor logging/tracing     | `observability.md` | --                              |
+|  [14]   | Refactor concurrency         | `concurrency.md`   | --                              |
+|  [15]   | Debug/profile functional code| `diagnostics.md`   | --                              |
+|  [16]   | Scaffold observable service  | `observability.md` | `observable-module.template.md` |
 
 ---
 ## [4][DECISION_TREES]
@@ -194,14 +194,14 @@ Each anti-pattern names a structural defect that propagates if left unchecked. S
 - **OVERLOAD_SPAM** -- `ProcessSingle`/`ProcessBatch`/`ProcessAll` is three methods doing one thing at different arities. `params ReadOnlySpan<T>` + algebraic constraint collapses them.
 - **API_SURFACE_INFLATION** -- `Get`/`GetMany`/`TryGet`/`GetOrDefault` is a query algebra disguised as method proliferation. One `Execute<R>(Query<K,V,R>)` entry point owns all variation.
 - **INTERFACE_POLLUTION** -- `IFooService` with exactly one `FooService` implementation adds indirection without testability value. Remove the interface; use `Func<>` delegates or direct injection.
-- **GOD_FUNCTION** -- a single function handling all variants via giant switch violates OCP. Each new variant requires modifying the god function. DU + `Fold` or `K<F,A>` abstraction makes extension additive.
+- **GOD_FUNCTION** -- a single function handling all variants via giant switch violates OCP. Each new variant requires modification. DU + `Fold` or `K<F,A>` abstraction makes extension additive.
 
 **Allocation violations** -- defects specific to hot-path code:
 - **CLOSURE_CAPTURE_HOT_PATH** -- implicit variable capture forces the runtime to allocate display classes. `static` lambdas + tuple threading keep the hot path allocation-free. Runtime closure allocation remains a known JIT frontier even in .NET 10.
 - **MUTABLE_ACCUMULATOR** -- `var sum = 0; foreach...` breaks referential transparency and prevents vectorization. Tail-recursive folds or `Seq<T>.Fold` are the replacement.
 - **LINQ_HOT_PATH** -- `IEnumerable` LINQ allocates state machines per enumerator. `ReadOnlySpan<T>` + `TensorPrimitives` for numeric aggregation, `Seq<T>.Choose` for functional filter+map.
 
-**Naming violations**:
+**Naming violations** -- defects that erode call-site clarity:
 - **POSITIONAL_ARGS** -- unnamed arguments cause silent logic inversions when signature parameter order changes. Named parameters at domain call sites are the contract.
 - **VARIABLE_REASSIGNMENT** -- `value = Process(value)` creates temporal coupling; `Bind`/`Map` chains make the directed computation graph explicit.
 

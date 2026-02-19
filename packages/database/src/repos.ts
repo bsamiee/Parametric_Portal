@@ -80,8 +80,8 @@ const makeAssetRepo = Effect.gen(function* () {
 const makeAuditRepo = Effect.gen(function* () {
     const repository = yield* repo(AuditLog, 'audit_logs', { scoped: 'appId' });
     return { ...repository,
-        bySubject: (type: string, id: string, limit: number, cursor?: string, { after, before, operation }: { after?: Date; before?: Date; operation?: S.Schema.Type<typeof AuditOperationSchema> } = {}) => repository.page([{ field: 'targetType', value: type }, { field: 'targetId', value: id }, ...repository.preds({ after, before, operation })], { limit, ...(cursor !== undefined ? { cursor } : {}) }),
-        byUser: (userId: string, limit: number, cursor?: string, { after, before, operation }: { after?: Date; before?: Date; operation?: S.Schema.Type<typeof AuditOperationSchema> } = {}) => repository.page(repository.preds({ after, before, operation, userId }), { limit, ...(cursor !== undefined ? { cursor } : {}) }),
+        bySubject: (type: string, id: string, limit: number, cursor?: string | undefined, { after, before, operation }: { after?: Date | undefined; before?: Date | undefined; operation?: S.Schema.Type<typeof AuditOperationSchema> | undefined } = {}) => repository.page([{ field: 'targetType', value: type }, { field: 'targetId', value: id }, ...repository.preds({ after, before, operation })], { cursor, limit }),
+        byUser: (userId: string, limit: number, cursor?: string | undefined, { after, before, operation }: { after?: Date | undefined; before?: Date | undefined; operation?: S.Schema.Type<typeof AuditOperationSchema> | undefined } = {}) => repository.page(repository.preds({ after, before, operation, userId }), { cursor, limit }),
         log: repository.insert,
     };
 });
@@ -109,7 +109,7 @@ const makeJobDlqRepo = Effect.gen(function* () {
     const repository = yield* repo(JobDlq, 'job_dlq', { purge: { column: 'replayedAt', defaultDays: 30, table: 'job_dlq' }, resolve: { byRequest: { field: 'contextRequestId', many: true }, bySource: 'sourceId' }, scoped: 'appId' });
     return { ...repository,
         countPending:   (type?: string) => repository.count(repository.wildcard('type', type)),
-        listPending:    (options?: { type?: string; limit?: number; cursor?: string }) => repository.page(repository.wildcard('type', options?.type), options),
+        listPending:    (options?: { type?: string | undefined; limit?: number | undefined; cursor?: string | undefined }) => repository.page(repository.wildcard('type', options?.type), options),
         markReplayed:   (id: string) => repository.drop(id),
         unmarkReplayed: (id: string) => repository.lift(id),
     };
@@ -166,7 +166,7 @@ const makeSystemRepo = Effect.gen(function* () {
     return {
         journalEntry:  (primaryKey: string) => repository.fn<readonly { payload: string }[]>('get_journal_entry', { primaryKey }).pipe(Effect.map((rows) => Option.fromNullable(rows[0]))),
         journalPurge:  (days: number) => repository.fn<number>('purge_journal', { days }),
-        journalReplay: (input: { batchSize: number; eventType?: string; sinceSequenceId: string; sinceTimestamp?: number }) => repository.fn<readonly { payload: string; primaryKey: string }[]>(
+        journalReplay: (input: { batchSize: number; eventType?: string | undefined; sinceSequenceId: string; sinceTimestamp?: number | undefined }) => repository.fn<readonly { payload: string; primaryKey: string }[]>(
             'list_journal_entries', {
                 batchSize: input.batchSize,
                 eventType: Option.getOrNull(Option.fromNullable(input.eventType)),
@@ -176,8 +176,8 @@ const makeSystemRepo = Effect.gen(function* () {
         ),
         outboxCount: () => repository.fn<number>('outbox_count', {}),
         query: (input: {
-            limit?: number;
-            sections: readonly { name: string; options?: Record<string, unknown> }[];
+            limit?: number | undefined;
+            sections: readonly { name: string; options?: Record<string, unknown> | undefined }[];
         }) => repository.fn<Record<string, unknown>>('query_db_observability', {
             limit: input.limit ?? _LIMITS.defaultPage,
             sections: JSON.stringify(input.sections),

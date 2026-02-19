@@ -3,7 +3,7 @@
 
 <br>
 
-Consolidated checklist for style-standards. SKILL.md §VALIDATION contains high-level gates; file contains operational verification procedures.
+Operational verification procedures for style-standards. SKILL.md §VALIDATION contains high-level gates.
 
 ---
 ## [1][STRUCTURE]

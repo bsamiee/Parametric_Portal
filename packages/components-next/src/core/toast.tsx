@@ -19,7 +19,7 @@ import { cn, Slot, type SlotInput } from './utils';
 type ToastPosition = 'bottom-center' | 'bottom-left' | 'bottom-right' | 'top-center' | 'top-left' | 'top-right';
 type QueueContent = Omit<ToastPayload, 'timeout' | 'onClose' | 'position'>;
 type ToastType = 'error' | 'info' | 'success' | 'warning';
-type ToastRenderConfig = { readonly position?: ToastPosition; readonly style?: string; readonly className?: string };
+type ToastRenderConfig = { readonly position?: ToastPosition | undefined; readonly style?: string | undefined; readonly className?: string | undefined };
 type ToastMessage = {
     readonly title: string;
     readonly description?: string;
@@ -31,18 +31,18 @@ type ToastMessage = {
     readonly icon?: SlotInput | false;
 };
 type ToastPayload = ToastMessage & {
-    readonly type?: ToastType;
-    readonly style?: string;
-    readonly position?: ToastPosition;
-    readonly progress?: number;
-    readonly showDuration?: boolean;
+    readonly type?: ToastType | undefined;
+    readonly style?: string | undefined;
+    readonly position?: ToastPosition | undefined;
+    readonly progress?: number | undefined;
+    readonly showDuration?: boolean | undefined;
 };
 type ToastTrigger = {
     readonly pending?: ToastMessage;
     readonly success?: ToastMessage;
     readonly failure?: ToastMessage;
-    readonly style?: string;
-    readonly position?: ToastPosition;
+    readonly style?: string | undefined;
+    readonly position?: ToastPosition | undefined;
 };
 type ProviderProps = {
     readonly children: ReactNode;

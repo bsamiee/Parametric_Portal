@@ -11,7 +11,7 @@ Effect types in LanguageExt v5 make the codomain honest: `Fin<T>` for sync failu
 
 <br>
 
-`Fin<T>` is isomorphic to `Either<Error,A>`. Construct via `FinSucc(value)` / `FinFail<T>(error)` (Prelude). Chain via `Bind`/`Map`. Convert to `Validation` via `.ToValidation()` or to `Eff` via `.ToEff()`. Reserve `Match` for boundaries only.
+`Fin<T>` is isomorphic to `Either<Error,T>`. Construct via `FinSucc(value)` / `FinFail<T>(error)` (Prelude). Chain via `Bind`/`Map`. Convert to `Validation` via `.ToValidation()` or to `Eff` via `.ToEff()`. Reserve `Match` for boundaries only.
 
 ```csharp
 namespace Domain.Effects;
@@ -132,7 +132,7 @@ Eff<RT, Config> loadConfig =
 Option<User> user = FindByEmail(email: email) | FindByUsername(username: username) | None;
 ```
 
-[IMPORTANT]: `@catch` takes an optional error predicate for selective recovery. The `|` operator is the Alternative/Choice combinator -- it tries the left operand and falls back to the right on failure. Compose both for layered resilience without procedural branching.
+[IMPORTANT]: `@catch` takes an error value or predicate for selective recovery. The `|` operator is the Alternative/Choice combinator -- it tries the left operand and falls back to the right on failure. Compose both for layered resilience without procedural branching.
 
 ---
 ## [4][VALIDATION]
@@ -194,7 +194,7 @@ public static class ConsoleIO {
 
 <br>
 
-`OptionT<M,A>` threads optionality through any monad. `EitherT<L,M,A>` threads error handling. `StateT<S,M,A>` threads mutable state. Compose by nesting: `StateT<GameState, IO, Unit>` gives stateful IO.
+`OptionT<M,A>` threads optionality through any monad. `EitherT<L,M,A>` threads error handling. `StateT<S,M,A>` threads state. Compose by nesting: `StateT<GameState, IO, Unit>` gives stateful IO.
 
 ```csharp
 namespace Domain.Effects;
@@ -242,7 +242,7 @@ public readonly record struct Account(decimal Balance);
 
 ---
 ## [8][SCHEDULE]
->**Dictum:** *Retry policies are algebraic; compose via pipe operators.*
+>**Dictum:** *Retry policies are algebraic; compose via `|` union and `&` intersect operators.*
 
 <br>
 

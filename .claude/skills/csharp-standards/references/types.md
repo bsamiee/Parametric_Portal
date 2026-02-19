@@ -73,7 +73,7 @@ using MoneyCents = Domain.Types.Newtype<Domain.Types.MoneyCentsTag, long>;
 
 ---
 ## [3][SMART_CONSTRUCTORS]
->**Dictum:** *Construction is validated composition; no branching, no exceptions.*
+>**Dictum:** *Construction is validated composition; no `if`/`else`, no exceptions.*
 
 <br>
 

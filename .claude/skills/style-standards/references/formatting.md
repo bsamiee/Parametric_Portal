@@ -30,6 +30,8 @@
 ## [3][SEPARATORS]
 >**Dictum:** *Separators encode transition type.*
 
+<br>
+
 | [INDEX] |  [TRANSITION]  | [SEPARATOR] | [SEMANTIC]                          |
 | :-----: | :------------: | :---------: | ----------------------------------- |
 |   [1]   |    H1 -> H2    |    `---`    | Hard boundary into subsections.     |
@@ -51,6 +53,8 @@
 ---
 ## [4][HEADERS]
 >**Dictum:** *Format anchors semantic scope.*
+
+<br>
 
 | [INDEX] | [LEVEL] | [FORMAT]                 | [SCOPE]             |
 | :-----: | :-----: | ------------------------ | ------------------- |
@@ -76,6 +80,8 @@
 ## [5][SPACING]
 >**Dictum:** *Whitespace encodes boundaries.*
 
+<br>
+
 | [INDEX] | [ELEMENT]     | [RULE]                                  |
 | :-----: | ------------- | --------------------------------------- |
 |   [1]   | After header  | 1 blank line.                           |
@@ -89,6 +95,8 @@
 ---
 ## [6][CASE_AND_PUNCTUATION]
 >**Dictum:** *Case and punctuation signal semantic category.*
+
+<br>
 
 | [INDEX] | [CONTEXT]     | [RULE]                                   |
 | :-----: | ------------- | ---------------------------------------- |
@@ -110,6 +118,8 @@
 ## [7][TABLES]
 >**Dictum:** *Alignment optimizes scanning.*
 
+<br>
+
 **Alignment:** Center index, right numeric, left prose, center short labels (<=10 chars).
 
 [IMPORTANT]:
@@ -118,6 +128,8 @@
 ---
 ## [8][CODE_SPANS]
 >**Dictum:** *Inline code syntax determines parser interpretation.*
+
+<br>
 
 | [INDEX] | [CONTEXT]              | [CORRECT]                 | [ANTI_PATTERN]           |
 | :-----: | ---------------------- | ------------------------- | ------------------------ |

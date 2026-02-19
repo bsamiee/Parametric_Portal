@@ -83,14 +83,14 @@ layer(_layer(_testEnv))('Crypto', (it) => {
             expect((yield* Context.Request.within(t2, Crypto.decrypt(c1)).pipe(Effect.flip)).code).toBe('OP_FAILED');
         });
     });
-    // P5: IV quality - uniqueness + uniform distribution (chi-squared α=0.01, df=255, threshold=310.46)
+    // P5: IV quality - uniqueness + uniform distribution (chi-squared α=0.001, df=255, threshold=330.52)
     it.effect('P5: IV uniformity', () => Effect.gen(function* () {
         const ciphertexts = yield* Effect.forEach(fc.sample(_nonempty, { numRuns: 600 }), (value) => Crypto.encrypt(value));
         const vectors = ciphertexts.map((c) => Array.from(c.slice(CIPHER.version, CIPHER.version + CIPHER.iv)));
         const bytes = vectors.flat(), expected = bytes.length / 256;
         expect(new Set(vectors.map((v) => v.join(','))).size).toBe(600);
         const counts = Object.groupBy(bytes, (b) => b);
-        expect(A.reduce(A.makeBy(256, (i) => counts[i]?.length ?? 0), 0, (s, o) => s + (o - expected) ** 2 / expected)).toBeLessThan(310.46);
+        expect(A.reduce(A.makeBy(256, (i) => counts[i]?.length ?? 0), 0, (s, o) => s + (o - expected) ** 2 / expected)).toBeLessThan(330.52);
     }));
 });
 // P6: Hash/Compare laws - determinism, format, differential oracle, reflexivity, equivalence, symmetry

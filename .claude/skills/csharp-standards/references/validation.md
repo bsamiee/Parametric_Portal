@@ -28,7 +28,7 @@ Structural quality checklist for auditing `.cs` modules against csharp-standards
 ## [3][CONTROL_FLOW]
 
 - [ ] Zero `if`/`else`/`while`/`for`/`foreach` in domain code -- switch expressions and monadic `Bind` only
-- [ ] Exhaustive switch on DU hierarchies -- compiler-enforced; no `_` discard arm that swallows future variants
+- [ ] Exhaustive switch on DU hierarchies -- compiler-enforced; no silent `_` discard arm that swallows future variants -- `_ => throw new UnreachableException()` is the permitted defensive pattern until C# ships first-class DU exhaustiveness
 - [ ] Binary conditions use switch expression -- not ternary with complex sub-expressions or method calls
 - [ ] No early-return guard sequences (`if (!valid) return Error;`) -- unify via `Validation<Error,T>` applicative pipeline
 
@@ -96,6 +96,8 @@ Concrete search patterns an agent can apply to any `.cs` file:
 |  [10]   | `.Where().Sum()` on hot path            | LINQ heap allocation          | `TensorPrimitives` / span-based processing         |
 |  [11]   | `null` used for 2+ semantic meanings    | Collapsed absence semantics   | `Option<T>` for absence, `Fin<T>` for failure      |
 |  [12]   | 3+ sibling methods (`Get`/`TryGet`/...) | API surface inflation         | One `Execute<R>(Query)` entry point                |
+|  [13]   | `private` method with single caller     | Helper spam                   | Inline at call site or promote to domain type      |
+|  [14]   | Repetitive switch arms, near-identical  | Brute-force inlining          | Fold algebra or `K<F,A>` generic pipeline          |
 
 ---
 ## [9][QUICK_REFERENCE]

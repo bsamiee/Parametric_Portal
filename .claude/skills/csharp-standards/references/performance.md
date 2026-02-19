@@ -117,7 +117,7 @@ public static class QuantitativeRiskEngine {
 
 ---
 ## [4][BUFFER_HYBRID]
->**Dictum:** *Stack for small buffers; pool for large; switch selects strategy.*
+>**Dictum:** *Stack for small buffers; pool for large; switch selects allocation path.*
 
 `stackalloc` for buffers under 256 bytes; `ArrayPool.Rent/Return` for larger. The `try/finally` is an intentional hardware-boundary exception -- pooled buffers must be returned even when downstream processing throws.
 
@@ -347,7 +347,7 @@ public static class SpanAlgorithms {
 |   [2]   | Span parsing        | Allocation-free text parsing           | `TryParseSpan<A>` + method groups   |
 |   [3]   | Vector512 SIMD      | Branchless conditional logic           | Mask + `ConditionalSelect` + `Sum`  |
 |   [4]   | Buffer hybrid       | Stack/pool strategy selection          | `stackalloc` + `ArrayPool`          |
-|   [5]   | ValueTask           | Sync cache hit avoidance of Task alloc | `FromResult` fast path              |
+|   [5]   | ValueTask           | Synchronous cache-hit fast path        | `FromResult` fast path              |
 |   [6]   | NativeAOT           | Trimmed 1 MB binaries, 86% faster cold | `JsonSerializerContext` source-gen  |
 |   [7]   | Static lambdas      | Zero closure bytes on hot paths        | `static` keyword + tuple threading  |
 |   [8]   | Span algorithms     | Allocation-free sort/search/partition  | `MemoryExtensions` + tail recursion |

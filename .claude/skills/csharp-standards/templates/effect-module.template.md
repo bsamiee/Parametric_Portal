@@ -3,14 +3,14 @@
 
 <br>
 
-Produces one effectful service module: domain primitives separating raw DTOs from validated commands, trait interfaces for DI via `Has<RT,Trait>`, `K<F,A>`-polymorphic applicative validation, `Eff<RT,T>` ROP pipelines via LINQ comprehension, `@catch` error recovery with `|` Alternative fallback, `Fin<T>` standalone sync pipelines, `Atom<T>` for thread-safe concurrent state, schedule-based retry, `Option<T>` absence-to-error conversion, `MapFail` error annotation, and double-Run boundary interpretation.
+Produces one effectful service module: domain primitives replacing raw DTOs with validated commands, trait interfaces for DI via `Has<RT,Trait>`, `K<F,A>`-polymorphic applicative validation, `Eff<RT,T>` ROP pipelines via LINQ comprehension, `@catch` error recovery with `|` Alternative fallback, `Fin<T>` standalone sync pipelines, `Atom<T>` for thread-safe concurrent state, schedule-based retry, `Option<T>` absence-to-error conversion, `MapFail` error annotation, and double-Run boundary interpretation.
 
 **Density:** ~400 LOC signals a refactoring opportunity. No file proliferation; helpers are always a code smell.
 **References:** `effects.md` (Fin, Eff, Validation, IO, @catch, Schedule, STM), `types.md` (domain primitives, sealed DUs), `objects.md` (boundary adapter mapping), `composition.md` (Pipe, arity collapse, HKT encoding, extension members), `performance.md` (static lambdas, tuple threading), `algorithms.md` (Kleisli composition), `diagnostics.md` (pipeline probes, error chains, Probe.Span, EnrichDebug), `observability.md` (structured logging, tracing, metrics, ROP combinators).
 **Workflow:** Fill placeholders, remove guidance blocks, verify compilation.
 
 ---
-**Anti-Pattern Awareness** -- See `patterns.md` [1] for PREMATURE_MATCH_COLLAPSE, NULL_ARCHITECTURE, HELPER_SPAM, VARIABLE_REASSIGNMENT.
+**Anti-Pattern Awareness** -- See `patterns.md` [1] for PREMATURE_MATCH_COLLAPSE, NULL_ARCHITECTURE, OVERLOAD_SPAM, VARIABLE_REASSIGNMENT.
 
 ---
 **Placeholders**
@@ -222,11 +222,11 @@ public static class ${ServiceName}Boundary {
 
 **Guidance: Eff Pipeline and Error Recovery**
 
-The `from..in..select` LINQ syntax desugars to `.Bind(x => ...)`. `guard`/`guardnot` short-circuit with typed errors for business invariants; `Validation` with `.Apply()` handles user-input accumulation. Error recovery is extracted into `CallWithRecovery` as a named method composing `@catch` + `|` outside the LINQ comprehension -- cleaner than parenthesized recovery inline. `Validation -> Fin -> MapFail -> Eff` is the canonical v5 conversion path (`.ToFin()` is direct; avoid the `.ToEither().MapLeft().ToEff()` detour). See `effects.md` [2][3] for pipeline and recovery patterns. For development-time inspection, wrap `Execute<RT>` with `Probe.Span` (`diagnostics.md` [3]) or `ObserveEff.Pipeline` (`observability.md` [4]) at the boundary -- never inside the LINQ comprehension.
+The `from..in..select` LINQ syntax desugars to `.Bind(x => ...)`. `guard`/`guardnot` short-circuit with typed errors for business invariants; `Validation` with `.Apply()` handles user-input accumulation. Error recovery is extracted into `CallWithRecovery` as a named method composing `@catch` + `|` outside the LINQ comprehension -- cleaner than inlining parenthesized recovery. `Validation -> Fin -> MapFail -> Eff` is the canonical v5 conversion path (`.ToFin()` is direct; avoid the `.ToEither().MapLeft().ToEff()` detour). See `effects.md` [2][3] for pipeline and recovery patterns. For development-time inspection, wrap `Execute<RT>` with `Probe.Span` (`diagnostics.md` [3]) or `ObserveEff.Pipeline` (`observability.md` [4]) at the boundary -- never inside the LINQ comprehension.
 
 **Guidance: Boundary and Concurrent State**
 
-Double-Run resolves `ReaderT<RT, IO, A>`: first `.Run(runtime)` strips the Reader layer to `IO<A>`, second `.Run()` interprets the IO. `Match` appears only here. `Atom<T>` provides lock-free state with optional validator; for multi-value transactions use `Ref<T>` + `atomic()`. On hot paths, mark lambdas `static` and thread state via `ValueTuple` per `performance.md` [7]. Schedule combinators compose algebraically: `|` unions (longer), `&` intersects (shorter). See `effects.md` [7][8] for STM and retry. At the boundary, wrap `RunAtBoundary` result with `Observe.Outcome` (`observability.md` [4]) for unified prod telemetry, or `result.PrettyPrint(...)` (`diagnostics.md` [2]) for debug display.
+Double-Run resolves `ReaderT<RT, IO, A>`: first `.Run(runtime)` strips the Reader layer to `IO<A>`, second `.Run()` interprets the IO. `Atom<T>` provides lock-free state with optional validator; for multi-value transactions use `Ref<T>` + `atomic()`. On hot paths, mark lambdas `static` and thread state via `ValueTuple` per `performance.md` [7]. Schedule combinators compose algebraically: `|` unions (longer), `&` intersects (shorter). See `effects.md` [7][8] for STM and retry. At the boundary, wrap `RunAtBoundary` result with `Observe.Outcome` (`observability.md` [4]) for unified prod telemetry, or `result.PrettyPrint(...)` (`diagnostics.md` [2]) for debug display.
 
 ---
 **Post-Scaffold Validation Checklist**

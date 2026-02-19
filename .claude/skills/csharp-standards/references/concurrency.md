@@ -44,8 +44,7 @@ public static class Coordination {
         from parentToken in default(RT).CancellationToken
         from result in Bracketed(
             acquire: IO.lift(() => {
-                CancellationTokenSource linked =
-                    CancellationTokenSource.CreateLinkedTokenSource(parentToken);
+                CancellationTokenSource linked = CancellationTokenSource.CreateLinkedTokenSource(parentToken);
                 linked.CancelAfter(timeout);
                 return linked;
             }),

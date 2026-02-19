@@ -5,6 +5,7 @@
 import { SendEmailCommand, SESv2Client } from '@aws-sdk/client-sesv2';
 import { FetchHttpClient, HttpClient, HttpClientError, HttpClientRequest } from '@effect/platform';
 import { Duration, Effect, identity, Match, Option, Redacted, Schema as S } from 'effect';
+import { constant } from 'effect/Function';
 import * as Nodemailer from 'nodemailer';
 import { Env } from '../env.ts';
 import { Telemetry } from '../observe/telemetry.ts';
@@ -34,7 +35,7 @@ class EmailError extends S.TaggedError<EmailError>()('EmailError', {
     static readonly from = (
         reason:   EmailError['reason'],
         provider: EmailError['provider'],
-        opts?: {  cause?: unknown; statusCode?: number },
+        opts?: {  cause?: unknown | undefined; statusCode?: number | undefined },
     ) => new EmailError({ cause: opts?.cause, provider, reason, statusCode: opts?.statusCode });
     get isRetryable(): boolean { return EmailError._props[this.reason].retryable; }
     get isTerminal():  boolean { return EmailError._props[this.reason].terminal;  }
@@ -102,7 +103,7 @@ class EmailAdapter extends Effect.Service<EmailAdapter>()('server/EmailAdapter',
                                 ? (cause as { readonly $metadata?: { readonly httpStatusCode?: number } }).$metadata?.httpStatusCode
                                 : undefined,
                         }),
-                        try: () => new SESv2Client({ endpoint: Option.getOrUndefined(ses.endpoint), region: ses.region }).send(new SendEmailCommand({
+                        try: () => new SESv2Client({ region: ses.region, ...(Option.match(ses.endpoint, { onNone: constant({}), onSome: (endpoint) => ({ endpoint }) })) }).send(new SendEmailCommand({
                             Content: {
                                 Template: {
                                     TemplateData: JSON.stringify(input.vars),

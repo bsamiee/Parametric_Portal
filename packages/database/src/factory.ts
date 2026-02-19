@@ -221,9 +221,9 @@ const repo = <M extends Model.AnyNoContext, const C extends Config<M>>(model: M,
                 ? Effect.Effect<readonly S.Schema.Type<M>[], SqlError | ParseError | RepoScopeError | RepoConfigError>
                 : Effect.Effect<Option.Option<S.Schema.Type<M>>, SqlError | ParseError | RepoScopeError | RepoConfigError>
         );
-        const find = (predicate: Pred | readonly Pred[], options: { asc?: boolean } = {}) => _scoped('find', ($s) => SqlSchema.findAll({ execute: () => sql`SELECT * ${$fromWhere(predicate, $s)} ${$order(options.asc ?? false)}`, Request: S.Void, Result: model })(undefined));
+        const find = (predicate: Pred | readonly Pred[], options: { asc?: boolean | undefined } = {}) => _scoped('find', ($s) => SqlSchema.findAll({ execute: () => sql`SELECT * ${$fromWhere(predicate, $s)} ${$order(options.asc ?? false)}`, Request: S.Void, Result: model })(undefined));
         const one = (predicate: Pred | readonly Pred[], lock: false | 'update' | 'share' | 'nowait' | 'skip' = false) => _scoped('one', ($s) => SqlSchema.findOne({ execute: () => sql`SELECT * ${$fromWhere(predicate, $s)}${$lock(lock)}`, Request: S.Void, Result: model })(undefined));
-        const page = (predicate: Pred | readonly Pred[], options: { limit?: number; cursor?: string; asc?: boolean } = {}) => {
+        const page = (predicate: Pred | readonly Pred[], options: { limit?: number | undefined; cursor?: string | undefined; asc?: boolean | undefined } = {}) => {
             const { limit = Page.bounds.default, cursor, asc = false } = options;
             return _scoped('page', ($s) => Page.decode(cursor).pipe(Effect.flatMap(decoded => {
                 const cursorFrag = decoded._tag === 'None' ? sql`` : sql`AND ${sql(_pkColumn)} ${asc ? sql`>` : sql`<`} ${decoded.value.id}${pkCast}`;
@@ -235,7 +235,7 @@ const repo = <M extends Model.AnyNoContext, const C extends Config<M>>(model: M,
         const exists = (predicate: Pred | readonly Pred[]) => _scalar('exists', ($s) => sql`SELECT EXISTS(SELECT 1 ${$fromWhere(predicate, $s)}) AS exists`, (row) => (row as { exists: boolean }).exists);
         const agg = <T extends { sum?: string; avg?: string; min?: string; max?: string; count?: true }>(predicate: Pred | readonly Pred[], spec: T): Effect.Effect<Record<keyof T & string, number>, RepoScopeError | SqlError | ParseError> =>
             _scalar('agg', ($s) => sql`SELECT ${sql.csv(Object.entries(spec).map(([fn, col]) => fn === 'count' ? sql`COUNT(*)::int AS count` : sql`${sql.literal(fn.toUpperCase())}(${sql(col as string)})${(fn === 'avg' || fn === 'sum') ? sql`::numeric` : sql``} AS ${sql.literal(fn)}`))} ${$fromWhere(predicate, $s)}`, (row) => row as Record<keyof T & string, number>);
-        const pageOffset = (predicate: Pred | readonly Pred[], options: { limit?: number; offset?: number; asc?: boolean } = {}) => {
+        const pageOffset = (predicate: Pred | readonly Pred[], options: { limit?: number | undefined; offset?: number | undefined; asc?: boolean | undefined } = {}) => {
             const { limit = Page.bounds.default, offset: start = 0, asc = false } = options;
             return _scoped('pageOffset', ($s) =>
                 $pagedCte(predicate, $s, sql`${$order(asc)} LIMIT ${limit} OFFSET ${start}`)

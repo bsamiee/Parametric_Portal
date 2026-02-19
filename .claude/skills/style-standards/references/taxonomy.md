@@ -76,6 +76,8 @@
 ### [3.1][STATI_EXAMPLE]
 >**Dictum:** *Patterns demonstrate marker application.*
 
+<br>
+
 ```text
 [STATUS]
 - [o] Passed

@@ -5,7 +5,7 @@ Cross-cutting algorithmic patterns for C# 14 / .NET 10 that span composition and
 
 ---
 ## [0][IMPORTS]
->**Dictum:** *A functional algorithm author commands these namespaces.*
+>**Dictum:** *A functional algorithm author uses these namespaces.*
 
 Snippets in this file assume or demonstrate patterns from the following advanced namespaces. This is the toolkit for algorithm-dense C# 14 / .NET 10 code.
 
@@ -166,7 +166,7 @@ public static class TypeClassComposition {
 
 ---
 ## [4][GENERIC_MATH_ADVANCED]
->**Dictum:** *Narrow constraints widen applicability; bridge algebraic and numeric worlds.*
+>**Dictum:** *Narrow constraints widen applicability; bridge algebraic monoid and generic numeric interfaces.*
 
 Extends `types.md` [6] with `SafeConvert` via `INumberBase<T>.TryCreate` for overflow-safe numeric narrowing, `ISpanParsable<TSelf>` for generic allocation-free parsing, a bridging pattern that makes a domain type participate in both `Aggregate` (via `IAlgebraicMonoid`) and generic numeric algorithms (via `IAdditiveIdentity`), and `TensorPrimitives` for hardware-accelerated span-level math.
 

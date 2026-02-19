@@ -132,7 +132,7 @@ class NotificationService extends Effect.Service<NotificationService>()('server/
             Effect.catchIf(Cause.isNoSuchElementException, () => Effect.void),
             Telemetry.span('notification.job.handle', { metrics: false }),
         )) as (raw: unknown) => Effect.Effect<void, unknown, never>);
-        const listPage = (options?: { after?: Date; before?: Date; cursor?: string; limit?: number; userId?: string }) => database.notifications.page(
+        const listPage = (options?: { after?: Date | undefined; before?: Date | undefined; cursor?: string | undefined; limit?: number | undefined; userId?: string | undefined }) => database.notifications.page(
             database.notifications.preds({ after: options?.after, before: options?.before, user_id: options?.userId }),
             { cursor: options?.cursor, limit: options?.limit },
         );
@@ -144,7 +144,7 @@ class NotificationService extends Effect.Service<NotificationService>()('server/
                 Telemetry.span('notification.preferences.get', { metrics: false }),
             ),
             list: listPage,
-            listMine: (options?: { after?: Date; before?: Date; cursor?: string; limit?: number }) => Context.Request.sessionOrFail.pipe(Effect.flatMap((session) => listPage({ ...options, userId: session.userId }))),
+            listMine: (options?: { after?: Date | undefined; before?: Date | undefined; cursor?: string | undefined; limit?: number | undefined }) => Context.Request.sessionOrFail.pipe(Effect.flatMap((session) => listPage({ ...options, userId: session.userId }))),
             replay: (notificationId: string) => Context.Request.currentTenantId.pipe(
                 Effect.flatMap(() => database.notifications.one([{ field: 'id', value: notificationId }])),
                 Effect.flatMap(Option.match({ onNone: () => Effect.fail(HttpError.NotFound.of('notification', notificationId)), onSome: Effect.succeed })),

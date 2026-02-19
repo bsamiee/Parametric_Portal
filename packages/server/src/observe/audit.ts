@@ -26,7 +26,7 @@ class AuditService extends Effect.Service<AuditService>()('server/Audit', {
             database.jobDlq.insert({ appId: context.tenantId, attempts: 1, contextRequestId: Option.some(context.requestId).pipe(Option.filter(S.is(S.UUID))), contextUserId: context.userId, errorReason: 'AuditPersistFailed', errors: [{ error, timestamp: timestampMs }], payload: entry, replayedAt: Option.none(), source: 'event', sourceId: context.requestId, type: `audit.${entry['subject']}.${entry['operation']}` }).pipe(Effect.ignore);
         const log = (
             operationName: string,
-            config?: { readonly subjectId?: string; readonly before?: unknown; readonly after?: unknown; readonly details?: unknown; readonly silent?: boolean },
+            config?: { readonly subjectId?: string | undefined; readonly before?: unknown | undefined; readonly after?: unknown | undefined; readonly details?: unknown | undefined; readonly silent?: boolean | undefined },
         ) => {
             const index = operationName.indexOf('.');
             const subject = index > 0 ? operationName.slice(0, index) : 'security';

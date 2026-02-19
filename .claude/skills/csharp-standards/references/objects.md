@@ -316,7 +316,7 @@ public static class CreateOrderMapper {
 - Behavioral closed sets use SmartEnum; variant payload sets use Union.
 - Domain primitives are strong types; raw primitives terminate at boundary adapters.
 - Generated exhaustive `Switch`/`Map` is preferred over ad-hoc branching.
-- Closure-free overloads + `static` lambdas are default on hot paths.
+- Context overloads + `static` lambdas are default on hot paths.
 - `ref struct` remains infrastructure-local.
 
 ---

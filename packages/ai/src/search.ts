@@ -71,13 +71,13 @@ class SearchService extends Effect.Service<SearchService>()('ai/Search', {
             );
         const query = (
             options: {
-                readonly entityTypes?: readonly string[];
-                readonly includeFacets?: boolean;
-                readonly includeGlobal?: boolean;
-                readonly includeSnippets?: boolean;
-                readonly term: string;
+                readonly entityTypes?:     readonly string[] | undefined;
+                readonly includeFacets?:   boolean | undefined;
+                readonly includeGlobal?:   boolean | undefined;
+                readonly includeSnippets?: boolean | undefined;
+                readonly term:             string;
             },
-            pagination?: { readonly cursor?: string; readonly limit?: number },) =>
+            pagination?: { readonly cursor?: string | undefined; readonly limit?: number | undefined },) =>
             Effect.gen(function* () {
                 const { ctx, scopeId, subjectId } = yield* requestContext(_CONFIG.users.anonymous);
                 const appSettings = yield* ai.settings();
@@ -112,8 +112,8 @@ class SearchService extends Effect.Service<SearchService>()('ai/Search', {
                 return result;
             }).pipe(Telemetry.span('search.query', { 'search.term': options.term }));
         const suggest = (options: {
-            readonly includeGlobal?: boolean;
-            readonly limit?: number;
+            readonly includeGlobal?: boolean | undefined;
+            readonly limit?: number | undefined;
             readonly prefix: string;}) =>
             Effect.gen(function* () {
                 const { ctx, scopeId, subjectId } = yield* requestContext(_CONFIG.users.anonymous);
@@ -128,9 +128,9 @@ class SearchService extends Effect.Service<SearchService>()('ai/Search', {
                 yield* _observe('Search.refresh', { includeGlobal, kind: 'index', scopeId }, metrics.search.refreshes, subjectId, ctx.tenantId);
             }).pipe(Telemetry.span('search.refresh', { 'search.includeGlobal': includeGlobal }));
         const refreshEmbeddings = (options?: {
-            readonly entityTypes?: readonly string[];
-            readonly includeGlobal?: boolean;
-            readonly limit?: number;}) =>
+            readonly entityTypes?: readonly string[] | undefined;
+            readonly includeGlobal?: boolean | undefined;
+            readonly limit?: number | undefined;}) =>
             Effect.gen(function* () {
                 const { ctx, scopeId, subjectId } = yield* requestContext(_CONFIG.users.system);
                 const appSettings = yield* ai.settings();

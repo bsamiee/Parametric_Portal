@@ -317,7 +317,7 @@ public static class TelemetryBootstrap {
 
 | [CONSTRAINT] | [MANDATE] | [SURFACE] |
 | ------------ | --------- | --------- |
-| `LOGGING_PATH` | `[LoggerMessage]` for all hot-path structured logs | `CA1848`, `CA2254`, `CA2017`, `CA2023` |
+| `LOGGING_PATH` | `[LoggerMessage]` for all structured logs | `CA1848`, `CA2254`, `CA2017`, `CA2023` |
 | `TRACE_LIFECYCLE` | `ActivitySource` span lifecycle owned by bracket/tap combinators | `Observe.Pipeline`, `Observe.Outcome` |
 | `METRIC_DIMENSIONS` | `TagList` dimensions and operation taxonomy are explicit and stable | `Counter`, `Histogram`, `UpDownCounter` |
 | `SINGLETON_IDS` | `ActivitySource` / `Meter` names must exactly match OTel `AddSource` / `AddMeter` | `OpenTelemetry.Extensions.Hosting` |

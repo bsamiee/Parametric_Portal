@@ -23,9 +23,9 @@ const _layer = Layer.unwrapEffect(Env.Service.pipe(Effect.map((env) => S3.layer(
     credentials: {
         accessKeyId:     Redacted.value(env.storage.accessKeyId),
         secretAccessKey: Redacted.value(env.storage.secretAccessKey),
-        sessionToken:    Option.getOrUndefined(Option.map(env.storage.sessionToken, Redacted.value)),
+        ...Option.match(env.storage.sessionToken, { onNone: constant({}), onSome: (sessionToken) => ({ sessionToken: Redacted.value(sessionToken) }) }),
     },
-    endpoint:       Option.getOrUndefined(env.storage.endpoint),
+    ...Option.match(env.storage.endpoint, { onNone: constant({}), onSome: (endpoint) => ({ endpoint }) }),
     forcePathStyle: env.storage.forcePathStyle,
     maxAttempts:    env.storage.maxAttempts,
     region:         env.storage.region,
@@ -99,7 +99,7 @@ class StorageAdapter extends Effect.Service<StorageAdapter>()('server/StorageAda
         const list = (o?: { prefix?: string; maxKeys?: number; continuationToken?: string }) =>
             track('list', Effect.gen(function* () {
                 const p = yield* _path(o?.prefix ?? '');
-                const response = yield* s3.listObjectsV2({ Bucket: bucket, ContinuationToken: o?.continuationToken, MaxKeys: o?.maxKeys ?? 1000, Prefix: p });
+                const response = yield* s3.listObjectsV2({ Bucket: bucket, MaxKeys: o?.maxKeys ?? 1000, Prefix: p, ...(o?.continuationToken === undefined ? {} : { ContinuationToken: o.continuationToken }) });
                 const prefixStrip = p.replace(o?.prefix ?? '', '');
                 return {
                     continuationToken: response.NextContinuationToken, isTruncated: response.IsTruncated ?? false,
@@ -108,7 +108,10 @@ class StorageAdapter extends Effect.Service<StorageAdapter>()('server/StorageAda
             })).pipe(Telemetry.span('storage.list', { metrics: false }));
         const listStream = (o?: { prefix?: string }) =>
             Stream.paginateEffect(undefined as string | undefined, (token) =>
-                list({ continuationToken: token, prefix: o?.prefix }).pipe(Effect.map((response) => [response.items, response.isTruncated ? Option.fromNullable(response.continuationToken) : Option.none<string>()] as const)),
+                list({
+                    ...(token === undefined ? {} : { continuationToken: token }),
+                    ...(o?.prefix === undefined ? {} : { prefix: o.prefix }),
+                }).pipe(Effect.map((response) => [response.items, response.isTruncated ? Option.fromNullable(response.continuationToken) : Option.none<string>()] as const)),
             ).pipe(Stream.flatMap((element) => Stream.fromIterable(element)));
         const sign = (input: { readonly op: 'get'; readonly key: string; readonly expires?: Duration.Duration } | { readonly op: 'put'; readonly key: string; readonly expires?: Duration.Duration } | { readonly op: 'copy'; readonly sourceKey: string; readonly destKey: string; readonly expires?: Duration.Duration }) => {
             const expiresIn = Math.floor(Duration.toSeconds(input.expires ?? Duration.hours(1)));

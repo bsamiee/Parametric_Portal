@@ -125,7 +125,10 @@ class StreamingService extends Effect.Service<StreamingService>()('server/Stream
                 (stream: Stream.Stream<A, E, never>) => config.debounce ? Stream.debounce(stream, config.debounce) : stream,
                 /* v8 ignore next */ Stream.tap(() => _inc(labels, (metrics) => metrics.stream.elements)),
             );
-            /* v8 ignore next */ const asBinary = (item: A) => item instanceof Uint8Array ? Effect.succeed(item) : Effect.fail(new TypeError(`streaming.emit(binary) expected Uint8Array for ${config.name}`));
+            /* v8 ignore next */ const asBinary = (item: A): Effect.Effect<Uint8Array, TypeError> =>
+                Object.prototype.toString.call(item) === '[object Uint8Array]'
+                    ? Effect.succeed(item as Uint8Array)
+                    : Effect.fail(new TypeError(`streaming.emit(binary) expected Uint8Array for ${config.name}`));
             /* v8 ignore start -- format codec closures execute inside Effect stream runtime */
             const encoded = ({
                 binary: () => processed.pipe(Stream.mapEffect(asBinary)),
@@ -149,7 +152,7 @@ class StreamingService extends Effect.Service<StreamingService>()('server/Stream
         Effect.gen(function* () {
             const tenantId = yield* Context.Request.currentTenantId.pipe(Effect.orElseSucceed(/* v8 ignore next */ () => 'system'));
             const labels = _labels('mailbox', 'push', config?.name ?? 'anonymous', tenantId);
-            const opts = { capacity: config?.capacity ?? 128, strategy: config?.strategy };
+            const opts = { capacity: config?.capacity ?? 128, ...(config?.strategy === undefined ? {} : { strategy: config.strategy }) };
             const mailbox = yield* Match.value(config?.from).pipe(
                 Match.when(Match.undefined, () => Mailbox.make<A, E>(opts)),
                 Match.when(Subscribable.isSubscribable, (subscribable) => Mailbox.fromStream(subscribable.changes, opts)),

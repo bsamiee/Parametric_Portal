@@ -6,9 +6,9 @@ packages:
 
 catalog:
   '@anthropic-ai/tokenizer': 0.0.4
-  '@aws-sdk/client-s3': 3.992.0
-  '@aws-sdk/client-sesv2': 3.992.0
-  '@aws-sdk/s3-request-presigner': 3.992.0
+  '@aws-sdk/client-s3': 3.993.0
+  '@aws-sdk/client-sesv2': 3.993.0
+  '@aws-sdk/s3-request-presigner': 3.993.0
   '@ast-grep/cli': 0.40.5
   '@berenddeboer/nx-biome': 1.0.2
   '@biomejs/biome': 2.4.2
@@ -38,11 +38,14 @@ catalog:
   '@mermaid-js/mermaid-cli': 11.12.0
   '@nx/dotnet': 22.5.1
   '@nx/docker': 22.5.1
+  '@nx-extend/pulumi': 11.0.3
   '@nx/js': 22.5.1
   '@nx/playwright': 22.5.1
   '@nx/react': 22.5.1
+  '@nx-tools/nx-container': 6.9.1
   '@nx/vite': 22.5.1
   '@nx/vitest': 22.5.1
+  '@nxlv/python': 22.1.0
   '@octokit/rest': 22.0.1
   '@playwright/test': 1.58.2
   '@pulumi/aws': 7.19.0
@@ -50,7 +53,7 @@ catalog:
   '@pulumi/command': 1.1.3
   '@pulumi/docker': 4.11.0
   '@pulumi/kubernetes': 4.25.0
-  '@pulumi/pulumi': 3.221.0
+  '@pulumi/pulumi': 3.222.0
   '@pulumi/random': 4.19.1
   '@radix-ui/react-label': 2.1.8
   '@radix-ui/react-separator': 1.1.8
@@ -65,12 +68,12 @@ catalog:
   '@sonar/scan': 4.3.4
   '@swc-node/register': 1.11.1
   '@swc/core': 1.15.11
-  '@tailwindcss/vite': 4.1.18
+  '@tailwindcss/vite': 4.2.0
   '@tanstack/react-table': 8.21.3
   '@tanstack/react-virtual': 3.13.18
   '@testing-library/react': 16.3.2
   '@types/k6': 1.6.0
-  '@types/node': 25.2.3
+  '@types/node': 25.3.0
   '@types/nodemailer': 7.0.10
   '@types/papaparse': 5.5.2
   '@types/react': 19.2.14
@@ -94,7 +97,7 @@ catalog:
   exceljs: 4.4.0
   fake-indexeddb: 6.2.5
   fast-check: 4.5.3
-  happy-dom: 20.6.2
+  happy-dom: 20.6.3
   idb-keyval: 6.2.2
   immer: 11.1.4
   ioredis: 5.9.3
@@ -103,11 +106,11 @@ catalog:
   isomorphic-dompurify: 2.36.0
   jspdf: 4.1.0
   jszip: 3.10.1
-  knip: 5.83.1
+  knip: 5.84.1
   lefthook: 2.1.1
   lightningcss: 1.31.1
   lucide-react: 0.574.0
-  motion: 12.34.1
+  motion: 12.34.2
   nanoid: 5.1.6
   nodemailer: 8.0.1
   nuqs: 2.8.8
@@ -126,8 +129,8 @@ catalog:
   sax: 1.4.4
   sharp: 0.34.5
   sherif: 1.10.0
-  tailwind-merge: 3.4.1
-  tailwindcss: 4.1.18
+  tailwind-merge: 3.5.0
+  tailwindcss: 4.2.0
   tailwindcss-react-aria-components: 2.0.1
   testcontainers: 11.12.0
   ts-essentials: 10.1.1

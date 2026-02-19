@@ -20,7 +20,7 @@ const config = {
     htmlReporter: {
         fileName: 'test-results/mutation/index.html',
     },
-    ignorePatterns: ['dist', '.nx', '.git', 'node_modules', 'coverage', 'test-results', '.stryker-tmp'],
+    ignorePatterns: ['dist', '.nx', '.git', 'node_modules', 'coverage', 'test-results', '.cache'],
     ignoreStatic: true,
     incremental: true,
     incrementalFile: 'test-results/mutation/stryker-incremental.json',
@@ -38,7 +38,7 @@ const config = {
     // --- [REPORTERS] ---------------------------------------------------------
     plugins: ['@stryker-mutator/vitest-runner', '@stryker-mutator/typescript-checker'],
     reporters: ['clear-text', 'html', 'json', 'progress'],
-    tempDirName: '.stryker-tmp',
+    tempDirName: '.cache',
     // --- [TEST_RUNNER] -------------------------------------------------------
     testFiles: ['tests/**/*.spec.ts', '!tests/e2e/**'],
     testRunner: 'vitest',

@@ -100,7 +100,7 @@ class AuthService extends Effect.Service<AuthService>()('server/Auth', {
             );
             return { clientSecret, providerSettings };
         });
-        const _makeOAuthClient = (provider: typeof OAuthProviderSchema.Type, providerSettings: { clientId: string; teamId?: string; keyId?: string; tenant?: string }, clientSecret: string) =>
+        const _makeOAuthClient = (provider: typeof OAuthProviderSchema.Type, providerSettings: { clientId: string; teamId?: string | undefined; keyId?: string | undefined; tenant?: string | undefined; scopes?: readonly string[] | undefined }, clientSecret: string) =>
             Match.value(provider).pipe(
                 Match.when('apple', () => providerSettings.teamId && providerSettings.keyId
                     ? Effect.succeed(new Apple(providerSettings.clientId, providerSettings.teamId, providerSettings.keyId, new TextEncoder().encode(clientSecret), _redirect('apple')))

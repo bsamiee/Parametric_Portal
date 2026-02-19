@@ -5,29 +5,30 @@ from typing import Final
 
 from _common import (
     COUNTER_SUFFIXES,
+    Finding,
     GAUGE_PATTERNS,
     RESERVED,
-    Finding,
     strip_strings_and_selectors,
     to_seconds,
 )
 
+
 # --- [PRECOMPILED_REGEX] -----------------------------------------------------
 
-_RE_METRIC_WORD: Final = re.compile(r'\b([a-zA-Z_:][a-zA-Z0-9_:]*)\b(?!\s*[{\(])')
-_RE_METRIC_BARE: Final = re.compile(r'\b[a-zA-Z_:][a-zA-Z0-9_:]*\s*\{\s*\}')
-_RE_LABEL_MATCHER: Final = re.compile(r'([a-zA-Z_][a-zA-Z0-9_]*)\s*=~\s*"([^"]+)"')
-_RE_COUNTER_METRIC: Final = re.compile(r'\b([a-zA-Z_:][a-zA-Z0-9_:]*(?:_total|_count|_sum|_bucket))\b')
-_RE_RATE_FUNC_METRIC: Final = re.compile(r'(rate|irate|increase|delta|idelta)\s*\(\s*([a-zA-Z_:][a-zA-Z0-9_:]*)')
-_RE_IRATE_RANGE: Final = re.compile(r'irate\s*\([^)]*\[(\d+)([smhdwy])\]')
-_RE_RATE_RANGE: Final = re.compile(r'rate\s*\([^)]*\[(\d+)(ms|s|m|h|d|w|y)\]')
-_RE_REGEX_METACHAR: Final = re.compile(r'[\.\*\+\?\^\$\[\]\(\)\|\\]')
-_RE_SIMPLE_VALUE: Final = re.compile(r'^[a-zA-Z0-9_\-]+$')
-_RE_COMPARISON: Final = re.compile(r'\s*(>|<|>=|<=|==|!=)\s*[\d\.]')
-_RE_SUBQUERY: Final = re.compile(r'\[[^\]]+:[^\]]+\]')
-_RE_FUNC_COUNT: Final = re.compile(r'\b[a-z_]+\s*\(')
-_RE_RANGE_DURATION: Final = re.compile(r'\[(\d+)([smhdwy])[^\]]*:\s*(\d+)?([smhdwy])?\]')
-_RE_NESTED_AGG: Final = re.compile(r'(sum|avg|min|max)\s*\([^)]*\b(sum|avg|min|max)\s*\(')
+_RE_METRIC_WORD: Final = re.compile(r"\b([a-zA-Z_:][a-zA-Z0-9_:]*)\b(?!\s*[{\(])")
+_RE_METRIC_BARE: Final = re.compile(r"\b[a-zA-Z_:][a-zA-Z0-9_:]*\s*\{\s*\}")
+_RE_LABEL_MATCHER: Final = re.compile(r'([a-zA-Z_]\w*)\s*=~\s*"([^"]+)"')
+_RE_COUNTER_METRIC: Final = re.compile(r"\b([a-zA-Z_:][a-zA-Z0-9_:]*(?:_total|_count|_sum|_bucket))\b")
+_RE_RATE_FUNC_METRIC: Final = re.compile(r"(rate|irate|increase|delta|idelta)\s*\(\s*([a-zA-Z_:][a-zA-Z0-9_:]*)")
+_RE_IRATE_RANGE: Final = re.compile(r"irate\s*\([^)]*\[(\d+)([smhdwy])\]")
+_RE_RATE_RANGE: Final = re.compile(r"rate\s*\([^)]*\[(\d+)(ms|s|m|h|d|w|y)\]")
+_RE_REGEX_METACHAR: Final = re.compile(r"[\.\*\+\?\^\$\[\]\(\)\|\\]")
+_RE_SIMPLE_VALUE: Final = re.compile(r"^[a-zA-Z0-9_\-]+$")
+_RE_COMPARISON: Final = re.compile(r"\s*(>|<|>=|<=|==|!=)\s*[\d\.]")
+_RE_SUBQUERY: Final = re.compile(r"\[[^\]]+:[^\]]+\]")
+_RE_FUNC_COUNT: Final = re.compile(r"\b[a-z_]+\s*\(")
+_RE_RANGE_DURATION: Final = re.compile(r"\[(\d+)([smhdwy])[^\]]*:\s*(\d+)?([smhdwy])?\]")
+_RE_NESTED_AGG: Final = re.compile(r"(sum|avg|min|max)\s*\([^)]*\b(sum|avg|min|max)\s*\(")
 
 # --- [FUNCTIONS] --------------------------------------------------------------
 
@@ -57,10 +58,10 @@ def check_high_cardinality(query: str) -> list[Finding]:
     bare_matcher = (
         [
             {
-                'type': 'high_cardinality',
-                'message': 'Empty label matcher {} may match many series',
-                'severity': 'warning',
-                'recommendation': 'Add {job="...", instance="..."}',
+                "type": "high_cardinality",
+                "message": "Empty label matcher {} may match many series",
+                "severity": "warning",
+                "recommendation": 'Add {job="...", instance="..."}',
             }
         ]
         if _RE_METRIC_BARE.search(query)
@@ -68,13 +69,13 @@ def check_high_cardinality(query: str) -> list[Finding]:
     )
     unfiltered = [
         {
-            'type': 'high_cardinality',
-            'message': f'"{metric}" used without label filters',
-            'severity': 'warning',
-            'recommendation': f'{metric}{{job="...", instance="..."}}',
+            "type": "high_cardinality",
+            "message": f'"{metric}" used without label filters',
+            "severity": "warning",
+            "recommendation": f'{metric}{{job="...", instance="..."}}',
         }
         for metric in find_metrics(query)
-        if not re.search(rf'\b{re.escape(metric)}\s*\{{\s*[^}}]+\s*\}}', query)
+        if not re.search(rf"\b{re.escape(metric)}\s*\{{\s*[^}}]+\s*\}}", query)
     ]
     return bare_matcher + unfiltered
 
@@ -95,10 +96,10 @@ def check_regex_overuse(query: str) -> list[Finding]:
             (
                 [
                     {
-                        'type': 'regex_to_exact',
-                        'message': f'{label}=~"{pattern}" can be exact match (5-10x faster index lookup)',
-                        'severity': 'info',
-                        'recommendation': f'{label}="{pattern}"',
+                        "type": "regex_to_exact",
+                        "message": f'{label}=~"{pattern}" can be exact match (5-10x faster index lookup)',
+                        "severity": "info",
+                        "recommendation": f'{label}="{pattern}"',
                     }
                 ]
                 if not _RE_REGEX_METACHAR.search(pattern) and _RE_SIMPLE_VALUE.fullmatch(pattern)
@@ -107,13 +108,13 @@ def check_regex_overuse(query: str) -> list[Finding]:
             + (
                 [
                     {
-                        'type': 'regex_optimization',
-                        'message': f'Wildcard suffix in "{pattern}" defeats index optimization',
-                        'severity': 'info',
-                        'recommendation': 'Use more specific label values or anchor: ^prefix.*',
+                        "type": "regex_optimization",
+                        "message": f'Wildcard suffix in "{pattern}" defeats index optimization',
+                        "severity": "info",
+                        "recommendation": "Use more specific label values or anchor: ^prefix.*",
                     }
                 ]
-                if pattern.endswith('.*')
+                if pattern.endswith(".*")
                 else []
             )
         )
@@ -131,21 +132,21 @@ def check_missing_rate(query: str) -> list[Finding]:
     """
     return [
         {
-            'type': 'missing_rate',
-            'message': f'Counter "{metric}" without rate()/increase() -- raw counter value is monotonically increasing',
-            'severity': 'warning',
-            'recommendation': f'rate({metric}[5m])',
+            "type": "missing_rate",
+            "message": f'Counter "{metric}" without rate()/increase() -- raw counter value is monotonically increasing',
+            "severity": "warning",
+            "recommendation": f"rate({metric}[5m])",
         }
         for metric in _RE_COUNTER_METRIC.findall(query)
-        if not re.search(rf'(?:rate|irate|increase|delta|idelta)\s*\([^)]*{re.escape(metric)}', query)
-        and not re.search(rf'histogram_quantile\s*\([^)]*{re.escape(metric)}', query)
-        and not re.search(rf'histogram_(?:avg|stddev|stdvar|count|sum|fraction)\s*\([^)]*{re.escape(metric)}', query)
+        if not re.search(rf"(?:rate|irate|increase|delta|idelta)\s*\([^)]*{re.escape(metric)}", query)
+        and not re.search(rf"histogram_quantile\s*\([^)]*{re.escape(metric)}", query)
+        and not re.search(rf"histogram_(?:avg|stddev|stdvar|count|sum|fraction)\s*\([^)]*{re.escape(metric)}", query)
         and not (
-            metric.endswith(('_sum', '_count'))
+            metric.endswith(("_sum", "_count"))
             and re.search(
                 (
-                    rf'{metric.rsplit("_", 1)[0]}_sum.*{metric.rsplit("_", 1)[0]}_count'
-                    rf'|{metric.rsplit("_", 1)[0]}_count.*{metric.rsplit("_", 1)[0]}_sum'
+                    rf"{metric.rsplit('_', 1)[0]}_sum.*{metric.rsplit('_', 1)[0]}_count"
+                    rf"|{metric.rsplit('_', 1)[0]}_count.*{metric.rsplit('_', 1)[0]}_sum"
                 ),
                 query,
             )
@@ -164,10 +165,10 @@ def check_rate_on_gauges(query: str) -> list[Finding]:
     """
     return [
         {
-            'type': 'rate_on_gauge',
-            'message': f'{func}() on gauge "{metric}" -- gauges represent current state, not cumulative totals',
-            'severity': 'warning',
-            'recommendation': f'avg_over_time({metric}[5m]) for smoothing, or use direct value',
+            "type": "rate_on_gauge",
+            "message": f'{func}() on gauge "{metric}" -- gauges represent current state, not cumulative totals',
+            "severity": "warning",
+            "recommendation": f"avg_over_time({metric}[5m]) for smoothing, or use direct value",
         }
         for func, metric in _RE_RATE_FUNC_METRIC.findall(query)
         if any(pattern in metric for pattern in GAUGE_PATTERNS)
@@ -186,13 +187,13 @@ def check_subquery_perf(query: str) -> list[Finding]:
     """
     return [
         {
-            'type': 'expensive_subquery',
-            'message': (
-                f'Subquery [{val}{unit}] may cause OOM or timeout -- '
-                f'{int(to_seconds(int(val), unit) / 86400):.0f}d of data'
+            "type": "expensive_subquery",
+            "message": (
+                f"Subquery [{val}{unit}] may cause OOM or timeout -- "
+                f"{int(to_seconds(int(val), unit) / 86400):.0f}d of data"
             ),
-            'severity': 'warning',
-            'recommendation': 'Use recording rules for ranges >7d, or reduce resolution: [7d:5m]',
+            "severity": "warning",
+            "recommendation": "Use recording rules for ranges >7d, or reduce resolution: [7d:5m]",
         }
         for val, unit, _, _ in _RE_RANGE_DURATION.findall(query)
         if to_seconds(int(val), unit) > 7 * 86400
@@ -210,10 +211,10 @@ def check_irate_range(query: str) -> list[Finding]:
     """
     return [
         {
-            'type': 'irate_long_range',
-            'message': f'irate() with {duration}{unit} only uses last 2 samples -- the extra range is wasted lookback',
-            'severity': 'warning',
-            'recommendation': 'Use rate() for trends over >5m, or irate([2m]) for spike detection',
+            "type": "irate_long_range",
+            "message": f"irate() with {duration}{unit} only uses last 2 samples -- the extra range is wasted lookback",
+            "severity": "warning",
+            "recommendation": "Use rate() for trends over >5m, or irate([2m]) for spike detection",
         }
         for duration, unit in _RE_IRATE_RANGE.findall(query)
         if to_seconds(int(duration), unit) > 300
@@ -231,10 +232,10 @@ def check_rate_range(query: str) -> list[Finding]:
     """
     return [
         {
-            'type': 'rate_short_range',
-            'message': f'rate() with [{duration}{unit}] -- needs >=3 samples for reliable extrapolation',
-            'severity': 'warning',
-            'recommendation': '>= 4x scrape interval, typically [2m]+ with 30s scrape',
+            "type": "rate_short_range",
+            "message": f"rate() with [{duration}{unit}] -- needs >=3 samples for reliable extrapolation",
+            "severity": "warning",
+            "recommendation": ">= 4x scrape interval, typically [2m]+ with 30s scrape",
         }
         for duration, unit in _RE_RATE_RANGE.findall(query)
         if to_seconds(int(duration), unit) < 120
@@ -253,24 +254,24 @@ def check_unbounded(query: str) -> list[Finding]:
     is_alert = bool(_RE_COMPARISON.search(query))
     return [
         {
-            'type': 'missing_aggregation_clause',
-            'message': f'{agg}() without by()/without()'
+            "type": "missing_aggregation_clause",
+            "message": f"{agg}() without by()/without()"
             + (
-                ' (likely intentional for alerting threshold)'
+                " (likely intentional for alerting threshold)"
                 if is_alert
-                else ' -- produces single-value result losing all dimensional data'
+                else " -- produces single-value result losing all dimensional data"
             ),
-            'severity': 'info',
-            'recommendation': (
-                'Add by(label) for per-label breakdown'
+            "severity": "info",
+            "recommendation": (
+                "Add by(label) for per-label breakdown"
                 if is_alert
-                else f'Add by()/without() to {agg}() for explicit label control'
+                else f"Add by()/without() to {agg}() for explicit label control"
             ),
         }
-        for agg in ('sum', 'avg', 'min', 'max', 'count')
-        if re.search(rf'\b{agg}\s*\(', query)
-        and not re.search(rf'\b{agg}\s+(?:by|without)\s*\(', query)
-        and not re.search(rf'\b{agg}\s*\(.*\)\s*(?:by|without)\s*\(', query, re.DOTALL)
+        for agg in ("sum", "avg", "min", "max", "count")
+        if re.search(rf"\b{agg}\s*\(", query)
+        and not re.search(rf"\b{agg}\s+(?:by|without)\s*\(", query)
+        and not re.search(rf"\b{agg}\s*\(.*\)\s*(?:by|without)\s*\(", query, re.DOTALL)
     ]
 
 
@@ -292,13 +293,13 @@ def check_recording_opportunity(query: str) -> list[Finding]:
     return (
         [
             {
-                'type': 'recording_rule_opportunity',
-                'message': (
-                    'Complex query (3+ functions, nested aggregations, or >150 chars) -- '
-                    'recording rules pre-compute at scrape time for 10-40x speedup'
+                "type": "recording_rule_opportunity",
+                "message": (
+                    "Complex query (3+ functions, nested aggregations, or >150 chars) -- "
+                    "recording rules pre-compute at scrape time for 10-40x speedup"
                 ),
-                'severity': 'info',
-                'recommendation': 'Create level:metric:operations recording rule if used frequently',
+                "severity": "info",
+                "recommendation": "Create level:metric:operations recording rule if used frequently",
             }
         ]
         if score >= 2

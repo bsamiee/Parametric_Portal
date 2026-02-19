@@ -116,7 +116,7 @@ export default defineConfig({
         buildWebServer(B.apps.parametric_icons),
         buildWebServer(B.apps.test_harness),
     ],
-    workers: isCI() ? B.workers.ci : B.workers.local,
+    ...(isCI() ? { workers: B.workers.ci } : {}),
 });
 
 export { B as PLAYWRIGHT_CONFIG };

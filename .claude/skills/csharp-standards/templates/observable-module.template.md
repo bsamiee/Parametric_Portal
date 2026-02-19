@@ -3,7 +3,12 @@
 
 <br>
 
-Scaffold for C# 14 / .NET 10 + LanguageExt v5: applicative validation, `Eff<RT,T>` runtime DI, bracketed span lifecycle, structured logging, and metrics with retry projection.
+Produces one observable service module: applicative validation, `Eff<RT,T>` runtime DI, bracketed span lifecycle, structured logging, and metrics with retry projection.
+
+**Density:** ~400 LOC signals a refactoring opportunity. No file proliferation; helpers are always a code smell.
+**References:** `effects.md` (Fin, Eff, Validation, @catch, Schedule), `types.md` (domain primitives), `objects.md` (boundary adapters), `composition.md` (HKT encoding, extension members), `performance.md` (static lambdas), `observability.md` (structured logging, tracing, metrics, ROP combinators).
+**Anti-Pattern Awareness:** See `patterns.md` [1] for PREMATURE_MATCH_COLLAPSE, NULL_ARCHITECTURE, OVERLOAD_SPAM, VARIABLE_REASSIGNMENT.
+**Workflow:** Fill placeholders, remove guidance blocks, verify compilation.
 
 ---
 **Placeholders**

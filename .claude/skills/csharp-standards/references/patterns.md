@@ -83,11 +83,11 @@ CORRECT:
 ```csharp
 public static Eff<Unit> Process(Guid id) =>
     FetchData()
-        .Map(static (string data) => (Data: data))
-        .Bind(static ((string Data) state) =>
-            Update(data: state.Data));
+        .Map((string data) => (Id: id, Data: data))
+        .Bind(static ((Guid Id, string Data) state) =>
+            Update(id: state.Id, data: state.Data));
 ```
-Thread all needed values through the tuple at each stage; each `static` lambda receives only its own parameter and captures nothing.
+Thread all needed values through the tuple at each stage; each `static` lambda receives only its own parameter and captures nothing. The first `Map` captures the method parameter to pack it into the tuple -- downstream `Bind` lambdas are `static`.
 Each non-static lambda capturing an outer variable triggers a compiler-generated display class allocation. On hot paths this means one heap allocation per pipeline invocation. `static` lambdas with explicit tuple threading are zero-allocation -- the compiler verifies no capture at compile time. See `performance.md` [7].
 
 **EARLY_RETURN_GUARDS**

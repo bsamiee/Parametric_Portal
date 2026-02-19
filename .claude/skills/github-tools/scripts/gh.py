@@ -69,7 +69,7 @@ def run_command(command: tuple[str, ...], env: dict | None = None, timeout_secon
     try:
         result = subprocess.run(command, capture_output=True, text=True, env=env, timeout=timeout_seconds)
     except subprocess.TimeoutExpired:
-        return False, f'Command timed out after {timeout_seconds}s'
+        return False, f"Command timed out after {timeout_seconds}s"
     return result.returncode == 0, (result.stdout or result.stderr).strip()
 
 
@@ -84,32 +84,32 @@ def main() -> int:
 
             if len(cmd_args) < len(required):
                 usage_args = (
-                    f'{" ".join(f"<{param}>" for param in required)} {" ".join(f"[{param}]" for param in optional)}'
+                    f"{' '.join(f'<{param}>' for param in required)} {' '.join(f'[{param}]' for param in optional)}"
                 )
-                sys.stdout.write(f'Usage: gh.py {cmd_name} {usage_args}\n')
+                sys.stdout.write(f"Usage: gh.py {cmd_name} {usage_args}\n")
                 return 1
 
             opts = dict(zip(all_params, cmd_args))
-            env = project_env() if cmd_name.startswith('project-') else None
+            env = project_env() if cmd_name.startswith("project-") else None
             ok, out = run_command(builder(opts), env)
 
             result = (
-                {'status': 'success', **formatter(out, opts)}
+                {"status": "success", **formatter(out, opts)}
                 if ok
-                else {'status': 'error', 'message': f'{cmd_name} failed', 'stderr': out}
+                else {"status": "error", "message": f"{cmd_name} failed", "stderr": out}
             )
-            sys.stdout.write(json.dumps(result, indent=2) + '\n')
+            sys.stdout.write(json.dumps(result, indent=2) + "\n")
             return 0 if ok else 1
 
         case [cmd_name, *_]:
             sys.stdout.write(f"[ERROR] Unknown command '{cmd_name}'\n\n")
-            sys.stdout.write(__doc__ + '\n')
+            sys.stdout.write(__doc__ + "\n")
             return 1
 
         case _:
-            sys.stdout.write(__doc__ + '\n')
+            sys.stdout.write(__doc__ + "\n")
             return 1
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     sys.exit(main())

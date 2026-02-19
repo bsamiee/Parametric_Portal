@@ -212,9 +212,9 @@ class SearchRepo extends Effect.Service<SearchRepo>()('database/Search', {
                 const cursorFilter = hasCursor ? sql`WHERE (paged.rank, paged.entity_id) < (${parameters.cursorRank}, ${parameters.cursorId}::uuid)` : sql``;
                 const { ctes, query } = _buildRankedCtes({
                     entityTypes: parameters.entityTypes, includeGlobal: parameters.includeGlobal, scopeId: parameters.scopeId, term: parameters.term,
-                    ...(parameters.embeddingJson !== undefined ? { embeddingJson: parameters.embeddingJson } : {}),
-                    ...(parameters.dimensions !== undefined ? { dimensions: parameters.dimensions } : {}),
-                    ...(parameters.model !== undefined ? { model: parameters.model } : {}),
+                    ...(parameters.embeddingJson === undefined ? {} : { embeddingJson: parameters.embeddingJson }),
+                    ...(parameters.dimensions === undefined ? {} : { dimensions: parameters.dimensions }),
+                    ...(parameters.model === undefined ? {} : { model: parameters.model }),
                 });
                 const snippetExpr = parameters.includeSnippets
                     ? sql`ts_headline(${_CONFIG.regconfig}::regconfig, coalesce(documents.display_text, '') || ' ' || coalesce(documents.content_text, '') || ' ' || coalesce((SELECT string_agg(value, ' ') FROM jsonb_each_text(coalesce(documents.metadata, '{}'::jsonb))), ''), ${query}, ${_CONFIG.snippet.opts})`
@@ -267,7 +267,7 @@ class SearchRepo extends Effect.Service<SearchRepo>()('database/Search', {
             Result:  S.Struct({ entityId: S.UUID, entityType: S.String, isNew: S.Boolean }),
         });
         return {
-            embeddingSources: Effect.fn('SearchRepo.embeddingSources')((options: { readonly dimensions: number; readonly entityTypes?: readonly string[]; readonly includeGlobal?: boolean; readonly limit?: number; readonly model: string; readonly scopeId?: string | null }) =>
+            embeddingSources: Effect.fn('SearchRepo.embeddingSources')((options: { readonly dimensions: number; readonly entityTypes?: readonly string[] | undefined; readonly includeGlobal?: boolean | undefined; readonly limit?: number | undefined; readonly model: string; readonly scopeId?: string | null | undefined }) =>
                 executeEmbeddingSources({
                     dimensions: options.dimensions, entityTypes: options.entityTypes ?? [], includeGlobal: options.includeGlobal ?? false,
                     limit: Math.min(Math.max(options.limit ?? _CONFIG.limits.embeddingBatch, 1), _CONFIG.limits.embeddingBatch),
@@ -282,7 +282,7 @@ class SearchRepo extends Effect.Service<SearchRepo>()('database/Search', {
                 return Effect.fn('SearchRepo.refresh')((scopeId: string | null = null, includeGlobal = false) =>
                     executeRefresh({ includeGlobal, scopeId }).pipe(Effect.mapError((cause) => new SearchError({ cause, operation: 'refresh' }))));
             })(),
-            search: Effect.fn('SearchRepo.search')((options: { readonly embedding?: EmbeddingInput; readonly entityTypes?: readonly string[]; readonly includeFacets?: boolean; readonly includeGlobal?: boolean; readonly includeSnippets?: boolean; readonly scopeId: string | null; readonly term: string }, pagination: { cursor?: string; limit?: number } = {}) =>
+            search: Effect.fn('SearchRepo.search')((options: { readonly embedding?: EmbeddingInput | undefined; readonly entityTypes?: readonly string[] | undefined; readonly includeFacets?: boolean | undefined; readonly includeGlobal?: boolean | undefined; readonly includeSnippets?: boolean | undefined; readonly scopeId: string | null; readonly term: string }, pagination: { cursor?: string | undefined; limit?: number | undefined } = {}) =>
                 Effect.gen(function* () {
                     const cursorValue = Option.filter(yield* Page.decode(pagination.cursor, S.Number), (cursor) => S.is(S.UUID)(cursor.id));
                     const limit = Math.min(Math.max(pagination.limit ?? _CONFIG.limits.defaultLimit, 1), _CONFIG.limits.maxLimit);
@@ -313,7 +313,7 @@ class SearchRepo extends Effect.Service<SearchRepo>()('database/Search', {
                     return { ...Page.keyset(items, totalCount, limit, (item) => ({ id: item.entityId, v: item.rank }), S.Number, Option.isSome(cursorValue)), facets };
                 }).pipe(Effect.tap(() => Effect.annotateCurrentSpan({ 'search.term': options.term }))),
             ),
-            suggest: Effect.fn('SearchRepo.suggest')((options: { readonly includeGlobal?: boolean; readonly limit?: number; readonly prefix: string; readonly scopeId: string | null }) =>
+            suggest: Effect.fn('SearchRepo.suggest')((options: { readonly includeGlobal?: boolean | undefined; readonly limit?: number | undefined; readonly prefix: string; readonly scopeId: string | null }) =>
                 executeSuggestions({
                     includeGlobal: options.includeGlobal ?? false,
                     limit: Math.min(Math.max(options.limit ?? _CONFIG.limits.suggestLimitDefault, 1), _CONFIG.limits.suggestLimitMax),
