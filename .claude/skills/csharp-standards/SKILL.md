@@ -55,15 +55,15 @@ References are complementary -- type discipline applies when writing effects; an
 
 **Step 3 -- Specialized (load when task requires)**
 
-| [INDEX] | [REFERENCE]        | [LOAD_WHEN]              |
-| :-----: | :----------------- | ------------------------ |
-|   [7]   | `algorithms.md`    | Recursion schemes, folds |
-|   [8]   | `performance.md`   | SIMD/span hot paths      |
-|   [9]   | `observability.md` | Logs/traces/metrics      |
-|  [10]   | `concurrency.md`   | Channels + cancellation  |
-|  [11]   | `diagnostics.md`   | Debugging + profiling    |
+| [INDEX] | [REFERENCE]        | [LOAD_WHEN]                   |
+| :-----: | :----------------- | ----------------------------- |
+|   [7]   | `algorithms.md`    | Recursion schemes, folds      |
+|   [8]   | `performance.md`   | SIMD/span hot paths           |
+|   [9]   | `observability.md` | Logs/traces/metrics           |
+|  [10]   | `concurrency.md`   | Channels + cancellation       |
+|  [11]   | `diagnostics.md`   | Debugging + profiling         |
 |  [12]   | `testing.md`       | PBT + benchmarks + containers |
-|  [13]   | `persistence.md`   | EF Core + repositories   |
+|  [13]   | `persistence.md`   | EF Core + repositories        |
 
 **Step 4 -- Template (scaffolding only)**
 
@@ -173,14 +173,14 @@ Core + foundation references are always loaded per [1]. The routing table select
 
 **Type family** -- select the encoding that makes illegal states unrepresentable at the narrowest type boundary.
 
-| [INDEX] | [DATA_SHAPE]                    | [USE]                                 | [KEY_TRAIT]                         |
-| :-----: | :------------------------------ | ------------------------------------- | ----------------------------------- |
-|   [1]   | **Object model topology**       | See `objects.md` [1] topology table   | topology annotations                |
-|   [2]   | **Domain primitive**            | `readonly record struct` + `Fin<T>`   | `{ get; }` only; normalize in factory |
-|   [3]   | **Source-gen payload DU**       | `[Union]` + `abstract partial record` | Generated `Switch`/`Map` exhaustive |
-|   [4]   | **Sealed DU hierarchy**         | `sealed abstract record` + cases      | Switch expression arms              |
-|   [5]   | **Zero-alloc wrapper**          | `Newtype<TTag, TRepr>`                | `[ValueObject<T>]` for public API   |
-|   [6]   | **Compile-time state tracking** | `UserId<TState>` phantom parameter    | Empty `readonly struct` markers     |
+| [INDEX] | [DATA_SHAPE]                    | [USE]                                  | [KEY_TRAIT]                           |
+| :-----: | :------------------------------ | -------------------------------------- | ------------------------------------- |
+|   [1]   | **Object model topology**       | See `objects.md` [1] topology table    | topology annotations                  |
+|   [2]   | **Domain primitive**            | `readonly record struct` + `Fin<T>`    | `{ get; }` only; normalize in factory |
+|   [3]   | **Source-gen payload DU**       | `[Union]` + `abstract partial record`  | Generated `Switch`/`Map` exhaustive   |
+|   [4]   | **Sealed DU hierarchy**         | `sealed abstract record` + cases       | Switch expression arms                |
+|   [5]   | **Zero-alloc wrapper**          | `Newtype<TTag, TRepr>`                 | `[ValueObject<T>]` for public API     |
+|   [6]   | **Compile-time state tracking** | `UserId<TState>` phantom parameter     | Empty `readonly struct` markers       |
 |   [7]   | **Inline property validation**  | `field` keyword setter (non-validated) | Auto-rounding; NOT for `Fin<T>` types |
 
 **Error channel** -- match the effect type to the failure mode.

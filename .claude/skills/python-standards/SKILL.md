@@ -16,6 +16,11 @@ description: >-
   structlog, beartype, polars, or any Python library in this monorepo;
   (6) writing or editing pytest tests, conftest.py fixtures, hypothesis
   property tests, or test configuration.
+metadata:
+  token_estimates:
+    entry_point: 4100
+    full_load: 22200
+    max_load: 61900
 ---
 
 # [H1][PYTHON-STANDARDS]
@@ -189,12 +194,49 @@ The routing table selects specialized references and templates to add beyond fou
 
 <br>
 
-See `patterns.md` for the full codex with detection heuristics and corrected forms.
-
-- **Type-system** -- `Any`/`cast` erasure, bare primitives, mutable model fields, `hasattr`/`getattr` over structural match.
-- **Control-flow** -- imperative branching, bare `try/except`, `raise` for control flow, mid-pipeline `unwrap`, boolean-match abuse.
-- **Surface-area** -- god decorators, helper/utility files, map-side-effect abuse, missing checkpoints.
-- **Library-mixing** -- mixed `expression.Result` + `returns.Result` in same module, `expression.pipe` in `returns.flow` pipelines.
+See `patterns.md` for the full codex (26 patterns) with detection heuristics and corrected forms. Three high-frequency violations inline:
+**IMPERATIVE_BRANCHING** `[ANTI-PATTERN]`
+```python
+def handle(result: Result[Payment, DomainError]) -> HttpResponse:
+    if isinstance(result, Success):
+        payment = result.unwrap()
+        if isinstance(payment, CardPayment):
+            return HttpResponse(200, body=f"Card: {payment.last_four}")
+    return HttpResponse(500, body="unexpected")
+```
+`[CORRECT]`
+```python
+def handle(result: Result[Payment, DomainError]) -> HttpResponse:
+    match result:
+        case Success(CardPayment(last_four=lf)): return HttpResponse(200, body=f"Card: {lf}")
+        case Success(BankPayment(iban=iban)): return HttpResponse(200, body=f"Bank: {iban}")
+        case Failure(err): return HttpResponse(500, body=err.message)
+```
+**BARE_TRY_EXCEPT** `[ANTI-PATTERN]`
+```python
+def parse_age(raw: str) -> int:
+    try: return int(raw)
+    except ValueError: raise ValueError("invalid age")
+```
+`[CORRECT]`
+```python
+@safe
+def parse_age(raw: str) -> int:
+    return int(raw)
+def process_age(raw: str) -> Result[int, Exception]:
+    return flow(raw, parse_age, bind(validate_age))
+```
+**MISSING_BIND_IN_FLOW** `[ANTI-PATTERN]`
+```python
+def process(raw: bytes) -> Result[Result[UserId, Exception], Exception]:
+    return flow(raw, parse_input, validate, persist)
+```
+`[CORRECT]`
+```python
+def process(raw: bytes) -> Result[UserId, Exception]:
+    return flow(raw, parse_input, bind(validate), bind(persist))
+```
+**Other categories:** type-system (`Any`/`cast` erasure, bare primitives, mutable models, `hasattr`/`getattr`), surface-area (god decorators, helper files, map-side-effect, missing checkpoints), library-mixing (mixed `expression`+`returns` in same module).
 
 ---
 ## [7][TEMPLATES]

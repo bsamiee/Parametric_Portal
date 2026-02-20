@@ -255,7 +255,9 @@ public static class VerifyConfiguration {
 public sealed class TransactionSnapshotTests {
     [Fact]
     public Task Pending_transaction_snapshot() {
-        Fin<DomainIdentity> identity = DomainIdentity.Create(candidate: Guid.NewGuid());
+        // Use a known-valid GUID to ensure deterministic success path
+        Fin<DomainIdentity> identity = DomainIdentity.Create(
+            candidate: Guid.Parse("550e8400-e29b-41d4-a716-446655440000"));
         Fin<TransactionAmount> amount = TransactionAmount.Create(candidate: 250.50m);
         IClock clock = SystemClock.Instance;
 

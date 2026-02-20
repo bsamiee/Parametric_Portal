@@ -180,7 +180,7 @@ _run "HIGH" "IMPERATIVE_BRANCH" \
     "$(_search '\bif\s*\(|}\s*else\b' -E | grep -i 'Domain[/\\]' || true)"
 # [CHECK_4] PREMATURE_MATCH_COLLAPSE
 _run "MEDIUM" "PREMATURE_MATCH_COLLAPSE" \
-    "$(_search '\.Match\(' | grep -v '^\s*return\b' | grep -v 'return.*\.Match(' || true)"
+    "$(_search '\.Match\(' | grep -vE '^\s*return\b|return.*\.Match\(' || true)"
 # [CHECK_5] ANEMIC_DOMAIN
 _run "HIGH" "ANEMIC_DOMAIN" \
     "$(_search '\{\s*get;\s*set;\s*\}' -E | grep -i 'Domain[/\\]' || true)"
@@ -195,7 +195,7 @@ _check_arity_spam
 _check_helper_spam
 # [CHECK_10] CLOSURE_CAPTURE_HOT_PATH
 _run "HIGH" "CLOSURE_CAPTURE_HOT_PATH" \
-    "$(_search '=>' | grep -i 'Performance[/\\]' | grep -v 'static\s' || true)"
+    "$(_search '=>' | grep -i 'Performance[/\\]' | grep -vE 'static\s' || true)"
 # [CHECK_11] MUTABLE_ACCUMULATOR
 _run "HIGH" "MUTABLE_ACCUMULATOR" \
     "$(_search '\b(foreach|for)\s*\(' -E | grep -i 'Domain[/\\]' || true)"

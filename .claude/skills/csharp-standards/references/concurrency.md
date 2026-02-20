@@ -265,20 +265,23 @@ public static class AtomicCoordination {
         liftEff(() => {
             Instant now = clock.GetCurrentInstant();
             bool reserved = false;
-            Processed.Swap((HashMap<EventId, Instant> current) =>
-                current.ContainsKey(eventId)
-                    ? current
-                    : current.AddOrUpdate(eventId, now).Map(_ => { reserved = true; return _; }));
-            return reserved;
-        }).Bind((bool isNew) => isNew
-            ? (from result in process
-                   | @catch(static (Error _) => true, liftEff<RT, TResult>(() => {
-                         Processed.Swap((HashMap<EventId, Instant> current) =>
-                             current.Remove(eventId));
-                         return Prelude.raise<TResult>(Error.New("TryProcess: rolled back reservation"));
-                     }))
-               select Some(result))
-            : Eff<RT, Option<TResult>>.Pure(Option<TResult>.None));
+        HashMap<EventId, Instant> before = Processed.Value;
+        HashMap<EventId, Instant> after = Processed.Swap((HashMap<EventId, Instant> current) =>
+            current.ContainsKey(eventId)
+                ? current
+                : current.AddOrUpdate(eventId, now));
+        // Reserved if the map changed (new entry added)
+        bool reserved = !before.ContainsKey(eventId) && after.ContainsKey(eventId);
+        return reserved;
+    }).Bind((bool isNew) => isNew
+        ? (from result in process
+               | @catch(static (Error _) => true, liftEff<RT, TResult>(() => {
+                     Processed.Swap((HashMap<EventId, Instant> current) =>
+                         current.Remove(eventId));
+                     return Prelude.raise<TResult>(Error.New("TryProcess: rolled back reservation"));
+                 }))
+           select Some(result))
+        : Eff<RT, Option<TResult>>.Pure(Option<TResult>.None));
     public static Unit Purge(IClock clock, Duration retention) =>
         Processed.Swap((HashMap<EventId, Instant> current) => {
             Instant cutoff = clock.GetCurrentInstant() - retention;
@@ -289,10 +292,10 @@ public static class AtomicCoordination {
 
 [CRITICAL]: Leader CAS is local-only -- for cross-node election, wrap `Claim`/`Abdicate` in `Eff<RT, T>` that syncs with an external distributed lock (Redis `SET NX`, PostgreSQL advisory lock). Without periodic `Purge`, the idempotency `HashMap` grows unbounded -- compose with `Schedule`-based repeating effect (see `effects.md` [8]).
 
-| [INDEX] | [PATTERN]        | [DISTRIBUTED_USE]                       | [LOCAL_PRIMITIVE]               |
-| :-----: | :--------------- | --------------------------------------- | ------------------------------- |
-|   [1]   | Message queue    | Cross-node `Channel<T>` + transport     | `Channel<T>` ([2])             |
-|   [2]   | Leader election  | CAS + external lock at boundary         | `Atom<Option<NodeId>>`         |
+| [INDEX] | [PATTERN]        | [DISTRIBUTED_USE]                       | [LOCAL_PRIMITIVE]             |
+| :-----: | :--------------- | --------------------------------------- | ----------------------------- |
+|   [1]   | Message queue    | Cross-node `Channel<T>` + transport     | `Channel<T>` ([2])            |
+|   [2]   | Leader election  | CAS + external lock at boundary         | `Atom<Option<NodeId>>`        |
 |   [3]   | Idempotent dedup | CAS + external unique constraint        | `Atom<HashMap<EventId, _>>`   |
 |   [4]   | Retry / backoff  | `Schedule` algebra across network calls | `Schedule` (`effects.md` [8]) |
 
@@ -353,15 +356,15 @@ public static class AsyncBoundary {
 ---
 ## [8][QUICK_REFERENCE]
 
-| [INDEX] | [PATTERN]              | [WHEN]                              | [KEY_TRAIT]                          |
-| :-----: | :--------------------- | :---------------------------------- | ------------------------------------ |
-|   [1]   | `Bracket`              | Resource acquire/use/release        | `IO.Bracket` + guaranteed `Fin`      |
-|   [2]   | `WithTimeout`          | Deadline-scoped `Eff` pipeline      | Linked CTS inside `Bracket`          |
-|   [3]   | `Channel<T>` bounded   | Backpressure-native fan-out         | `BoundedChannelOptions` + `FullMode` |
-|   [4]   | `RunStage`             | Channel pipeline stage              | `Fin<TOut>` failure completes writer |
-|   [5]   | `await foreach` + batch | Async stream consumption           | `[EnumeratorCancellation]` + `Seq`   |
-|   [6]   | `Atom<T>` CAS          | Lock-free state / leader election   | `Swap` + optional validator          |
-|   [7]   | `Atom<HashMap<K,V>>`   | Concurrent map / idempotent dedup   | CAS retry + immutable inner          |
-|   [8]   | `Ref<T>` + `atomic`    | Multi-ref transactional consistency | STM commit/rollback                  |
-|   [9]   | `ParallelBounded`      | Ad-hoc bounded fan-out              | `SemaphoreSlim` + `IO<Seq<T>>`       |
-|  [10]   | `IO.liftAsync`         | Async boundary wrapping             | Avoids sync-over-async starvation    |
+| [INDEX] | [PATTERN]               | [WHEN]                              | [KEY_TRAIT]                          |
+| :-----: | :---------------------- | :---------------------------------- | ------------------------------------ |
+|   [1]   | `Bracket`               | Resource acquire/use/release        | `IO.Bracket` + guaranteed `Fin`      |
+|   [2]   | `WithTimeout`           | Deadline-scoped `Eff` pipeline      | Linked CTS inside `Bracket`          |
+|   [3]   | `Channel<T>` bounded    | Backpressure-native fan-out         | `BoundedChannelOptions` + `FullMode` |
+|   [4]   | `RunStage`              | Channel pipeline stage              | `Fin<TOut>` failure completes writer |
+|   [5]   | `await foreach` + batch | Async stream consumption            | `[EnumeratorCancellation]` + `Seq`   |
+|   [6]   | `Atom<T>` CAS           | Lock-free state / leader election   | `Swap` + optional validator          |
+|   [7]   | `Atom<HashMap<K,V>>`    | Concurrent map / idempotent dedup   | CAS retry + immutable inner          |
+|   [8]   | `Ref<T>` + `atomic`     | Multi-ref transactional consistency | STM commit/rollback                  |
+|   [9]   | `ParallelBounded`       | Ad-hoc bounded fan-out              | `SemaphoreSlim` + `IO<Seq<T>>`       |
+|  [10]   | `IO.liftAsync`          | Async boundary wrapping             | Avoids sync-over-async starvation    |

@@ -343,15 +343,15 @@ public static class PerfGate {
 ---
 ## [10][QUICK_REFERENCE]
 
-| [INDEX] | [PATTERN]                 | [WHEN]                                | [KEY_TRAIT]                        |
-| :-----: | ------------------------- | ------------------------------------- | ---------------------------------- |
-|   [1]   | **TensorPrimitives**      | Hardware-accelerated numeric math     | `Multiply`/`Sum` over `Span<T>`    |
-|   [2]   | **Vector SIMD**           | Branchless conditional logic          | Mask + `ConditionalSelect` + loop  |
-|  [2A]   | **Zero-copy reinterpret** | Bit-level span projection             | `MemoryMarshal.Cast`/`AsBytes`     |
-|   [3]   | **Buffer hybrid**         | Stack/pool strategy selection         | `stackalloc` + `ArrayPool`         |
-|   [4]   | **ValueTask**             | Synchronous cache-hit fast path       | `FromResult` fast path             |
-|   [5]   | **NativeAOT**             | Trimmed AOT binaries, source-gen      | `JsonSerializerContext` source-gen |
-|  [5A]   | **LibraryImport**         | AOT-safe native interop               | Source-gen marshalling, no IL stub |
-|   [6]   | **Static lambdas**        | Zero closure bytes on hot paths       | `static` keyword + tuple threading |
-|   [7]   | **Span algorithms**       | Allocation-free sort/search/`SeparateEither` | `MemoryExtensions` + fold     |
-|   [8]   | **Benchmark gate**        | Evidence-backed perf claims           | `[MemoryDiagnoser]` + baseline     |
+| [INDEX] | [PATTERN]                 | [WHEN]                                       | [KEY_TRAIT]                        |
+| :-----: | ------------------------- | -------------------------------------------- | ---------------------------------- |
+|   [1]   | **TensorPrimitives**      | Hardware-accelerated numeric math            | `Multiply`/`Sum` over `Span<T>`    |
+|   [2]   | **Vector SIMD**           | Branchless conditional logic                 | Mask + `ConditionalSelect` + loop  |
+|  [2A]   | **Zero-copy reinterpret** | Bit-level span projection                    | `MemoryMarshal.Cast`/`AsBytes`     |
+|   [3]   | **Buffer hybrid**         | Stack/pool strategy selection                | `stackalloc` + `ArrayPool`         |
+|   [4]   | **ValueTask**             | Synchronous cache-hit fast path              | `FromResult` fast path             |
+|   [5]   | **NativeAOT**             | Trimmed AOT binaries, source-gen             | `JsonSerializerContext` source-gen |
+|  [5A]   | **LibraryImport**         | AOT-safe native interop                      | Source-gen marshalling, no IL stub |
+|   [6]   | **Static lambdas**        | Zero closure bytes on hot paths              | `static` keyword + tuple threading |
+|   [7]   | **Span algorithms**       | Allocation-free sort/search/`SeparateEither` | `MemoryExtensions` + fold          |
+|   [8]   | **Benchmark gate**        | Evidence-backed perf claims                  | `[MemoryDiagnoser]` + baseline     |

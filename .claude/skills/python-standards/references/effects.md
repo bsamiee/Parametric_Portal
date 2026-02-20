@@ -3,7 +3,7 @@
 
 <br>
 
-Use `returns >= 0.26` as one algebra: `Result[T, E]`, `Maybe[T]`, `FutureResult[T, E]`, `IO[T]`, `RequiresContextResult[T, E, Deps]`, and `RequiresContextFutureResult[T, E, Deps]`. Compose with `flow()`/`pipe()` plus pointfree combinators; unwrap only at the terminal boundary. Use `expression >= 5.6` computational effects (`@effect.result`, `@effect.option`) for complex branching that exceeds linear pipeline shape.
+`returns >= 0.26` owns the railway: `Result`, `Maybe`, `FutureResult`, `IO`, `RequiresContext*` reader monads. Compose via `flow()`/`pipe()` + pointfree combinators; unwrap only at the terminal boundary. `expression >= 5.6` owns computational effects (`@effect.result`, `@effect.option`) for branching that exceeds linear pipeline shape.
 
 ---
 ## [1][EFFECT_STACK]
@@ -11,7 +11,7 @@ Use `returns >= 0.26` as one algebra: `Result[T, E]`, `Maybe[T]`, `FutureResult[
 
 <br>
 
-`Result[T, E]` models expected sync failure. `Maybe[T]` models semantic absence. `FutureResult[T, E]` models async failure. `flow(value, *fns)` is eager and linear; `pipe(*fns)` builds reusable fragments; `bind` chains monadic stages, `map_` maps pure stages, `lash` remaps the error track.
+`flow(value, *fns)` is eager; `pipe(*fns)` builds reusable fragments. `bind` chains monadic stages, `map_` maps pure, `lash` remaps the error track.
 
 ```python
 # --- [IMPORTS] ----------------------------------------------------------------
@@ -65,7 +65,7 @@ def classify(age: int) -> Result[str, ValidationError]:
         case _:
             return Failure(ValidationError(field="age", message="must be adult"))
 
-# -- Reusable fragment via pipe; eager execution via flow -------------------
+# -- pipe (reusable) + flow (eager) ----------------------------------------
 age_pipeline: Callable[[Result[int, ValidationError]], Result[str, ValidationError]] = pipe(
     bind(validate_age), bind(classify),
 )
@@ -89,7 +89,6 @@ def async_user_pipeline(email: str) -> FutureResult[int, Exception]:
 [CRITICAL]:
 - [ALWAYS] Wrap `Result`-returning stages in `bind(...)` inside `flow(...)`.
 - [ALWAYS] Use `@safe` / `@future_safe` only at foreign boundaries.
-- [ALWAYS] Model absence as `Maybe`, then bridge via `maybe_to_result` when failure is required.
 - [NEVER] Unwrap (`.unwrap()`, `.value_or()`, `.failure()`) before the terminal boundary.
 
 ---
@@ -98,7 +97,7 @@ def async_user_pipeline(email: str) -> FutureResult[int, Exception]:
 
 <br>
 
-`RequiresContextResult[T, E, Deps]` is `Deps -> Result[T, E]`; `RequiresContextFutureResult` is the async variant. Use `.ask()` + `.from_result()` for sync stages, `.bind_async(...)` for async, `.modify_env(...)` for narrower dependency contracts.
+`.ask()` + `.from_result()` for sync stages, `.bind_async(...)` for async, `.modify_env(...)` for narrowing dependency contracts across heterogeneous reader stages.
 
 ```python
 # --- [IMPORTS] ----------------------------------------------------------------
@@ -134,7 +133,6 @@ def enrich_with_cache(label: str) -> RequiresContextResult[str, Exception, _Cach
     )
 
 def lookup_and_enrich(user_id: int) -> RequiresContextResult[str, Exception, ServiceDeps]:
-    """Compose heterogeneous reader stages via modify_env context narrowing."""
     return (
         fetch_user(user_id)
         .modify_env(lambda deps: deps)  # ServiceDeps -> _RepoDeps
@@ -161,7 +159,7 @@ def async_lookup_user(user_id: int) -> RequiresContextFutureResult[dict[str, obj
 
 <br>
 
-Encode domain errors as frozen dataclass variants combined into a closed union via PEP 695 `type` alias. Structural `match/case` at boundaries exhausts the algebra. See `types.md` [2] for `@tagged_union` alternative.
+Frozen dataclass variants + PEP 695 `type` alias; `match/case` at boundaries exhausts the algebra. See `types.md` [2] for `@tagged_union` alternative.
 
 ```python
 # --- [IMPORTS] ----------------------------------------------------------------
@@ -188,7 +186,6 @@ type DomainError = AtomError | NotFoundError | ConflictError
 # --- [FUNCTIONS] --------------------------------------------------------------
 
 def handle_result(result: Result[str, DomainError]) -> str:
-    """Boundary handler: structural dispatch on closed error variants."""
     match result:
         case Success(value):
             return f"OK: {value}"
@@ -211,7 +208,7 @@ def handle_result(result: Result[str, DomainError]) -> str:
 
 <br>
 
-`IO[T]` marks synchronous impurity; `@impure_safe` bridges exception-raising sync IO into `IOResult`; `@trampoline` keeps deep recursion stack-safe. See `algorithms.md` [1] for extended recursion patterns.
+`@impure_safe` bridges exception-raising sync IO into `IOResult`; `@trampoline` keeps deep recursion stack-safe. See `algorithms.md` [1] for extended recursion patterns.
 
 ```python
 # --- [IMPORTS] ----------------------------------------------------------------
@@ -220,11 +217,6 @@ from collections.abc import Callable
 from typing import cast
 from returns.io import IO, impure_safe
 from returns.trampolines import Trampoline, trampoline
-
-# --- [CONSTANTS] --------------------------------------------------------------
-
-pure_io: IO[int] = IO.from_value(42)
-greeting: IO[str] = pure_io.map(lambda value: f"Value: {value}")
 
 # --- [FUNCTIONS] --------------------------------------------------------------
 
@@ -243,9 +235,8 @@ def factorial(number: int, accumulator: int = 1) -> int | Trampoline[int]:
 ```
 
 [IMPORTANT]:
-- [ALWAYS] Keep IO markers and IO bridges at boundaries only.
 - [ALWAYS] Use `@trampoline` for recursive functions with unbounded depth.
-- [NEVER] Embed `IO` construction in domain transforms -- `IO` is a boundary concern.
+- [NEVER] Embed `IO` construction in domain transforms -- boundary concern only.
 
 ---
 ## [5][EXPRESSION_EFFECTS]
@@ -253,7 +244,7 @@ def factorial(number: int, accumulator: int = 1) -> int | Trampoline[int]:
 
 <br>
 
-`expression >= 5.6` provides generator-based monadic comprehension via `@effect.result[T, E]()` and `@effect.option[T]()`. Generator `yield` acts as monadic bind -- short-circuiting on `Error`/`Nothing` while preserving `match/case`, loops, and early returns. Use for **complex branching**; `returns.flow()` for **linear pipelines**. See `SKILL.md` [8].
+Generator `yield from` acts as monadic bind -- short-circuiting on `Error`/`Nothing` while preserving `match/case`, loops, and early returns inside the generator body.
 
 ```python
 # --- [IMPORTS] ----------------------------------------------------------------
@@ -273,7 +264,6 @@ class OrderError:
 def calculate_order_total(
     items: tuple[tuple[str, int, float], ...], discount_code: str | None,
 ) -> Effect[Result[float, OrderError]]:
-    """Conditional discount, per-item validation, accumulation -- yield from = monadic bind."""
     subtotal: float = 0.0
     for name, quantity, price in items:
         validated: float = yield from validate_line_item(name, quantity, price)
@@ -305,7 +295,6 @@ def validate_line_item(
 
 @effect.option[str]()
 def find_display_name(primary: Option[str], fallback: Option[str]) -> Effect[Option[str]]:
-    """Try primary, fall back, transform -- Nothing short-circuits."""
     match primary:
         case Some(name):
             return name.upper()
@@ -331,10 +320,8 @@ def bridge_result[T, E](expr: ExprResult[T, E]) -> ReturnsResult[T, E]:
 ```
 
 [CRITICAL]:
-- [ALWAYS] `@effect.result` for complex branching; `returns.flow()` for linear pipelines.
-- [ALWAYS] Bridge between expression and returns via `match/case` at layer boundaries only.
-- [NEVER] Mix `expression.Ok`/`Error` with `returns.Success`/`Failure` in the same module (except bridges).
 - [NEVER] Use `@effect.result` for linear A -> B -> C pipelines -- `flow()` + `bind` is more readable.
+- [NEVER] Mix `expression.Ok`/`Error` with `returns.Success`/`Failure` in the same module (except bridges).
 
 ---
 ## [6][RULES]
@@ -342,16 +329,12 @@ def bridge_result[T, E](expr: ExprResult[T, E]) -> ReturnsResult[T, E]:
 
 <br>
 
-- [ALWAYS] `Result[T, E]` for sync failure; `FutureResult[T, E]` for async; `Maybe[T]` for absence.
-- [ALWAYS] `flow(...)` for eager linear execution; `pipe(...)` for reusable stage fragments.
-- [ALWAYS] `bind` for monadic stages, `map_` for pure, `lash` for error-track recovery.
-- [ALWAYS] `RequiresContextResult` / `RequiresContextFutureResult` for typed DI via `.ask()`.
-- [ALWAYS] `IO[T]` / `@impure_safe` at boundaries only; `@trampoline` for stack-safe recursion.
-- [ALWAYS] Closed frozen variant unions for domain error algebras. See `types.md` [2].
-- [ALWAYS] `@effect.result` for complex branching; bridge via `match/case` at boundaries.
-- [NEVER] `try/except` in domain pipelines -- only at foreign-boundary bridges.
+- [ALWAYS] `@effect.result` for complex branching; `flow()` + `bind` for linear pipelines.
+- [ALWAYS] Bridge expression <-> returns via `match/case` at layer boundaries only.
+- [ALWAYS] Closed frozen variant unions for error algebras; exhaust in boundary `match/case`.
 - [NEVER] Container unwrap mid-pipeline (`.unwrap()`, `.value_or()`, `.failure()`).
 - [NEVER] Mix expression and returns Result/Option types in the same module.
+- [NEVER] `try/except` in domain pipelines -- only at foreign-boundary bridges.
 
 ---
 ## [7][QUICK_REFERENCE]

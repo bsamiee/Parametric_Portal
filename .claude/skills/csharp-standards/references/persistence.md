@@ -215,7 +215,9 @@ public sealed class JsonColumnConverter<T> : ValueConverter<T, string> where T :
         convertToProviderExpression: static (T value) =>
             JsonSerializer.Serialize(value, JsonSerializerOptions.Default),
         convertFromProviderExpression: static (string json) =>
-            JsonSerializer.Deserialize<T>(json, JsonSerializerOptions.Default)!) { }
+            JsonSerializer.Deserialize<T>(json, JsonSerializerOptions.Default)
+                ?? throw new InvalidOperationException(
+                    $"Failed to deserialize JSON column to {typeof(T).FullName}")) { }
 }
 
 // --- [VALUE_OBJECTS] ---------------------------------------------------------
