@@ -104,7 +104,7 @@ catalog:
   ipaddr.js: 2.3.0
   jsdom: 28.1.0
   isomorphic-dompurify: 2.36.0
-  jspdf: 4.1.0
+  jspdf: 4.2.0
   jszip: 3.10.1
   knip: 5.84.1
   lefthook: 2.1.1
