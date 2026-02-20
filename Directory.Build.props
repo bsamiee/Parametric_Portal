@@ -14,6 +14,9 @@
         <AnalysisLevel>latest-all</AnalysisLevel>
         <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
         <ErrorLog Condition="'$(CI)' == 'true'">diagnostics.sarif,version=2.1</ErrorLog>
+        <LocalCSharpAnalyzerProject>$(MSBuildThisFileDirectory)apps/cs-analyzer/ParametricPortal.CsAnalyzer.csproj</LocalCSharpAnalyzerProject>
+        <IsLocalCSharpAnalyzerProject Condition="'$(MSBuildProjectName)' == 'ParametricPortal.CsAnalyzer'">true</IsLocalCSharpAnalyzerProject>
+        <IsLocalCSharpAnalyzerProject Condition="'$(IsLocalCSharpAnalyzerProject)' == ''">false</IsLocalCSharpAnalyzerProject>
     </PropertyGroup>
 
     <PropertyGroup Label="Restore and CI">
@@ -46,7 +49,7 @@
         <BenchmarkDotNetVersion>0.15.8</BenchmarkDotNetVersion>
     </PropertyGroup>
 
-    <ItemGroup Label="Global Libraries">
+    <ItemGroup Label="Global Libraries" Condition="'$(IsLocalCSharpAnalyzerProject)' != 'true'">
         <PackageReference Include="LanguageExt.Core" Version="$(LanguageExtCoreVersion)" />
         <PackageReference Include="FluentValidation" Version="$(FluentValidationVersion)" />
         <PackageReference Include="Thinktecture.Runtime.Extensions" Version="$(ThinktectureRuntimeExtensionsVersion)" />
@@ -67,9 +70,17 @@
         <PackageReference Include="Npgsql.OpenTelemetry" Version="$(NpgsqlOpenTelemetryVersion)" />
     </ItemGroup>
 
-    <ItemGroup Label="Analyzer Packages">
+    <ItemGroup Label="Analyzer Packages" Condition="'$(IsLocalCSharpAnalyzerProject)' != 'true'">
         <PackageReference Include="Microsoft.VisualStudio.Threading.Analyzers" Version="$(MicrosoftVisualStudioThreadingAnalyzersVersion)" PrivateAssets="all" />
         <PackageReference Include="Meziantou.Analyzer" Version="$(MeziantouAnalyzerVersion)" PrivateAssets="all" />
+    </ItemGroup>
+
+    <ItemGroup Label="Local Analyzer Projects" Condition="'$(IsLocalCSharpAnalyzerProject)' != 'true' and Exists('$(LocalCSharpAnalyzerProject)')">
+        <ProjectReference Include="$(LocalCSharpAnalyzerProject)" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
+    </ItemGroup>
+
+    <ItemGroup Label="Boundary Exemption Contracts" Condition="'$(IsLocalCSharpAnalyzerProject)' != 'true'">
+        <Compile Include="$(MSBuildThisFileDirectory)apps/cs-analyzer/Contracts/BoundaryContracts.cs" Link="CSharpStandards/BoundaryContracts.cs" />
     </ItemGroup>
 
     <ItemGroup Label="Test Packages" Condition="'$(IsTestProject)' == 'true'">

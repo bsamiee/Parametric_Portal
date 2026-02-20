@@ -1,10 +1,10 @@
 # [H1][OBJECTS]
->**Dictum:** *Object topology is a proof surface: pick one canonical shape per concept and encode invariants at construction.*
+>**Dictum:** *Object topology is a proof surface; one canonical shape per concept.*
 
 <br>
 
 Object-focused reference for C# 14 / .NET 10 with LanguageExt v5 and Thinktecture Runtime Extensions v10.
-This document standardizes object-family selection, invariant construction, variant modeling, and boundary mapping without representational drift.
+This document standardizes object-family selection, invariant construction, variant modeling, and aggregate transitions.
 Effect orchestration lives in `effects.md`; polymorphic compression lives in `composition.md`; low-level tuning lives in `performance.md`.
 
 ---
@@ -13,19 +13,19 @@ Effect orchestration lives in `effects.md`; polymorphic compression lives in `co
 
 <br>
 
-| [INDEX] | [DOMAIN_SHAPE]                               | [CANONICAL_FORM]         |
-| :-----: | -------------------------------------------- | ------------------------ |
-|   [1]   | Constrained scalar (Email, Amount, Id)       | `[ValueObject<T>]`       |
-|   [2]   | Closed behavioral set (status/type/strategy) | `[SmartEnum<T>]`         |
-|   [3]   | Closed variant payload space                 | `[Union]`                |
-|   [4]   | Identity-bearing lifecycle object            | `sealed class` aggregate |
-|   [5]   | Stack-confined parser/workspace              | `readonly ref struct`    |
+| [INDEX] | [DOMAIN_SHAPE]                                   | [CANONICAL_FORM]          |
+| :-----: | ------------------------------------------------ | ------------------------- |
+|   [1]   | **Constrained scalar (Email, Amount, Id)**       | `[ValueObject<T>]`        |
+|   [2]   | **Closed behavioral set (status/type/strategy)** | `[SmartEnum<T>]`          |
+|   [3]   | **Closed variant payload space**                 | `[Union]`                 |
+|   [4]   | **Identity-bearing lifecycle object**            | `sealed record` aggregate |
+|   [5]   | **Stack-confined parser/workspace**              | `readonly ref struct`     |
 
 [IMPORTANT]:
 - [1] Use generated `TryCreate` as the external ingress gate.
 - [2] Use generated exhaustive `Switch`/`Map`; keep behavior co-located with the enum.
 - [3] Use generated exhaustive `Switch`/`Map`; avoid nullable/flag choreography.
-- [4] Aggregate transitions return typed codomains (`Fin<T>` / `Validation<Error,T>`).
+- [4] Aggregate transitions return typed codomains (`Fin<T>` / `Validation<Error,T>`) via `with`-expressions.
 - [5] Convert stack-only buffers into canonical objects before crossing boundaries.
 
 [CRITICAL]:
@@ -40,7 +40,7 @@ Effect orchestration lives in `effects.md`; polymorphic compression lives in `co
 <br>
 
 Thinktecture v10 source-generates construction APIs; LanguageExt provides typed error channels.
-Use `TryCreate` for untrusted input and project to `Fin<T>` / `Validation<Error,T>`.
+Use `TryCreate` for untrusted input and project to `Fin<T>` / `Validation<Error,T>` via DomainBridge.
 
 ```csharp
 namespace Domain.Objects;
@@ -80,6 +80,19 @@ public readonly partial struct OrderId {
 }
 ```
 
+[CRITICAL]:
+- `Create` is for trusted internal construction; `TryCreate` is the boundary gate.
+- Never expose primitives in public domain signatures once a value object exists.
+
+---
+## [3][DOMAIN_BRIDGE]
+>**Dictum:** *One generic bridge projects Thinktecture construction into `Fin<T>`; derive `Validation` at call site.*
+
+<br>
+
+Single bridge unifies value object and smart enum parsing into the `Fin<T>` error channel.
+Callers needing `Validation<Error,T>` compose via `.ToValidation()` -- no separate `Validate` wrapper.
+
 ```csharp
 namespace Domain.Objects;
 
@@ -88,25 +101,31 @@ using LanguageExt.Common;
 using Thinktecture;
 using static LanguageExt.Prelude;
 
-public static class ValueObjectBridge {
-    public static Fin<TValueObject> Parse<TValueObject, TKey>(TKey candidate)
+public static class DomainBridge {
+    // --- [PARSE_VALUE_OBJECT] ------------------------------------------------
+    public static Fin<TValueObject> ParseValueObject<TValueObject, TKey>(TKey candidate)
         where TValueObject : IValueObjectFactory<TValueObject, TKey, ValidationError> =>
         TValueObject.TryCreate(candidate, out TValueObject value, out ValidationError? validationError) switch {
             true => FinSucc(value),
-            false => FinFail<TValueObject>(Error.New(validationError?.Message ?? $"{typeof(TValueObject).Name} validation failed."))
+            false => FinFail<TValueObject>(
+                Error.New(validationError?.Message ?? $"{typeof(TValueObject).Name} validation failed for '{candidate}'."))
         };
-    public static Validation<Error, TValueObject> Validate<TValueObject, TKey>(TKey candidate)
-        where TValueObject : IValueObjectFactory<TValueObject, TKey, ValidationError> =>
-        Parse<TValueObject, TKey>(candidate).ToValidation();
+    // --- [PARSE_SMART_ENUM] --------------------------------------------------
+    public static Fin<TEnum> ParseSmartEnum<TEnum, TKey>(TKey candidate)
+        where TEnum : class, ISmartEnum<TEnum, TKey> =>
+        TEnum.TryGet(candidate, out TEnum? enumValue) switch {
+            true when enumValue is not null => FinSucc(enumValue),
+            _ => FinFail<TEnum>(Error.New($"Unknown {typeof(TEnum).Name} '{candidate}'."))
+        };
 }
 ```
 
 [CRITICAL]:
-- `Create` is for trusted internal construction; `TryCreate` is the boundary gate.
-- Never expose primitives in public domain signatures once a value object exists.
+- `ParseValueObject` for `[ValueObject<T>]` types; `ParseSmartEnum` for `[SmartEnum<T>]` types.
+- Never create separate `Validate` wrappers -- compose `.ToValidation()` at call site.
 
 ---
-## [3][SMART_ENUM_CANONICAL]
+## [4][SMART_ENUM_CANONICAL]
 >**Dictum:** *Closed behavioral sets belong in SmartEnums, not primitive enums plus detached switch maps.*
 
 <br>
@@ -122,14 +141,19 @@ using LanguageExt.Common;
 using Thinktecture;
 using static LanguageExt.Prelude;
 
+// --- [ENUM] ------------------------------------------------------------------
+
 [SmartEnum<string>]
-public partial class OrderState {
+public sealed partial class OrderState {
     public static readonly OrderState Draft = new("DRAFT");
     public static readonly OrderState Confirmed = new("CONFIRMED");
     public static readonly OrderState Cancelled = new("CANCELLED");
     static partial void ValidateConstructorArguments(ref string key) =>
         key = key.Trim().ToUpperInvariant();
 }
+
+// --- [EXTENSIONS] ------------------------------------------------------------
+
 public static class OrderStateRole {
     extension(OrderState state) {
         public bool IsTerminal =>
@@ -138,6 +162,7 @@ public static class OrderStateRole {
                 confirmed: false,
                 cancelled: true);
         public Fin<OrderState> EnsureProgressable() =>
+            // state threaded as parameter to enable static lambda (zero closure allocation)
             state.Switch(state,
                 draft: static current => FinSucc(current),
                 confirmed: static current => FinSucc(current),
@@ -146,33 +171,12 @@ public static class OrderStateRole {
 }
 ```
 
-```csharp
-namespace Domain.Objects;
-
-using LanguageExt;
-using LanguageExt.Common;
-using Thinktecture;
-using static LanguageExt.Prelude;
-
-public static class SmartEnumBridge {
-    public static Fin<TEnum> Parse<TEnum, TKey>(TKey candidate)
-        where TEnum : class, ISmartEnum<TEnum, TKey> =>
-        TEnum.TryGet(candidate, out TEnum? value) switch {
-            true when value is not null => FinSucc(value),
-            _ => FinFail<TEnum>(Error.New($"Unknown {typeof(TEnum).Name} '{candidate}'."))
-        };
-    public static Validation<Error, TEnum> Validate<TEnum, TKey>(TKey candidate)
-        where TEnum : class, ISmartEnum<TEnum, TKey> =>
-        Parse<TEnum, TKey>(candidate).ToValidation();
-}
-```
-
 [CRITICAL]:
 - Never model SmartEnum behavior in external switch tables.
-- Boundary parse uses `TryGet`; reserve throwing `Get` for trusted paths.
+- Boundary parse uses `TryGet` via DomainBridge; reserve throwing `Get` for trusted paths.
 
 ---
-## [4][UNION_CANONICAL]
+## [5][UNION_CANONICAL]
 >**Dictum:** *Variant payloads require unions, not nullable field choreography.*
 
 <br>
@@ -188,12 +192,18 @@ using LanguageExt.Common;
 using Thinktecture;
 using static LanguageExt.Prelude;
 
+// --- [UNION] -----------------------------------------------------------------
+
+// [Union] source-generates private constructor -- external derivation is prevented by codegen.
 [Union]
 public abstract partial record PaymentResult {
     public sealed record Authorized(string AuthorizationCode) : PaymentResult;
     public sealed record Declined(string Reason) : PaymentResult;
     public sealed record ProviderFailure(string Code, string Message) : PaymentResult;
 }
+
+// --- [EXTENSIONS] ------------------------------------------------------------
+
 public static class PaymentResultRole {
     extension(PaymentResult result) {
         public string Category =>
@@ -205,7 +215,8 @@ public static class PaymentResultRole {
             result.Switch(
                 authorized: static authorized => FinSucc(authorized.AuthorizationCode),
                 declined: static declined => FinFail<string>(Error.New($"Declined: {declined.Reason}")),
-                providerFailure: static failure => FinFail<string>(Error.New($"ProviderFailure {failure.Code}: {failure.Message}")));
+                providerFailure: static failure => FinFail<string>(
+                    Error.New($"ProviderFailure {failure.Code}: {failure.Message}")));
     }
 }
 ```
@@ -214,10 +225,10 @@ public static class PaymentResultRole {
 - In v10, nested union case type names were simplified; bind to generated case names, not hand-authored aliases.
 
 ---
-## [5][AGGREGATE_OBJECT_SHAPE]
->**Dictum:** *Aggregates own transitions; callers consume typed constructors and transition codomains.*
+## [6][AGGREGATE_OBJECT_SHAPE]
+>**Dictum:** *Aggregates own transitions; callers consume typed constructors and `with`-expression codomains.*
 
-Aggregate state is immutable; transitions are typed and explicit.
+Aggregate state is immutable; transitions use `with`-expression mutation and return typed codomains (`Fin<T>` / `Validation<Error,T>`).
 No external mutation channels; no primitive re-validation in downstream code.
 
 ```csharp
@@ -227,85 +238,59 @@ using LanguageExt;
 using LanguageExt.Common;
 using static LanguageExt.Prelude;
 
-public sealed class PurchaseOrder(
-    OrderId id,
-    EmailAddress customerEmail,
-    MoneyAmount total,
-    OrderState state
+public sealed record PurchaseOrder(
+    OrderId Id,
+    EmailAddress CustomerEmail,
+    MoneyAmount Total,
+    OrderState State
 ) {
-    public OrderId Id { get; } = id;
-    public EmailAddress CustomerEmail { get; } = customerEmail;
-    public MoneyAmount Total { get; } = total;
-    public OrderState State { get; } = state;
     public static Validation<Error, PurchaseOrder> Create(
         Guid idCandidate,
         string emailCandidate,
         decimal totalCandidate
     ) =>
-        (ValueObjectBridge.Validate<OrderId, Guid>(idCandidate),
-         ValueObjectBridge.Validate<EmailAddress, string>(emailCandidate),
-         ValueObjectBridge.Validate<MoneyAmount, decimal>(totalCandidate))
-        .Apply(static (id, email, total) => new PurchaseOrder(id, email, total, OrderState.Draft));
+        (DomainBridge.ParseValueObject<OrderId, Guid>(idCandidate).ToValidation(),
+         DomainBridge.ParseValueObject<EmailAddress, string>(emailCandidate).ToValidation(),
+         DomainBridge.ParseValueObject<MoneyAmount, decimal>(totalCandidate).ToValidation())
+        .Apply(static (id, email, total) =>
+            new PurchaseOrder(id, email, total, State: OrderState.Draft));
     public Fin<PurchaseOrder> Confirm() =>
-        State.EnsureProgressable().Map(_ => new PurchaseOrder(Id, CustomerEmail, Total, OrderState.Confirmed));
+        State.EnsureProgressable().Map(_ => this with { State = OrderState.Confirmed });
     public Fin<PurchaseOrder> Cancel() =>
-        State.EnsureProgressable().Map(_ => new PurchaseOrder(Id, CustomerEmail, Total, OrderState.Cancelled));
+        State.EnsureProgressable().Map(_ => this with { State = OrderState.Cancelled });
 }
 ```
 
+[CRITICAL]:
+- Transitions produce new state via `with`-expressions -- never reconstruct manually.
+- Applicative tuple gathers all validation errors; `Apply` runs only when all succeed.
+
 ---
-## [6][STACK_ONLY_OBJECT_BOUNDARY]
+## [7][STACK_ONLY_OBJECT_BOUNDARY]
 >**Dictum:** *`ref struct` belongs to parsing/workspace layers, then exits into durable canonical objects.*
 
 `readonly ref struct` is infrastructure-local for span workflows.
 Project to canonical value objects before crossing boundaries.
+Full span-based parsing patterns live in `performance.md`.
 
 ```csharp
 namespace Domain.Objects;
 
-using System.Text;
 using LanguageExt;
-using Thinktecture;
+using static LanguageExt.Prelude;
 
 public readonly ref struct Utf8Window(ReadOnlySpan<byte> source) {
     public ReadOnlySpan<byte> Source { get; } = source;
     public int Length => Source.Length;
     public Fin<Utf8Window> Slice(int start, int length) =>
-        (start >= 0, length >= 0, (start + length) <= Length) switch {
-            (true, true, true) => new Utf8Window(Source.Slice(start, length)),
-            _ => FinFail<Utf8Window>(LanguageExt.Common.Error.New("Invalid Utf8Window slice."))
-        };
-}
-public static class Utf8Bridge {
-    public static Fin<TValueObject> ParseUtf8<TValueObject>(ReadOnlySpan<byte> utf8)
-        where TValueObject : IValueObjectFactory<TValueObject, string, ValidationError> =>
-        Encoding.UTF8.GetString(utf8) switch {
-            string text => ValueObjectBridge.Parse<TValueObject, string>(text)
+        (start >= 0 && length >= 0 && (start + length) <= Length) switch {
+            true => new Utf8Window(Source.Slice(start, length)),
+            false => FinFail<Utf8Window>(LanguageExt.Common.Error.New("Invalid Utf8Window slice."))
         };
 }
 ```
 
----
-## [7][BOUNDARY_ADAPTER_CANONICAL]
->**Dictum:** *Boundary payloads map once into canonical objects through applicative validation.*
-
-```csharp
-namespace Domain.Objects;
-
-using LanguageExt;
-using LanguageExt.Common;
-
-public readonly record struct CreateOrderRequest(Guid Id, string Email, decimal Total, string State);
-public readonly record struct CreateOrderCommand(OrderId Id, EmailAddress Email, MoneyAmount Total, OrderState State);
-public static class CreateOrderMapper {
-    public static Validation<Error, CreateOrderCommand> ToDomain(CreateOrderRequest dto) =>
-        (ValueObjectBridge.Validate<OrderId, Guid>(dto.Id),
-         ValueObjectBridge.Validate<EmailAddress, string>(dto.Email),
-         ValueObjectBridge.Validate<MoneyAmount, decimal>(dto.Total),
-         SmartEnumBridge.Validate<OrderState, string>(dto.State))
-        .Apply(static (id, email, total, state) => new CreateOrderCommand(id, email, total, state));
-}
-```
+[REF]: Utf8-to-domain parsing bridges and span workflow patterns are canonicalized in `performance.md`.
 
 ---
 ## [8][RULES]
@@ -318,16 +303,18 @@ public static class CreateOrderMapper {
 - Generated exhaustive `Switch`/`Map` is preferred over ad-hoc branching.
 - Context overloads + `static` lambdas are default on hot paths.
 - `ref struct` remains infrastructure-local.
+- `with`-expressions are the sole mechanism for record state transitions.
+
+[REF]: Boundary adapter mapping (DTO to domain command) via applicative validation is canonicalized in `validation.md`. Import pattern from there; do not redefine in object modules.
 
 ---
 ## [9][QUICK_REFERENCE]
 
-| [INDEX] | [SYMPTOM]                                     | [PRIMARY_FIX]                                      | [SECTION] |
-| :-----: | --------------------------------------------- | -------------------------------------------------- | --------- |
-|   [1]   | Primitive obsession in signatures             | Value object canonicalization + generic bridge     | [2]       |
-|   [2]   | Enum/switch sprawl                            | SmartEnum + exhaustive generated behavior          | [3]       |
-|   [3]   | Variant ambiguity via nullable fields         | Union + exhaustive `Switch`/`Map`                  | [4]       |
-|   [4]   | Mutable aggregate drift                       | Immutable aggregate transitions returning `Fin<T>` | [5]       |
-|   [5]   | Stack-only type leaking into domain contracts | `ref struct` isolation + conversion bridge         | [6]       |
-|   [6]   | Boundary payload directly used in domain      | Applicative adapter mapping to command             | [7]       |
-|   [7]   | Dual object representations per concept       | Collapse to one canonical shape                    | [1], [8]  |
+| [INDEX] | [SYMPTOM]                                     | [PRIMARY_FIX]                                 | [SECTION] |
+| :-----: | :-------------------------------------------- | --------------------------------------------- | :-------- |
+|   [1]   | Primitive obsession in signatures             | Value object canonicalization + DomainBridge  | [2], [3]  |
+|   [2]   | Enum/switch sprawl                            | SmartEnum + exhaustive generated behavior     | [4]       |
+|   [3]   | Variant ambiguity via nullable fields         | Union + exhaustive `Switch`/`Map`             | [5]       |
+|   [4]   | Mutable aggregate drift                       | Sealed record + `with`-expression transitions | [6]       |
+|   [5]   | Stack-only type leaking into domain contracts | `ref struct` isolation + conversion bridge    | [7]       |
+|   [6]   | Dual object representations per concept       | Collapse to one canonical shape               | [1], [8]  |

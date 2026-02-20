@@ -1,30 +1,40 @@
 # [H1][DECORATORS]
->**Dictum:** *Decorators are typed algebra — ParamSpec preserves signatures, frozen config drives factories, descriptor protocol binds context, ordering validates at import time.*
+>**Dictum:** *Decorators are typed algebra -- ParamSpec preserves signatures, frozen config drives factories, descriptor protocol binds context, ordering validates at import time.*
 
-Python-native decorator architecture for 3.14+. Cross-references: effects.md [3], observability.md [1], protocols.md [1].
+<br>
+
+Python-native decorator architecture for 3.14+. Cross-references: `effects.md` [3], `observability.md` [1], `protocols.md` [1].
 
 ---
 ## [1][PARAMSPEC_ALGEBRA]
 >**Dictum:** *`@wraps` preserves runtime identity; `ParamSpec` preserves static identity. Frozen config drives factory decorators.*
 
+<br>
+
 Graduated progression: identity decorator, `Concatenate` prepend, traced factory with frozen config, `@safe` for fallible parse.
 
 ```python
+# --- [IMPORTS] ----------------------------------------------------------------
+
 from collections.abc import Callable
 from functools import wraps
 from typing import Concatenate, cast
 from opentelemetry import trace
 from opentelemetry.trace import StatusCode
 from pydantic import BaseModel, ConfigDict
-from returns.result import Result, Success, safe
+from returns.result import safe
+
+# --- [CLASSES] ----------------------------------------------------------------
 
 class TraceConfig(BaseModel, frozen=True):
     model_config = ConfigDict(strict=True)
     record_args: bool = False
     span_name: str | None = None
 
+# --- [FUNCTIONS] --------------------------------------------------------------
+
 def transparent[**P, R](func: Callable[P, R]) -> Callable[P, R]:
-    """Identity decorator — ParamSpec + wraps preserves everything."""
+    """Identity decorator -- ParamSpec + wraps preserves everything."""
     @wraps(func)
     def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
         return func(*args, **kwargs)
@@ -54,8 +64,7 @@ def trace_span[**P, R](
                 match config:
                     case TraceConfig(record_args=True):
                         span.set_attribute("args", repr(args)[:256])
-                    case _:
-                        pass
+                    case _: pass
                 result = cast(Callable[..., object], func)(*args, **kwargs)
                 span.set_status(StatusCode.OK)
                 return result
@@ -64,33 +73,44 @@ def trace_span[**P, R](
 
 @safe
 def parse_config(raw: str) -> TraceConfig:
-    """Fallible parse returning Result[TraceConfig, Exception]."""
     return TraceConfig.model_validate_json(raw)
 ```
 
 [CRITICAL]:
-- [ALWAYS] Pair `ParamSpec` with `@wraps` — runtime metadata and static signature both required.
-- [ALWAYS] Declare decorator config as `BaseModel(frozen=True)` — mutable closures race under free-threading.
-- [ALWAYS] Use `@safe` from returns to wrap fallible sync operations — never bare `try/except`.
-- [NEVER] Return `Callable[..., Any]` — erases the entire downstream type graph.
+- [ALWAYS] Pair `ParamSpec` with `@wraps` -- runtime metadata and static signature both required.
+- [ALWAYS] Declare decorator config as `BaseModel(frozen=True)` -- mutable closures race under free-threading.
+- [ALWAYS] Use `@safe` from returns to wrap fallible sync operations -- never bare `try/except`.
+- [NEVER] Return `Callable[..., Any]` -- erases the entire downstream type graph.
 
 ---
-## [2][CLASS_INSTRUMENTATION]
->**Dictum:** *`Validated` descriptor + `Traceable.__init_subclass__` instruments public methods without metaclass machinery.*
+## [2][CLASS_LEVEL_PATTERNS]
+>**Dictum:** *Descriptors bind context, `__init_subclass__` instruments hierarchies, ordering validates at import time -- all class-scoped.*
+
+<br>
+
+Three unified patterns: `Validated` descriptor for method-level injection via `__get__` binding, `Traceable.__init_subclass__` for hierarchy-wide auto-instrumentation, and canonical ordering validation as a class decorator via pure recursive `__wrapped__` chain walking. Canonical order (outermost to innermost): **trace > retry > cache > validate > authorize**.
 
 ```python
+# --- [IMPORTS] ----------------------------------------------------------------
+
 from collections.abc import Callable
 from functools import wraps
-from typing import ClassVar, overload
+from typing import ClassVar, Protocol, overload
+from returns.result import Failure, Result, Success
+
+# --- [CONSTANTS] --------------------------------------------------------------
+
+CANONICAL_ORDER: tuple[str, ...] = ("trace", "retry", "cache", "validate", "authorize")
+
+# --- [CLASSES] ----------------------------------------------------------------
+
+class _Tagged(Protocol):
+    __decorator_tag__: str
 
 class Validated[**P, R]:
     """Method descriptor injecting validation via __get__ binding.
-
-    NOTE: ParamSpec limitation -- when accessed on an instance, the returned
-    bound function has `self` already applied, so its actual signature is
-    `P minus first arg`. Python's type system cannot express "ParamSpec minus
-    first parameter", so the instance overload uses `Callable[..., R]` to
-    acknowledge this gap. The class-level access preserves the full `P`.
+    NOTE: Instance overload uses Callable[..., R] because Python's type system
+    cannot express "ParamSpec minus first parameter" after self-binding.
     """
     __slots__ = ("_func", "_owner", "_name")
 
@@ -98,7 +118,6 @@ class Validated[**P, R]:
         self._func: Callable[P, R] = func
         self._owner: type | None = None
         self._name: str = "validated"
-
     def __set_name__(self, owner: type, name: str) -> None:
         self._owner = owner
         self._name = name
@@ -107,7 +126,6 @@ class Validated[**P, R]:
     def __get__(self, obj: None, objtype: type) -> Callable[P, R]: ...
     @overload
     def __get__(self, obj: object, objtype: type) -> Callable[..., R]: ...
-
     def __get__(self, obj: object | None, objtype: type | None = None) -> Callable[..., R]:
         match obj:
             case None: return self._func
@@ -116,19 +134,16 @@ class Validated[**P, R]:
                 def bound(*args: P.args, **kwargs: P.kwargs) -> R:
                     return self._func(instance, *args, **kwargs)
                 return bound
-
     def __call__(self, *args: P.args, **kwargs: P.kwargs) -> R:
         return self._func(*args, **kwargs)
 
 class Traceable:
     """All subclasses auto-instrument public methods with trace spans."""
     _trace_name: ClassVar[str] = ""
-
     def __init_subclass__(cls, /, trace_name: str = "", **kwargs: object) -> None:
         super().__init_subclass__(**kwargs)
         cls._trace_name = trace_name or cls.__qualname__
-        # Side-effect boundary: __init_subclass__ is inherently imperative --
-        # class mutation via setattr is required by the descriptor protocol.
+        # Side-effect boundary: class mutation via setattr required by descriptor protocol
         public: tuple[tuple[str, Callable[..., object]], ...] = tuple(
             (name, method) for name, method in vars(cls).items()
             if callable(method) and not name.startswith("_")
@@ -139,28 +154,8 @@ class Traceable:
 class UserCommandHandler(Traceable, trace_name="user"):
     def create(self, payload: bytes) -> None: ...
     def update(self, payload: bytes) -> None: ...
-```
 
-[IMPORTANT]:
-- [ALWAYS] `__set_name__` + `__get__` for class-aware descriptors — not metaclasses.
-- [ALWAYS] `__init_subclass__` for hierarchy-wide instrumentation — filter `not name.startswith("_")`.
-- [NEVER] Store mutable state on descriptor instances — shared across all instances of the owning class.
-
----
-## [3][ORDERING_ALGEBRA]
->**Dictum:** *Decorator ordering is validated at import time via pure recursion — invalid stacks fail before IO.*
-
-Canonical order (outermost to innermost): **trace > retry > cache > validate > authorize**.
-
-```python
-from collections.abc import Callable
-from typing import Protocol
-from returns.result import Failure, Result, Success
-
-CANONICAL_ORDER = ("trace", "retry", "cache", "validate", "authorize")
-
-class _Tagged(Protocol):
-    __decorator_tag__: str
+# --- [FUNCTIONS] --------------------------------------------------------------
 
 def _extract_names(func: Callable[..., object]) -> tuple[str, ...]:
     """Recursively walk __wrapped__ chain collecting decorator tags."""
@@ -174,7 +169,7 @@ def _extract_names(func: Callable[..., object]) -> tuple[str, ...]:
 
 def _is_ordered(names: tuple[str, ...]) -> bool:
     known: tuple[int, ...] = tuple(
-        map(CANONICAL_ORDER.index, filter(lambda n: n in CANONICAL_ORDER, names))
+        map(CANONICAL_ORDER.index, filter(lambda name: name in CANONICAL_ORDER, names))
     )
     return known == tuple(sorted(known))
 
@@ -196,23 +191,28 @@ def validate_ordering[T](cls: type[T]) -> Result[type[T], str]:
             return Failure(f"Ordering violations in {cls.__name__}: " + ", ".join((first, *rest)))
 
 def _tag_decorator[**P, R](tag: str, func: Callable[P, R]) -> Callable[P, R]:
-    """Attach ordering tag to decorated function via object.__setattr__."""
-    object.__setattr__(func, "__decorator_tag__", tag)
+    setattr(func, "__decorator_tag__", tag)
     return func
 ```
 
-[CRITICAL]:
-- [ALWAYS] Validate ordering at import time — misordering must fail before any request is served.
-- [ALWAYS] Use structural pattern matching for `__wrapped__` chain walking — no `getattr`.
-- [NEVER] Place `@authorize` outside `@trace` — authorization decisions must be observable.
+[IMPORTANT]:
+- [ALWAYS] `__set_name__` + `__get__` for class-aware descriptors -- not metaclasses.
+- [ALWAYS] `__init_subclass__` for hierarchy-wide instrumentation -- filter `not name.startswith("_")`.
+- [ALWAYS] Validate ordering at import time -- misordering must fail before any request is served.
+- [NEVER] Store mutable state on descriptor instances -- shared across all class instances.
+- [NEVER] Place `@authorize` outside `@trace` -- authorization decisions must be observable.
 
 ---
-## [4][ASYNC_DECORATORS]
+## [3][ASYNC_DECORATORS]
 >**Dictum:** *Async decorators thread environment via `Concatenate[Env, P]`, integrate stamina retry + returns safe capture.*
 
-Stack order: `@future_safe` OUTER, `@stamina.retry` INNER. `on` accepts exception type, tuple, or predicate.
+<br>
+
+Type alias compresses repeated async decorator signatures. Stack order: `@future_safe` OUTER, `@stamina.retry` INNER.
 
 ```python
+# --- [IMPORTS] ----------------------------------------------------------------
+
 from collections.abc import Callable
 from functools import wraps
 from typing import Concatenate, cast
@@ -221,38 +221,35 @@ from opentelemetry import trace
 from pydantic import BaseModel, ConfigDict
 from returns.future import FutureResult
 
+# --- [TYPES] ------------------------------------------------------------------
+
+type AsyncEnvFn[Env, **P] = Callable[Concatenate[Env, P], FutureResult[object, Exception]]
+
+# --- [CLASSES] ----------------------------------------------------------------
+
 class RetryConfig(BaseModel, frozen=True):
     model_config = ConfigDict(strict=True)
     max_attempts: int = 3
     timeout_seconds: float = 30.0
 
+# --- [FUNCTIONS] --------------------------------------------------------------
+
 def trace_async[Env, **P](
     span_name: str,
-) -> Callable[
-    [Callable[Concatenate[Env, P], FutureResult[object, Exception]]],
-    Callable[Concatenate[Env, P], FutureResult[object, Exception]],
-]:
-    """Async trace decorator threading Env through Concatenate. Tracer acquired at call time."""
-    def decorator(
-        func: Callable[Concatenate[Env, P], FutureResult[object, Exception]],
-    ) -> Callable[Concatenate[Env, P], FutureResult[object, Exception]]:
+) -> Callable[[AsyncEnvFn[Env, P]], AsyncEnvFn[Env, P]]:
+    """Async trace threading Env through Concatenate. Tracer acquired at call time."""
+    def decorator(func: AsyncEnvFn[Env, P]) -> AsyncEnvFn[Env, P]:
         @wraps(func)
         def wrapper(env: Env, *args: object, **kwargs: object) -> object:
             tracer: trace.Tracer = trace.get_tracer("pinnacle")
             with tracer.start_as_current_span(span_name) as span:
                 match env:
-                    case object(correlation_id=str() as cid):
-                        span.set_attribute("correlation_id", cid)
+                    case object(correlation_id=str() as correlation_id):
+                        span.set_attribute("correlation_id", correlation_id)
                     case _: pass
                 return cast(Callable[..., object], func)(env, *args, **kwargs)
-        return cast(Callable[Concatenate[Env, P], FutureResult[object, Exception]], wrapper)
-    return cast(
-        Callable[
-            [Callable[Concatenate[Env, P], FutureResult[object, Exception]]],
-            Callable[Concatenate[Env, P], FutureResult[object, Exception]],
-        ],
-        decorator,
-    )
+        return cast(AsyncEnvFn[Env, P], wrapper)
+    return cast(Callable[[AsyncEnvFn[Env, P]], AsyncEnvFn[Env, P]], decorator)
 
 def retry_async[**P, A](
     config: RetryConfig,
@@ -267,44 +264,48 @@ def retry_async[**P, A](
         return cast(Callable[P, A], wrapper)
     return cast(Callable[[Callable[P, A]], Callable[P, A]], decorator)
 
-# Correct async decorator composition:
-# @returns.future.future_safe         # OUTER — captures final outcome as Result
-# @stamina.retry(on=ConnectionError)  # INNER — retries on exception
-# @trace_async("user.create")         # innermost — observes each attempt
+# Correct composition: @future_safe (OUTER) > @stamina.retry (INNER) > @trace_async (innermost)
 # def create_user(env: AppEnv, payload: bytes) -> User: ...
 ```
 
 [IMPORTANT]:
 - [ALWAYS] Stack order: `@future_safe` OUTER, `@stamina.retry` INNER.
 - [ALWAYS] Use `Concatenate[Env, P]` when threading an environment parameter.
-- [NEVER] Unwrap async results inside the decorator — preserve `FutureResult` return type.
+- [NEVER] Unwrap async results inside the decorator -- preserve `FutureResult` return type.
 
 ---
-## [5][RULES]
+## [4][RULES]
 >**Dictum:** *Rules compress into constraints.*
 
-- [ALWAYS] `ParamSpec` + `@wraps` on every decorator — both static and runtime identity preserved.
-- [ALWAYS] Frozen `BaseModel` for decorator config — mutable closures race under free-threading.
-- [ALWAYS] `@safe` / `@future_safe` for fallible operations — never bare `try/except`.
-- [ALWAYS] `__set_name__` + `__get__` for class-aware descriptors — not metaclasses.
-- [ALWAYS] `__init_subclass__` for hierarchy-wide instrumentation — filter `not name.startswith("_")`.
+<br>
+
+- [ALWAYS] `ParamSpec` + `@wraps` on every decorator -- both static and runtime identity preserved.
+- [ALWAYS] Frozen `BaseModel` for decorator config -- mutable closures race under free-threading.
+- [ALWAYS] `@safe` / `@future_safe` for fallible operations -- never bare `try/except`.
+- [ALWAYS] `__set_name__` + `__get__` for class-aware descriptors -- not metaclasses.
+- [ALWAYS] `__init_subclass__` for hierarchy-wide instrumentation -- filter `not name.startswith("_")`.
 - [ALWAYS] Validate ordering at import time via structural matching on `__wrapped__` chain.
 - [ALWAYS] `Concatenate[Env, P]` for async decorators threading environment.
 - [ALWAYS] Stack `@future_safe` OUTER, `@stamina.retry` INNER for retried fallible async ops.
-- [NEVER] Return `Callable[..., Any]` — erases the downstream type graph.
-- [NEVER] Capture mutable state in decorator closures — use `ContextVar` or frozen config.
-- [NEVER] Use `getattr` for attribute probing — use structural `match`/`case` with `object(attr=...)`.
+- [ALWAYS] PEP 695 `type` aliases for repeated complex callable signatures.
+- [ALLOW] `expression.curry(n)` for auto-curried partial application in domain/collection modules.
+- [NEVER] Return `Callable[..., Any]` -- erases the downstream type graph.
+- [NEVER] Capture mutable state in decorator closures -- use `ContextVar` or frozen config.
+- [NEVER] Use `getattr` for attribute probing -- use structural `match/case` with `object(attr=...)`.
 
 ---
-## [6][QUICK_REFERENCE]
+## [5][QUICK_REFERENCE]
 
-- `ParamSpec + @wraps`: preserve static signature and runtime metadata.
-- `Concatenate[Ctx, P]`: prepend injected context without erasing caller shape.
-- Frozen config factories: `BaseModel(frozen=True)` for deterministic closure state.
-- `@safe` / `@future_safe`: convert raised exceptions into typed containers.
-- Descriptor protocol: `__set_name__` + `__get__` for class-aware decorators.
-- `__init_subclass__`: hierarchy-wide instrumentation without metaclass coupling.
-- Ordering algebra: recursive `__wrapped__` walk validates stack order at import time.
-- `@stamina.retry`: retried fallible operations with explicit retry contract.
-- Async retry capture: `@future_safe` outer, retry inner.
-- Async env threading: `Concatenate[Env, P]` keeps `FutureResult` return type intact.
+| [INDEX] | [PATTERN]                | [WHEN]                               | [KEY_TRAIT]                               |
+| :-----: | ------------------------ | ------------------------------------ | ----------------------------------------- |
+|   [1]   | `ParamSpec` + `@wraps`   | Every decorator                      | Static signature + runtime metadata       |
+|   [2]   | `Concatenate[Ctx, P]`    | Prepend injected context             | Caller shape preserved                    |
+|   [3]   | Frozen config factory    | Decorator with configuration         | `BaseModel(frozen=True)` closure state    |
+|   [4]   | `@safe` / `@future_safe` | Fallible sync/async capture          | Exceptions -> typed containers            |
+|   [5]   | Descriptor protocol      | Class-aware method decorators        | `__set_name__` + `__get__` binding        |
+|   [6]   | `__init_subclass__`      | Hierarchy-wide instrumentation       | No metaclass coupling                     |
+|   [7]   | Ordering algebra         | Validate decorator stack order       | Recursive `__wrapped__` walk at import    |
+|   [8]   | `AsyncEnvFn` type alias  | Compress repeated async signatures   | PEP 695 `type` alias for readability      |
+|   [9]   | `@stamina.retry`         | Retried fallible operations          | Explicit attempt count + timeout contract |
+|  [10]   | Async env threading      | Environment through async decorators | `Concatenate[Env, P]` + `FutureResult`    |
+|  [11]   | `expression.curry(n)`    | Auto-curried partial application     | Domain/collection module convenience      |

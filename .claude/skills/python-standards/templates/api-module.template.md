@@ -1,98 +1,115 @@
 # [H1][API_MODULE]
->**Dictum:** *API modules own boundary translation: external data enters validated, internal results exit serialized, telemetry observes both channels.*
+>**Dictum:** *API modules own boundary translation: external data enters validated, internal results exit serialized with expression types, telemetry observes both channels.*
 
-Produces one API boundary module: Pydantic `TypeAdapter` validates inbound data, domain logic processes validated models, msgspec `Struct(frozen=True, gc=False)` serializes outbound responses, error mapping translates domain errors to HTTP errors, and fused telemetry via `@instrument` observes the full request lifecycle. API modules are thin adapters -- zero domain logic lives here.
+<br>
+
+Produces one API boundary module: Pydantic `TypeAdapter` validates inbound data, domain logic processes validated models, `expression.Option[T]` and `expression.Result[T, E]` appear in Pydantic response models with auto-serialization, msgspec `Struct(frozen=True, gc=False)` serializes outbound wire formats, a bridge function converts `returns.Result` pipeline output to `expression.Result` response fields, error mapping translates domain errors to HTTP errors, and fused telemetry via `@instrument` observes the full request lifecycle. API modules are thin adapters -- zero domain logic lives here.
 
 **Density:** ~225 LOC signals a refactoring opportunity. No file proliferation; colocate boundary concerns in the API module.
-**References:** `observability.md` ([1] SIGNAL_PIPELINE), `serialization.md` ([1] INBOUND_VALIDATION_PIPELINE, [2] MSGSPEC_STRUCTS, [3] CORE_SCHEMA), `effects.md` ([1] EFFECT_STACK).
-**Anti-Pattern Awareness:** See `patterns.md` [1] for BARE_TRY_EXCEPT, MODEL_WITH_BEHAVIOR, STRING_ERROR_DISPATCH, HASATTR_GETATTR.
+**References:** `observability.md` ([1] SIGNAL_PIPELINE, [4] METRICS_PROJECTION), `serialization.md` ([1] INBOUND_VALIDATION_PIPELINE, [2] MSGSPEC_STRUCTS), `effects.md` ([1] EFFECT_STACK), `types.md` ([2] DISCRIMINATED_UNIONS, [3] FROZEN_MODELS).
+**Anti-Pattern Awareness:** See `patterns.md` [1] for BARE_TRY_EXCEPT, MODEL_WITH_BEHAVIOR, STRING_ERROR_DISPATCH, MIXED_RESULT_LIBRARIES.
 **Workflow:** Fill placeholders, remove guidance blocks, verify with ty and ruff.
 
 ---
 **Placeholders**
 
-- `{{module_path}}`: `pinnacle/adapters/user_api.py`
-- `{{resource_name}}`: `user`
-- `{{request_model}}`: `UserRequest`
-- `{{response_model}}`: `UserResponse`
-- `{{domain_model}}`: `User`
-- `{{error_mapping}}`: `NotFoundError -> 404, ValidationError -> 422`
-- `{{request_adapter}}`: `UserRequestAdapter`
-- `{{response_encoder}}`: `_encoder`
-- `{{trace_operation}}`: `"user.create"`
-- `{{service_protocol}}`: `Repository[User]`
-- `{{deps_class}}`: `ApiDeps`
-- `{{http_error_type}}`: `HttpError`
-- `{{request_fields}}`: `email: Email`
-- `{{response_fields}}`: `user_id: int`
-- `{{service_stage}}`: `bind(service.create_user)`
-- `{{response_expr}}`: `{{response_model}}(user_id=domain.user_id)`
+| [INDEX] | [PLACEHOLDER]          | [EXAMPLE]                                           |
+| :-----: | ---------------------- | --------------------------------------------------- |
+|   [1]   | `{{module_path}}`      | `pinnacle/adapters/order_api.py`                    |
+|   [2]   | `{{resource_name}}`    | `order`                                             |
+|   [3]   | `{{request_model}}`    | `OrderRequest`                                      |
+|   [4]   | `{{response_model}}`   | `OrderResponse`                                     |
+|   [5]   | `{{domain_model}}`     | `Order`                                             |
+|   [6]   | `{{error_mapping}}`    | `NotFoundError -> 404, ValidationError -> 422`      |
+|   [7]   | `{{request_adapter}}`  | `OrderRequestAdapter`                               |
+|   [8]   | `{{response_encoder}}` | `_encoder`                                          |
+|   [9]   | `{{trace_operation}}`  | `"order.create"`                                    |
+|  [10]   | `{{service_stage}}`    | `bind(service.create_order)`                        |
+|  [11]   | `{{http_error_type}}`  | `HttpError`                                         |
+|  [12]   | `{{request_fields}}`   | `customer_id: CustomerId`                           |
+|  [13]   | `{{response_fields}}`  | See response model section                          |
+|  [14]   | `{{response_expr}}`    | `{{response_model}}(order_id=domain.order_id, ...)` |
 
 ---
 ```python
 """{{module_path}} -- API module: boundary validation, serialization, telemetry."""
 
-# --- [IMPORTS] -------------------------------------------------------------
-from collections.abc import Callable
+# --- [IMPORTS] ----------------------------------------------------------------
+
+from __future__ import annotations
+
 from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal
 from enum import Enum
 from functools import wraps
-from pathlib import Path
+from typing import TYPE_CHECKING
 from uuid import UUID
 
+from expression import Error as ExprError, Nothing, Ok, Option, Result as ExprResult, Some
 import msgspec
-import structlog
 from opentelemetry import trace
 from opentelemetry.trace import StatusCode
 from pydantic import BaseModel, ConfigDict, TypeAdapter
 from returns.pipeline import flow
-from returns.pointfree import bind, lash, map_
-from returns.result import Failure, Result, Success, safe
+from returns.pointfree import lash, map_
+from returns.result import Failure, Result, safe, Success
+import structlog
 
-# Import domain types from their canonical modules:
-# from pinnacle.domain.errors import NotFoundError, ValidationError
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+# from pinnacle.domain.errors import NotFoundError, ValidationError, ServiceError
 # from pinnacle.domain.models import {{domain_model}}
-# from pinnacle.ops.service import {{service_protocol}}
+# from pinnacle.ops.service import service
 
-# --- [ERRORS] ---------------------------------------------------------------
+# --- [ERRORS] -----------------------------------------------------------------
 
-# HTTP-level errors are frozen dataclasses mapping domain errors to status codes.
-# Error mapping is exhaustive via match/case -- no unmapped error escapes.
+
+# HTTP errors: frozen dataclasses; exhaustive match/case mapping.
 @dataclass(frozen=True, slots=True)
 class {{http_error_type}}:
+    """Base HTTP error."""
+
     message: str = "Error"
     status_code: int = 500
 
+
 @dataclass(frozen=True, slots=True)
 class NotFoundHttpError({{http_error_type}}):
+    """Not found HTTP error."""
+
     message: str = "Not found"
     status_code: int = 404
 
+
 @dataclass(frozen=True, slots=True)
 class ValidationHttpError({{http_error_type}}):
+    """Validation HTTP error."""
+
     message: str = "Validation error"
     status_code: int = 422
 
+
 @dataclass(frozen=True, slots=True)
 class InternalHttpError({{http_error_type}}):
+    """Internal server error."""
+
     message: str = "Internal server error"
     status_code: int = 500
 
-# --- [REQUEST] --------------------------------------------------------------
+# --- [REQUEST] ----------------------------------------------------------------
 
-# Pydantic TypeAdapter validates inbound data at the API boundary.
-# TypeAdapter initialization is eager at module level -- never per-request.
-# @safe bridges ValidationError into Result[T, Exception].
-# See serialization.md [1] for TypeAdapter boundary patterns.
 
+# TypeAdapter eager at module level; @safe bridges into Result.
+# See serialization.md [1] INBOUND_VALIDATION_PIPELINE.
 class {{request_model}}(BaseModel, frozen=True):
     """Inbound request schema -- Pydantic validates at ingress."""
     model_config = ConfigDict(strict=True, extra="forbid")
     {{request_fields}}
 
 {{request_adapter}}: TypeAdapter[{{request_model}}] = TypeAdapter({{request_model}})
+
 
 @safe
 def validate_{{resource_name}}_request(
@@ -101,6 +118,7 @@ def validate_{{resource_name}}_request(
     """Pydantic validates JSON ingress into typed request model."""
     return {{request_adapter}}.validate_json(raw)
 
+
 @safe
 def validate_{{resource_name}}_dict(
     data: dict[str, object],
@@ -108,106 +126,111 @@ def validate_{{resource_name}}_dict(
     """Pydantic validates dict ingress into typed request model."""
     return {{request_adapter}}.validate_python(data)
 
-# --- [RESPONSE] -------------------------------------------------------------
+# --- [RESPONSE] ---------------------------------------------------------------
 
-# msgspec Struct(frozen=True, gc=False) serializes outbound responses.
-# Zero-GC, C-backed objects excluded from garbage collection cycles.
-# Domain models never import msgspec; wire formats are adapter concerns.
-# See serialization.md [2] for msgspec struct patterns.
 
-class {{response_model}}(msgspec.Struct, frozen=True, gc=False):
-    """Outbound response schema -- msgspec encodes at egress."""
-    {{response_fields}}
+# expression.Option[T] and expression.Result[T, E] as Pydantic fields --
+# auto-serialization via __get_pydantic_core_schema__. See types.md [3].
+class {{response_model}}(BaseModel, frozen=True):
+    """Outbound response with expression types -- Pydantic auto-serializes.
+    Option[T] serializes as value or null; Result[T, E] as tagged union."""
+    order_id: int
+    discount: Option[Decimal]
+    validation_outcome: ExprResult[str, str]
+
+# Optional: add {{response_model}}Wire(msgspec.Struct, frozen=True, gc=False)
+# for high-throughput egress. See serialization.md [2] MSGSPEC_STRUCTS.
+
 
 def _enc_hook(obj: object) -> str | float:
-    """Custom type serialization for boundary types."""
+    """Custom type serialization -- see serialization.md [2] for enc_hook patterns."""
     match obj:
-        case datetime() as value:
+        case datetime() | date() as value:
             return value.isoformat()
-        case date() as value:
-            return value.isoformat()
-        case UUID() as value:
-            return str(value)
-        case Decimal() as value:
-            return str(value)
-        case Path() as value:
+        case UUID() | Decimal() as value:
             return str(value)
         case Enum() as value:
             return value.value
         case _:
-            # Foreign boundary: msgspec hook contract requires TypeError for unknown types.
             raise TypeError(f"Cannot encode {type(obj)}")
 
 {{response_encoder}}: msgspec.json.Encoder = msgspec.json.Encoder(
     enc_hook=_enc_hook,
 )
 
-def to_{{resource_name}}_response(
-    domain: {{domain_model}},
-) -> {{response_model}}:
-    """Map domain model to wire response via match/case."""
-    # Transform domain model fields to response struct fields.
-    return {{response_expr}}
+# --- [BRIDGE] -----------------------------------------------------------------
 
-def encode_{{resource_name}}_response(
-    response: {{response_model}},
-) -> bytes:
-    """msgspec encodes response struct to JSON bytes."""
-    return {{response_encoder}}.encode(response)
 
-# --- [TELEMETRY] ------------------------------------------------------------
+# Bridge: returns.Result -> expression.Result at API boundary only.
+# See SKILL.md [8] LIBRARY_CONVENTIONS for integration rules.
+def bridge_result[T, E](
+    pipeline_result: Result[T, E],
+) -> ExprResult[T, E]:
+    """Canonical bridge -- the ONE place both libraries coexist."""
+    match pipeline_result:
+        case Success(value):
+            return Ok(value)
+        case Failure(error):
+            return ExprError(error)
 
-# Fused telemetry: single @instrument decorator owns span + log + metric.
-# Business code never calls tracing/logging APIs directly.
-# See observability.md [1] for signal fusion patterns.
 
-def instrument[**P, R](
-    func: Callable[P, Result[R, Exception]],
-) -> Callable[P, Result[R, Exception]]:
+def bridge_option[T](
+    pipeline_result: Result[T, object],
+) -> Option[T]:
+    """Convert returns.Result to expression.Option -- collapses error to Nothing."""
+    match pipeline_result:
+        case Success(value):
+            return Some(value)
+        case Failure(_):
+            return Nothing
+
+# --- [TELEMETRY] --------------------------------------------------------------
+
+
+# Fused telemetry: @instrument owns span + log + metric.
+# See observability.md [1] SIGNAL_PIPELINE + [4] METRICS_PROJECTION.
+def _record_outcome[R, E](
+    span: trace.Span, log: structlog.stdlib.BoundLogger,
+    name: str, result: Result[R, E],
+) -> None:
+    match result:
+        case Success(_):
+            span.set_status(StatusCode.OK)
+            log.info("op_success", operation=name)
+        case Failure(Exception() as error):
+            span.record_exception(error)
+            span.set_status(StatusCode.ERROR, str(error))
+            log.error("op_failure", operation=name, error_type=type(error).__name__)
+        case Failure(error):
+            span.set_status(StatusCode.ERROR, str(error))
+            log.error("op_failure", operation=name, error_type=type(error).__name__)
+
+
+def instrument[**P, R, E](
+    func: Callable[P, Result[R, E]],
+) -> Callable[P, Result[R, E]]:
     """Fused observability: span + structured log + outcome projection."""
-    # Derives operation from wrapped function; override with a literal if needed
-    # (e.g., operation: str = "{{resource_name}}.handler").
     operation: str = f"{func.__module__}.{func.__qualname__}"
+
     @wraps(func)
-    def wrapper(*args: P.args, **kwargs: P.kwargs) -> Result[R, Exception]:
+    def wrapper(*args: P.args, **kwargs: P.kwargs) -> Result[R, E]:
         tracer: trace.Tracer = trace.get_tracer("pinnacle.api")
         log: structlog.stdlib.BoundLogger = structlog.get_logger()
         with tracer.start_as_current_span(operation) as span:
             log.info("op_start", operation=operation)
-            result: Result[R, Exception] = func(*args, **kwargs)
-            match result:
-                case Success(_):
-                    span.set_status(StatusCode.OK)
-                    log.info("op_success", operation=operation)
-                case Failure(error):
-                    span.record_exception(error)
-                    span.set_status(StatusCode.ERROR, str(error))
-                    log.error(
-                        "op_failure",
-                        operation=operation,
-                        error_type=type(error).__name__,
-                    )
+            result: Result[R, E] = func(*args, **kwargs)
+            _record_outcome(span, log, operation, result)
             return result
     return wrapper
 
-# --- [FUNCTIONS] ------------------------------------------------------------
+# --- [FUNCTIONS] --------------------------------------------------------------
 
-# The handler composes the full boundary lifecycle:
-# 1. Validate inbound (Pydantic TypeAdapter)
-# 2. Execute domain logic (service Protocol)
-# 3. Map errors (match/case exhaustive)
-# 4. Serialize outbound (msgspec Encoder)
-# 5. Observe both channels (fused telemetry)
-#
-# API modules are thin adapters -- ALL business logic lives in domain services.
+
+# Handler lifecycle: validate -> execute -> bridge -> serialize -> observe.
+# API modules are thin adapters -- ALL business logic in domain services.
 # See serialization.md [1] for dual-library boundary architecture.
-
 def map_error(error: object) -> {{http_error_type}}:
-    """Exhaustive error mapping from domain to HTTP via type dispatch.
-    Import domain errors: from pinnacle.domain.errors import ServiceError, NotFoundError, ValidationError
-    ServiceError subclasses are frozen dataclasses (not Exception subclasses);
-    the union type handles both domain errors and unexpected exceptions.
-    """
+    """Exhaustive error mapping from domain to HTTP via type dispatch."""
     match error:
         case NotFoundError() as err:
             return NotFoundHttpError(message=err.message)
@@ -218,6 +241,20 @@ def map_error(error: object) -> {{http_error_type}}:
         case _:
             return InternalHttpError(message="Internal server error")
 
+
+def to_{{resource_name}}_response(domain: {{domain_model}}) -> {{response_model}}:
+    """Map domain -> response; use bridge_result/bridge_option for expression fields."""
+    return {{response_expr}}
+
+
+def encode_{{resource_name}}_response(
+    response: {{response_model}},
+) -> bytes:
+    """Pydantic serializes response (including expression fields), then msgspec encodes."""
+    wire: dict[str, object] = response.model_dump()
+    return {{response_encoder}}.encode(wire)
+
+
 @instrument
 def handle_{{resource_name}}(raw: bytes) -> Result[bytes, {{http_error_type}}]:
     """Full boundary handler: validate -> process -> serialize -> remap errors."""
@@ -227,8 +264,9 @@ def handle_{{resource_name}}(raw: bytes) -> Result[bytes, {{http_error_type}}]:
         {{service_stage}},
         map_(to_{{resource_name}}_response),
         map_(encode_{{resource_name}}_response),
-        lash(lambda err: Failure(map_error(err))),  # error mapping inside the railway
+        lash(lambda err: Failure(map_error(err))),
     )
+
 
 def handle_{{resource_name}}_result(
     result: Result[bytes, {{http_error_type}}],
@@ -244,28 +282,24 @@ def handle_{{resource_name}}_result(
                     {"error": http_error.message},
                 ),
             )
-        case _:
-            return (500, {{response_encoder}}.encode({"error": "unexpected result"}))
 
-# --- [EXPORT] ---------------------------------------------------------------
+# --- [EXPORT] -----------------------------------------------------------------
 
 # All symbols above use explicit naming. No __all__, no default exports.
 # Consumers import directly: from {{module_path}} import handle_{{resource_name}}
 ```
 
 ---
-**Guidance**
+**Guidance: Expression Types and Boundary Architecture**
 
-- Boundary validation: keep `TypeAdapter` module-scoped; use `validate_json()` / `validate_python()` plus `@safe` for railway compatibility.
-- Serialization split: Pydantic validates ingress, msgspec encodes egress, domain models remain wire-agnostic.
-- Error mapping: exhaustive `match/case` from domain errors to HTTP errors; reserve `case _:` for internal fallback.
-- Fused telemetry: `@instrument` owns span/log outcome projection; business code remains telemetry-agnostic.
+`expression.Option[T]` serializes as value or `null`; `expression.Result[T, E]` as tagged `{"ok": value}` / `{"error": err}` -- both via built-in `__get_pydantic_core_schema__`, no custom serializers needed. The bridge functions (`bridge_result`, `bridge_option`) convert `returns.Result` pipeline outputs to expression types at the boundary -- the ONE place both libraries coexist (see `SKILL.md` [8]). Pydantic validates ingress; for egress, use `BaseModel(frozen=True)` with expression fields or msgspec `Struct(frozen=True, gc=False)` for throughput. Domain models import neither. Error mapping is exhaustive via `match/case`; `@instrument` owns fused span + log + outcome projection. See `serialization.md` [1] for full dual-library pattern.
 
 ---
 **Post-Scaffold Checklist** (from `validation.md`)
 
 - [ ] BOUNDARY_VALIDATION: `TypeAdapter` at module level; `@safe` bridges `ValidationError` into `Result`; no per-request adapter creation
-- [ ] SERIALIZATION_SPLIT: Pydantic validates inbound; msgspec encodes outbound; domain models import neither
+- [ ] SERIALIZATION_SPLIT: Pydantic validates inbound; expression types in response models auto-serialize; domain models import neither
+- [ ] BRIDGE_EXPLICIT: `bridge_result`/`bridge_option` converts `returns.Result` -> `expression.Result`/`Option` at boundary only; no mid-pipeline mixing
 - [ ] ERROR_MAPPING: Exhaustive `match`/`case` from domain errors to HTTP errors; `case _:` maps to 500
 - [ ] TELEMETRY_FUSED: Single `@instrument` decorator owns span + log + metric; no split observability pipelines
 - [ ] NO_DOMAIN_LOGIC: Handler delegates ALL business logic to domain services; API module is a thin adapter

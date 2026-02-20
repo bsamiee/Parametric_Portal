@@ -10,7 +10,8 @@
     "scripts": {
         "prepare": "lefthook install",
         "ts:check": "pnpm exec nx affected -t typecheck,check --base=origin/main --parallel=4",
-        "cs:check": "if fd -HI -e csproj . --exclude .cache --exclude .git --exclude .nx --exclude .venv --exclude _TMP --exclude node_modules --exclude dist --exclude build --exclude coverage --exclude test-results | grep -q .; then pnpm exec nx affected -t restore,build,test --base=origin/main --parallel=4; else echo '[cs:check] skipped (no .csproj files)'; fi",
+        "cs:check": "DOTNET_PROJECTS=$(pnpm exec nx show projects --withTarget=restore --json | jq -r 'join(\",\")'); if [ -n \"$DOTNET_PROJECTS\" ]; then pnpm exec nx run-many -t restore,build,test --projects=\"$DOTNET_PROJECTS\" --parallel=4; else echo '[cs:check] skipped (no .NET projects)'; fi",
+        "cs:check:affected": "DOTNET_PROJECTS=$(pnpm exec nx show projects --affected --base=origin/main --withTarget=restore --json | jq -r 'join(\",\")'); if [ -n \"$DOTNET_PROJECTS\" ]; then pnpm exec nx run-many -t restore,build,test --projects=\"$DOTNET_PROJECTS\" --parallel=4; else echo '[cs:check:affected] skipped (no affected .NET projects)'; fi",
         "py:check": "if fd -HI -e py . --exclude .claude --exclude .cache --exclude .git --exclude .nx --exclude .venv --exclude _TMP --exclude node_modules --exclude dist --exclude build --exclude coverage --exclude test-results | grep -q .; then uv run ruff check . --config pyproject.toml && uv run ty check --project . --respect-ignore-files --force-exclude --error-on-warning --no-progress; else echo '[py:check] skipped (no Python files in workspace scope)'; fi"
     },
     "devDependencies": {

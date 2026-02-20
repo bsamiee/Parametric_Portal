@@ -1,13 +1,62 @@
 # [H1][COMPOSITION]
 >**Dictum:** *Composition compresses surface; one abstraction owns the concept.*
 
-Composition in C# 14 / .NET 10 collapses method families into single polymorphic abstractions, threads data through transformation chains, and encodes concepts as types via higher-kinded encodings and algebraic interfaces. Prefer LanguageExt collections (`HashMap`, `Seq`, `HashSet`) over BCL `System.Collections.Immutable` -- they integrate with `K<F,A>` trait machinery (`Foldable`, `Traversable`, `Monad`).
+<br>
+
+Collapses method families into polymorphic abstractions via higher-kinded encodings. Prefer LanguageExt collections (`HashMap`, `Seq`, `HashSet`) -- they integrate with `K<F,A>` trait machinery.
 
 ---
-## [1][PIPE_COMPOSE]
+## [1][EFF_COMPOSITION]
+>**Dictum:** *Monadic pipelines compose via LINQ, applicative via tuple, errors via @catch.*
+
+<br>
+
+`Eff<RT,A>` composition: (a) sequential via LINQ `from`/`select`, (b) independent via applicative tuple, (c) `Fin<A>` lifting via `.ToEff()`, (d) error recovery via `@catch` | alternation.
+
+```csharp
+namespace Domain.Composition;
+
+// --- [SEQUENTIAL] ------------------------------------------------------------
+
+public static Eff<AppRuntime, OrderSummary> ProcessOrder(OrderId orderId) =>
+    from order in OrderRepo.Get(orderId: orderId)
+    from inventory in InventoryService.Reserve(items: order.Items)
+    from payment in PaymentGateway.Charge(
+        amount: order.Total, reservationId: inventory.ReservationId)
+    select new OrderSummary(
+        OrderId: orderId, PaymentRef: payment.Reference, Reserved: inventory.Count);
+
+// --- [INDEPENDENT] -----------------------------------------------------------
+
+public static Eff<AppRuntime, DashboardData> LoadDashboard(TenantId tenantId) =>
+    (StatsService.GetMetrics(tenantId: tenantId),
+     AlertService.GetActive(tenantId: tenantId),
+     AuditService.GetRecent(tenantId: tenantId, limit: 50))
+        .Apply(static (MetricsSnapshot metrics, Seq<Alert> alerts, Seq<AuditEntry> audit) =>
+            new DashboardData(Metrics: metrics, Alerts: alerts, RecentAudit: audit));
+
+// --- [LIFTING] ---------------------------------------------------------------
+
+public static Eff<AppRuntime, ValidatedEmail> ValidateAndStore(string raw) =>
+    from validated in Email.Parse(input: raw).ToEff()
+    from stored in EmailRepo.Upsert(email: validated)
+    select stored;
+
+// --- [RECOVERY] --------------------------------------------------------------
+
+public static Eff<AppRuntime, Config> LoadConfig(ConfigKey key) =>
+    ConfigCache.Get(key: key)
+      | @catch(Errors.CacheMiss, (Error _) => ConfigDb.Get(key: key))
+      | @catch(Errors.NotFound, (Error _) => eff(Config.Default));
+```
+
+---
+## [2][PIPE_COMPOSE]
 >**Dictum:** *Data flows left-to-right; composition is the universal operator.*
 
-C# 14 extension members provide `Pipe` for left-to-right application and `Compose` for function chaining. `ComposeAll` owns unbounded arity for endomorphic chains. All are `AggressiveInlining` for zero overhead.
+<br>
+
+`Pipe` for left-to-right application, `Compose` for chaining, `ComposeAll` for unbounded endomorphic chains.
 
 ```csharp
 namespace Domain.Composition;
@@ -20,6 +69,7 @@ public static class Flow {
     public static Func<A, C> Compose<A, B, C>(
         Func<A, B> first, Func<B, C> second) =>
         (A input) => second(arg: first(arg: input));
+    // ComposeAll: composition-time overhead is N closures; acceptable for pipeline assembly
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static Func<A, A> ComposeAll<A>(Seq<Func<A, A>> functions) =>
         functions.Fold(
@@ -29,13 +79,13 @@ public static class Flow {
 }
 ```
 
-[IMPORTANT]: `Pipe` works with any codomain -- `Fin<T>`, `Option<T>`, `K<F,T>`, `Validation<..>`. `ComposeAll` accepts `Seq` (not `IEnumerable`) for trait integration. See `performance.md` [7] for `static` lambda guidance in hot paths.
-
 ---
-## [2][ARITY_COLLAPSE]
+## [3][ARITY_COLLAPSE]
 >**Dictum:** *One method owns all arities; variation is typed, not overloaded.*
 
-`IAlgebraicMonoid<TSelf>` provides `Combine` and `Identity`. `params ReadOnlySpan<T>` collapses all arities into a single stack-allocated call. Tail-recursive `Fold` over `ReadOnlySpan<T>` replaces `foreach`.
+<br>
+
+`params ReadOnlySpan<T>` collapses all arities into a single stack-allocated call via `IAlgebraicMonoid<TSelf>`.
 
 ```csharp
 namespace Domain.Composition;
@@ -58,11 +108,9 @@ public static class SpanPolymorphism {
         public T ConcatAll() =>
             span.Fold(
                 seed: T.Identity,
-                folder: (T accumulator, T current) =>
+                folder: static (T accumulator, T current) =>
                     T.Combine(leftOperand: accumulator, rightOperand: current));
     }
-}
-public static class UniversalComputeEngine {
     public static TElement Aggregate<TElement>(
         params ReadOnlySpan<TElement> elements)
         where TElement : IAlgebraicMonoid<TElement> =>
@@ -70,35 +118,13 @@ public static class UniversalComputeEngine {
 }
 ```
 
-[CRITICAL]: `Aggregate(a)`, `Aggregate(a, b)`, `Aggregate(a, b, c, ...)` are all one method. .NET 10 promotes discrete arguments to stack-allocated spans implicitly. See `types.md` [6] for generic math constraints that pair with algebraic monoid.
-
----
-## [3][EXTENSION_MEMBERS]
->**Dictum:** *Behavior projects onto data without inheritance.*
-
-C# 14 extension blocks group properties, methods, and operators by receiver type. This replaces singleton service classes with static, allocation-free behavior projection. Prefer LanguageExt `HashMap<K,V>` over `IDictionary` -- `Find` returns `Option<V>` natively without extension adapters.
-
-```csharp
-namespace Domain.Composition;
-public static class DomainExtensions {
-    extension<TSource>(Seq<TSource> source) {
-        public bool IsEmpty => source.Count == 0;
-        public Seq<TSource> WhereNot(Func<TSource, bool> predicate) =>
-            source.Filter(f: (TSource item) => !predicate(arg: item));
-    }
-    // HashMap.Find returns Option<V> natively -- no adapter needed
-    // Seq.Choose combines Map+Filter in a single pass
-    // Seq.Fold replaces Aggregate with explicit state threading
-}
-```
-
-[IMPORTANT]: Extension blocks replace legacy `this`-parameter convention. Properties, operators, and static members group under one receiver. See `types.md` [4] for extension members on DU hierarchies.
-
 ---
 ## [4][HKT_ENCODING]
 >**Dictum:** *Algorithms generic over computation eliminate adapter code.*
 
-`K<F,A>` via LanguageExt.Traits encodes higher-kinded types. Constraints like `Fallible<F>`, `Applicative<F>`, `Monad<F>` specify required capabilities. `pure<F,A>` and `error<F,A>` construct values generically. `.As()` downcasts `K<F,A>` back to concrete types at consumption boundaries.
+<br>
+
+`K<F,A>` encodes higher-kinded types. Constraints (`Fallible<F>`, `Applicative<F>`, `Monad<F>`) specify capabilities. `.As()` downcasts at boundaries.
 
 ```csharp
 namespace Domain.Composition;
@@ -110,105 +136,53 @@ public readonly record struct Digit(int Value) {
             >= 0 and <= 9 => pure<F, Digit>(new Digit(Value: value)),
             _ => error<F, Digit>(Error.New(message: "Not a digit"))
         };
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static implicit operator int(Digit digit) => digit.Value;
 }
 public static class Parsing {
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static K<F, int> ParseInt<F>(string text)
         where F : Fallible<F>, Monad<F> =>
-        ParseDigits<F>(text: text)
-            .Bind((Seq<Digit> digits) => MakeNumberFromDigits<F>(digits: digits));
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static K<F, Seq<Digit>> ParseDigits<F>(string text)
-        where F : Fallible<F>, Applicative<F> =>
-        toSeq(text).Traverse((char ch) => ParseDigit<F>(ch: ch));
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static K<F, Digit> ParseDigit<F>(char ch)
-        where F : Fallible<F>, Applicative<F> =>
-        ch switch {
-            >= '0' and <= '9' => Digit.Make<F>(value: ch - '0'),
-            _ => error<F, Digit>(Error.New(message: "Not a digit"))
-        };
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static K<F, int> MakeNumberFromDigits<F>(Seq<Digit> digits)
-        where F : Fallible<F>, Applicative<F> =>
-        digits.IsEmpty switch {
-            true => error<F, int>(Error.New(message: "Empty digit sequence")),
-            false => pure<F, int>(
-                digits.FoldBack(
-                    state: (Total: 0, Scalar: 1),
-                    folder: ((int Total, int Scalar) state, Digit digit) =>
-                        (Total: state.Total + digit.Value * state.Scalar,
-                         Scalar: state.Scalar * 10)).Total)
-        };
+        toSeq(text)
+            .Traverse(static (char ch) => ch switch {
+                >= '0' and <= '9' => Digit.Make<F>(value: ch - '0'),
+                _ => error<F, Digit>(Error.New(message: "Not a digit"))
+            })
+            .Bind(static (Seq<Digit> digits) => digits.IsEmpty switch {
+                true => error<F, int>(Error.New(message: "Empty digit sequence")),
+                false => pure<F, int>(
+                    digits.FoldBack(
+                        state: (Total: 0, Scalar: 1),
+                        folder: static ((int Total, int Scalar) state, Digit digit) =>
+                            (Total: state.Total + digit.Value * state.Scalar,
+                             Scalar: state.Scalar * 10)).Total)
+            });
 }
 ```
 
-[CRITICAL]: `ParseInt<F>` returns `K<F, int>` -- the caller selects the effect context. One algorithm, many execution semantics. `Traverse` is applicative: independent parsing with multi-error reports.
+`.As()` downcasts at consumption boundary: `Parsing.ParseInt<Fin>(text: "42").As()` yields `Fin<int>`.
 
-**`.As()` Downcast** -- consumers MUST call `.As()` to convert `K<F, A>` to a concrete type:
-
+`Foldable<F>` / `Traversable<F>` -- write once, run across all containers:
 ```csharp
-// .As() bridges K<F, A> back to concrete types at consumption boundaries
-Fin<int> finResult = Parsing.ParseInt<Fin>(text: "42").As();
-Option<int> optResult = Parsing.ParseInt<Option>(text: "42").As();
-Eff<int> effResult = Parsing.ParseInt<Eff>(text: "42").As();
-// Without .As(), the consumer gets K<Fin, int> which is not usable as Fin<int>
-```
-
-**Sequence** -- inverts container nesting via identity-Traverse:
-```csharp
-// Sequence: Seq<Option<A>> -> Option<Seq<A>> (inverts container nesting)
-Seq<Option<int>> items = Seq(Some(1), Some(2), Some(3));
-Option<Seq<int>> allPresent = items.Sequence().As();     // Some(Seq(1, 2, 3))
-Seq<Option<int>> withNone = Seq(Some(1), None, Some(3));
-Option<Seq<int>> shortCircuited = withNone.Sequence().As(); // None
-```
-
-**Foldable/Traversable Traits** -- write once, run across all containers:
-
-```csharp
-// Foldable<F>: Sum/All/Count written ONCE -- works for Seq, Option, Either, List
 public static T Sum<F, T>(K<F, T> structure)
     where F : Foldable<F> where T : INumber<T> =>
-    Foldable.fold(f: (T acc, T item) => acc + item, initialState: T.Zero, ta: structure);
-public static bool All<F, T>(K<F, T> structure, Func<T, bool> predicate)
-    where F : Foldable<F> =>
-    Foldable.fold(f: (bool acc, T item) => acc && predicate(arg: item), initialState: true, ta: structure);
-// Traversable<F>: generic effectful iteration across any Applicative
-public static K<G, K<F, B>> TraverseGeneric<F, G, A, B>(
-    K<F, A> structure, Func<A, K<G, B>> transform)
-    where F : Traversable<F> where G : Applicative<G> =>
-    Traversable.traverse(f: transform, ta: structure);
-```
-
-**Middleware Generic Over Monad** -- HKT applied to orchestration patterns. `Functor<TMonad>` suffices because `MapState` applies a pure transform without monadic bind:
-
-```csharp
-public interface IUniversalStateElevator<TMonad, TState>
-    where TMonad : Functor<TMonad> {
-    K<TMonad, TState> Elevate(TState state);
-    K<TMonad, TState> MapState(
-        K<TMonad, TState> source, Func<TState, TState> transform);
-}
+    Foldable.fold(f: static (T acc, T item) => acc + item, initialState: T.Zero, ta: structure);
 ```
 
 ---
 ## [5][ALGEBRAIC_COMPRESSION]
 >**Dictum:** *One DU + Fold replaces N interpreter classes.*
 
-A discriminated union with a `Fold` catamorphism encodes an algebra. Every new interpretation is a new set of fold arguments -- no new classes, no visitor pattern. `StoreQuery` is the minimal case; expression trees demonstrate the full pattern.
+<br>
 
+DU + `Fold` catamorphism encodes an algebra. New interpretations are fold arguments -- no classes, no visitors.
 ```csharp
 namespace Domain.Composition;
-// Expression algebra: one Fold method, infinite interpretations
 public abstract record Expr {
     private protected Expr() { }
     public sealed record Literal(double Value) : Expr;
     public sealed record Add(Expr Left, Expr Right) : Expr;
     public sealed record Multiply(Expr Left, Expr Right) : Expr;
     public sealed record Negate(Expr Inner) : Expr;
+    // SAFETY: _ arm unreachable -- sealed hierarchy exhaustive; pending C# first-class DU matching
     public TResult Fold<TResult>(
         Func<double, TResult> onLiteral,
         Func<TResult, TResult, TResult> onAdd,
@@ -224,125 +198,140 @@ public abstract record Expr {
                 arg2: m.Right.Fold(onLiteral, onAdd, onMultiply, onNegate)),
             Negate n => onNegate(
                 arg: n.Inner.Fold(onLiteral, onAdd, onMultiply, onNegate)),
-            _ => throw new UnreachableException()
+            _ => throw new System.Diagnostics.UnreachableException()
         };
 }
-// Interpretation: Evaluate (PrettyPrint, Optimize, TypeCheck use same Fold, different algebra)
 public static double Evaluate(Expr expression) =>
     expression.Fold<double>(
-        onLiteral: (double value) => value,
-        onAdd: (double left, double right) => left + right,
-        onMultiply: (double left, double right) => left * right,
-        onNegate: (double inner) => -inner);
-// StoreQuery: minimal fold algebra for one-method interfaces
-public abstract record StoreQuery<TResult> {
-    public abstract TResult Fold(
-        Func<GetById, TResult> onGetById,
-        Func<Search, TResult> onSearch);
-    public sealed record GetById(Guid Id) : StoreQuery<TResult>;
-    public sealed record Search(string Term) : StoreQuery<TResult>;
-}
+        onLiteral: static (double value) => value,
+        onAdd: static (double left, double right) => left + right,
+        onMultiply: static (double left, double right) => left * right,
+        onNegate: static (double inner) => -inner);
 ```
 
-[IMPORTANT]: Each new interpretation adds zero types -- only fold arguments change. The `_` arm with `UnreachableException` guards until C# ships first-class exhaustive DU matching.
+---
+## [6][LAYER_COMPOSITION]
+>**Dictum:** *Runtime wires traits without inheritance; tests swap implementations.*
+
+<br>
+
+`Has<RT, Trait>` encodes capabilities. Sealed records compose traits via `Eff.Lift` + static lambdas. Test runtimes substitute stubs -- no mocks.
+```csharp
+namespace Domain.Composition;
+public sealed record AppRuntime(DbClient Db, GatewayClient Gateway)
+    : Has<AppRuntime, DbClient>,
+      Has<AppRuntime, GatewayClient> {
+    static Eff<AppRuntime, DbClient> Has<AppRuntime, DbClient>.Ask =>
+        Eff<AppRuntime, DbClient>.Lift(static (AppRuntime runtime) => runtime.Db);
+    static Eff<AppRuntime, GatewayClient> Has<AppRuntime, GatewayClient>.Ask =>
+        Eff<AppRuntime, GatewayClient>.Lift(static (AppRuntime runtime) => runtime.Gateway);
+}
+// TestRuntime: same Has<RT, Trait> shape with stub implementations -- zero mocks
+// Services constrain on Has<RT, Trait>, never the concrete runtime type
+```
 
 ---
-## [6][CURRYING_PARTIAL]
->**Dictum:** *Partial application eliminates parameter repetition.*
+## [7][CURRYING_PARTIAL]
+>**Dictum:** *LanguageExt Prelude owns curry/partial -- do not hand-roll.*
 
-`Curry` transforms a multi-argument function into a chain of single-argument functions. `Partial` fixes the first argument, producing a specialized function.
+<br>
 
 ```csharp
-public static Func<T1, Func<T2, TResult>> Curry<T1, T2, TResult>(
-    Func<T1, T2, TResult> func) =>
-    (T1 first) => (T2 second) => func(arg1: first, arg2: second);
-public static Func<T2, TResult> Partial<T1, T2, TResult>(
-    Func<T1, T2, TResult> func, T1 fixedArg) =>
-    (T2 remaining) => func(arg1: fixedArg, arg2: remaining);
+// curry: Func<A,B,R> -> Func<A, Func<B, R>>
+Func<int, Func<int, int>> curriedAdd = curry<int, int, int>(static (int first, int second) => first + second);
+Func<int, int> addTen = curriedAdd(arg: 10);
+// par: fix first argument -> specialized function
+Func<string, string> greetAlice = par<string, string, string>(
+    static (string greeting, string name) => $"{greeting}, {name}!",
+    arg1: "Hello");
 ```
 
 ---
-## [7][MEMOIZATION]
->**Dictum:** *Pure functions memoize safely; Lazy guarantees single invocation.*
+## [8][MEMOIZATION]
+>**Dictum:** *Pure functions memoize safely; Atom + HashMap for lock-free CAS.*
 
-`ConcurrentDictionary<TKey, Lazy<TResult>>` ensures thread-safe caching with single-invocation semantics. This is an intentional controlled-mutation boundary -- the mutable dictionary is an implementation detail invisible to consumers, preserving referential transparency at the API surface.
+<br>
+
+`Atom<HashMap<K,V>>` provides lock-free memoization via CAS. `Swap` accepts state for `static` lambda. `ConcurrentDictionary` is boundary-adapter escape hatch only.
 
 ```csharp
 namespace Domain.Composition;
 public static class Memoization {
     public static Func<TKey, TResult> Memoize<TKey, TResult>(
         Func<TKey, TResult> func) where TKey : notnull {
-        ConcurrentDictionary<TKey, Lazy<TResult>> cache = new();
-        return (TKey key) => cache.GetOrAdd(
-            key: key,
-            valueFactory: (TKey cacheKey) =>
-                new Lazy<TResult>(() => func(arg: cacheKey))).Value;
-    }
-    // Multi-arity: tuple-pack for composite key hashing
-    public static Func<T1, T2, TResult> Memoize<T1, T2, TResult>(
-        Func<T1, T2, TResult> func) where T1 : notnull where T2 : notnull {
-        Func<(T1, T2), TResult> memoized = Memoize<(T1, T2), TResult>(
-            func: ((T1, T2) args) => func(arg1: args.Item1, arg2: args.Item2));
-        return (T1 first, T2 second) => memoized(key: (first, second));
+        Atom<HashMap<TKey, TResult>> cache = Atom(HashMap<TKey, TResult>());
+        return (TKey key) => cache.Value.Find(key: key).Match(
+            Some: static (TResult cached) => cached,
+            None: () => {
+                TResult result = func(arg: key);
+                cache.Swap(static (HashMap<TKey, TResult> current, (TKey key, TResult result) ctx) =>
+                    current.AddOrUpdate(key: ctx.key, value: ctx.result), (key, result));
+                return result;
+            });
     }
 }
 ```
 
-[IMPORTANT]: `GetOrAdd` with `Lazy<T>` guarantees the factory runs exactly once even under contention. `ConcurrentDictionary.GetOrAdd` alone permits concurrent factory execution.
-
 ---
-## [8][LINQ_EXTENSIONS]
->**Dictum:** *LINQ vocabulary extends via C# 14 extension blocks.*
+## [9][SEQ_EXTENSIONS]
+>**Dictum:** *Seq-native operations avoid IEnumerable state machines.*
 
-.NET 10 ships `CountBy`, `AggregateBy`, `LeftJoin`, and built-in `IAsyncEnumerable` LINQ. Custom operators like `Window` and `Scan` extend the vocabulary. For hot paths, prefer `Seq.Fold` / `Seq.Choose` over LINQ chains to avoid intermediate `IEnumerable` state machines.
+<br>
+
+Extend `Seq<T>` directly. `Scan` uses `.Cons` (O(1) prepend) + `.Rev()`, avoiding O(n^2) `.Add`. .NET 10 ships `CountBy`/`AggregateBy`/`LeftJoin` built-in.
 
 ```csharp
 namespace Domain.Composition;
-public static class LinqExtensions {
-    extension<T>(IEnumerable<T> source) {
-        public IEnumerable<IReadOnlyList<T>> Window(int size) =>
-            source.Select((T item, int index) => (item, index))
+public static class SeqExtensions {
+    extension<T>(Seq<T> source) {
+        public Seq<Seq<T>> Window(int size) =>
+            source.Select(static (T item, int index) => (item, index))
                   .GroupBy(pair => pair.index / size)
-                  .Select(group => group.Select(pair => pair.item).ToList());
-        public IEnumerable<TAccumulate> Scan<TAccumulate>(
+                  .Map(static (IGrouping<int, (T item, int index)> group) =>
+                      toSeq(group.Map(static ((T item, int index) pair) => pair.item)));
+        public Seq<TAccumulate> Scan<TAccumulate>(
             TAccumulate seed,
-            Func<TAccumulate, T, TAccumulate> func) =>
-            source.Aggregate(
-                seed: Seq(seed),
-                func: (Seq<TAccumulate> acc, T item) =>
-                    acc.Add(func(arg1: acc.Last, arg2: item)));
+            Func<TAccumulate, T, TAccumulate> folder) =>
+            source.Fold(
+                state: Seq1(seed),
+                folder: (Seq<TAccumulate> acc, T item) =>
+                    folder(arg1: acc.Last, arg2: item).Cons(acc))
+                .Rev();
     }
 }
-// .NET 10 built-in: CountBy, AggregateBy, LeftJoin, WhereAwait (IAsyncEnumerable)
 ```
 
 ---
-## [9][RULES]
+## [10][RULES]
 >**Dictum:** *Rules compress into constraints.*
 
+<br>
+
+- [ALWAYS] Eff composition: LINQ comprehension for sequential, applicative tuple for independent.
 - [ALWAYS] `Pipe` for left-to-right application; `Compose` for function chaining.
 - [ALWAYS] `params ReadOnlySpan<T>` for arity collapse -- one method, all arities.
 - [ALWAYS] `K<F,A>` with `.As()` downcast at consumption boundaries.
-- [ALWAYS] `Foldable<F>` / `Traversable<F>` constraints for container-generic algorithms.
-- [ALWAYS] Extension blocks for behavior projection -- no singleton service classes.
+- [ALWAYS] `Has<RT, Trait>` for runtime composition -- services never know the concrete runtime.
 - [ALWAYS] LanguageExt `HashMap`/`Seq`/`HashSet` over BCL immutable collections.
 - [ALWAYS] DU + `Fold` catamorphism for algebras -- not visitor classes.
+- [ALWAYS] `Atom<HashMap<K,V>>` for memoization -- `ConcurrentDictionary` for boundary adapters only.
+- [ALWAYS] Prelude `curry`/`par` -- never hand-roll currying or partial application.
+- [NEVER] `async/await` mixed with `Eff` -- use `.ToEff()`, `Eff.liftAsync` for interop.
+- [NEVER] Single-call private helpers -- inline into the single caller.
 - [NEVER] Sibling method families (`Get`/`GetMany`/`GetOrDefault`) -- use typed queries.
-- [NEVER] Manual overloads when `params ReadOnlySpan<T>` + algebraic constraints suffice.
-- [NEVER] Consuming `K<F,A>` without `.As()` -- the concrete type is not accessible otherwise.
 
 ---
-## [10][QUICK_REFERENCE]
+## [11][QUICK_REFERENCE]
 
-| [INDEX] | [PATTERN]              | [WHEN]                                     | [KEY_TRAIT]                            |
-| :-----: | ---------------------- | ------------------------------------------ | -------------------------------------- |
-|   [1]   | `Pipe`/`Compose`       | Left-to-right data threading               | C# 14 extension + `AggressiveInlining` |
-|   [2]   | Arity collapse         | Replace overload families                  | `params ReadOnlySpan<T>` + monoid      |
-|   [3]   | Extension members      | Behavior projection onto data              | C# 14 `extension` block                |
-|   [4]   | `K<F,A>` HKT + `.As()` | Algorithm generic over effect/container    | `Fallible`/`Applicative`/`Monad`       |
-|   [5]   | Foldable/Traversable   | Container-generic fold, traverse, sequence | `Foldable<F>` / `Traversable<F>`       |
-|   [6]   | Algebraic compression  | DU + Fold replaces N interpreters          | Catamorphism on sealed DU hierarchy    |
-|   [7]   | Currying/Partial       | Fix arguments, build specialized functions | `Func<T1, Func<T2, R>>`                |
-|   [8]   | Memoization            | Thread-safe pure function caching          | `ConcurrentDictionary` + `Lazy<T>`     |
-|   [9]   | Custom LINQ            | Extend query vocabulary                    | `Window`/`Scan` via extension blocks   |
-|  [10]   | Algebraic interface    | One method owns the concept                | `StoreQuery.Fold` dispatch             |
+| [INDEX] | [PATTERN]                  | [WHEN]                                     | [KEY_TRAIT]                          |
+| :-----: | -------------------------- | ------------------------------------------ | ------------------------------------ |
+|   [1]   | **Eff LINQ comprehension** | Sequential monadic pipeline composition    | from/select = Bind/Map               |
+|   [2]   | **Eff applicative tuple**  | Independent pipeline composition           | Apply on tuple of Eff values         |
+|   [3]   | **Pipe/Compose**           | Left-to-right data threading               | C# 14 extension + AggressiveInlining |
+|   [4]   | **Arity collapse**         | Replace overload families                  | params ReadOnlySpan + monoid         |
+|   [5]   | **K<F,A> HKT + .As()**     | Algorithm generic over effect/container    | Fallible/Applicative/Monad           |
+|   [6]   | **Foldable/Traversable**   | Container-generic fold, traverse, sequence | Foldable<F> / Traversable<F>         |
+|   [7]   | **Algebraic compression**  | DU + Fold replaces N interpreters          | Catamorphism on sealed DU hierarchy  |
+|   [8]   | **Layer composition**      | Runtime wiring + test substitution         | Has<RT, Trait> sealed records        |
+|   [9]   | **Atom memoization**       | Thread-safe pure function caching          | Atom<HashMap> + CAS Swap             |
+|  [10]   | **Seq extensions**         | Windowing, scanning on LanguageExt Seq     | Seq.Fold + .Cons for O(1) prepend    |

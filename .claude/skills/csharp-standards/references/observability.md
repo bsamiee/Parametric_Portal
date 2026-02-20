@@ -1,21 +1,21 @@
 # [H1][OBSERVABILITY]
->**Dictum:** *Signals are one algebra: logs, traces, and metrics execute as a fused tap over typed outcomes.*
+>**Dictum:** *Observability is one algebra; typed outcomes remain primary.*
 
-<br>
-
-Observability in C# 14 / .NET 10 must preserve computational context: `Fin<T>` and `Eff<RT,T>` remain primary carriers while telemetry is projected through `BiMap` and bracketed resource lifecycles. Canonical surfaces are `[LoggerMessage]`, `ActivitySource`, `Meter`, `TagList`, `LogContext`, and OTel exporters. All snippets assume `using static LanguageExt.Prelude;`.
+Observability in C# 14 / .NET 10 keeps `Fin<T>`, `Validation<Error,T>`, and `Eff<RT,T>` intact while projecting telemetry through one compositional surface. Canonical surfaces: `[LoggerMessage]`, `ActivitySource`, `Meter`, `TagList`, `LogContext`, Serilog OTLP sink, OpenTelemetry exporters.
 
 ---
-## [1][SIGNAL_FUSION]
->**Dictum:** *One combinator owns outcome projection; no split logging/tracing/metrics pipelines.*
-
-<br>
+## [1][SIGNAL_ALGEBRA]
+>**Dictum:** *One module owns identities, tag algebra, and fused channel emission.*
 
 ```csharp
 namespace Domain.Observability;
 
+// --- [IMPORTS] ---------------------------------------------------------------
+
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Diagnostics.Metrics;
+using System.Runtime.CompilerServices;
 using LanguageExt;
 using LanguageExt.Common;
 using LanguageExt.Traits;
@@ -23,229 +23,226 @@ using Microsoft.Extensions.Logging;
 using Serilog.Context;
 using static LanguageExt.Prelude;
 
-public interface IObservabilityProvider {
-    ILogger Logger { get; }
-}
+public interface IObservabilityProvider { ILogger Logger { get; } }
 public interface HasObservability<RT> : Has<RT, IObservabilityProvider>
     where RT : HasObservability<RT>;
 
+public readonly record struct ObserveSpec(string Operation, TagList Dimensions);
+
+// --- [SIGNALS] ---------------------------------------------------------------
+
 internal static class Signals {
-    internal static readonly ActivitySource Source =
-        new(name: "Domain.Service", version: "1.0.0");
-    internal static readonly Meter ServiceMeter =
-        new(name: "Domain.Service", version: "1.0.0");
-
-    internal static readonly Counter<long> Requests =
-        ServiceMeter.CreateCounter<long>(
-            name: "domain.requests.total",
-            unit: "requests",
-            description: "Total request outcomes.");
-
-    internal static readonly Histogram<double> Duration =
-        ServiceMeter.CreateHistogram<double>(
-            name: "domain.request.duration",
-            unit: "s",
-            description: "End-to-end request duration in seconds.",
-            tags: null,
-            advice: new InstrumentAdvice<double> {
-                HistogramBucketBoundaries = [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10]
-            });
-
-    internal static readonly UpDownCounter<int> Active =
-        ServiceMeter.CreateUpDownCounter<int>(
-            name: "domain.requests.active",
-            unit: "requests",
-            description: "In-flight requests.");
-
-    internal static readonly Counter<long> ValidationFailures =
-        ServiceMeter.CreateCounter<long>(
-            name: "domain.validation.failures",
-            unit: "failures",
-            description: "Validation failures grouped by operation.");
-
-    internal static readonly Counter<long> Retries =
-        ServiceMeter.CreateCounter<long>(
-            name: "domain.retries.total",
-            unit: "retries",
-            description: "Retry attempts grouped by operation.");
+    private const string ServiceName = "Domain.Service";
+    private const string ServiceVersion = "1.0.0";
+    internal static readonly ActivitySource Source = new(ServiceName, ServiceVersion);
+    internal static readonly Meter ServiceMeter = new(ServiceName, ServiceVersion);
+    internal static readonly Counter<long> Requests = ServiceMeter.CreateCounter<long>(
+        "domain.requests.total", "requests", "Total request outcomes.");
+    internal static readonly Histogram<double> Duration = ServiceMeter.CreateHistogram<double>(
+        "domain.request.duration", "s", "Request duration (seconds).", null,
+        new InstrumentAdvice<double> {
+            HistogramBucketBoundaries = [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10]
+        });
+    internal static readonly UpDownCounter<int> Active = ServiceMeter.CreateUpDownCounter<int>(
+        "domain.requests.active", "requests", "In-flight request count.");
+    internal static readonly Counter<long> ValidationFailures = ServiceMeter.CreateCounter<long>(
+        "domain.validation.failures", "failures", "Validation failures by operation.");
+    internal static readonly Counter<long> Retries = ServiceMeter.CreateCounter<long>(
+        "domain.retries.total", "retries", "Retry attempts by operation and error code.");
 }
+
+// --- [LOG] -------------------------------------------------------------------
 
 internal static partial class Log {
-    [LoggerMessage(
-        EventId = 1000,
-        Level = LogLevel.Information,
-        Message = "{Operation} started")]
+    [LoggerMessage(1000, LogLevel.Information, "{Operation} started")]
     internal static partial void Started(ILogger logger, string operation);
-
-    [LoggerMessage(
-        EventId = 1001,
-        Level = LogLevel.Information,
-        Message = "{Operation} succeeded in {ElapsedMs}ms")]
-    internal static partial void Succeeded(
-        ILogger logger,
-        string operation,
-        double elapsedMs);
-
-    [LoggerMessage(
-        EventId = 1002,
-        Level = LogLevel.Error,
-        Message = "{Operation} failed with {ErrorCode}: {ErrorMessage}")]
-    internal static partial void Failed(
-        ILogger logger,
-        string operation,
-        int errorCode,
-        string errorMessage);
-
-    [LoggerMessage(
-        EventId = 1003,
-        Level = LogLevel.Warning,
-        Message = "{Operation} retry attempt {Attempt} after {ErrorCode}")]
-    internal static partial void Retry(
-        ILogger logger,
-        string operation,
-        int attempt,
-        int errorCode);
+    [LoggerMessage(1001, LogLevel.Information, "{Operation} succeeded in {ElapsedMs}ms")]
+    internal static partial void Succeeded(ILogger logger, string operation, double elapsedMs);
+    [LoggerMessage(1002, LogLevel.Error, "{Operation} failed with {ErrorCode}: {ErrorMessage}")]
+    internal static partial void Failed(ILogger logger, string operation, int errorCode, string errorMessage);
+    [LoggerMessage(1003, LogLevel.Warning, "{Operation} retry attempt {Attempt} after {ErrorCode}")]
+    internal static partial void Retry(ILogger logger, string operation, int attempt, int errorCode);
 }
 
-public static class Observe {
-    public static Fin<T> Outcome<T>(
-        Fin<T> result,
-        ILogger logger,
-        string operation,
-        TagList dimensions,
-        long startTimestamp) {
-        using Activity? activity = Signals.Source.StartActivity(
-            name: operation,
-            kind: ActivityKind.Internal);
-        TimeSpan elapsed = TimeProvider.System.GetElapsedTime(
-            startingTimestamp: startTimestamp);
+// --- [TAG_POLICY] ------------------------------------------------------------
 
-        return result.BiMap(
-            Succ: (T value) => {
-                TagList tags = new() {
-                    { "operation", operation },
-                    { "outcome", "success" }
-                };
-                Merge(target: tags, source: dimensions);
-                Signals.Requests.Add(delta: 1, tags: tags);
-                Signals.Duration.Record(value: elapsed.TotalSeconds, tags: tags);
-                activity?.SetStatus(code: ActivityStatusCode.Ok);
-                Log.Succeeded(
-                    logger: logger,
-                    operation: operation,
-                    elapsedMs: elapsed.TotalMilliseconds);
-                return value;
-            },
-            Fail: (Error error) => {
-                TagList tags = new() {
-                    { "operation", operation },
-                    { "outcome", "failure" },
-                    { "error.code", error.Code }
-                };
-                Merge(target: tags, source: dimensions);
-                Signals.Requests.Add(delta: 1, tags: tags);
-                Signals.Duration.Record(value: elapsed.TotalSeconds, tags: tags);
-                activity?.SetStatus(
-                    code: ActivityStatusCode.Error,
-                    description: error.Message);
-                activity?.AddEvent(new ActivityEvent(
-                    name: "error",
-                    tags: new ActivityTagsCollection {
-                        ["error.code"] = error.Code,
-                        ["error.message"] = error.Message
-                    }));
-                Log.Failed(
-                    logger: logger,
-                    operation: operation,
-                    errorCode: error.Code,
-                    errorMessage: error.Message);
-                return error;
-            });
-    }
-
-    public static Eff<RT, T> Pipeline<RT, T>(
-        Eff<RT, T> pipeline,
-        string operation,
-        TagList dimensions)
-        where RT : HasObservability<RT> =>
-        from provider in default(RT).ObservabilityProvider
-        from result in
-            IO.lift(() => Signals.Source.StartActivity(
-                name: operation,
-                kind: ActivityKind.Internal))
-            .Bracket(
-                Use: (Activity? activity) => {
-                    Signals.Active.Add(delta: 1, tags: dimensions);
-                    using IDisposable _ = LogContext.PushProperty(
-                        name: "operation",
-                        value: operation);
-                    Log.Started(logger: provider.Logger, operation: operation);
-                    return pipeline.BiMap(
-                        Succ: (T value) => {
-                            Signals.Active.Add(delta: -1, tags: dimensions);
-                            activity?.SetStatus(code: ActivityStatusCode.Ok);
-                            return value;
-                        },
-                        Fail: (Error error) => {
-                            Signals.Active.Add(delta: -1, tags: dimensions);
-                            activity?.SetStatus(
-                                code: ActivityStatusCode.Error,
-                                description: error.Message);
-                            return error;
-                        }).As();
+public static class TagPolicy {
+    public static TagList Outcome(ObserveSpec spec, string outcome, Option<int> errorCode) =>
+        Merge(
+            seed: errorCode.Match(
+                Some: (int code) => new TagList {
+                    { "operation", spec.Operation }, { "outcome", outcome }, { "error.code", code }
                 },
-                Fin: (Activity? activity) =>
-                    IO.lift(() => {
-                        activity?.Dispose();
-                        return unit;
-                    }))
-        select result;
+                None: () => new TagList {
+                    { "operation", spec.Operation }, { "outcome", outcome }
+                }),
+            dimensions: spec.Dimensions);
+    public static void AnnotateFailure(Activity? activity, Error error) {
+        activity?.SetStatus(ActivityStatusCode.Error, error.Message);
+        activity?.AddEvent(new ActivityEvent("error",
+            tags: new ActivityTagsCollection {
+                ["error.code"] = error.Code, ["error.message"] = error.Message
+            }));
+    }
+    public static TagList Merge(TagList seed, TagList dimensions) =>
+        toSeq(dimensions).Fold(seed,
+            static (TagList acc, KeyValuePair<string, object?> next) => {
+                acc.Add(next.Key, next.Value);
+                return acc;
+            });
+    // Pre-compiled property-to-tag extractors: compile Expression<Func<T, object>>
+    // once at startup; cache the delegate. Zero reflection on hot paths.
+    // Use for domain entities where tag dimensions map to entity properties.
+    public static Func<T, object?> CompileTagExtractor<T>(
+        Expression<Func<T, object?>> accessor) =>
+        accessor.Compile();
+    // Build a TagList from an entity using pre-compiled extractors.
+    // Extractors are compiled once via CompileTagExtractor and stored in a
+    // static readonly Seq -- zero per-call reflection or allocation.
+    public static TagList FromEntity<T>(
+        T entity,
+        Seq<(string Dimension, Func<T, object?> Extract)> extractors) =>
+        extractors.Fold(
+            new TagList(),
+            (TagList tags, (string Dimension, Func<T, object?> Extract) pair) => {
+                tags.Add(pair.Dimension, pair.Extract(entity));
+                return tags;
+            });
+}
 
+// --- [PROJECTIONS] -----------------------------------------------------------
+
+public static class Observe {
+    /// Caller owns Activity lifecycle — annotates span, does not start or dispose.
+    public static Fin<T> Outcome<T>(
+        Fin<T> result, ILogger logger, ObserveSpec spec,
+        long startTimestamp, Activity? activity) =>
+        Emit(result, logger, spec,
+            TimeProvider.System.GetElapsedTime(startTimestamp), activity);
     public static Validation<Error, T> Validation<T>(
-        Validation<Error, T> validation,
-        string operation) =>
+        Validation<Error, T> validation, string operation) =>
         validation.BiMap(
             Succ: (T value) => value,
             Fail: (Error error) => {
-                Signals.ValidationFailures.Add(
-                    delta: toSeq(error.AsIterable()).Count,
-                    tags: new TagList { { "operation", operation } });
+                Signals.ValidationFailures.Add(error.Count,
+                    new TagList { { "operation", operation } });
                 return error;
             });
-
+    /// Tap-style — returns error unchanged after emitting retry metric + log.
+    /// Designed for Polly OnRetry delegates.
     public static Error RetryProjection(
-        Error error,
-        ILogger logger,
-        string operation,
-        int attempt) {
-        Signals.Retries.Add(
-            delta: 1,
-            tags: new TagList {
-                { "operation", operation },
-                { "error.code", error.Code }
-            });
-        Log.Retry(
-            logger: logger,
-            operation: operation,
-            attempt: attempt,
-            errorCode: error.Code);
+        Error error, ILogger logger, string operation, int attempt) {
+        Signals.Retries.Add(1,
+            new TagList { { "operation", operation }, { "error.code", error.Code } });
+        Log.Retry(logger, operation, attempt, error.Code);
         return error;
     }
-
-    private static void Merge(TagList target, TagList source) =>
-        toSeq(source).Iter(item => target.Add(item.Key, item.Value));
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static Fin<T> Emit<T>(
+        Fin<T> result, ILogger logger, ObserveSpec spec,
+        TimeSpan elapsed, Activity? activity) =>
+        result.Match(
+            Succ: (T value) => {
+                TagList tags = TagPolicy.Outcome(spec, "success", None);
+                Signals.Requests.Add(1, tags);
+                Signals.Duration.Record(elapsed.TotalSeconds, tags);
+                activity?.SetStatus(ActivityStatusCode.Ok);
+                Log.Succeeded(logger, spec.Operation, elapsed.TotalMilliseconds);
+                return FinSucc(value);
+            },
+            Fail: (Error error) => {
+                TagList tags = TagPolicy.Outcome(spec, "failure", Some(error.Code));
+                Signals.Requests.Add(1, tags);
+                Signals.Duration.Record(elapsed.TotalSeconds, tags);
+                TagPolicy.AnnotateFailure(activity, error);
+                Log.Failed(logger, spec.Operation, error.Code, error.Message);
+                return FinFail<T>(error);
+            });
 }
 ```
 
 ---
-## [2][COMPOSITION_ROOT_RUNTIME]
->**Dictum:** *Composition root wires providers; modules own singleton signal identities.*
+## [2][OBSERVABILITY_CANON]
+>**Dictum:** *Observability constraints are architecture contracts, not optional style.*
 
-<br>
+| [INDEX] | [CONSTRAINT]               | [MANDATE]                                        | [SURFACE]              |
+| :-----: | :------------------------- | ------------------------------------------------ | ---------------------- |
+|   [1]   | **`LOGGING_PATH`**         | structured logs via `[LoggerMessage]` only       | CA1848, CA2254         |
+|   [2]   | **`TRACE_LIFECYCLE`**      | span lifecycle bracket-owned, never leaked       | Pipeline bracket       |
+|   [3]   | **`METRIC_DIMENSIONS`**    | tags include `operation` + `outcome` taxonomy    | TagPolicy.Outcome      |
+|   [4]   | **`ERROR_CODE_STABILITY`** | numeric `Error.Code` as canonical failure dim    | span/metric/log fields |
+|   [5]   | **`NO_SPLIT_PIPELINES`**   | no parallel telemetry branches in logic          | fused BiMap projection |
+|   [6]   | **`BOUNDARY_ONLY_MATCH`**  | no mid-pipeline `.Match()` for observability     | Fin/Eff/Val BiMap      |
+|   [7]   | **`SINGLETON_IDS`**        | ActivitySource/Meter match OTel registration     | Signals statics        |
+|   [8]   | **`AMBIENT_SCOPE`**        | contextual props boundary-scoped via ambient ctx | LogContext             |
+|   [9]   | **`RETRY_TELEMETRY`**      | every retry emits count + error code             | RetryProjection        |
+|  [10]   | **`VALIDATION_TELEMETRY`** | validation fail emits accumulation-aware metric  | Observe.Validation     |
+|  [11]   | **`EXPRESSION_GATING`**    | dynamic Serilog filters compile-validated        | TryCompile gate        |
+|  [12]   | **`DB_CORRELATION`**       | DB instrumentation mandatory for e2e traces      | Npgsql.OpenTelemetry   |
+|  [13]   | **`ANTI_PATTERN`**         | no ad-hoc ILogger.Log* or inline ActivitySource  | centralized surfaces   |
+|  [14]   | **`COMPILED_EXTRACTORS`**  | entity-to-tag via pre-compiled expressions       | TagPolicy.FromEntity   |
+
+---
+
+**Tag taxonomy** — canonical dimensions from TagPolicy.Outcome and AnnotateFailure:
+
+| [INDEX] | [DIMENSION]      | [REQUIRED]      | [SEMANTICS]                                       |
+| :-----: | :--------------- | :-------------- | ------------------------------------------------- |
+|   [1]   | **`operation`**  | **yes**         | stable taxonomy key (`orders.submit`, `db.query`) |
+|   [2]   | **`outcome`**    | **yes**         | `success`, `failure`, `active`                    |
+|   [3]   | **`error.code`** | **on failure**  | stable numeric domain/system error code           |
+|   [4]   | **`service`**    | **recommended** | service identity for shared dashboards            |
+|   [5]   | **`component`**  | **recommended** | adapter boundary (`gateway`, `repo`, `scheduler`) |
+
+---
+## [3][EFF_PIPELINE]
+>**Dictum:** *`Eff` instrumentation composes as one wrapper; no business-flow forks.*
+
+```csharp
+// (imports from section [1])
+public static class ObserveEff {
+    public static Eff<RT, T> Pipeline<RT, T>(
+        Eff<RT, T> pipeline, string operation, TagList dimensions)
+        where RT : HasObservability<RT> =>
+        from provider in default(RT).ObservabilityProvider
+        from result in IO.lift(() => Signals.Source.StartActivity(operation, ActivityKind.Internal))
+            .Bracket(
+                Use: (Activity? activity) => {
+                    ObserveSpec spec = new(operation, dimensions);
+                    long startTimestamp = TimeProvider.System.GetTimestamp();
+                    using IDisposable _ = LogContext.PushProperty("operation", operation);
+                    Signals.Active.Add(1, TagPolicy.Outcome(spec, "active", None));
+                    Log.Started(provider.Logger, operation);
+                    return pipeline
+                        .Map((T value) => {
+                            Observe.Outcome(FinSucc(value), provider.Logger,
+                                spec, startTimestamp, activity);
+                            return value;
+                        })
+                        .MapFail((Error error) => {
+                            Observe.Outcome(FinFail<Unit>(error), provider.Logger,
+                                spec, startTimestamp, activity);
+                            return error;
+                        }).As();
+                },
+                Fin: (Activity? activity) => IO.lift(() => {
+                    Signals.Active.Add(-1, new TagList { { "operation", operation } });
+                    activity?.Dispose();
+                    return unit;
+                }))
+        select result;
+}
+```
+
+---
+## [4][COMPOSITION_ROOT]
+>**Dictum:** *Composition root wires exporters and resilience; domain modules emit canonical signals only.*
 
 ```csharp
 namespace App.Bootstrap;
 
+using Domain.Observability;
+using LanguageExt.Common;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Http.Resilience;
@@ -260,71 +257,66 @@ using Serilog.Sinks.OpenTelemetry;
 public static class TelemetryBootstrap {
     public static IHostApplicationBuilder AddTelemetry(
         IHostApplicationBuilder builder) {
-        builder.Host.UseSerilog((HostBuilderContext context,
-                                 IServiceProvider services,
-                                 LoggerConfiguration cfg) =>
-            cfg.MinimumLevel.Information()
-                .MinimumLevel.Override(source: "Microsoft", level: LogEventLevel.Warning)
-                .ReadFrom.Configuration(configuration: context.Configuration)
-                .ReadFrom.Services(services: services)
-                .Enrich.FromLogContext()
-                .Enrich.WithExceptionDetails()
-                .Filter.ByExcluding(expression: "RequestPath like '/health%'")
-                .WriteTo.Console()
-                // Endpoint resolved from configuration; never hardcoded
-                .WriteTo.OpenTelemetry(options: new OpenTelemetrySinkOptions {
-                    Endpoint = context.Configuration["OpenTelemetry:Endpoint"]
-                               ?? "http://localhost:4317",
-                    Protocol = OtlpProtocol.Grpc
-                }));
-
+        builder.Host.UseSerilog(
+            (HostBuilderContext ctx, IServiceProvider svc, LoggerConfiguration cfg) =>
+                cfg.MinimumLevel.Information()
+                    .MinimumLevel.Override("Microsoft", LogEventLevel.Warning)
+                    .ReadFrom.Configuration(ctx.Configuration)
+                    .ReadFrom.Services(svc)
+                    .Enrich.FromLogContext()
+                    .Enrich.WithExceptionDetails()
+                    .Filter.ByExcluding("RequestPath like '/health%'")
+                    .WriteTo.Console()
+                    .WriteTo.OpenTelemetry(new OpenTelemetrySinkOptions {
+                        Endpoint = ctx.Configuration["OpenTelemetry:Endpoint"]
+                            ?? "http://localhost:4317",
+                        Protocol = OtlpProtocol.Grpc
+                    }));
         builder.Services.AddOpenTelemetry()
-            .ConfigureResource(resource =>
-                resource.AddService(serviceName: "Domain.Service"))
-            .WithTracing(tracing => tracing
-                .AddSource("Domain.Service")
-                .AddAspNetCoreInstrumentation()
-                .AddHttpClientInstrumentation()
-                .AddNpgsql()
-                .AddOtlpExporter())
-            .WithMetrics(metrics => metrics
-                .AddMeter("Domain.Service")
-                .AddAspNetCoreInstrumentation()
-                .AddHttpClientInstrumentation()
-                .AddRuntimeInstrumentation()
-                .AddOtlpExporter());
-
-        builder.Services.AddHttpClient(name: "upstream")
+            .ConfigureResource(static r => r.AddService("Domain.Service"))
+            .WithTracing(static t => t.AddSource("Domain.Service")
+                .AddAspNetCoreInstrumentation().AddHttpClientInstrumentation()
+                .AddNpgsql().AddOtlpExporter())
+            .WithMetrics(static m => m.AddMeter("Domain.Service")
+                .AddAspNetCoreInstrumentation().AddHttpClientInstrumentation()
+                .AddRuntimeInstrumentation().AddOtlpExporter());
+        // RetryProjection + Polly composition
+        builder.Services.AddHttpClient("upstream")
             .AddStandardResilienceHandler(options => {
                 options.TotalRequestTimeout.Timeout = TimeSpan.FromSeconds(10);
                 options.Retry.MaxRetryAttempts = 5;
                 options.Retry.UseJitter = true;
+                options.Retry.OnRetry = static args => {
+                    Error error = args.Outcome.Exception is { } ex
+                        ? Error.New(ex)
+                        : Error.New(
+                            (int)(args.Outcome.Result?.StatusCode ?? 0),
+                            args.Outcome.Result?.ReasonPhrase ?? "upstream");
+                    Observe.RetryProjection(
+                        error,
+                        args.Context.Properties.GetValue<ILogger>("logger")!,
+                        "upstream.request", args.AttemptNumber);
+                    return ValueTask.CompletedTask;
+                };
             });
-
         return builder;
     }
-
-    public static Func<string, bool> ValidateSerilogExpression =
-        static (string expression) =>
-            SerilogExpression.TryCompile(
-                expression: expression,
-                result: out _);
+    public static bool ValidateSerilogExpression(string expression) =>
+        SerilogExpression.TryCompile(expression, out _, out _);
 }
 ```
 
 ---
-## [3][OBSERVABILITY_CANON]
+## [5][RULES]
+>**Dictum:** *Observability quality is consistency under composition pressure.*
 
-| [CONSTRAINT] | [MANDATE] | [SURFACE] |
-| ------------ | --------- | --------- |
-| `LOGGING_PATH` | `[LoggerMessage]` for all structured logs | `CA1848`, `CA2254`, `CA2017`, `CA2023` |
-| `TRACE_LIFECYCLE` | `ActivitySource` span lifecycle owned by bracket/tap combinators | `Observe.Pipeline`, `Observe.Outcome` |
-| `METRIC_DIMENSIONS` | `TagList` dimensions and operation taxonomy are explicit and stable | `Counter`, `Histogram`, `UpDownCounter` |
-| `SINGLETON_IDS` | `ActivitySource` / `Meter` names must exactly match OTel `AddSource` / `AddMeter` | `OpenTelemetry.Extensions.Hosting` |
-| `AMBIENT_SCOPE` | domain context enters logs via `LogContext.PushProperty` at boundary scope | `Serilog.Context` |
-| `RETRY_TELEMETRY` | retries record count + error code, never implicit counters | `Observe.RetryProjection` + `Microsoft.Extensions.Http.Resilience` |
-| `VALIDATION_TELEMETRY` | validation error accumulation emits one metric from `Validation<Error,T>` fail channel | `Observe.Validation` |
-| `NO_SPLIT_PIPELINES` | no separate logging/tracing/metrics branches in business flow; one fused observability tap | `BiMap` + `Bracket` |
-| `EXPORTER_DISCIPLINE` | logs and traces must emit through OTLP with explicit protocol/endpoint settings | `Serilog.Sinks.OpenTelemetry`, `OpenTelemetry.Exporter.OpenTelemetryProtocol` |
-| `DB_CORRELATION` | database spans and metrics are first-class runtime signals | `Npgsql.OpenTelemetry` + `AddNpgsql()` |
-| `EXPRESSION_GATING` | dynamic log filtering expressions must be validated before runtime use | `SerilogExpression.TryCompile` |
+- [ALWAYS] Emit via Observe.Outcome, Observe.Validation, and ObserveEff.Pipeline.
+- [ALWAYS] Keep ActivitySource/Meter identities centralized in Signals.
+- [ALWAYS] Use `[LoggerMessage]` on structured logging paths.
+- [ALWAYS] Record retry attempts with operation + error code.
+- [ALWAYS] Configure OTLP protocol/endpoint in composition root only.
+- [ALWAYS] Validate dynamic Serilog expressions before runtime use.
+- [NEVER] Split telemetry into separate procedural branches.
+- [NEVER] Collapse context early via mid-pipeline `.Match()` just for logging.
+- [NEVER] Instantiate telemetry identities inside handlers/services.
+- [NEVER] Hardcode exporter endpoints in domain modules.

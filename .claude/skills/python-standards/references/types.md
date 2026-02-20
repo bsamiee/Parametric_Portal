@@ -1,40 +1,41 @@
 # [H1][TYPES]
 >**Dictum:** *Types are closed proofs; typed atoms eradicate primitive obsession; discriminated unions exhaust state space.*
 
-Domain types in Python 3.14+ encode invariants at construction through smart constructors returning `Result`, block invalid state with frozen models, and use Pydantic Rust-backed `core_schema` for boundary validation. Modeling remains schema-first: strict `ConfigDict`, targeted validators/serializers, and functional updates via `model_copy(update=...)`. All snippets assume `returns >= 0.26`, `pydantic >= 2.12`, `typing-extensions >= 4.15`, `beartype >= 0.22`.
+<br>
+
+Domain types in Python 3.14+ encode invariants at construction through smart constructors returning `Result`, block invalid state with frozen models, and use Pydantic Rust-backed `core_schema` for boundary validation. `expression` types (`Option[T]`, `Block[T]`, `@tagged_union`) integrate natively with Pydantic v2 via `__get_pydantic_core_schema__`. All snippets assume `returns >= 0.26`, `expression >= 5.6`, `pydantic >= 2.12`, `beartype >= 0.22`.
 
 ---
 ## [1][TYPED_ATOM_PATTERN]
->**Dictum:** *Primitives validate inline; construction is total; collections are immutable.*
+>**Dictum:** *Primitives validate inline; construction is total.*
 
-`NewType` provides compile-time distinction. `Annotated` + `__get_pydantic_core_schema__` provides Rust-backed runtime validation. Smart constructors return `Result[Atom, Error]` via `match/case` -- the caller composes via `bind`/`map` on the railway. Signatures use `tuple[T, ...]` over `list`, `frozenset` over `set`, `Mapping` over `dict`.
+<br>
+
+`NewType` provides compile-time distinction. `Annotated` + `__get_pydantic_core_schema__` provides Rust-backed runtime validation. Smart constructors return `Result[Atom, Error]` via `match/case` -- the caller composes via `bind`/`map` on the railway.
 
 ```python
-# --- [IMPORTS] -------------------------------------------------------------
+# --- [IMPORTS] ----------------------------------------------------------------
+
 import re
-from collections.abc import Sequence
-from decimal import Decimal
 from dataclasses import dataclass
 from typing import Annotated, NewType
 
-from pydantic import GetCoreSchemaHandler, GetJsonSchemaHandler, StringConstraints, TypeAdapter
-from pydantic.json_schema import JsonSchemaValue
+from pydantic import GetCoreSchemaHandler, StringConstraints
 from pydantic_core import CoreSchema, core_schema
 from returns.result import Failure, Result, Success
 
-# --- [CODE] ----------------------------------------------------------------
+# --- [TYPES] ------------------------------------------------------------------
 
-# -- Typed error atom for validation failures ------------------------------
 @dataclass(frozen=True, slots=True)
 class AtomError:
     atom: str
     message: str
 
-# -- NewType atoms: zero-cost at runtime, distinct at type-check -----------
 UserId = NewType("UserId", int)
 CorrelationId = NewType("CorrelationId", str)
 
-# -- Annotated constrained atom with core_schema enforcement ---------------
+# --- [SCHEMA] -----------------------------------------------------------------
+
 EMAIL_RE: re.Pattern[str] = re.compile(r"^[\w.+-]+@[\w-]+\.[\w.]+$")
 
 class _EmailValidator:
@@ -44,175 +45,54 @@ class _EmailValidator:
     def __get_pydantic_core_schema__(
         self, source_type: type[str], handler: GetCoreSchemaHandler,
     ) -> CoreSchema:
-        # Canonical pattern: parse primitive first, then run domain validator.
         return core_schema.chain_schema([
             core_schema.str_schema(min_length=5, max_length=320, strip_whitespace=True),
             core_schema.no_info_plain_validator_function(self._validate),
         ])
-
-    def __get_pydantic_json_schema__(
-        self, schema: CoreSchema, handler: GetJsonSchemaHandler,
-    ) -> JsonSchemaValue:
-        json_schema: JsonSchemaValue = handler(schema)
-        return {**json_schema, "format": "email", "x-domain-atom": "Email"}
-
     @staticmethod
     def _validate(value: str) -> str:
         match EMAIL_RE.fullmatch(value):
-            case None:
-                raise ValueError(f"Invalid email: {value}")
-            case _:
-                return value
+            case None: raise ValueError(f"Invalid email: {value}")
+            case _: return value
 
 type Email = Annotated[str, _EmailValidator()]
 type Slug = Annotated[str, StringConstraints(min_length=1, max_length=64, pattern=r"^[a-z0-9-]+$")]
 
-# -- Smart constructors: sole public API for atom creation -----------------
+# --- [FUNCTIONS] --------------------------------------------------------------
+
 def make_user_id(raw: int) -> Result[UserId, AtomError]:
     match raw:
-        case n if n > 0:
-            return Success(UserId(n))
-        case _:
-            return Failure(AtomError(atom="UserId", message=f"UserId must be positive, got {raw}"))
+        case n if n > 0: return Success(UserId(n))
+        case _: return Failure(AtomError(atom="UserId", message=f"Must be positive, got {raw}"))
 
 def make_email(raw: str) -> Result[Email, AtomError]:
     stripped: str = raw.strip()
     match EMAIL_RE.fullmatch(stripped):
-        case None:
-            return Failure(AtomError(atom="Email", message=f"Invalid email: {raw}"))
-        case _:
-            return Success(stripped)  # Annotated alias validated; raw str is the Email type
-
-# -- Immutable collections: tuple > list, frozenset > set, Mapping > dict -
-def top_scores(
-    scores: Sequence[tuple[UserId, Decimal]],
-    limit: int,
-) -> tuple[tuple[UserId, Decimal], ...]:
-    return tuple(sorted(scores, key=lambda pair: pair[1], reverse=True)[:limit])
+        case None: return Failure(AtomError(atom="Email", message=f"Invalid email: {raw}"))
+        case _: return Success(stripped)
 ```
 
-[CRITICAL]: Every domain scalar follows this shape. `NewType` for compile-time distinction; `Annotated` + `core_schema` for runtime enforcement; smart constructors return `Result`. `tuple` over `list`, `frozenset` over `set`, `Mapping` over `dict` in all domain signatures. No raw `str`, `int`, or `Decimal` where a typed atom exists.
+[CRITICAL]: Every domain scalar follows this shape. `NewType` for compile-time distinction; `Annotated` + `core_schema` for runtime enforcement; smart constructors return `Result`. Immutable collection signatures (`tuple` over `list`, `frozenset` over `set`, `Mapping` over `dict`) apply to all domain returns and parameters.
 
 ---
-## [2][FROZEN_MODELS]
->**Dictum:** *Models are pure data; behavior lives in pipelines.*
-
-Pydantic `BaseModel(frozen=True)` with strict config disables coercion globally and keeps object state deterministic. Inbound shape normalization uses `model_validator(mode="before")`; cross-field invariants use `mode="after"`; alias compatibility uses `AliasChoices`/`AliasPath`; outbound shape control uses serializer hooks. BaseModel exposes `__match_args__` automatically -- prefer keyword patterns for stability.
-
-```python
-# --- [IMPORTS] -------------------------------------------------------------
-from typing import Annotated, Self
-
-from pydantic import (
-    AliasChoices,
-    AliasPath,
-    BaseModel,
-    ConfigDict,
-    Field,
-    SerializerFunctionWrapHandler,
-    computed_field,
-    field_serializer,
-    model_serializer,
-    model_validator,
-)
-
-from pinnacle.domain.atoms import Email, Slug, UserId
-
-# --- [CODE] ----------------------------------------------------------------
-
-class Address(BaseModel, frozen=True):
-    model_config = ConfigDict(strict=True, extra="forbid")
-    street: Annotated[str, Field(min_length=1)]
-    city: Annotated[str, Field(min_length=1)]
-    country_code: Annotated[str, Field(min_length=2, max_length=2)]
-
-class User(BaseModel, frozen=True):
-    model_config = ConfigDict(strict=True, extra="forbid", revalidate_instances="never")
-    user_id: UserId
-    email: Email
-    name: Annotated[
-        str,
-        Field(
-            min_length=1,
-            validation_alias=AliasChoices("name", AliasPath("profile", "name")),
-        ),
-    ]
-    slug: Slug
-    address: Address
-
-    @model_validator(mode="before")
-    @classmethod
-    def _normalize_ingress(cls, data: object) -> object:
-        """Compatibility layer for legacy ingress payloads."""
-        match data:
-            case {"full_name": str() as full_name, **rest}:
-                return {"name": full_name, **rest}
-            case _:
-                return data
-
-    @computed_field
-    @property
-    def display(self) -> str:
-        return f"{self.name} <{self.email}>"
-
-    @model_validator(mode="after")
-    def _cross_validate(self) -> Self:
-        """Cross-field validation: US addresses require 5-digit zip in slug."""
-        match (self.address.country_code, self.slug):
-            case ("US", slug) if not slug[:5].isdigit():
-                raise ValueError("US users require zip-prefixed slug")
-            case _:
-                return self
-
-    @field_serializer("email")
-    def _serialize_email(self, value: Email) -> str:
-        return str(value).lower()
-
-    @model_serializer(mode="wrap")
-    def _serialize_user(self, handler: SerializerFunctionWrapHandler) -> dict[str, object]:
-        payload: dict[str, object] = handler(self)
-        return {**payload, "kind": "user", "schema_version": 1}
-
-# -- Keyword pattern matching on BaseModel (via __match_args__) -----------
-def describe_user(user: User) -> str:
-    match user:
-        case User(name=name, email=email, slug=slug):
-            return f"{name} ({email}) [{slug}]"
-
-# -- Functional update via model_copy: frozen models are never mutated ----
-def rename_user(user: User, new_name: str) -> User:
-    """model_copy(update={...}) returns a new frozen instance -- the original is untouched."""
-    return user.model_copy(update={"name": new_name})
-```
-
-[CRITICAL]: All models declare `frozen=True`. Use `model_copy(update={...})` for functional updates -- never mutate fields directly. Use strict configs (`strict=True`, `extra=\"forbid\"`) to keep object contracts closed. Use `model_validator(mode=\"before\")` for ingress normalization and `mode=\"after\"` for invariant checks. Keep serializer logic in model serializers only for boundary shape; domain behavior remains in `ops/` pipelines.
-
----
-## [3][DISCRIMINATED_UNIONS]
+## [2][DISCRIMINATED_UNIONS]
 >**Dictum:** *Unions exhaust state space; the type checker and runtime enforce totality.*
 
-Pydantic `Discriminator` + `Tag` + `Literal` fields route validation to the correct variant. `TypeAdapter` provides eager boundary initialization. Callable discriminators handle polymorphic dispatch via structural `match/case` on dict keys and model attributes.
+<br>
+
+Two construction mechanisms, selected by context. **Pydantic `Discriminator` + `Tag`** for boundary models requiring JSON Schema generation and ingress validation. **`expression.@tagged_union`** for internal domain unions with zero Pydantic overhead -- preferred when the union does not cross a serialization boundary.
 
 ```python
-# --- [IMPORTS] -------------------------------------------------------------
+# --- [IMPORTS] ----------------------------------------------------------------
+
 from typing import Annotated, Literal, Union
 
+from expression import tagged_union, case, tag
 from pydantic import BaseModel, Discriminator, Field, Tag, TypeAdapter
 
-from pinnacle.domain.atoms import Email
-
-# --- [CODE] ----------------------------------------------------------------
+# --- [SCHEMA] -----------------------------------------------------------------
 
 type Money = Annotated[str, Field(pattern=r"^\d+\.\d{2}$")]
-
-def _payment_disc(raw: dict[str, object] | CardPayment | BankPayment) -> str:
-    match raw:
-        case {"method": str() as method}:
-            return method
-        case object(method=str() as method):
-            return method
-        case _:
-            return "unknown"
 
 class CardPayment(BaseModel, frozen=True):
     method: Literal["card"]
@@ -224,135 +104,238 @@ class BankPayment(BaseModel, frozen=True):
     iban: Annotated[str, Field(min_length=1)]
     amount: Money
 
+def _payment_disc(raw: dict[str, object] | CardPayment | BankPayment) -> str:
+    match raw:
+        case {"method": str() as method}: return method
+        case object(method=str() as method): return method
+        case _: return "unknown"
+
 type Payment = Annotated[
-    Union[
-        Annotated[CardPayment, Tag("card")],
-        Annotated[BankPayment, Tag("bank")],
-    ],
+    Union[Annotated[CardPayment, Tag("card")], Annotated[BankPayment, Tag("bank")]],
     Discriminator(_payment_disc),
 ]
-
 PaymentAdapter: TypeAdapter[Payment] = TypeAdapter(Payment)
 
-# -- Structural destructuring replaces hasattr/getattr --------------------
+# --- [SCHEMA] -----------------------------------------------------------------
+
+@tagged_union
+class OrderState:
+    tag: Literal["Pending", "Processing", "Shipped", "Cancelled"] = tag()
+    Pending = case()
+    Processing = case(order_id=str, worker_id=str)
+    Shipped = case(tracking=str)
+    Cancelled = case(reason=str)
+
+# --- [FUNCTIONS] --------------------------------------------------------------
+
+def order_label(state: OrderState) -> str:
+    match state:
+        case OrderState.Pending(): return "awaiting processing"
+        case OrderState.Processing(order_id=oid, worker_id=wid): return f"processing {oid} by {wid}"
+        case OrderState.Shipped(tracking=tracking): return f"shipped: {tracking}"
+        case OrderState.Cancelled(reason=reason): return f"cancelled: {reason}"
+
 def payment_label(payment: Payment) -> str:
     match payment:
-        case CardPayment(amount=amount, last_four=last_four):
-            return f"card ending {last_four}: {amount}"
-        case BankPayment(amount=amount, iban=iban):
-            return f"bank {iban}: {amount}"
+        case CardPayment(amount=amount, last_four=last_four): return f"card ending {last_four}: {amount}"
+        case BankPayment(amount=amount, iban=iban): return f"bank {iban}: {amount}"
 ```
 
-[IMPORTANT]: `TypeAdapter` initialization is eager -- create at module level, not per-request. Callable discriminators use structural `match/case`: dict pattern for raw ingress, `object(attr=value)` for model instances. [NEVER] `hasattr`/`getattr` -- use keyword patterns.
+[IMPORTANT]: `@tagged_union` replaces manual frozen dataclass hierarchies for domain-internal unions -- zero boilerplate, exhaustive `match/case` via generated variant constructors. `TypeAdapter` initialization is eager -- create at module level. See `effects.md` [3] for `Result` dispatch over union outcomes.
 
 ---
-## [4][TYPE_SYNTAX]
+## [3][FROZEN_MODELS]
+>**Dictum:** *Models are pure data; behavior lives in pipelines.*
+
+<br>
+
+Pydantic `BaseModel(frozen=True)` with strict config. `expression.Option[T]` and `expression.collections.Block[T]` integrate as Pydantic model fields via built-in `__get_pydantic_core_schema__` -- use for optional domain values and frozen collections respectively. Functional updates via `model_copy(update=...)`.
+
+```python
+# --- [IMPORTS] ----------------------------------------------------------------
+
+from typing import Annotated, Self
+
+from expression import Option, Some, Nothing
+from expression.collections import Block
+from pydantic import (
+    AliasChoices, AliasPath, BaseModel, ConfigDict, Field,
+    computed_field, model_validator,
+)
+from pinnacle.domain.atoms import Email, Slug, UserId
+
+# --- [SCHEMA] -----------------------------------------------------------------
+
+class User(BaseModel, frozen=True):
+    model_config = ConfigDict(strict=True, extra="forbid", revalidate_instances="never")
+    user_id: UserId
+    email: Email
+    name: Annotated[str, Field(
+        min_length=1, validation_alias=AliasChoices("name", AliasPath("profile", "name")),
+    )]
+    slug: Slug
+    country_code: Annotated[str, Field(min_length=2, max_length=2)]
+    # -- expression types as Pydantic fields (auto-serialization via core_schema) --
+    nickname: Option[str] = Nothing
+    tags: Block[str] = Block.empty()
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_ingress(cls, data: object) -> object:
+        match data:
+            case {"full_name": str() as full_name, **rest}: return {"name": full_name, **rest}
+            case _: return data
+    @computed_field
+    @property
+    def display(self) -> str:
+        return f"{self.name} <{self.email}>"
+    @model_validator(mode="after")
+    def _cross_validate(self) -> Self:
+        match (self.country_code, self.slug):
+            case ("US", slug) if not slug[:5].isdigit():
+                raise ValueError("US users require zip-prefixed slug")
+            case _: return self
+
+# --- [FUNCTIONS] --------------------------------------------------------------
+
+def rename_user(user: User, new_name: str) -> User:
+    return user.model_copy(update={"name": new_name})
+
+def user_greeting(user: User) -> str:
+    """Option.match for presence/absence -- never if/else."""
+    match user.nickname:
+        case Some(nick):
+            return f"Hello, {nick}!"
+        case _:
+            return f"Hello, {user.name}!"
+```
+
+[CRITICAL]: `frozen=True` on all models. `expression.Option[T]` replaces `X | None` for model fields -- provides `Some`/`Nothing` match semantics and Pydantic auto-serialization. `expression.Block[T]` replaces `tuple[T, ...]` when structural sharing or 30+ collection combinators are needed. See `serialization.md` [1] for ingress pipeline details.
+
+---
+## [4][MODERN_SYNTAX]
 >**Dictum:** *Modern syntax reduces ceremony; type parameters are first-class.*
+
+<br>
 
 PEP 695 (`type X = Y`) replaces `TypeAlias`. PEP 696 (`TypeVar` defaults) collapses boilerplate. PEP 747 (`TypeForm`) bridges static types and runtime checks.
 
 ```python
-# --- [IMPORTS] -------------------------------------------------------------
+# --- [IMPORTS] ----------------------------------------------------------------
+
 from collections.abc import Callable
 from typing import cast
 
 from beartype.door import die_if_unbearable
-from returns.result import Failure, Result, Success, safe
+from returns.result import Result, safe
 from typing_extensions import TypeForm
 
-# --- [CODE] ----------------------------------------------------------------
+# --- [TYPES] ------------------------------------------------------------------
 
-# -- PEP 695: type statement as canonical alias syntax --------------------
 type DomainError = str
 type Pipeline[A, B] = Callable[[A], Result[B, DomainError]]
 type Validator[T] = Pipeline[object, T]
 
-# -- PEP 696: TypeVar defaults collapse generic arity --------------------
-class Processor[T, E = str]:
-    """Consumers specify only T; E defaults to str."""
-    __slots__ = ("_transform",)
+# --- [SCHEMA] -----------------------------------------------------------------
 
+class Processor[T, E = str]:
+    """PEP 696: consumers specify only T; E defaults to str."""
+    __slots__ = ("_transform",)
     def __init__(self, transform: Pipeline[T, T]) -> None:
         self._transform = transform
 
-# -- PEP 747: TypeForm runtime narrowing returning Result ----------------
+# --- [FUNCTIONS] --------------------------------------------------------------
+
 @safe
-def _check_beartype[V](form: object, raw: object) -> V:
+def _check_beartype[V](form: TypeForm[V], raw: object) -> V:
     """Beartype bridge: raises on mismatch, @safe captures into Result."""
     die_if_unbearable(raw, form)
     return cast(V, raw)
 
-def narrow[V](form: object, raw: object) -> Result[V, Exception]:
-    """Runtime narrowing via beartype -- Result instead of raising."""
+def narrow[V](form: TypeForm[V], raw: object) -> Result[V, Exception]:
+    """PEP 747: runtime narrowing via beartype -- Result instead of raising."""
     return _check_beartype(form, raw)
+```
 
-# -- Phantom types: compile-time state tracking via unused type parameter ---
+[IMPORTANT]: `type X = Y` replaces `TypeAlias`. Generic pipeline aliases (`type Pipeline[A, B] = ...`) express reusable effect shapes. `TypeVar` defaults via PEP 696 reduce generic arity. `TypeForm` closes the last `Any` leak in validation architectures. See `patterns.md` [1] for `ANY_CAST_ERASURE` anti-pattern.
+
+---
+## [5][PHANTOM_TYPES]
+>**Dictum:** *Compile-time state is zero-cost; runtime enforcement is unnecessary.*
+
+<br>
+
+Empty classes parameterize a generic type. Method signatures accept only the validated variant -- compile-time enforcement with zero runtime overhead. The type checker prevents double-validation and use of unvalidated values.
+
+```python
+# --- [IMPORTS] ----------------------------------------------------------------
+
+from returns.result import Failure, Result, Success
+
+# --- [TYPES] ------------------------------------------------------------------
+
 class _Unvalidated: ...
 class _Validated: ...
-
 class Token[State]:
-    """Phantom type: State is never stored, only checked at type level."""
+    """Phantom: State is never stored, only checked at type level."""
     __slots__ = ("_value",)
-    def __init__(self, value: str) -> None:
-        self._value = value
+    def __init__(self, value: str) -> None: self._value = value
     @property
-    def value(self) -> str:
-        return self._value
+    def value(self) -> str: return self._value
+
+# --- [FUNCTIONS] --------------------------------------------------------------
 
 def create_token(raw: str) -> Token[_Unvalidated]:
     return Token[_Unvalidated](raw)
 
 def validate_token(token: Token[_Unvalidated]) -> Result[Token[_Validated], str]:
-    """Only accepts unvalidated tokens; returns validated. Type checker prevents double-validation."""
     match token.value:
-        case str() as value if len(value) > 0:
-            return Success(Token[_Validated](value))
-        case _:
-            return Failure("empty token")
+        case str() as value if len(value) > 0: return Success(Token[_Validated](value))
+        case _: return Failure("empty token")
 
 def use_token(token: Token[_Validated]) -> str:
-    """Only accepts validated tokens -- unvalidated tokens are a type error."""
     return f"authorized:{token.value}"
 ```
 
-[IMPORTANT]: `type X = Y` replaces `TypeAlias` assignments. Generic pipeline aliases (`type Pipeline[A, B] = ...`) express reusable effect shapes. `TypeVar` defaults via PEP 696 reduce generic arity at call sites. `TypeForm` from `typing_extensions` closes the last `Any` leak in validation-heavy architectures.
+[CRITICAL]: `use_token(Token[_Validated])` rejects `Token[_Unvalidated]` at type-check time. The phantom parameter carries no runtime data. Combine with `@tagged_union` (see [2]) for state machines where transitions also carry variant data.
 
 ---
-## [5][RULES]
+## [6][RULES]
 >**Dictum:** *Rules compress into constraints.*
+
+<br>
 
 - [ALWAYS] `NewType` for compile-time scalar distinction -- zero runtime overhead.
 - [ALWAYS] `Annotated` + `__get_pydantic_core_schema__` for Rust-backed validation atoms.
-- [ALWAYS] `StringConstraints` for simple pattern/length constraints on strings.
 - [ALWAYS] Smart constructors return `Result[Atom, Error]` -- construction is total.
 - [ALWAYS] `frozen=True` on every Pydantic model -- immutability is default.
-- [ALWAYS] `model_copy(update={...})` for functional updates on frozen models -- never mutate directly.
-- [ALWAYS] `ConfigDict(strict=True, extra=\"forbid\")` for closed object contracts.
-- [ALWAYS] `AliasChoices` / `AliasPath` for backward-compatible ingress fields.
-- [ALWAYS] `model_validator(mode=\"before\")` to normalize legacy payloads before field checks.
-- [ALWAYS] `field_serializer` / `model_serializer` only for boundary shape projection.
-- [ALWAYS] `@property` (not `@cached_property`) with `@computed_field` on frozen models.
-- [ALWAYS] `tuple` over `list`, `frozenset` over `set`, `Mapping` over `dict` in domain signatures.
+- [ALWAYS] `model_copy(update={...})` for functional updates -- never mutate directly.
+- [ALWAYS] `ConfigDict(strict=True, extra="forbid")` for closed object contracts.
 - [ALWAYS] `TypeAdapter` initialized eagerly at module level for boundary validation.
 - [ALWAYS] Keyword patterns (`case Model(field=value)`) for `__match_args__` stability.
-- [NEVER] Raw `str`/`int`/`Decimal` as method parameters where a typed atom exists.
+- [ALWAYS] `tuple` over `list`, `frozenset` over `set`, `Mapping` over `dict` in domain signatures. `expression.Block[T]` when 30+ combinators or structural sharing needed.
+- [ALWAYS] `expression.Option[T]` for optional model fields; `Some`/`Nothing` match semantics.
+- [ALWAYS] `@tagged_union` for domain-internal closed unions; Pydantic `Discriminator` + `Tag` for boundary unions.
+- [NEVER] Raw `str`/`int`/`Decimal` as parameters where a typed atom exists.
 - [NEVER] Public constructors that raise for expected invalid input -- return `Result`.
-- [NEVER] Mutable collections in domain model fields -- use `tuple` and `frozenset`.
-- [NEVER] `hasattr`/`getattr` -- use structural pattern matching.
+- [NEVER] Mutable collections in domain model fields.
+- [NEVER] `hasattr`/`getattr` -- use structural pattern matching. See `patterns.md` [1].
+- [NEVER] `Optional[T]` for model fields -- use `expression.Option[T]`.
 
 ---
-## [6][QUICK_REFERENCE]
+## [7][QUICK_REFERENCE]
 
-- NewType atoms: compile-time scalar distinction with zero runtime overhead.
-- Annotated atoms: runtime-validated scalars through `core_schema`.
-- `StringConstraints`: concise string range/pattern constraints.
-- Smart constructors: `make_x(raw) -> Result[X, Error]` as sole creation path.
-- Frozen models: strict `ConfigDict` and `model_copy`-based updates.
-- Alias compatibility: `AliasChoices` / `AliasPath` for ingress evolution.
-- Ingress normalization: `model_validator(mode=\"before\")`.
-- Boundary projection: `field_serializer` / `model_serializer`.
-- Discriminated unions: `Discriminator` + `Tag` + eager `TypeAdapter`.
-- Immutable collections: `tuple`, `frozenset`, `Mapping` in domain signatures.
-- PEP 695 aliases: compact reusable shape definitions.
-- PEP 747 `TypeForm`: runtime narrowing without `Any` leakage.
-- Phantom types: compile-time state tracking with unused type parameters.
+| [INDEX] | [PATTERN]          | [WHEN]                               | [KEY_TRAIT]                                 |
+| :-----: | ------------------ | ------------------------------------ | ------------------------------------------- |
+|   [1]   | NewType atoms      | Compile-time scalar distinction      | Zero runtime overhead, nominal typing       |
+|   [2]   | Annotated atoms    | Runtime-validated scalars            | `core_schema` Rust-backed enforcement       |
+|   [3]   | Smart constructors | `make_x(raw) -> Result[X, Error]`    | Total construction, railway-composable      |
+|   [4]   | Frozen models      | Strict `ConfigDict` + `model_copy`   | Immutability, Pydantic auto-serialization   |
+|   [5]   | expression.Option  | Optional model fields                | `Some`/`Nothing` match, Pydantic-compatible |
+|   [6]   | expression.Block   | Frozen collection model fields       | Structural sharing, 30+ combinators         |
+|   [7]   | Pydantic DU        | Boundary unions with JSON Schema     | `Discriminator` + `Tag` + `TypeAdapter`     |
+|   [8]   | @tagged_union      | Domain-internal closed unions        | Zero boilerplate, exhaustive `match/case`   |
+|   [9]   | PEP 695 aliases    | Compact reusable shape definitions   | `type Pipeline[A, B] = Callable[...]`       |
+|  [10]   | PEP 696 defaults   | Reducing generic arity at call sites | `class Processor[T, E = str]`               |
+|  [11]   | PEP 747 TypeForm   | Runtime narrowing without `Any` leak | `beartype` + `Result` bridge                |
+|  [12]   | Phantom types      | Compile-time state tracking          | Empty class markers, zero runtime data      |

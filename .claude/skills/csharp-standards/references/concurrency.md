@@ -1,15 +1,17 @@
 # [H1][CONCURRENCY]
->**Dictum:** *Coordination is algebraic: bounded flow, explicit cancellation, guaranteed release, and observed joins.*
+>**Dictum:** *Coordination is algebraic: bounded flow, cancellation, release, observed joins.*
 
 <br>
 
-Concurrency in C# 14 / .NET 10 is boundary architecture, not domain mutation strategy. `Channel<T>` provides constrained flow, `Lock` and `SemaphoreSlim` provide boundary-only synchronization, and cancellation is environmental (`Has<RT, CancellationToken>`). All snippets assume `using static LanguageExt.Prelude;`.
+Concurrency in C# 14 / .NET 10 (`using static LanguageExt.Prelude;` assumed) is boundary architecture -- domain transforms stay pure; coordination belongs at the effectful shell where I/O is already acknowledged. `Channel<T>` replaces queue-plus-lock patterns with bounded, backpressure-native fan-out; `Lock` (.NET 9+) and `SemaphoreSlim` gate synchronization at boundary sites exclusively -- never inside `Eff<RT,T>` pipelines. Cancellation threads explicitly as `CancellationToken` at adapter entry points, or implicitly via the `HasCancellationToken<RT>` trait deep inside `Eff` chains; resource lifecycle is always `Bracket`/`IO.bracket` -- `try/finally` is a boundary-adapter exemption only.
 
 ---
 ## [1][COORDINATION_ALGEBRA]
 >**Dictum:** *Acquire-use-release, cancellation, and bounded fan-out belong in one compositional surface.*
 
 <br>
+
+`Bracket` encodes acquire/use/release as a first-class effect -- `Fin` is guaranteed regardless of success, failure, or cancellation, replacing `try/finally` entirely in domain code. `WithTimeout` composes a deadline into any `Eff` pipeline by scoping a linked `CancellationTokenSource` inside `Bracket`; `ParallelBounded` is the approved boundary adapter for ad-hoc fan-out when a full `Channel<T>` pipeline topology is disproportionate.
 
 ```csharp
 namespace Domain.Concurrency;
@@ -20,8 +22,7 @@ using LanguageExt.Common;
 using LanguageExt.Traits;
 using static LanguageExt.Prelude;
 
-public interface HasCancel<RT> : Has<RT, CancellationToken>
-    where RT : HasCancel<RT>;
+// --- [FUNCTIONS] -------------------------------------------------------------
 
 public static class Coordination {
     public static Eff<RT, T> Bracketed<RT, TResource, T>(
@@ -39,12 +40,13 @@ public static class Coordination {
         select result;
     public static Eff<RT, T> WithTimeout<RT, T>(
         TimeSpan timeout,
-        Func<CancellationToken, Eff<RT, T>> operation)
-        where RT : HasCancel<RT> =>
-        from parentToken in default(RT).CancellationToken
+        CancellationToken parentToken,
+        Func<CancellationToken, Eff<RT, T>> operation) =>
         from result in Bracketed(
             acquire: IO.lift(() => {
-                CancellationTokenSource linked = CancellationTokenSource.CreateLinkedTokenSource(parentToken);
+                CancellationTokenSource linked =
+                    CancellationTokenSource
+                        .CreateLinkedTokenSource(parentToken);
                 linked.CancelAfter(timeout);
                 return linked;
             }),
@@ -53,107 +55,102 @@ public static class Coordination {
             release: (CancellationTokenSource linked) =>
                 linked.Dispose())
         select result;
+    // [BOUNDARY ADAPTER -- sync lock acquire is imperative]
     public static Fin<T> WithLock<T>(
-        Lock gate,
-        Func<Fin<T>> criticalSection) {
+        Lock gate, Func<Fin<T>> criticalSection) {
         using Lock.Scope _ = gate.EnterScope();
         return criticalSection();
     }
     public static IO<Seq<TResult>> ParallelBounded<TInput, TResult>(
-        Seq<TInput> inputs,
-        int maxConcurrency,
+        Seq<TInput> inputs, int maxConcurrency,
         CancellationToken cancellationToken,
         Func<TInput, CancellationToken, Task<TResult>> operation) =>
-        liftIO(async () => {
-            SemaphoreSlim gate = new(
-                initialCount: maxConcurrency,
-                maxCount: maxConcurrency);
-            try {
-                Task<TResult>[] tasks = inputs.Map((TInput input) =>
-                    ExecuteGated(
-                        gate: gate,
-                        input: input,
-                        cancellationToken: cancellationToken,
-                        operation: operation)).ToArray();
-                TResult[] values = await Task.WhenAll(tasks).ConfigureAwait(false);
-                return toSeq(values);
-            } finally {
-                gate.Dispose();
+        IO.lift(async () => {
+            // [BOUNDARY ADAPTER -- semaphore lifecycle + try/finally
+            //  for deterministic release on success, fault, cancel]
+            using SemaphoreSlim gate = new(
+                maxConcurrency, maxConcurrency);
+            Task<TResult>[] tasks = inputs
+                .Map((TInput input) => ExecuteGated(input))
+                .ToArray();
+            TResult[] values = await Task
+                .WhenAll(tasks).ConfigureAwait(false);
+            return toSeq(values);
+            async Task<TResult> ExecuteGated(TInput input) {
+                await gate.WaitAsync(cancellationToken)
+                    .ConfigureAwait(false);
+                try {
+                    return await operation(input, cancellationToken)
+                        .ConfigureAwait(false);
+                }
+                finally {
+                    gate.Release();
+                }
             }
         });
-    private static async Task<TResult> ExecuteGated<TInput, TResult>(
-        SemaphoreSlim gate,
-        TInput input,
-        CancellationToken cancellationToken,
-        Func<TInput, CancellationToken, Task<TResult>> operation) {
-        await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try {
-            return await operation(input, cancellationToken).ConfigureAwait(false);
-        } finally {
-            gate.Release();
-        }
-    }
 }
 ```
 
 ---
 ## [2][CHANNEL_TOPOLOGIES]
->**Dictum:** *Backpressure strategy is explicit at construction; error propagation is terminal semantics, not side effect.*
+>**Dictum:** *Backpressure is explicit at construction; error propagation is terminal.*
 
 <br>
+
+`BoundedChannelOptions` locks topology at construction -- capacity, `FullMode`, and reader/writer cardinality are structural decisions, not runtime tuning. `RunStage` is the canonical pipeline primitive: a `Fin<TOut>` failure calls `writer.Complete(error.ToException())`, terminating the downstream stage immediately rather than swallowing the error or leaving the writer open.
 
 ```csharp
 namespace Domain.Concurrency;
 
 using System.Threading.Channels;
 using LanguageExt;
+using LanguageExt.Common;
 using static LanguageExt.Prelude;
+
+// --- [FUNCTIONS] -------------------------------------------------------------
 
 public static class ChannelTopology {
     public static Channel<T> CreateBounded<T>(
-        int capacity,
-        BoundedChannelFullMode fullMode,
-        bool singleWriter,
-        bool singleReader) =>
+        int capacity, BoundedChannelFullMode fullMode,
+        bool singleWriter, bool singleReader) =>
         Channel.CreateBounded<T>(
-            new BoundedChannelOptions(capacity: capacity) {
+            new BoundedChannelOptions(capacity) {
                 FullMode = fullMode,
                 SingleWriter = singleWriter,
                 SingleReader = singleReader,
                 AllowSynchronousContinuations = false
             });
     public static IO<Unit> RunStage<TIn, TOut>(
-        ChannelReader<TIn> reader,
-        ChannelWriter<TOut> writer,
+        ChannelReader<TIn> reader, ChannelWriter<TOut> writer,
         CancellationToken cancellationToken,
         Func<TIn, Fin<TOut>> transform) =>
         liftIO(async () => {
-            try {
-                await foreach (TIn input in reader
-                    .ReadAllAsync(cancellationToken)
-                    .ConfigureAwait(false)) {
-                    TOut output = transform(input)
-                        .IfFail(static (Error error) => throw error.ToException());
-                    await writer.WriteAsync(output, cancellationToken)
-                        .ConfigureAwait(false);
-                }
-                writer.Complete();
-            } catch (Exception ex) {
-                writer.Complete(ex);
+            // [BOUNDARY ADAPTER -- async enumeration + writer lifecycle]
+            await foreach (TIn input in reader
+                .ReadAllAsync(cancellationToken)
+                .ConfigureAwait(false)) {
+                await transform(input).Match(
+                    Succ: (TOut output) =>
+                        writer.WriteAsync(output, cancellationToken),
+                    Fail: (Error error) => {
+                        writer.Complete(error.ToException());
+                        return default(ValueTask);
+                    }).ConfigureAwait(false);
             }
+            writer.Complete();
             return unit;
         });
 }
 ```
 
-| [FULL_MODE] | [SEMANTICS] | [PRIMARY_USE] |
-| ----------- | ----------- | ------------- |
-| `Wait` | Producer awaits available capacity | lossless command/event pipelines |
-| `DropOldest` | Oldest buffered item evicted | latest-state telemetry streams |
-| `DropNewest` | Most recent buffered item evicted | preserve earliest causality |
-| `DropWrite` | Incoming write discarded | best-effort non-critical signals |
+| [INDEX] | [FULL_MODE]      | [SEMANTICS]              | [PRIMARY_USE]          |
+| :-----: | :--------------- | ------------------------ | ---------------------- |
+|   [1]   | **`Wait`**       | Awaits available space   | Lossless event pipes   |
+|   [2]   | **`DropOldest`** | Oldest item evicted      | Latest-state telemetry |
+|   [3]   | **`DropNewest`** | Newest item evicted      | Earliest causality     |
+|   [4]   | **`DropWrite`**  | Incoming write discarded | Best-effort signals    |
 
-`capacity` must remain positive for bounded channels; backpressure policy is declared once at topology construction.
+Bounded channels require positive `capacity`; backpressure declared once at construction.
 
 ---
 ## [3][ASYNC_STREAM_BOUNDARIES]
@@ -161,38 +158,49 @@ public static class ChannelTopology {
 
 <br>
 
+`[EnumeratorCancellation]` on the token parameter makes cancellation cooperative at call sites via `WithCancellation`; `ConfigureAwait(false)` is mandatory throughout. The C# async iterator spec requires statement-form `if` + `yield return` -- these are the only permitted imperative constructs at this boundary, each annotated with a `[BOUNDARY ADAPTER]` comment explaining the spec constraint.
+
 ```csharp
 namespace Domain.Concurrency;
 
+// [EnumeratorCancellation] requires this import
 using System.Runtime.CompilerServices;
 using LanguageExt;
 using static LanguageExt.Prelude;
 
+// --- [FUNCTIONS] -------------------------------------------------------------
+
 public static class AsyncStreams {
     extension<T>(IAsyncEnumerable<T> stream) {
+        // [BOUNDARY ADAPTER -- yield-based accumulation;
+        //  async iterator protocol mandates mutable binding +
+        //  conditional yield. Seq<T> is immutable; binding evolves.]
         public async IAsyncEnumerable<Seq<T>> Batch(
             int batchSize,
-            [EnumeratorCancellation] CancellationToken cancellationToken = default) {
-            Seq<T> batch = Seq<T>.Empty;
+            [EnumeratorCancellation]
+            CancellationToken cancellationToken = default) {
+            Seq<T> batch = Empty;
             await foreach (T item in stream
                 .WithCancellation(cancellationToken)
                 .ConfigureAwait(false)) {
                 batch = batch.Add(item);
+                // [BOUNDARY ADAPTER -- conditional yield; yield
+                //  cannot appear in expression-bodied constructs]
                 if (batch.Count >= batchSize) {
                     yield return batch;
-                    batch = Seq<T>.Empty;
+                    batch = Empty;
                 }
             }
-            if (!batch.IsEmpty) {
-                yield return batch;
-            }
+            // [BOUNDARY ADAPTER -- terminal flush; yield cannot appear in switch/ternary arm]
+            if (!batch.IsEmpty) { yield return batch; }
         }
     }
+    // [BOUNDARY ADAPTER -- async enumeration materialization]
     public static IO<Seq<T>> Collect<T>(
         IAsyncEnumerable<T> stream,
         CancellationToken cancellationToken) =>
         liftIO(async () => {
-            Seq<T> acc = Seq<T>.Empty;
+            Seq<T> acc = Empty;
             await foreach (T item in stream
                 .WithCancellation(cancellationToken)
                 .ConfigureAwait(false)) {
@@ -205,16 +213,22 @@ public static class AsyncStreams {
 
 ---
 ## [4][CONCURRENCY_CANON]
+>**Dictum:** *Canon constraints codify non-negotiable concurrency guarantees.*
 
-| [CONSTRAINT] | [MANDATE] | [ANALYZER_OR_REASON] |
-| ------------ | --------- | -------------------- |
-| `RESOURCE_LIFECYCLE` | acquisition and release are composed in bracket form | no orphaned disposables on failure channels |
-| `TOKEN_THREADING` | async APIs must accept and forward `CancellationToken` | `MA0032`, `CA2016` |
-| `ASYNC_OBSERVATION` | spawned work is always joined/observed (`Task.WhenAll`) | `VSTHRD110` |
-| `AWAIT_INTENT` | library awaits are explicit with `ConfigureAwait(false)` | `VSTHRD111` |
-| `LOCK_DISCIPLINE` | `Lock` for sync critical sections only; never across `await` | `MA0158` + lock semantics |
-| `SEMAPHORE_DISCIPLINE` | `WaitAsync(token)` + guaranteed `Release()` in finally path | bounded async mutual exclusion |
-| `CHANNEL_EXPLICITNESS` | bounded channels require explicit full mode and positive capacity | deterministic backpressure |
-| `ERROR_PROPAGATION` | stage failures terminate writer with `Complete(exception)` | downstream completion semantics |
-| `DOMAIN_STATE` | domain concurrency uses `Atom<T>` / `Ref<T>` transitions, not lock choreography | compositional state invariants |
-| `ANTI_PATTERN` | no `Task.Run` fan-out as policy substitute for bounded topology | avoids unbounded scheduler pressure |
+<br>
+
+Every row maps to a Roslyn analyzer or architectural invariant -- enforcement is compile-time, not review-time. `RESOURCE_LIFECYCLE` and `TOKEN_THREADING` catch the highest-severity bugs (leaked handles, silent cancellation loss); `DOMAIN_STATE` and `IMMUTABLE_ACCUM` enforce the hard boundary between coordination (shell) and pure computation (domain).
+
+| [INDEX] | [CONSTRAINT]             | [MANDATE]                        | [ENFORCER]              |
+| :-----: | :----------------------- | -------------------------------- | ----------------------- |
+|   [1]   | **`RESOURCE_LIFECYCLE`** | Bracket-form acquire/use/release | CA2000                  |
+|   [2]   | **`TOKEN_THREADING`**    | Async APIs forward cancel tokens | MA0032 (strict), CA2016 |
+|   [3]   | **`ASYNC_OBSERVATION`**  | Spawned work joined via WhenAll  | VSTHRD110               |
+|   [4]   | **`AWAIT_INTENT`**       | ConfigureAwait(false) on lib     | VSTHRD111               |
+|   [5]   | **`LOCK_DISCIPLINE`**    | Lock for sync only; never await  | MA0158                  |
+|   [6]   | **`SEMAPHORE_SCOPE`**    | WaitAsync(token) + Release       | Bounded exclusion       |
+|   [7]   | **`CHANNEL_EXPLICIT`**   | Bounded + explicit full mode     | Deterministic BP        |
+|   [8]   | **`ERROR_PROPAGATION`**  | Stage failure completes writer   | Downstream signal       |
+|   [9]   | **`DOMAIN_STATE`**       | Atom/Ref, not lock choreography  | Compositional inv.      |
+|  [10]   | **`IMMUTABLE_ACCUM`**    | Fold/aggregate, not reassignment | Referential transp.     |
+|  [11]   | **`NO_TASKRUN_FANOUT`**  | No Task.Run fan-out as policy    | Bounded topology        |

@@ -1,20 +1,53 @@
 # [H1][PATTERNS]
 >**Dictum:** *Expert knowledge is knowing which landmines to avoid and which gates to enforce.*
 
-Anti-pattern codex with inline grep detection for Python 3.14+ functional modules. For operational checklists, see `validation.md`.
+<br>
+
+Anti-pattern codex with corrective examples for Python 3.14+ functional modules. For operational checklists, see `validation.md`.
 
 ---
 ## [1][ANTI_PATTERN_CODEX]
 >**Dictum:** *Each anti-pattern is a local decision that compounds into global drag.*
 
-### [MUTABLE_STATE]
-> **DETECT:** `grep -rn "= \[\]\|= {}\|^[A-Z_]*: dict\|^[A-Z_]*: list" --include="*.py"`
+<br>
 
-**Violation:** `CACHE: dict[str, str] = {}`
-**Resolution:** `_cache: ContextVar[tuple[tuple[str, str], ...]] = ContextVar("cache", default=())`
-Shared mutable state races under free-threading (PEP 779). `ContextVar` provides task-local snapshots; frozen tuples prevent mutation. See `concurrency.md` [5].
+### Inline Anti-Patterns
 
-### [IMPERATIVE_BRANCHING]
+**HASATTR_GETATTR** -- ANTI-PATTERN: `return getattr(obj, "name", "unknown")` -- CORRECT: `case object(name=name):` structural pattern matching. See `types.md` [4].
+
+**MUTABLE_MODELS** -- ANTI-PATTERN: `class Config(BaseModel): timeout: float` -- CORRECT: `class Config(BaseModel, frozen=True): timeout: Annotated[float, Field(gt=0)]`. See `serialization.md` [1].
+
+**RAISE_CONTROL_FLOW** -- ANTI-PATTERN: `raise NotFoundError(f"user {uid}")` -- CORRECT: `maybe_to_result(find_in_db(uid), default_error=NotFoundError(...))`. See `effects.md` [1].
+
+**NONE_RETURNS** -- ANTI-PATTERN: `def find_user(uid: UserId) -> User | None:` -- CORRECT: `-> Maybe[User]` (absence) or `-> Result[User, RepoError]` (failure). See `effects.md` [1].
+
+**IMPORT_TIME_IO** -- ANTI-PATTERN: `db = connect_to_database("postgresql://...")  # module level` -- CORRECT: Defer to `boot()` at composition root. See `serialization.md` [3].
+
+**BARE_COLLECTION** -- ANTI-PATTERN: `def get_scores() -> list[dict[str, Any]]:` -- CORRECT: `-> tuple[tuple[UserId, Money], ...]` or `-> Block[Score]`. See `types.md` [6].
+
+**MODEL_WITH_BEHAVIOR** -- ANTI-PATTERN: `class Order(BaseModel, frozen=True): async def persist(self, db):` -- CORRECT: Models are pure data; logic in `ops/` pipelines via `flow()`. See `effects.md` [3].
+
+**ANY_CAST_ERASURE** -- ANTI-PATTERN: `data: Any = get_payload()` -- CORRECT: `data: dict[str, object]` + `TypeForm` + `beartype.is_bearable()` for narrowing. See `types.md` [4].
+
+**PRIMITIVE_OBSESSION** -- ANTI-PATTERN: `def create_user(email: str, balance: int):` -- CORRECT: `def create_user(email: Email, balance: Money) -> Result[User, AtomError]:`. See `types.md` [1].
+
+**INHERITANCE_HIERARCHIES** -- ANTI-PATTERN: `class Repository(ABC): @abstractmethod ...` -- CORRECT: `class Repository(Protocol[T]): ...` structural subtyping. See `protocols.md` [1].
+
+**WRAPS_ONLY_ERASURE** -- ANTI-PATTERN: `def logged(func: Callable[..., Any]):` -- CORRECT: `def logged[**P, R](func: Callable[P, R]) -> Callable[P, R]:` with `ParamSpec`. See `decorators.md` [1].
+
+**STRING_ERROR_DISPATCH** -- ANTI-PATTERN: `if "not found" in str(err):` -- CORRECT: `match err: case NotFound(entity=entity):` typed variant dispatch. See `effects.md` [3].
+
+**MUTABLE_STATE** -- ANTI-PATTERN: `CACHE: dict[str, str] = {}` -- CORRECT: `_cache: ContextVar[tuple[tuple[str, str], ...]] = ContextVar("cache", default=())`. See `concurrency.md` [2].
+
+**DATACLASS_FOR_VALIDATION** -- ANTI-PATTERN: `@dataclass class UserInput: email: str` -- CORRECT: `class UserInput(BaseModel, frozen=True): email: Email`. Reserve `dataclass(frozen=True, slots=True)` for error types only. See `types.md` [3].
+
+**IMPERATIVE_LOOPS** -- ANTI-PATTERN: `results = []; for x in xs: results.append(f(x))` -- CORRECT: `tuple(map(transform, items))` or `functools.reduce(...)` for folds. See `algorithms.md` [1].
+
+**FRAMEWORK_FIRST** -- ANTI-PATTERN: `from fastapi import Depends  # in domain/service.py` -- CORRECT: Domain depends on Protocol ports only; framework imports in adapters/runtime. See `protocols.md` [1].
+
+### Complex Anti-Patterns
+
+**IMPERATIVE_BRANCHING**
 > **DETECT:** `grep -rn "^\s*if \|^\s*elif \|^\s*else:" --include="*.py"`
 
 **Violation:**
@@ -34,47 +67,22 @@ def handle_outcome(result: Result[Payment, DomainError]) -> HttpResponse:
 ```python
 def handle_outcome(result: Result[Payment, DomainError]) -> HttpResponse:
     match result:
-        case Success(CardPayment(amount=Money(cents=c), last_four=last_four)) if c > 100_00:
-            return HttpResponse(status=200, body=f"Large card {last_four}: {c}")
+        case Success(CardPayment(amount=Money(cents=cents), last_four=last_four)) if cents > 100_00:
+            return HttpResponse(status=200, body=f"Large card {last_four}: {cents}")
         case Success(CardPayment(last_four=last_four)):
             return HttpResponse(status=200, body=f"Card: {last_four}")
         case Success(BankPayment(iban=iban)):
             return HttpResponse(status=200, body=f"Bank: {iban}")
-        case Failure(NotFoundError(entity=entity, identifier=ident)):
-            return HttpResponse(status=404, body=f"{entity}/{ident}")
+        case Failure(NotFoundError(entity=entity, identifier=identifier)):
+            return HttpResponse(status=404, body=f"{entity}/{identifier}")
         case Failure(err):
             return HttpResponse(status=500, body=err.message)
         case _:
             return HttpResponse(status=500, body="unexpected outcome")
 ```
-Nested structural destructuring on `Result` + domain union with guard clauses. `match`/`case` provides compiler-verifiable exhaustive dispatch. See `types.md` [3], `effects.md` [4].
+Nested structural destructuring on `Result` + domain union with guard clauses. See `types.md` [2], `effects.md` [3].
 
-### [IMPERATIVE_LOOPS]
-> **DETECT:** `grep -rn "^\s*for \|^\s*while " --include="*.py"`
-
-**Violation:** `results: list[str] = []; for item in items: results.append(transform(item))`
-**Resolution:** `results: tuple[str, ...] = tuple(map(transform, items))`
-For accumulation (fold): `total: int = functools.reduce(lambda acc, x: acc + x, items, 0)`.
-For running totals (scan): `running: tuple[int, ...] = tuple(itertools.accumulate(items))`.
-For flattening: `flat: tuple[T, ...] = tuple(itertools.chain.from_iterable(nested))`.
-`map`/`filter`/`reduce`/`accumulate` express intent declaratively and produce immutable results. See `effects.md` [1].
-
-### [HASATTR_GETATTR]
-> **DETECT:** `grep -rn "hasattr(\|getattr(" --include="*.py"`
-
-**Violation:** `return getattr(obj, "name", "unknown")`
-**Resolution:**
-```python
-def extract_name(obj: object) -> str:
-    match obj:
-        case object(name=name):
-            return name
-        case _:
-            return "unknown"
-```
-Structural pattern matching via `case object(attr=value):` provides type-safe dispatch ty can verify. See `types.md` [4].
-
-### [BARE_TRY_EXCEPT]
+**BARE_TRY_EXCEPT**
 > **DETECT:** `grep -rn "^\s*try:\|^\s*except " --include="*.py" | grep -v "adapters/"`
 
 **Violation:**
@@ -85,10 +93,6 @@ def parse_age(raw: str) -> int:
 ```
 **Resolution:**
 ```python
-from returns.pipeline import flow
-from returns.pointfree import bind
-from returns.result import safe
-
 @safe
 def parse_age(raw: str) -> int:
     return int(raw)
@@ -98,118 +102,51 @@ def validate_age(age: int) -> Result[int, ValidationError]:
         case n if 0 < n < 150: return Success(n)
         case _: return Failure(ValidationError(field="age", message=f"out of range: {age}"))
 
-# @safe makes parse_age composable in a flow() pipeline:
 def process_age(raw: str) -> Result[int, Exception]:
     return flow(raw, parse_age, bind(validate_age))
 ```
-`@safe` captures exceptions into `Result[T, Exception]`, making failure visible and composable via `flow()` + `bind`. See `effects.md` [1].
+`@safe` captures exceptions into `Result[T, Exception]`, composable via `flow()` + `bind`. See `effects.md` [1].
 
-### [MUTABLE_MODELS]
-> **DETECT:** `grep -rn "class.*BaseModel" --include="*.py" | grep -v "frozen=True"`
+**UNWRAP_MID_PIPELINE**
+> **DETECT:** `grep -rn "\.unwrap()\|\.value_or(\|\.failure()" --include="*.py" | grep -v "adapters/"`
 
-**Violation:** `class Config(BaseModel): timeout: float`
-**Resolution:** `class Config(BaseModel, frozen=True): timeout: Annotated[float, Field(gt=0)]`
-`frozen=True` enforces immutability and enables hashing. See `serialization.md` [2].
-
-### [RAISE_CONTROL_FLOW]
-> **DETECT:** `grep -rn "^\s*raise " --include="*.py" | grep -v "adapters/"`
-
-**Violation:** `raise NotFoundError(f"user {uid}")`
+**Violation:**
+```python
+def process_order(raw: bytes) -> Result[OrderId, Exception]:
+    parsed: dict[str, object] = parse_input(raw).unwrap()
+    validated: Order = validate(parsed).unwrap()
+    return persist(validated)
+```
 **Resolution:**
 ```python
-from returns.converters import maybe_to_result
-from returns.maybe import maybe
-
-@maybe
-def find_in_db(uid: UserId) -> User | None:
-    """@maybe bridges None-returning lookup into Maybe[User]."""
-    return db.get(uid)
-
-def find_user(uid: UserId) -> Result[User, NotFoundError]:
-    """Bridge Maybe -> Result: absence becomes typed NotFoundError."""
-    return maybe_to_result(
-        find_in_db(uid),
-        default_error=NotFoundError(entity="User", identifier=str(uid)),
-    )
+def process_order(raw: bytes) -> Result[OrderId, Exception]:
+    return flow(raw, parse_input, bind(validate), bind(persist))
 ```
-`@maybe` wraps the None-returning lookup; `maybe_to_result` bridges `Maybe` to `Result` with a typed error. The bare `db.get()` call never leaks into domain code unwrapped. See `effects.md` [1], [2].
+`.unwrap()` short-circuits the error channel into untyped `UnwrapFailedError`. Reserve `.value_or()` for terminal boundaries only. See `effects.md` [1].
 
-### [NONE_RETURNS]
-> **DETECT:** `grep -rn "-> .*| None\|-> Optional\[" --include="*.py" | grep -v "__init__\|-> None:"`
+**BARE_FLOW_WITHOUT_BIND**
+> **DETECT:** `grep -rn "flow(" --include="*.py" -A 5 | grep -v "bind\|map_\|lash\|alt"` (manual review)
 
-**Violation:** `def find_user(uid: UserId) -> User | None:`
-**Resolution:** `def find_user(uid: UserId) -> Maybe[User]:` (absence) / `def fetch_user(uid: UserId) -> Result[User, RepoError]:` (failure)
-`Optional[T]` conflates "absent" with "failed". `Maybe[T]` for absence, `Result[T, E]` for failure. See `effects.md` [2].
-
-### [STRING_ERROR_DISPATCH]
-> **DETECT:** `grep -rn "in str(err)\|str(e)\|\"not found\" in" --include="*.py"`
-
-**Violation:** `case s if "not found" in s: return Response(status=404)`
+**Violation:**
+```python
+def process(raw: bytes) -> Result[Result[UserId, Exception], Exception]:
+    return flow(raw, parse_input, validate, persist)
+```
 **Resolution:**
 ```python
-def map_error(err: object) -> Response:
-    match err:
-        case NotFound(entity=entity):
-            return Response(status=404, body=entity)
-        case Forbidden(reason=reason):
-            return Response(status=403, body=reason)
-        case _:
-            return Response(status=500, body="unknown error")
+def process(raw: bytes) -> Result[UserId, Exception]:
+    return flow(raw, parse_input, bind(validate), bind(persist))
 ```
-Type dispatch via `match`/`case` on tagged variants is exhaustive and refactor-safe. See `effects.md` [2].
+Without `bind()`, Result nests: `Result[Result[T, E], E]`. Only the first stage omits `bind()`. See `effects.md` [1].
 
-### [INHERITANCE_HIERARCHIES]
-> **DETECT:** `grep -rn "class.*ABC\|from abc import" --include="*.py"`
-
-**Violation:** `class Repository(ABC): @abstractmethod async def get(self, uid: str) -> dict: ...`
-**Resolution:** `class Repository(Protocol[T]): async def get(self, uid: UserId) -> Result[T, RepoError]: ...`
-`Protocol` provides structural subtyping -- any class satisfying the shape is valid without inheriting. See `protocols.md` [1].
-
-### [PRIMITIVE_OBSESSION]
-> **DETECT:** `grep -rn "def .*email: str\|def .*amount: int\|def .*-> dict\[" --include="*.py"`
-
-**Violation:** `def create_user(email: str, balance: int) -> dict[str, str]:`
-**Resolution:** `def create_user(email: Email, balance: Money) -> Result[User, AtomError]:`
-Typed atoms via `NewType`/`Annotated` shrink the input space to valid values only. See `types.md` [1].
-
-### [WRAPS_ONLY_ERASURE]
-> **DETECT:** `grep -rn "Callable\[\.\.\.," --include="*.py"`
-
-**Violation:** `def logged(func: Callable[..., Any]) -> Callable[..., Any]:`
-**Resolution:**
-```python
-def logged[**P, R](func: Callable[P, R]) -> Callable[P, R]:
-    @wraps(func)
-    def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
-        return func(*args, **kwargs)
-    return wrapper
-```
-Without `ParamSpec`, decorated functions degrade to `(*args: Any, **kwargs: Any) -> Any`. See `decorators.md` [1].
-
-### [IMPORT_TIME_IO]
-> **DETECT:** `grep -rn "^db = \|^conn = \|^client = \|^settings = " --include="*.py"`
-
-**Violation:** `db = connect_to_database("postgresql://localhost/app")  # module level`
-**Resolution:** `def boot() -> AppSettings: return AppSettings()  # reads env at call time`
-Module-level IO breaks testability and free-threaded safety. Defer to `boot()` at composition root. See `serialization.md` [4].
-
-### [BARE_COLLECTION]
-> **DETECT:** `grep -rn "def .*-> list\[\|def .*-> dict\[" --include="*.py"`
-
-**Violation:** `def get_scores() -> list[dict[str, Any]]:`
-**Resolution:** `def get_scores() -> tuple[tuple[UserId, Money], ...]:`
-`tuple` with explicit type parameters preserves structural immutability. See `types.md` [5].
-
-### [MODEL_WITH_BEHAVIOR]
-> **DETECT:** `grep -rn "class.*BaseModel" -A 10 --include="*.py" | grep "async def\|def .*self.*db"`
-
-**Violation:** `class Order(BaseModel, frozen=True): ... async def persist(self, db: Database) -> None:`
-**Resolution:** Models are pure data carriers; logic lives in `ops/` pipelines composed via `flow()`/`pipe()`. See `effects.md` [3].
-
-### [GOD_DECORATOR]
+**GOD_DECORATOR**
 > **DETECT:** `grep -rn "@handle_everything\|@do_all" --include="*.py"`
 
-**Violation:** `@handle_everything  # auth + logging + caching + retry + tracing`
+**Violation:**
+```python
+@handle_everything  # auth + logging + caching + retry + tracing
+def process(data: Input) -> Output: ...
+```
 **Resolution:**
 ```python
 @trace_span(TraceConfig(span_name="process"))
@@ -217,16 +154,9 @@ Module-level IO breaks testability and free-threaded safety. Defer to `boot()` a
 @cache_result(CacheConfig(ttl=300))
 def process(data: Input) -> Output: ...
 ```
-One decorator per concern; canonical ordering: trace > retry > cache > validate > authorize. See `decorators.md` [5].
+One decorator per concern; canonical ordering: trace > retry > cache > validate > authorize. See `decorators.md` [2].
 
-### [GLOBAL_MUTABLE_ASYNC]
-> **DETECT:** `grep -rn "^[A-Z_]*: dict\|^_.*: list\|^_.*= {}" --include="*.py" | grep -v "ContextVar"`
-
-**Violation:** `_CACHE: dict[str, bytes] = {}`
-**Resolution:** `_cache: ContextVar[tuple[tuple[str, bytes], ...]] = ContextVar("cache", default=())`
-Module-level mutable dicts race under free-threading (PEP 779) and async task interleaving. `ContextVar` provides task-local snapshots; immutable tuple snapshots prevent mutation. See `concurrency.md` [5].
-
-### [MISSING_CHECKPOINT]
+**MISSING_CHECKPOINT**
 > **DETECT:** `grep -rn "while True\|async for" --include="*.py" | grep -v "checkpoint\|sleep\|await"`
 
 **Violation:**
@@ -245,41 +175,10 @@ async def poll_forever(queue: Queue[bytes]) -> None:
         process(item)
         await checkpoint()
 ```
-CPU-bound async loops starve the event loop. `checkpoint()` yields control, enabling cooperative scheduling. See `concurrency.md` [3].
+CPU-bound async loops starve the event loop. `checkpoint()` yields control for cooperative scheduling. See `concurrency.md` [1].
 
-### [FRAMEWORK_FIRST]
-> **DETECT:** `grep -rn "from flask\|from django\|from fastapi" --include="*.py" | grep -v "adapters/"`
-
-**Violation:** `from fastapi import Depends  # in domain/service.py`
-**Resolution:** Domain and ops modules depend on `Protocol` ports, never on framework types. Framework imports belong in `/adapters` and `/runtime` only. See `protocols.md` [2].
-
-### [ANY_CAST_ERASURE]
-> **DETECT:** `grep -rn "Any\|cast(Any" --include="*.py"`
-
-**Violation:** `data: Any = get_payload()` / `result = cast(Any, value)`
-**Resolution:** `data: dict[str, object] = get_payload()` / Use `TypeForm` + `beartype.is_bearable()` for runtime narrowing instead of `cast(Any, ...)`. `Any` erases the downstream type graph entirely. See `types.md` [4].
-
-### [BOOLEAN_MATCH_ABUSE]
-> **DETECT:** `grep -rn "match.*>.*:\|match.*True\|case True:\|case False:" --include="*.py"`
-
-**Violation:**
-```python
-def validate_positive(n: int) -> Result[int, str]:
-    match n > 0:
-        case True: return Success(n)
-        case False: return Failure("not positive")
-```
-**Resolution:**
-```python
-def validate_positive(n: int) -> Result[int, str]:
-    match n:
-        case v if v > 0: return Success(v)
-        case _: return Failure("not positive")
-```
-`match True/False` is `if/else` in disguise. `match/case` is for structural dispatch on algebraic data -- use guard clauses (`case v if pred:`) for conditional validation. Boolean `case True:/case False:` provides zero exhaustiveness benefit over ternary.
-
-### [MAP_SIDE_EFFECT_ABUSE]
-> **DETECT:** `grep -rn "tuple(map.*setattr\|tuple(map.*start_soon\|tuple(map.*send\b" --include="*.py"`
+**MAP_SIDE_EFFECT_ABUSE**
+> **DETECT:** `grep -rn "tuple(map.*start_soon\|tuple(map.*send\b" --include="*.py"`
 
 **Violation:**
 ```python
@@ -294,89 +193,98 @@ tuple(map(
 for index, item in enumerate(items):
     task_group.start_soon(worker, index, item)
 ```
-`map` is for pure transformations. Using `tuple(map(side_effect))` abuses `map` as a loop driver, allocates a discarded tuple of `None`, and hides imperative intent behind a functional API. At side-effect boundaries (task spawning, `setattr`, I/O), use an explicit `for` loop with a boundary comment.
+`map` is for pure transformations. `tuple(map(side_effect))` abuses map as a loop driver and allocates a discarded tuple. At side-effect boundaries, use explicit `for` with a boundary comment.
 
-### [UNWRAP_MID_PIPELINE]
-> **DETECT:** `grep -rn "\.unwrap()\|\.value_or(\|\.failure()" --include="*.py" | grep -v "adapters/\|runtime/"`
-
-**Violation:**
-```python
-def process_order(raw: bytes) -> Result[OrderId, Exception]:
-    parsed: dict[str, object] = parse_input(raw).unwrap()  # BREAKS the railway
-    validated: Order = validate(parsed).unwrap()
-    return persist(validated)
-```
-**Resolution:**
-```python
-from returns.pipeline import flow
-from returns.pointfree import bind
-
-def process_order(raw: bytes) -> Result[OrderId, Exception]:
-    return flow(raw, parse_input, bind(validate), bind(persist))
-```
-`.unwrap()` short-circuits the error channel, converting typed `Failure` into an untyped `UnwrapFailedError` exception. This defeats monadic composition entirely. `.value_or()` and `.failure()` have the same problem -- they extract from the railway mid-pipeline. Reserve `.value_or()` for terminal boundaries only (e.g., HTTP response construction). See `effects.md` [2].
-
-### [BARE_FLOW_WITHOUT_BIND]
-> **DETECT:** `grep -rn "flow(" --include="*.py" -A 5 | grep -v "bind\|map_\|lash\|alt"` (manual review needed)
+**BOOLEAN_MATCH_ABUSE**
+> **DETECT:** `grep -rn "match.*True\|case True:\|case False:" --include="*.py"`
 
 **Violation:**
 ```python
-def process(raw: bytes) -> Result[Result[UserId, Exception], Exception]:
-    return flow(raw, parse_input, validate, persist)
-    # validate returns Result -- without bind(), Result nests: Result[Result[...]]
+def validate_positive(number: int) -> Result[int, str]:
+    match number > 0:
+        case True: return Success(number)
+        case False: return Failure("not positive")
 ```
 **Resolution:**
 ```python
-from returns.pointfree import bind
-
-def process(raw: bytes) -> Result[UserId, Exception]:
-    return flow(raw, parse_input, bind(validate), bind(persist))
+def validate_positive(number: int) -> Result[int, str]:
+    match number:
+        case value if value > 0: return Success(value)
+        case _: return Failure("not positive")
 ```
-When a stage returns `Result[T, E]`, it MUST be wrapped in `bind()` inside `flow()`. Without `bind()`, the Result nests: `Result[Result[T, E], E]`. Only the first stage (which receives the raw value, not a Result) omits `bind()`. This is the most common `returns` footgun. See `effects.md` [2].
+`match True/False` is `if/else` in disguise. Use guard clauses (`case value if pred:`) for conditional validation.
 
-### [DATACLASS_FOR_VALIDATION]
-> **DETECT:** `grep -rn "@dataclass" --include="*.py" | grep -v "frozen=True\|slots=True\|Error\|Exception"`
+### Library-Mixing Anti-Patterns
+
+**MIXED_RESULT_LIBRARIES**
+> **DETECT:** `grep -rn "from expression import.*Result\|from expression import.*Ok" --include="*.py"` cross-referenced with `grep -rn "from returns.result import" --include="*.py"` in same file
 
 **Violation:**
 ```python
-@dataclass
-class UserInput:
-    email: str
-    age: int
+from expression import Ok, Error as ExprError
+from returns.result import Success, Failure
+
+def transform(order: Order) -> Success[Order]:
+    validated: Ok[Order] = validate_domain(order)  # expression Result
+    return Success(validated.value)  # returns Result -- MIXED
 ```
-**Resolution:**
-```python
-class UserInput(BaseModel, frozen=True):
-    model_config = ConfigDict(strict=True)
-    email: Email
-    age: Annotated[int, Field(gt=0, lt=150)]
-```
-Plain `dataclass` provides no runtime validation. Pydantic `BaseModel(frozen=True)` with `ConfigDict(strict=True)` gives Rust-backed validation, immutability, and JSON Schema generation. Reserve `dataclass(frozen=True, slots=True)` for error types only. See `types.md` [2], `serialization.md` [3].
+**Resolution:** ONE library's `Result`/`Option` per module. Domain modules use `expression`; pipeline modules use `returns`. Bridge at layer boundaries via `match/case`. See SKILL.md [8].
+
+**EXPRESSION_PIPE_IN_RETURNS_FLOW**
+> **DETECT:** `grep -rn "expression.pipe\|from expression import pipe" --include="*.py"` in files containing `from returns.pipeline import flow`
+
+ANTI-PATTERN: `expression.pipe(value, step_a, step_b)` in a `returns.flow()` module.
+CORRECT: Use `returns.flow(value, step_a, bind(step_b))` consistently. `expression.pipe` and `returns.flow` are equivalent left-to-right composition -- choose one per module. See SKILL.md [8].
 
 ---
-## [2][QUICK_REFERENCE]
+## [2][ERROR_SYMPTOMS]
+>**Dictum:** *Symptoms point to structural causes; fixes are architectural.*
 
-- Dispatch and control flow:
-  - `IMPERATIVE_BRANCHING`, `BOOLEAN_MATCH_ABUSE`: replace with exhaustive `match/case` plus guards.
-  - `HASATTR_GETATTR`: replace with structural keyword patterns.
-  - `STRING_ERROR_DISPATCH`: replace string checks with variant matching.
-- Effect and pipeline integrity:
-  - `BARE_TRY_EXCEPT`, `RAISE_CONTROL_FLOW`: use `@safe` at boundaries and `Failure(...)` in domain flow.
-  - `NONE_RETURNS`: use `Maybe` (absence) or `Result` (failure), never `Optional` for fallible paths.
-  - `UNWRAP_MID_PIPELINE`, `BARE_FLOW_WITHOUT_BIND`: keep the railway intact; bind monadic stages explicitly.
-- Type and model integrity:
-  - `PRIMITIVE_OBSESSION`, `BARE_COLLECTION`: enforce typed atoms and immutable signatures.
-  - `MUTABLE_MODELS`, `DATACLASS_FOR_VALIDATION`: use frozen strict `BaseModel` for validated input models.
-  - `ANY_CAST_ERASURE`: replace `Any`/`cast(Any, ...)` with `TypeForm` + runtime narrowing.
-- Architecture boundaries:
-  - `INHERITANCE_HIERARCHIES`: use `Protocol` capability ports over `abc.ABC`.
-  - `FRAMEWORK_FIRST`: keep framework imports in adapters/runtime only.
-  - `MODEL_WITH_BEHAVIOR`: keep models as carriers; move IO/business flow to pipelines.
-  - `IMPORT_TIME_IO`: defer side effects to explicit bootstrap.
-- Concurrency and shared state:
-  - `MUTABLE_STATE`, `GLOBAL_MUTABLE_ASYNC`: use `ContextVar` immutable snapshots.
-  - `MISSING_CHECKPOINT`: add cooperative checkpoints in hot async loops.
-  - `MAP_SIDE_EFFECT_ABUSE`: use explicit boundary loops for side effects.
-- Decorator discipline:
-  - `WRAPS_ONLY_ERASURE`: preserve signatures with `ParamSpec` + `@wraps`.
-  - `GOD_DECORATOR`: split concerns and enforce canonical ordering.
+<br>
+
+| [INDEX] | [SYMPTOM]                                    | [CAUSE]                        | [FIX]                                             |
+| :-----: | -------------------------------------------- | ------------------------------ | ------------------------------------------------- |
+|   [1]   | `isinstance(result, Success)` checks         | Imperative branching           | `match/case` structural destructuring             |
+|   [2]   | `-> X | None` in domain signature            | None-based architecture        | `Maybe[T]` or `expression.Option[T]`              |
+|   [3]   | `try/except` outside adapters                | Exception-driven control flow  | `@safe` / `Result[T, E]` error channel            |
+|   [4]   | `Result[Result[T, E], E]` nested type        | Missing `bind()` in `flow()`   | Wrap monadic stages in `bind()`                   |
+|   [5]   | `.unwrap()` in domain/ops code               | Mid-pipeline extraction        | Keep on railway; extract at terminal boundary     |
+|   [6]   | `from expression import Ok` + `from returns` | Mixed Result libraries         | ONE library per module; bridge at boundaries      |
+|   [7]   | `list[...]` / `dict[...]` in model fields    | Mutable collections            | `tuple[...]` / `Block[T]` / `frozenset[...]`      |
+|   [8]   | `class X(BaseModel):` without `frozen=True`  | Mutable model                  | Add `frozen=True` to class declaration            |
+|   [9]   | `@decorator` erasing `*args, **kwargs` types | Missing `ParamSpec`            | `ParamSpec` + `Concatenate` + `@wraps`            |
+|  [10]   | `while True:` without `await` in body        | Missing cooperative checkpoint | `await checkpoint()` or `await sleep(0)`          |
+|  [11]   | `hasattr(obj, "name")` in domain code        | Dynamic attribute probing      | `match obj: case object(name=name):` pattern      |
+|  [12]   | `Any` in domain/ops type annotations         | Type erasure                   | `object` + `TypeForm` narrowing or concrete types |
+
+---
+## [3][QUICK_REFERENCE]
+
+| [INDEX] | [PATTERN]                  | [CATEGORY]           | [KEY_TRAIT]                                       |
+| :-----: | -------------------------- | -------------------- | ------------------------------------------------- |
+|   [1]   | IMPERATIVE_BRANCHING       | Control flow         | Exhaustive `match/case` + guards                  |
+|   [2]   | BOOLEAN_MATCH_ABUSE        | Control flow         | Guard clauses over `match True/False`             |
+|   [3]   | HASATTR_GETATTR            | Control flow         | Structural keyword patterns                       |
+|   [4]   | BARE_TRY_EXCEPT            | Effect integrity     | `@safe` at boundaries + `Result` in domain        |
+|   [5]   | RAISE_CONTROL_FLOW         | Effect integrity     | `Failure(...)` / `maybe_to_result`                |
+|   [6]   | NONE_RETURNS               | Effect integrity     | `Maybe` (absence) / `Result` (failure)            |
+|   [7]   | UNWRAP_MID_PIPELINE        | Effect integrity     | Railway stays intact; extract at terminal only    |
+|   [8]   | BARE_FLOW_WITHOUT_BIND     | Effect integrity     | `bind()` wraps every monadic stage in `flow()`    |
+|   [9]   | MUTABLE_MODELS             | Type integrity       | `frozen=True` + strict `ConfigDict`               |
+|  [10]   | ANY_CAST_ERASURE           | Type integrity       | `TypeForm` + `beartype` narrowing                 |
+|  [11]   | BARE_COLLECTION            | Type integrity       | `tuple`/`frozenset`/`Block[T]` over mutable       |
+|  [12]   | MODEL_WITH_BEHAVIOR        | Architecture         | Models are carriers; logic in pipelines           |
+|  [13]   | IMPORT_TIME_IO             | Architecture         | Defer IO to `boot()` at composition root          |
+|  [14]   | GOD_DECORATOR              | Decorator discipline | One concern per decorator; canonical ordering     |
+|  [15]   | MAP_SIDE_EFFECT_ABUSE      | Concurrency          | Explicit `for` at side-effect boundaries          |
+|  [16]   | MISSING_CHECKPOINT         | Concurrency          | `checkpoint()` in CPU-bound async loops           |
+|  [17]   | PRIMITIVE_OBSESSION        | Type integrity       | Typed atoms replace raw `str`/`int`/`Decimal`     |
+|  [18]   | INHERITANCE_HIERARCHIES    | Architecture         | `Protocol` over `ABC`; structural subtyping       |
+|  [19]   | WRAPS_ONLY_ERASURE         | Decorator discipline | `ParamSpec` + `Concatenate` + `@wraps`            |
+|  [20]   | STRING_ERROR_DISPATCH      | Control flow         | Typed variant `match/case` over string inspection |
+|  [21]   | MUTABLE_STATE              | Concurrency          | `ContextVar` + frozen snapshots                   |
+|  [22]   | DATACLASS_FOR_VALIDATION   | Type integrity       | `BaseModel(frozen=True)` over plain `@dataclass`  |
+|  [23]   | IMPERATIVE_LOOPS           | Control flow         | `map`/`reduce`/`accumulate` over `for`            |
+|  [24]   | FRAMEWORK_FIRST            | Architecture         | Protocol ports in domain; framework in adapters   |
+|  [25]   | MIXED_RESULT_LIBRARIES     | Library discipline   | ONE Result/Option library per module              |
+|  [26]   | EXPRESSION_PIPE_IN_RETURNS | Library discipline   | `flow` in returns modules; `pipe` in expression   |

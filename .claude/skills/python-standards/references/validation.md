@@ -1,111 +1,140 @@
 # [H1][VALIDATION]
 >**Dictum:** *Operational criteria verify Python 3.14+ standards compliance.*
 
+<br>
+
 Checklist for auditing `.py` modules against python-standards contracts. Items below are not fully enforced by ty or ruff and require human/agent judgment.
 
 ---
 ## [1][TYPE_INTEGRITY]
+>**Dictum:** *Types make illegal states unrepresentable.*
+
+<br>
 
 - [ ] One canonical schema per entity -- no duplicate model definitions across files
-- [ ] Domain primitives use typed atoms (`NewType`/`Annotated`) -- raw `str`/`int` absent from public signatures
+- [ ] Typed atoms (`NewType`/`Annotated`) -- raw `str`/`int` absent from public signatures
 - [ ] Smart constructors return `Result[T, E]` -- never raise for invalid input
-- [ ] All `BaseModel` subclasses declare `frozen=True`
-- [ ] All `@dataclass` definitions include `frozen=True, slots=True`
-- [ ] Discriminated unions use `Discriminator` + `Tag` + `TypeAdapter`
-- [ ] Immutable collections: `tuple` over `list`, `frozenset` over `set`, `Mapping` over `dict`
+- [ ] `frozen=True` on all `BaseModel` subclasses and `@dataclass` (with `slots=True`)
+- [ ] Discriminated unions via `Discriminator` + `Tag` + `TypeAdapter` or `@tagged_union`
+- [ ] Immutable collections: `tuple`/`frozenset`/`Mapping`/`Block[T]` over mutable equivalents
 
 ---
 ## [2][EFFECT_INTEGRITY]
+>**Dictum:** *Effects encode failure as types; extraction happens once at the boundary.*
 
-- [ ] `Result[T, E]` for synchronous fallible ops -- `map`/`bind` chain; `match` at boundaries only
-- [ ] `Maybe[T]` for semantic absence -- not `Optional[T]` conflating absence with failure
-- [ ] `FutureResult[T, E]` for async fallible ops -- async `map`/`bind` pipeline
-- [ ] `@safe` at foreign boundaries only -- domain code returns `Result` explicitly
-- [ ] Zero `try`/`except` in `domain/` or `ops/`
-- [ ] No `Result` unwrapping mid-pipeline -- zero `.unwrap()` / `.value_or()` / `.failure()` in domain or ops code
-- [ ] `flow()` + pointfree `bind`/`map_`/`lash` as primary composition -- not method chaining for 3+ stages
-- [ ] Monadic law compliance for custom bind implementations: left identity, right identity, associativity
+<br>
+
+- [ ] `Result[T, E]` sync, `FutureResult[T, E]` async, `Maybe[T]` absence -- correct container per channel
+- [ ] `@safe`/`@future_safe` at foreign boundaries only -- domain returns `Result` explicitly
+- [ ] Zero `try`/`except` and zero `.unwrap()`/`.value_or()` in `domain/` or `ops/`
+- [ ] `flow()` + `bind`/`map_`/`lash` as primary composition -- not method chaining for 3+ stages
+- [ ] Result library consistency: ONE library's `Result`/`Option` per module (no `expression.Ok` + `returns.Success`)
+- [ ] No mid-pipeline library mixing: `expression.pipe` and `returns.flow` never in same file
 
 ---
 ## [3][CONTROL_FLOW]
+>**Dictum:** *Dispatch is structural and exhaustive; iteration is declarative.*
 
-- [ ] Zero `if`/`else`/`elif` -- `match`/`case` exhaustive dispatch only
-- [ ] Zero `for`/`while` in pure/domain transforms -- boundary loops only with explicit side-effect comments
-- [ ] Exhaustive `match`/`case` with `case _:` defensive arm on all dispatches
+<br>
+
+- [ ] Zero `if`/`else`/`elif` -- `match`/`case` exhaustive dispatch with `case _:` defensive arm
+- [ ] Zero `for`/`while` in domain transforms -- boundary loops only with side-effect comments
 - [ ] Guard clauses via `case x if predicate:` -- not bare `if` statements
 
 ---
 ## [4][DECORATOR_INTEGRITY]
+>**Dictum:** *Decorators preserve signatures and compose cleanly.*
 
-- [ ] Every decorator uses `ParamSpec` + `Concatenate` + `@wraps`
+<br>
+
+- [ ] `ParamSpec` + `Concatenate` + `@wraps` on every decorator
 - [ ] Canonical ordering: trace > retry > cache > validate > authorize
-- [ ] One concern per decorator -- no god decorators
-- [ ] Decorator factories accept frozen `BaseModel` config objects
+- [ ] One concern per decorator; factories accept frozen `BaseModel` config
 - [ ] Class-based decorators implement descriptor protocol (`__set_name__` + `__get__`)
 
 ---
 ## [5][CONCURRENCY_INTEGRITY]
+>**Dictum:** *Concurrency is bounded, structured, and cooperative.*
 
-- [ ] `anyio.create_task_group()` as sole spawn mechanism -- no bare `asyncio.create_task`
-- [ ] `anyio.lowlevel.checkpoint()` in tight async loops
-- [ ] `CapacityLimiter` for backpressure -- no unbounded concurrency
-- [ ] `ContextVar` for request-scoped state -- no global mutable singletons
-- [ ] `CancelScope` with explicit deadlines -- no unbounded timeouts
+<br>
+
+- [ ] `anyio.create_task_group()` sole spawn -- no bare `asyncio.create_task`
+- [ ] `checkpoint()` in tight async loops; `CapacityLimiter` for backpressure
+- [ ] `ContextVar` for request-scoped state; `CancelScope` with explicit deadlines
 
 ---
 ## [6][SURFACE_QUALITY]
+>**Dictum:** *Surface area reflects domain boundaries, not implementation artifacts.*
 
-- [ ] No helper spam: private functions called from 2+ sites or inlined
-- [ ] No class proliferation: Protocol in `protocols/`, implementations in `adapters/`
-- [ ] No DTO soup: one frozen model per entity, derive variants at call site
-- [ ] No framework coupling: domain/ops import zero framework types
-- [ ] No import-time IO: module-level code is pure; IO deferred to `boot()`
+<br>
 
----
-## [7][DIAGNOSTIC_TABLE]
-
-| [CAUSE]                  | [GREP_ID] | [FIX]                                        |
-| ------------------------ | --------- | -------------------------------------------- |
-| Optional masking failure | `G1`      | `Maybe[T]` then `.to_result()` at boundary   |
-| Exception control flow   | `G2`      | `@safe` at edge, `Result[T, E]` in domain    |
-| Imperative iteration     | `G3`      | Comprehension or `map` over immutable output |
-| Nominal dispatch         | `G4`      | Structural `match`/`case`                    |
-| ABC-based interface      | `G5`      | `Protocol` structural typing                 |
-| Signature erasure        | `G6`      | `ParamSpec[P]` + `Callable[P, R]`            |
-| Mutable domain model     | `G7`      | Set `frozen=True`                            |
-| Bare collection          | `G8`      | Validate via frozen model or `TypeAdapter`   |
-| Unstructured concurrency | `G9`      | Use `TaskGroup` + `start_soon`               |
-| Unstructured logging     | `G10`     | Emit key-value structured logs               |
-| Global mutable state     | `G11`     | `ContextVar[tuple[...]]` snapshot state      |
-| Bare primitive I/O       | `G12`     | Typed atoms + `Result[T, E]`                 |
-| Import-time IO           | `G13`     | Defer initialization to `boot()`             |
-| Imperative branching     | `G14`     | Exhaustive `match`/`case`                    |
-| `hasattr`/`getattr`      | `G15`     | `case object(attr=value)` patterns           |
-
-`GREP_ID` commands (prefer `rg`):
-- `G1`: `rg -n "is None:" -g "*.py"`
-- `G2`: `rg -n "^\s*except " -g "*.py"`
-- `G3`: `rg -n "^\s*for " -g "*.py"`
-- `G4`: `rg -n "isinstance\\(" -g "*.py"`
-- `G5`: `rg -n "class.*ABC|from abc import" -g "*.py"`
-- `G6`: `rg -n "Callable\\[\\.\\.\\.," -g "*.py"`
-- `G7`: `rg -n "class.*BaseModel" -g "*.py"`
-- `G8`: `rg -n "-> list\\[|-> dict\\[" -g "*.py"`
-- `G9`: `rg -n "asyncio\\.create_task|asyncio\\.gather" -g "*.py"`
-- `G10`: `rg -n "logging\\.info\\(f\\\"|logger\\.info\\(f\\\"" -g "*.py"`
-- `G11`: `rg -n "^[A-Z_]*: dict|= \\[\\]|= \\{\\}" -g "*.py"`
-- `G12`: `rg -n "def .*: str\\) -> str:" -g "*.py"`
-- `G13`: `rg -n "^db = |^conn = |^client = " -g "*.py"`
-- `G14`: `rg -n "^\s*if |^\s*elif " -g "*.py"`
-- `G15`: `rg -n "hasattr\\(|getattr\\(" -g "*.py"`
+- [ ] No helper spam, class proliferation, DTO soup, framework coupling, or import-time IO
 
 ---
-## [8][QUICK_REFERENCE]
+## [7][ALGORITHM_INTEGRITY]
+>**Dictum:** *Accumulators are folds, not loops.*
 
-- `TYPE_INTEGRITY`: `types.md` [1]-[4].
-- `EFFECT_INTEGRITY`: `effects.md` [1]-[4].
-- `CONTROL_FLOW`: `patterns.md` [1].
-- `DECORATOR_INTEGRITY`: `decorators.md` [1], [5].
-- `CONCURRENCY_INTEGRITY`: `concurrency.md` [1], [4].
-- `SURFACE_QUALITY`: `protocols.md` [1], [3].
-- `DIAGNOSTIC_TABLE`: section [7] in this file.
+<br>
+
+- [ ] `reduce` replaces accumulator loops; `accumulate` for scans; generators for lazy transforms
+- [ ] `@trampoline` for unbounded recursion depth -- stack safety mandatory
+- [ ] `Decimal` + `ROUND_HALF_EVEN` for financial arithmetic -- zero `float` in monetary paths
+
+---
+## [8][PERFORMANCE_INTEGRITY]
+>**Dictum:** *Measure before optimizing; allocation discipline is structural.*
+
+<br>
+
+- [ ] `__slots__` on non-Pydantic domain classes; module-level singletons for Encoder/Decoder/TypeAdapter
+- [ ] `CapacityLimiter` sized to downstream; `checkpoint_if_cancelled()` in hot loops
+- [ ] Profiling evidence before optimization -- no premature tuning
+
+---
+## [9][DETECTION_HEURISTICS]
+>**Dictum:** *Grep patterns surface violations faster than reading every line.*
+
+<br>
+
+| [INDEX] | [CAUSE]                  | [GREP_ID] | [RG_PATTERN]                                          | [FIX]                                      |
+| :-----: | ------------------------ | :-------: | ----------------------------------------------------- | ------------------------------------------ |
+|   [1]   | Optional masking failure |   `G1`    | `"is None:" -g "*.py"`                                | `Maybe[T]` + `.to_result()`                |
+|   [2]   | Exception control flow   |   `G2`    | `"^\s*except " -g "*.py"`                             | `@safe` at edge, `Result` in domain        |
+|   [3]   | Imperative iteration     |   `G3`    | `"^\s*for " -g "*.py"`                                | Comprehension or `map`                     |
+|   [4]   | Nominal dispatch         |   `G4`    | `"isinstance\\(" -g "*.py"`                           | Structural `match`/`case`                  |
+|   [5]   | ABC-based interface      |   `G5`    | `"class.*ABC\|from abc import" -g "*.py"`             | `Protocol` structural typing               |
+|   [6]   | Signature erasure        |   `G6`    | `"Callable\\[\\.\\.\\.," -g "*.py"`                   | `ParamSpec[P]` + `Callable[P, R]`          |
+|   [7]   | Mutable domain model     |   `G7`    | `"class.*BaseModel" -g "*.py"`                        | Set `frozen=True`                          |
+|   [8]   | Bare collection          |   `G8`    | `"-> list\\[\|-> dict\\[" -g "*.py"`                  | Frozen model or `TypeAdapter`              |
+|   [9]   | Unstructured concurrency |   `G9`    | `"asyncio\\.create_task\|asyncio\\.gather" -g "*.py"` | `TaskGroup` + `start_soon`                 |
+|  [10]   | Unstructured logging     |   `G10`   | `"logging\\.info\\(f\\\"\|logger\\.info\\(f\\\""...`  | Key-value structured logs                  |
+|  [11]   | Global mutable state     |   `G11`   | `"^[A-Z_]*: dict\|= \\[\\]\|= \\{\\}" -g "*.py"`      | `ContextVar[tuple]` snapshots              |
+|  [12]   | Bare primitive I/O       |   `G12`   | `"def .*: str\\) -> str:" -g "*.py"`                  | Typed atoms + `Result[T, E]`               |
+|  [13]   | Import-time IO           |   `G13`   | `"^db = \|^conn = \|^client = " -g "*.py"`            | Defer to `boot()`                          |
+|  [14]   | Imperative branching     |   `G14`   | `"^\s*if \|^\s*elif " -g "*.py"`                      | Exhaustive `match`/`case`                  |
+|  [15]   | `hasattr`/`getattr`      |   `G15`   | `"hasattr\\(\|getattr\\(" -g "*.py"`                  | `case object(attr=value)`                  |
+|  [16]   | Imperative accumulation  |   `G16`   | `"^\s*total\s*[+=]\|^\s*count\s*[+=]" -g "*.py"`      | `reduce` or `Seq.fold`                     |
+|  [17]   | Premature optimization   |   `G17`   | `"# TODO.*optim\|# PERF" -g "*.py"`                   | Profile with `cProfile`/`tracemalloc`      |
+|  [18]   | Mixed Result libraries   |   `G18`   | `"from expression.*Result\|from returns.*Result"...`  | ONE library per module; bridge at boundary |
+
+All patterns use `rg -n`. Combine G2+G14 for full control-flow audit; G4+G15 for dispatch audit.
+
+---
+## [10][QUICK_REFERENCE]
+>**Dictum:** *One table maps checklist to reference.*
+
+<br>
+
+| [INDEX] | [CHECKLIST_AREA]      | [WHAT_IT_VALIDATES]                                                            | [REFERENCE]                |
+| :-----: | --------------------- | ------------------------------------------------------------------------------ | -------------------------- |
+|   [1]   | TYPE_INTEGRITY        | Atoms, frozen models, unions, immutable collections                            | `types.md` [1]-[5]         |
+|   [2]   | EFFECT_INTEGRITY      | Result/Maybe/FutureResult, flow, library consistency                           | `effects.md` [1]-[5]       |
+|   [3]   | CONTROL_FLOW          | match/case exhaustive, zero imperative branching                               | `patterns.md` [1]          |
+|   [4]   | DECORATOR_INTEGRITY   | ParamSpec, ordering, single-concern                                            | `decorators.md` [1]-[2]    |
+|   [5]   | CONCURRENCY_INTEGRITY | TaskGroup, CancelScope, CapacityLimiter, ContextVar                            | `concurrency.md` [1]-[4]   |
+|   [6]   | SURFACE_QUALITY       | No helpers, framework coupling, import-time IO                                 | `protocols.md` [1], [3]    |
+|   [7]   | ALGORITHM_INTEGRITY   | Folds, scans, generators, @trampoline, Decimal                                 | `algorithms.md` [1]-[5]    |
+|   [8]   | PERFORMANCE_INTEGRITY | __slots__, singletons, backpressure, profiling-first                           | `performance.md` [1]-[5]   |
+|   [9]   | DETECTION_HEURISTICS  | Grep-based violation surface scan (G1-G18)                                     | Section [9] in this file   |
+|  [10]   | SERIALIZATION         | TypeAdapter at module level, Pydantic ingress, msgspec egress, Settings frozen | `serialization.md` [1]-[3] |
+|  [11]   | OBSERVABILITY         | Fused @instrument, processor chain, RED metrics, context propagation           | `observability.md` [1]-[4] |

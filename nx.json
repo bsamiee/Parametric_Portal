@@ -12,6 +12,8 @@
             "{workspaceRoot}/Directory.Build.targets",
             "{workspaceRoot}/Directory.Packages.props",
             "{workspaceRoot}/NuGet.config",
+            "{workspaceRoot}/apps/cs-analyzer/**/*.cs",
+            "{workspaceRoot}/apps/cs-analyzer/**/*.csproj",
             { "runtime": "dotnet --version" }
         ],
         "dotnetSources": [

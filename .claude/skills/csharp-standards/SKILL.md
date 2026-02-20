@@ -1,16 +1,24 @@
 ---
 name: csharp-standards
 description: >-
-  Enforce pure functional C# 14 / .NET 10 standards with LanguageExt v5 ROP,
-  discriminated unions, smart constructors, K<F,A> higher-kinded encoding,
-  zero-branching monadic pipelines, and hardware-accelerated patterns.
-  Use when editing, creating, reviewing, or refactoring any .cs module,
-  implementing domain services, defining type algebras, or applying
-  functional programming standards to C# code.
+  Sole authority on C# style, type discipline, error handling, concurrency, and
+  module organization in this workspace. MUST be loaded for every C# / .NET code
+  interaction. Use when performing ANY C#-related task:
+  (1) writing, editing, creating, reviewing, refactoring, or debugging any
+  .cs module, sealed DU hierarchy, smart constructor, or LanguageExt
+  Fin/Validation/Eff pipeline;
+  (2) implementing domain services, boundary adapters, ASP.NET endpoints,
+  gRPC stubs, or Thinktecture value objects;
+  (3) configuring Directory.Build.props, .editorconfig, .csproj files, NuGet
+  packages, or Roslyn analyzers (CSP0001-CSP0008);
+  (4) working with Serilog, OpenTelemetry, Polly resilience, NodaTime,
+  FluentValidation, Npgsql, or any .NET library in this monorepo;
+  (5) writing or editing FsCheck property tests, xUnit test projects,
+  BenchmarkDotNet benchmarks, or test configuration.
 ---
 
 # [H1][CSHARP-STANDARDS]
->**Dictum:** *Functional discipline unifies C# 14 / .NET 10 authoring with LanguageExt v5.*
+>**Dictum:** *Functional discipline unifies C# 14 / .NET 10 authoring with LanguageExt v5-beta-77.*
 
 <br>
 
@@ -22,48 +30,42 @@ This skill enforces a **single dense style** for C# 14 / .NET 10 modules: smart 
 
 <br>
 
-Coding standards references are complementary, not mutually exclusive. Type discipline applies when writing effects; anti-pattern awareness applies when writing types; composition patterns apply when writing algorithms. Unlike domain-knowledge skills (where finance and sales data are independent), enforcement skills demand layered awareness to prevent violations that span concerns.
+References are complementary -- type discipline applies when writing effects; anti-patterns apply when writing types. Enforcement demands layered awareness. Hold all loaded references stable through task completion.
 
 **Step 1 -- Foundation (always load first)**
-Cross-cutting references that establish baseline discipline for ALL C# modules.
 
-| [ORDER] | [REFERENCE]     | [FOCUS]          |
-| :-----: | --------------- | ------------------------------------------- |
-|   [1]   | `validation.md` | Compliance checks |
+| [INDEX] | [REFERENCE]     | [FOCUS]            |
+| :-----: | :-------------- | ------------------ |
+|   [1]   | `validation.md` | Compliance checks  |
 |   [2]   | `patterns.md`   | Anti-pattern codex |
 
 **Step 2 -- Core (always load second)**
-Domain references covering the type system, object modeling, and computation. Nearly all implementation tasks touch multiple core domains simultaneously.
 
-| [ORDER] | [REFERENCE]      | [FOCUS]                  |
-| :-----: | ---------------- | ------------------------------------------------ |
-|   [3]   | `types.md`       | primitives, DUs, phantom state |
-|   [4]   | `objects.md`     | object topology |
-|   [5]   | `effects.md`     | Fin/Validation/Eff/IO |
-|   [6]   | `composition.md` | LINQ + `K<F,A>` composition |
+| [INDEX] | [REFERENCE]      | [FOCUS]                        |
+| :-----: | :--------------- | ------------------------------ |
+|   [3]   | `types.md`       | Primitives, DUs, phantom state |
+|   [4]   | `objects.md`     | Object topology (Thinktecture) |
+|   [5]   | `effects.md`     | Fin/Validation/Eff/IO          |
+|   [6]   | `composition.md` | LINQ + `K<F,A>` composition    |
 
 **Step 3 -- Specialized (load when task requires)**
-Specialized domains. Load when the task involves HKT polymorphic algorithms, recursion schemes, hot-path optimization, observability, concurrency, or diagnostics.
 
-| [ORDER] | [REFERENCE]        | [LOAD_WHEN]                |
-| :-----: | ------------------ | ------------------------------------------------------------------- |
-|   [7]   | `algorithms.md`    | recursion schemes, folds, HKTs |
-|   [8]   | `performance.md`   | SIMD/span hot paths |
-|   [9]   | `observability.md` | logs/traces/metrics |
-|  [10]   | `concurrency.md`   | channels + cancellation |
-|  [11]   | `diagnostics.md`   | debugging + profiling |
+| [INDEX] | [REFERENCE]        | [LOAD_WHEN]              |
+| :-----: | :----------------- | ------------------------ |
+|   [7]   | `algorithms.md`    | Recursion schemes, folds |
+|   [8]   | `performance.md`   | SIMD/span hot paths      |
+|   [9]   | `observability.md` | Logs/traces/metrics      |
+|  [10]   | `concurrency.md`   | Channels + cancellation  |
+|  [11]   | `diagnostics.md`   | Debugging + profiling    |
 
 **Step 4 -- Template (scaffolding only)**
-Load exactly one template when creating a new module from scratch.
 
-| [ORDER] | [TEMPLATE]                      | [ARCHETYPE] |
-| :-----: | ------------------------------- | ----------- |
-|  [12]   | `pure-module.template.md`       | Pure        |
-|  [13]   | `effect-module.template.md`     | Effect      |
-|  [14]   | `algebra-module.template.md`    | Algebra     |
+| [INDEX] | [TEMPLATE]                      | [ARCHETYPE] |
+| :-----: | :------------------------------ | :---------: |
+|  [12]   | `pure-module.template.md`       |    Pure     |
+|  [13]   | `effect-module.template.md`     |   Effect    |
+|  [14]   | `algebra-module.template.md`    |   Algebra   |
 |  [15]   | `observable-module.template.md` | Observable  |
-
-Hold all loaded references stable through task completion.
 
 ---
 ## [2][CONTRACTS]
@@ -72,40 +74,60 @@ Hold all loaded references stable through task completion.
 <br>
 
 **Density over volume**
-- **~400 LOC signals a refactoring opportunity** -- dense polymorphic patterns naturally compress well-architected modules. This is not a hard cap: a sealed DU hierarchy with exhaustive `Fold` may legitimately exceed it. The question is whether the module owns exactly one concept and whether repetitive arms indicate a missing abstraction. File proliferation and helper extraction are *always* code smells -- better patterns compress the logic.
-- **File-scoped namespaces** only (`namespace X;`).
-- **Explicit accessibility** on every member (`public`, `private`, `internal`).
+- **~300 LOC signals a refactoring opportunity** -- dense polymorphic patterns compress well-architected modules. A sealed DU hierarchy with exhaustive arms may legitimately exceed it when the module owns exactly one concept. File proliferation and helper extraction are *always* code smells. Cap applies to `.cs` source modules only.
+- **File-scoped namespaces** only (`namespace X;`). **Explicit accessibility** on every member.
 
 **Imports convention**
-- **`using static LanguageExt.Prelude;`** assumed in every module -- provides `Some`, `None`, `unit`, `pure`, `error`, `guard`, `liftIO`, `Seq`, `HashMap`, `Atom`, `Ref`, `ms`, `sec`.
+- **`using static LanguageExt.Prelude;`** assumed in every module -- provides `Some`, `None`, `unit`, `pure`, `error`, `guard`, `liftIO`, `Seq`, `HashMap`, `Atom`, `ms`, `sec`. `Ref<T>` requires explicit `using LanguageExt;` (STM module, not in Prelude).
 
 **Type discipline**
 - **Zero `var`** -- all types explicit in declarations and lambda parameters.
-- **Named parameters** at every domain call site (`Create(candidate: value)`). Framework/LINQ predicate parameters and single-argument lambdas may use positional syntax.
-- **`readonly record struct`** for domain primitives; `sealed abstract record` for DUs.
-- **Expression-bodied members** where the body is a single expression.
-- **Primary constructors** preferred per `.editorconfig` (`csharp_style_prefer_primary_constructors = true:error`).
+- **Named parameters** at every domain call site (`Create(candidate: value)`). Framework/LINQ and single-argument lambdas may use positional syntax.
+- **`readonly record struct`** for domain primitives; `sealed abstract record` for DUs. **Expression-bodied members** where the body is a single expression. **Primary constructors** preferred per `.editorconfig`.
 
 **Control-flow discipline**
-- **Zero `if`/`else`/`else if`/`while`/`for`/`foreach`** -- use `switch` expressions and monadic `Bind`/`Map`.
-- **Zero `try`/`catch`/`throw`** -- use `Fin<T>`, `Validation<Error,T>`, `Eff<RT,T>`, or `IO<A>`.
-- **Exhaustive `switch`** with compiler-enforced coverage on DU hierarchies. Include `_ => throw new UnreachableException()` as a defensive arm until C# ships first-class DU exhaustiveness (targeted C# 15 preview).
+- **Zero `if`/`else`/`else if`/`while`/`for`/`foreach` in domain transforms** -- use `switch` expressions (C# equivalent of `Match.type`) and monadic `Bind`/`Map`.
+- **Zero `try`/`catch`/`throw` in domain transforms** -- use `Fin<T>`, `Validation<Error,T>`, `Eff<RT,T>`, or `IO<A>`.
+- **Exhaustive `switch`** with compiler-enforced coverage on DU hierarchies:
+```csharp
+result.Match(
+    Succ: value => /* handle success */,
+    Fail: error => error.Match(
+        NotFound: _ => /* handle missing */,
+        Validation: errs => /* handle invalid */
+    )
+);
+// Alternatively: @catch to intercept specific errors in Eff pipelines
+```
+- **Time acquisition is injected** (`NodaTime.IClock` or `System.TimeProvider` bridge), never direct `DateTime*` calls.
+- **Custom policy enforcement** via analyzers `CSP0001`-`CSP0008`.
 
-**Formatting** (compiler/editorconfig-enforced, listed for awareness)
-- **K&R brace style** (`csharp_new_line_before_open_brace = none`), **zero consecutive blank lines**, **method group conversion** preferred over equivalent lambdas, **UTF-8 string literals** preferred.
+**Boundary adapter exemptions** -- modules interfacing with external protocols (HTTP handlers, DB clients, message consumers, gRPC stubs).
+- **Exempt flow** -- annotate each site with `[BOUNDARY ADAPTER -- reason]`:
+  - `await foreach(...).WithCancellation(ct)` -- async stream enumeration
+  - `if (ct.IsCancellationRequested)` -- cancellation guard
+  - `if` + `yield return` in async iterator bodies -- C# spec requires statement form; no switch-expression or ternary equivalent exists
+  - `try/finally` for resource cleanup -- acquire/use/release lifecycle
+  - `yield return` in async generators adapting external I/O -- exempted from pure-function rules
+- See `validation.md` [2].
 
 **Effect discipline**
 - **`Fin<T>`** for synchronous fallible operations (isomorphic to `Either<Error,A>`).
 - **`Validation<Error,T>`** for parallel error accumulation (applicative, zero short-circuit).
 - **`Eff<RT,T>`** for effectful pipelines with environmental DI via `Has<RT,Trait>`.
-- **`IO<A>`** for boundary side effects (free monad: Pure/Fail/Sync/Async).
+- **`IO<A>`** for boundary side effects (lazy effect: Pure/Fail/Sync/Async thunks).
 - **`K<F,A>`** for higher-kinded generic algorithms (`Fallible`, `Applicative`, `Monad` constraints).
+- **FluentValidation** for boundary-layer async rule sets (HTTP request DTOs, external payloads). Bridge to `Validation<Error,T>` via `ValidateAsync` before entering domain pipelines. See `validation.md` [2A].
 
 **Surface minimization**
-- **`params ReadOnlySpan<T>`** for arity collapse -- one method owns all arities.
-- **Sealed DU hierarchies** with `private protected` constructors -- closed extension.
+- **`params ReadOnlySpan<T>`** for arity collapse. See `composition.md` [2].
+- **Sealed DU hierarchies**: `sealed abstract record` base + `sealed record` cases. Static factories on abstract base for construction.
 - **`static` lambdas** on hot-path closures -- zero closure allocations.
-- **C# 14 extension blocks** for behavior projection without inheritance.
+- **C# 14 extension blocks** for behavior projection without inheritance. See `types.md` [4].
+- **`static abstract` interface members** for compile-time dispatch (type classes, factories, defaults). See `types.md` [4], `algorithms.md` [3].
+
+**Formatting** (compiler/editorconfig-enforced)
+- **K&R brace style**, **zero consecutive blank lines**, **method group conversion** preferred, **UTF-8 string literals** preferred.
 
 ---
 ## [3][ROUTING]
@@ -113,26 +135,26 @@ Hold all loaded references stable through task completion.
 
 <br>
 
-The routing table below selects specialized references and templates to add beyond foundation and core.
+Core + foundation references are always loaded per [1]. The routing table selects additional specialized references and templates.
 
-| [INDEX] | [TASK]                       | [ADD_SPECIALIZED]  | [TEMPLATE]                      |
-| :-----: | --------------------------------------- | ------------------ | ------------------------------- |
-|   [1]   | Scaffold pure domain module  | --                 | `pure-module.template.md`       |
-|   [2]   | Scaffold effect service      | --                 | `effect-module.template.md`     |
-|   [3]   | Scaffold algebra module      | `algorithms.md`    | `algebra-module.template.md`    |
-|   [4]   | Refactor object model        | --                 | --                              |
-|   [5]   | Refactor domain types/DUs    | --                 | --                              |
-|   [6]   | Refactor ROP pipeline        | --                 | --                              |
-|   [7]   | Refactor composition/LINQ    | --                 | --                              |
-|   [8]   | Optimize hot path            | `performance.md`   | --                              |
-|   [9]   | Review existing module       | --                 | --                              |
-|  [10]   | Implement recursion/folds    | `algorithms.md`    | --                              |
-|  [11]   | Implement `K<F,A>` algo      | `algorithms.md`    | --                              |
-|  [12]   | Vectorize numeric code       | `performance.md`   | --                              |
-|  [13]   | Refactor logging/tracing     | `observability.md` | --                              |
-|  [14]   | Refactor concurrency         | `concurrency.md`   | --                              |
-|  [15]   | Debug/profile functional code| `diagnostics.md`   | --                              |
-|  [16]   | Scaffold observable service  | `observability.md` | `observable-module.template.md` |
+| [INDEX] | [TASK]                        | [ADD_SPECIALIZED]                   | [TEMPLATE]                      |
+| :-----: | ----------------------------- | ----------------------------------- | ------------------------------- |
+|   [1]   | Scaffold pure domain module   | --                                  | `pure-module.template.md`       |
+|   [2]   | Scaffold effect service       | --                                  | `effect-module.template.md`     |
+|   [3]   | Scaffold algebra module       | `algorithms.md`                     | `algebra-module.template.md`    |
+|   [4]   | Refactor object model         | --                                  | --                              |
+|   [5]   | Refactor domain types/DUs     | --                                  | --                              |
+|   [6]   | Refactor ROP pipeline         | --                                  | --                              |
+|   [7]   | Refactor composition/LINQ     | --                                  | --                              |
+|   [8]   | Optimize hot path             | `performance.md`                    | --                              |
+|   [9]   | Review existing module        | --                                  | --                              |
+|  [10]   | Implement recursion/folds     | `algorithms.md`                     | --                              |
+|  [11]   | Implement `K<F,A>` algo       | `algorithms.md`                     | --                              |
+|  [12]   | Vectorize numeric code        | `performance.md`                    | --                              |
+|  [13]   | Refactor logging/tracing      | `observability.md`                  | --                              |
+|  [14]   | Refactor concurrency          | `concurrency.md`                    | --                              |
+|  [15]   | Debug/profile functional code | `diagnostics.md`                    | --                              |
+|  [16]   | Scaffold observable service   | `observability.md` `concurrency.md` | `observable-module.template.md` |
 
 ---
 ## [4][DECISION_TREES]
@@ -142,34 +164,35 @@ The routing table below selects specialized references and templates to add beyo
 
 **Type family** -- select the encoding that makes illegal states unrepresentable at the narrowest type boundary.
 
-| [DATA_SHAPE]                        | [USE]                               | [KEY_TRAIT]                       |
-| ----------------------------------- | ----------------------------------- | --------------------------------- |
-| Object model topology selection     | See `objects.md`                    | Canonical shape before coding     |
-| Domain primitive (ID, amount, code) | `readonly record struct` + `Fin<T>` | `field` keyword inline validation |
-| Zero-alloc semantic wrapper         | `Newtype<TTag, TRepr>`              | Sealed tag class + `using` alias  |
-| Exhaustive state space              | Sealed abstract record hierarchy    | `private protected` ctor + `Fold` |
-| Compile-time state tracking         | `UserId<TState>` phantom parameter  | Empty `readonly struct` markers   |
-| Inline property validation          | `field` keyword setter              | Auto-rounding, auto-normalization |
+| [INDEX] | [DATA_SHAPE]                    | [USE]                                 | [KEY_TRAIT]                         |
+| :-----: | :------------------------------ | ------------------------------------- | ----------------------------------- |
+|   [1]   | **Object model topology**       | See `objects.md` [1] topology table   | topology annotations                |
+|   [2]   | **Domain primitive**            | `readonly record struct` + `Fin<T>`   | `{ get; }` only; normalize in factory |
+|   [3]   | **Source-gen payload DU**       | `[Union]` + `abstract partial record` | Generated `Switch`/`Map` exhaustive |
+|   [4]   | **Sealed DU hierarchy**         | `sealed abstract record` + cases      | Switch expression arms              |
+|   [5]   | **Zero-alloc wrapper**          | `Newtype<TTag, TRepr>`                | `[ValueObject<T>]` for public API   |
+|   [6]   | **Compile-time state tracking** | `UserId<TState>` phantom parameter    | Empty `readonly struct` markers     |
+|   [7]   | **Inline property validation**  | `field` keyword setter (non-validated) | Auto-rounding; NOT for `Fin<T>` types |
 
-**Error channel** -- match the effect type to the failure mode. Mixing types (e.g. `Fin` where `Validation` is needed) collapses parallel error accumulation into sequential short-circuiting.
+**Error channel** -- match the effect type to the failure mode.
 
-| [FAILURE_SHAPE]                    | [USE]                  | [KEY_TRAIT]                                   |
-| ---------------------------------- | ---------------------- | --------------------------------------------- |
-| Synchronous fallible operation     | `Fin<T>`               | `Bind`/`Map` chain; `Match` at boundary only  |
-| Parallel multi-field validation    | `Validation<Error,T>`  | Applicative `.Apply()` tuple; collects all    |
-| Effectful pipeline with DI         | `Eff<RT,T>`            | `Has<RT,Trait>` + LINQ `from..in..select`     |
-| Boundary side effect               | `IO<A>`                | Pure/Fail/Sync/Async + `Run`/`RunAsync`       |
-| Algorithm generic over computation | `K<F,A>` + constraints | `Fallible`/`Applicative`/`Monad`/`Foldable`   |
-| Declarative fallback chain         | `pipe` operator        | `Alternative<F>`/`Choice<F>` trait on Eff/Fin |
+| [INDEX] | [FAILURE_SHAPE]                        | [USE]                  | [KEY_TRAIT]                                   |
+| :-----: | :------------------------------------- | ---------------------- | --------------------------------------------- |
+|   [1]   | **Synchronous fallible operation**     | `Fin<T>`               | `Bind`/`Map` chain; `Match` at boundary only  |
+|   [2]   | **Parallel multi-field validation**    | `Validation<Error,T>`  | Applicative `.Apply()` tuple; collects all    |
+|   [3]   | **Effectful pipeline with DI**         | `Eff<RT,T>`            | `Has<RT,Trait>` + LINQ `from..in..select`     |
+|   [4]   | **Boundary side effect**               | `IO<A>`                | Pure/Fail/Sync/Async + `Run`/`RunAsync`       |
+|   [5]   | **Algorithm generic over computation** | `K<F,A>` + constraints | `Fallible`/`Applicative`/`Monad`/`Foldable`   |
+|   [6]   | **Declarative fallback chain**         | `\|` operator          | `Alternative<F>`/`Choice<F>` trait on Eff/Fin |
 
 **Module archetype** -- determines which template to scaffold.
 
-| [WHAT_YOU_ARE_BUILDING]                          | [ARCHETYPE] | [TEMPLATE]                      |
-| ------------------------------------------------ | ----------- | ------------------------------- |
-| Types + validators + transforms + extensions     | Pure        | `pure-module.template.md`       |
-| ROP pipelines + DI traits + boundary handling    | Effect      | `effect-module.template.md`     |
-| Algebraic interfaces + HKT + query unions        | Algebra     | `algebra-module.template.md`    |
-| ROP pipelines + DI traits + integrated telemetry | Observable  | `observable-module.template.md` |
+| [INDEX] | [WHAT_YOU_ARE_BUILDING]                              | [ARCHETYPE] | [TEMPLATE]                      |
+| :-----: | :--------------------------------------------------- | :---------: | ------------------------------- |
+|   [1]   | **Types + validators + transforms + extensions**     |    Pure     | `pure-module.template.md`       |
+|   [2]   | **ROP pipelines + DI traits + boundary handling**    |   Effect    | `effect-module.template.md`     |
+|   [3]   | **Algebraic interfaces + HKT + query unions**        |   Algebra   | `algebra-module.template.md`    |
+|   [4]   | **ROP pipelines + DI traits + integrated telemetry** | Observable  | `observable-module.template.md` |
 
 ---
 ## [5][ANTI_PATTERNS]
@@ -177,33 +200,33 @@ The routing table below selects specialized references and templates to add beyo
 
 <br>
 
-Each anti-pattern names a structural defect that propagates if left unchecked. See `validation.md` [7] for concrete grep-level detection heuristics.
+Each anti-pattern names a structural defect that propagates if left unchecked. See `validation.md` [7] for detection heuristics.
 
-**Type-system violations** -- defects that weaken static guarantees:
-- **VAR_INFERENCE** -- `var` hides codomain semantics; when `Fin<T>` silently becomes `Option<T>` under refactoring, the compiler cannot distinguish intention from accident. Explicit types are the proof obligation.
-- **NULL_ARCHITECTURE** -- `null` encoding three states (not-found, error, uninitialized) collapses distinct failure modes into one opaque value. `Option<T>` for absence, `Fin<T>` for failure, explicit initialization for construction.
-- **ANEMIC_DOMAIN** -- entities with `{ get; set; }` make invariants unenforceable because any consumer can construct invalid state. Smart constructors + `with`-expression transitions move validation to the only place it belongs: the type boundary.
+**Type-system violations**
+- **VAR_INFERENCE** -- `var` hides codomain semantics; when `Fin<T>` silently becomes `Option<T>` under refactoring, the compiler cannot distinguish intention from accident.
+- **NULL_ARCHITECTURE** -- `null` encoding three states (not-found, error, uninitialized) collapses distinct failure modes. `Option<T>` for absence, `Fin<T>` for failure.
+- **ANEMIC_DOMAIN** -- entities with `{ get; set; }` make invariants unenforceable. Smart constructors + `with`-expression transitions move validation to the type boundary.
 
-**Control-flow violations** -- defects that break pipeline determinism:
-- **IMPERATIVE_BRANCH** -- `if`/`else`/`while`/`for` fragments what should be a directed computation graph. Switch expressions and monadic `Bind` preserve exhaustiveness and totality.
-- **EXCEPTION_CONTROL_FLOW** -- `try`/`catch`/`throw` hides failure paths from type signatures, defeating the entire ROP contract. `Fin`/`Validation`/`Eff` make failure *visible*.
-- **PREMATURE_MATCH_COLLAPSE** -- calling `.Match()` mid-pipeline destroys the monadic context that downstream combinators need. `Map`/`Bind`/`BiMap` preserve the functor, reserving `Match` for the boundary where the caller consumes the result.
-- **EARLY_RETURN_GUARDS** -- `if (!valid) return Error;` sequences scatter cyclomatic exits; `Validation<Error,T>` applicative pipeline collects all failures in one pass.
+**Control-flow violations**
+- **IMPERATIVE_BRANCH** -- `if`/`else`/`while`/`for` fragments directed computation. Switch expressions and monadic `Bind` preserve exhaustiveness.
+- **EXCEPTION_CONTROL_FLOW** -- `try`/`catch`/`throw` hides failure from type signatures. `Fin`/`Validation`/`Eff` make failure *visible*.
+- **PREMATURE_MATCH_COLLAPSE** -- `.Match()` mid-pipeline destroys monadic context. `Map`/`Bind`/`BiMap` preserve the functor; reserve `Match` for boundaries.
+- **EARLY_RETURN_GUARDS** -- `if (!valid) return Error;` scatters cyclomatic exits. `Validation<Error,T>` applicative pipeline collects all failures in one pass.
 
-**Surface-area violations** -- defects that inflate API complexity:
-- **OVERLOAD_SPAM** -- `ProcessSingle`/`ProcessBatch`/`ProcessAll` is three methods doing one thing at different arities. `params ReadOnlySpan<T>` + algebraic constraint collapses them.
-- **API_SURFACE_INFLATION** -- `Get`/`GetMany`/`TryGet`/`GetOrDefault` is a query algebra disguised as method proliferation. One `Execute<R>(Query<K,V,R>)` entry point owns all variation.
-- **INTERFACE_POLLUTION** -- `IFooService` with exactly one `FooService` implementation adds indirection without testability value. Remove the interface; use `Func<>` delegates or direct injection.
-- **GOD_FUNCTION** -- a single function handling all variants via giant switch violates OCP. Each new variant requires modification. DU + `Fold` or `K<F,A>` abstraction makes extension additive.
+**Surface-area violations**
+- **OVERLOAD_SPAM** -- three methods at different arities. `params ReadOnlySpan<T>` + algebraic constraint collapses them. See `composition.md` [2].
+- **API_SURFACE_INFLATION** -- `Get`/`GetMany`/`TryGet`/`GetOrDefault` is query algebra as method proliferation. One `Execute<R>(Query<K,V,R>)` entry point owns all variation.
+- **INTERFACE_POLLUTION** -- `IFooService` with exactly one implementation adds zero testability. Remove; use `Func<>` delegates or direct injection.
+- **GOD_FUNCTION** -- giant switch handling all variants violates OCP. DU + exhaustive `Switch`/`Map` (Thinktecture) or `K<F,A>` abstraction makes extension additive.
 
-**Allocation violations** -- defects specific to hot-path code:
-- **CLOSURE_CAPTURE_HOT_PATH** -- implicit variable capture forces the runtime to allocate display classes. `static` lambdas + tuple threading keep the hot path allocation-free. Runtime closure allocation remains a known JIT frontier even in .NET 10.
-- **MUTABLE_ACCUMULATOR** -- `var sum = 0; foreach...` breaks referential transparency and prevents vectorization. Tail-recursive folds or `Seq<T>.Fold` are the replacement.
-- **LINQ_HOT_PATH** -- `IEnumerable` LINQ allocates state machines per enumerator. `ReadOnlySpan<T>` + `TensorPrimitives` for numeric aggregation, `Seq<T>.Choose` for functional filter+map.
+**Allocation violations**
+- **CLOSURE_CAPTURE_HOT_PATH** -- implicit capture forces display class allocation. `static` lambdas + tuple threading keep hot paths allocation-free.
+- **MUTABLE_ACCUMULATOR** -- `var sum = 0; foreach...` breaks referential transparency. Tail-recursive folds or `Seq<T>.Fold` replace it.
+- **LINQ_HOT_PATH** -- `IEnumerable` LINQ allocates state machines. `ReadOnlySpan<T>` + `TensorPrimitives` for numeric aggregation, `Seq<T>.Choose` for filter+map.
 
-**Naming violations** -- defects that erode call-site clarity:
-- **POSITIONAL_ARGS** -- unnamed arguments cause silent logic inversions when signature parameter order changes. Named parameters at domain call sites are the contract.
-- **VARIABLE_REASSIGNMENT** -- `value = Process(value)` creates temporal coupling; `Bind`/`Map` chains make the directed computation graph explicit.
+**Naming violations**
+- **POSITIONAL_ARGS** -- unnamed arguments cause silent logic inversions. Named parameters at domain call sites.
+- **VARIABLE_REASSIGNMENT** -- `value = Process(value)` creates temporal coupling. `Bind`/`Map` chains make the computation graph explicit.
 
 ---
 ## [6][TEMPLATES]
@@ -211,20 +234,20 @@ Each anti-pattern names a structural defect that propagates if left unchecked. S
 
 <br>
 
-- **Pure domain module** (`pure-module.template.md`) -- types, smart constructors via `Fin<T>`, sealed DU hierarchies with `Fold`, C# 14 extension blocks for behavior projection. Start here for any entity or value object.
-- **Effect service module** (`effect-module.template.md`) -- `Eff<RT,T>` ROP pipelines, `Has<RT,Trait>` environmental DI, LINQ comprehension with `guard`/`from..in..select`, `@catch` error recovery. Start here for any service or boundary adapter.
-- **Algebraic abstraction module** (`algebra-module.template.md`) -- query algebras as sealed DUs, `K<F,A>` higher-kinded bridge with `.As()` downcast, `Foldable`/`Traversable` trait constraints. Start here for any cross-cutting generic abstraction.
-- **Observable service module** (`observable-module.template.md`) -- `Eff<RT,T>` ROP pipelines with integrated `ActivitySource` tracing, `Meter` metrics, `[LoggerMessage]` logging, and `Observe` tap combinators. Start here for any service requiring structured telemetry.
+- **Pure domain module** (`pure-module.template.md`) -- types, smart constructors via `Fin<T>`, sealed DU hierarchies with exhaustive `Switch`/`Map`, C# 14 extension blocks.
+- **Effect service module** (`effect-module.template.md`) -- `Eff<RT,T>` ROP pipelines, `Has<RT,Trait>` environmental DI, LINQ comprehension with `guard`/`from..in..select`, `@catch` error recovery.
+- **Algebraic abstraction module** (`algebra-module.template.md`) -- query algebras as sealed DUs, `K<F,A>` higher-kinded bridge with `.As()` downcast, `Foldable`/`Traversable` trait constraints.
+- **Observable service module** (`observable-module.template.md`) -- `Eff<RT,T>` ROP pipelines with `ActivitySource` tracing, `Meter` metrics, `[LoggerMessage]` logging, and `Observe` tap combinators.
 
 ---
-## [7][LANGEXT_V5_CONVENTIONS]
->**Dictum:** *LanguageExt v5 idioms supersede v4 patterns.*
+## [7][LANGEXT_V5_BETA77_CONVENTIONS]
+>**Dictum:** *LanguageExt v5-beta-77 idioms supersede v4 patterns.*
 
 <br>
 
 - **`.As()` downcast** -- `K<F,A>` results must be downcast to concrete types: `ParseInt<Fin>("123").As()` yields `Fin<int>`. Without `.As()`, consumers receive the unusable `K<Fin, int>`.
-- **`@catch` operator** -- declarative error recovery via `|`: `CallApi(request) | @catch(Errors.TimedOut, error => Retry(request))`. Composes with `|` (Alternative/Choice) for fallback chains.
-- **`|` fallback** -- `LoadFromFile(path) | LoadFromEnvironment() | Pure(Config.Default)`. Works across `Eff`, `IO`, `Fin`, `Option`.
-- **Prefer LanguageExt collections** -- `Seq<T>` (10x faster than `Lst<T>`, trait-integrated), `HashMap<K,V>` (CHAMP, fastest immutable dict), `HashSet<T>`. BCL `ImmutableDictionary` does not implement `K<F,A>` traits.
-- **`Validation<Error,T>`** standardized -- `Error` implements `Monoid` in v5, so `Validation<Error,T>` is valid. Use this form over `Validation<Seq<Error>,T>` unless explicit collection semantics are required.
-- **Memoization boundary** -- `ConcurrentDictionary` + `Lazy<T>` wrapping inside memoize combinators is an intentional controlled side effect at the purity boundary. Document the exception.
+- **`@catch` operator** -- declarative error recovery: `CallApi(request) | @catch(Errors.TimedOut, static error => Retry(request))`.
+- **`|` fallback** -- `LoadFromFile(path) | LoadFromEnvironment() | Pure(Config.Default)`. Works across `Eff`, `IO`, `Fin`, `Option`. Composes with `@catch` for typed fallback chains.
+- **Prefer LanguageExt collections** -- `Seq<T>` (array-backed, faster iteration/indexing than `Lst<T>`; trait-integrated via `K<Seq, A>`), `HashMap<K,V>` (CHAMP), `HashSet<T>`. BCL `ImmutableDictionary` does not implement `K<F,A>` traits.
+- **`Validation<Error,T>`** standardized -- `Error` implements `Monoid` in v5, so `Validation<Error,T>` is valid. Use this form over `Validation<Seq<Error>,T>`.
+- **Memoization boundary** -- `Atom<HashMap<K,V>>` for lock-free memoize combinators with CAS semantics: `Atom(HashMap<CacheKey, Result>.Empty)`. `ConcurrentDictionary` is an infrastructure escape hatch in boundary adapters only.

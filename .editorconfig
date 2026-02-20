@@ -26,7 +26,7 @@ dotnet_style_require_accessibility_modifiers = always:error                   # 
 csharp_using_directive_placement = outside_namespace:error                    # Keep using directives outside namespace blocks.
 dotnet_sort_system_directives_first = true                                    # Keep System usings ordered first.
 dotnet_separate_import_directive_groups = false                               # Avoid blank-line grouping in imports.
-dotnet_diagnostic.IDE0005.severity = none                                     # Disabled on build: requires GenerateDocumentationFile=true.
+dotnet_diagnostic.IDE0005.severity = error                                    # Remove unnecessary using directives; no XML doc comments means no false positives from <see cref> references.
 
 # --- [TYPE_EXPLICITNESS] ----------------------------------------------------
 csharp_style_var_for_built_in_types = false:error                             # Use explicit built-in types instead of var.
@@ -149,6 +149,7 @@ csharp_space_between_square_brackets = false                                  # 
 dotnet_diagnostic.IDE0055.severity = error                                    # Enforce formatter compliance in CI/build.
 
 # --- [QUALITY_ANALYZERS] -----------------------------------------------------
+# CSP0001-CSP0902 severities are defined in analyzer descriptors (default = error).
 dotnet_diagnostic.CA1002.severity = error                                     # Avoid exposing mutable List<T> in public APIs.
 dotnet_diagnostic.CA1008.severity = error                                     # Require enums to define a zero-valued member.
 dotnet_diagnostic.CA1021.severity = error                                     # Avoid out parameters for clearer API contracts.
@@ -290,5 +291,6 @@ dotnet_diagnostic.MA0110.severity = error                                     # 
 dotnet_diagnostic.MA0134.severity = none                                      # Covered by VSTHRD110 to avoid duplicate async-observation diagnostics.
 dotnet_diagnostic.MA0155.severity = none                                      # Covered by VSTHRD100 to avoid duplicate async-void diagnostics.
 dotnet_diagnostic.MA0158.severity = error                                     # Prefer System.Threading.Lock over object lock guards.
+dotnet_diagnostic.MA0166.severity = error                                     # Forward TimeProvider when overloads support it.
 MA0032.allowOverloadsWithOptionalParameters = false                           # Require token-aware overload usage even when optional params exist.
 dotnet_code_quality_unused_parameters = non_public                            # Restrict unused-parameter enforcement to non-public members.

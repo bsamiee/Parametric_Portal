@@ -12,19 +12,19 @@ Produces one algebraic abstraction module: query union as a sealed DU with `Fold
 ---
 **Placeholders**
 
-| [INDEX] | [PLACEHOLDER]        | [EXAMPLE]                   |
-| :-----: | -------------------- | --------------------------- |
-|   [1]   | `${Namespace}`       | `Domain.Storage`            |
-|   [2]   | `${AlgebraName}`     | `Store`                     |
-|   [3]   | `${KeyType}`         | `K`                         |
-|   [4]   | `${ValueType}`       | `V`                         |
-|   [5]   | `${InterfaceName}`   | `IStore`                    |
-|   [6]   | `${ImplName}`        | `InMemoryStore`             |
-|   [7]   | `${DecoratorName}`   | `Logging${AlgebraName}`     |
-|   [8]   | `${ConfigReprType}`  | `string`                    |
-|   [9]   | `${config-valid}`    | `candidate.Length > 0`      |
-|  [10]   | `${config-message}`  | `"Name must be non-empty."` |
-|  [11]   | `${DiagnosticLabel}` | `"store.execute"`           |
+| [INDEX] | [PLACEHOLDER]            | [EXAMPLE]                   |
+| :-----: | ------------------------ | --------------------------- |
+|   [1]   | **`${Namespace}`**       | `Domain.Storage`            |
+|   [2]   | **`${AlgebraName}`**     | `Store`                     |
+|   [3]   | **`${KeyType}`**         | `K`                         |
+|   [4]   | **`${ValueType}`**       | `V`                         |
+|   [5]   | **`${InterfaceName}`**   | `IStore`                    |
+|   [6]   | **`${ImplName}`**        | `InMemoryStore`             |
+|   [7]   | **`${DecoratorName}`**   | `Logging${AlgebraName}`     |
+|   [8]   | **`${ConfigReprType}`**  | `string`                    |
+|   [9]   | **`${ConfigValid}`**     | `candidate.Length > 0`      |
+|  [10]   | **`${ConfigMessage}`**   | `"Name must be non-empty."` |
+|  [11]   | **`${DiagnosticLabel}`** | `"store.execute"`           |
 
 ---
 ```csharp
@@ -45,10 +45,10 @@ public readonly record struct ${AlgebraName}Config {
     public ${ConfigReprType} Value { get; }
     private ${AlgebraName}Config(${ConfigReprType} value) { Value = value; }
     public static Fin<${AlgebraName}Config> Create(${ConfigReprType} candidate) =>
-        (${config-valid}) switch {
+        (${ConfigValid}) switch {
             true => FinSucc(new ${AlgebraName}Config(value: candidate)),
             false => FinFail<${AlgebraName}Config>(
-                Error.New(message: ${config-message}))
+                Error.New(message: ${ConfigMessage}))
         };
 }
 
@@ -59,6 +59,8 @@ public readonly record struct ${AlgebraName}Config {
 // composition.md [5].
 public abstract record ${AlgebraName}Query<${KeyType}, ${ValueType}, TResult>
     where ${KeyType} : notnull {
+    // private protected: prevents external subclassing; _ arm is defensive
+    // until C# ships native DU exhaustiveness checking.
     private protected ${AlgebraName}Query() { }
     public sealed record Get(${KeyType} Key)
         : ${AlgebraName}Query<${KeyType}, ${ValueType}, TResult>;
@@ -81,18 +83,17 @@ public abstract record ${AlgebraName}Query<${KeyType}, ${ValueType}, TResult>
                 message: "Exhaustive: all ${AlgebraName}Query variants handled")
         };
 }
-
 // C# 14 extension members -- pure projections via Fold.
-public static class ${AlgebraName}QueryRole {
-    extension<${KeyType}, ${ValueType}, TResult>(
-        ${AlgebraName}Query<${KeyType}, ${ValueType}, TResult> query)
-        where ${KeyType} : notnull {
-        public bool IsMutation =>
-            query.Fold(
-                onGet: static (${AlgebraName}Query<${KeyType}, ${ValueType}, TResult>.Get _) => false,
-                onUpsert: static (${AlgebraName}Query<${KeyType}, ${ValueType}, TResult>.Upsert _) => true,
-                onDelete: static (${AlgebraName}Query<${KeyType}, ${ValueType}, TResult>.Delete _) => true);
-    }
+// file static class keeps projection helpers file-private and off the public API surface.
+file static class ${AlgebraName}QueryExtensions {
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static bool IsMutation<${KeyType}, ${ValueType}, TResult>(
+        this ${AlgebraName}Query<${KeyType}, ${ValueType}, TResult> query)
+        where ${KeyType} : notnull =>
+        query.Fold(
+            onGet: static _ => false,
+            onUpsert: static _ => true,
+            onDelete: static _ => true);
 }
 
 // --- [ERRORS] ----------------------------------------------------------------
@@ -131,6 +132,8 @@ public sealed class ${ImplName}<${KeyType}, ${ValueType}>(
         ${AlgebraName}Query<${KeyType}, ${ValueType}, TResult> query) =>
         query.Fold(
             onGet: (${AlgebraName}Query<${KeyType}, ${ValueType}, TResult>.Get getQuery) =>
+                // [MONOMORPHIC-PATH] K<F,A> requires object boxing when F is erased at runtime.
+                // Prefer ${AlgebraName}Interpret.Execute path when F is known -- avoids double-cast.
                 FinSucc((TResult)(object)_state.Value.Find(key: getQuery.Key)),
             onUpsert: (${AlgebraName}Query<${KeyType}, ${ValueType}, TResult>.Upsert upsertQuery) =>
                 _state.Swap((HashMap<${KeyType}, ${ValueType}> current) =>
@@ -143,21 +146,25 @@ public sealed class ${ImplName}<${KeyType}, ${ValueType}>(
                     .Pipe(static (HashMap<${KeyType}, ${ValueType}> _) =>
                         FinSucc((TResult)(object)unit)));
     // Batch: params ReadOnlySpan<T> collapses all arities -- see composition.md [2].
+    /// <summary>
+    /// Execute multiple queries in batch. Note: materializes the span into an array
+    /// for lambda capture; consider individual Execute calls for zero-allocation hot paths.
+    /// </summary>
     public Seq<Fin<TResult>> ExecuteBatch<TResult>(
-        params ReadOnlySpan<${AlgebraName}Query<${KeyType}, ${ValueType}, TResult>> queries) =>
-        toSeq(queries.ToArray()).Map(
+        params ReadOnlySpan<${AlgebraName}Query<${KeyType}, ${ValueType}, TResult>> queries) {
+        // [HEAP-REQUIRED] Span cannot be captured by lambda -- array conversion intentional.
+        ${AlgebraName}Query<${KeyType}, ${ValueType}, TResult>[] batch = queries.ToArray();
+        return toSeq(items: batch).Map(
             (${AlgebraName}Query<${KeyType}, ${ValueType}, TResult> query) =>
                 Execute(query: query));
+    }
 }
 
 // --- [DECORATORS] ------------------------------------------------------------
 
-// Wraps Execute with cross-cutting behavior via fold inspection.
-// Logging, caching, metrics, dry-run all follow this shape.
+// Wraps Execute with cross-cutting behavior via fold label extraction.
 // Compose by nesting: new Logging(new Caching(new InMemory(seed))).
-// For ActivitySource-based span decorators, centralize the source in a
-// Diagnostics static class rather than accepting ILogger -- see diagnostics.md [1].
-// Replace Action<string> log with Observe.Outcome tap for unified log+trace+metrics
+// Replace Action<string> with Observe.Outcome tap for unified telemetry
 // in a single BiMap pass -- see observability.md [4].
 public sealed class ${DecoratorName}<${KeyType}, ${ValueType}>(
     ${InterfaceName}<${KeyType}, ${ValueType}> inner,
@@ -165,19 +172,12 @@ public sealed class ${DecoratorName}<${KeyType}, ${ValueType}>(
     : ${InterfaceName}<${KeyType}, ${ValueType}>
     where ${KeyType} : notnull {
     public Fin<TResult> Execute<TResult>(
-        ${AlgebraName}Query<${KeyType}, ${ValueType}, TResult> query) =>
-        query.Fold(
-            onGet: (${AlgebraName}Query<${KeyType}, ${ValueType}, TResult>.Get getQuery) =>
-                LogAndDelegate(label: "Get", key: getQuery.Key.ToString()!, query: query),
-            onUpsert: (${AlgebraName}Query<${KeyType}, ${ValueType}, TResult>.Upsert upsertQuery) =>
-                LogAndDelegate(label: "Upsert", key: upsertQuery.Key.ToString()!, query: query),
-            onDelete: (${AlgebraName}Query<${KeyType}, ${ValueType}, TResult>.Delete deleteQuery) =>
-                LogAndDelegate(label: "Delete", key: deleteQuery.Key.ToString()!, query: query));
-    private Fin<TResult> LogAndDelegate<TResult>(
-        string label,
-        string key,
         ${AlgebraName}Query<${KeyType}, ${ValueType}, TResult> query) {
-        log($"[${AlgebraName}] {label} key={key}");
+        string label = query.Fold(
+            onGet: static _ => "Get",
+            onUpsert: static _ => "Upsert",
+            onDelete: static _ => "Delete");
+        log($"[${AlgebraName}] {label}");
         return inner.Execute(query: query);
     }
 }
@@ -220,12 +220,11 @@ public static class ${AlgebraName}Eff {
         ${AlgebraName}Query<${KeyType}, ${ValueType}, TResult> query)
         where RT : Has${AlgebraName}<RT, ${KeyType}, ${ValueType}>
         where ${KeyType} : notnull =>
+        // default(RT).Trait: phantom access via Has<RT,Trait> -- see effects.md [2]
         default(RT).Trait.Execute(query: query).ToEff();
     // @catch / | Alternative: declarative error recovery.
-    // Wrap pipeline in Probe.Span(pipeline: ..., spanName: ${DiagnosticLabel})
-    // during development to capture debug Activity without collapsing Eff context
-    // -- see diagnostics.md [3]. Remove probe before production; span overhead
-    // is non-zero even when no listener is registered.
+    // [DEBUG] Wrap in Probe.Span(pipeline: ..., spanName: ${DiagnosticLabel})
+    // for debug Activity; remove before production -- see diagnostics.md [3].
     public static Eff<RT, TResult> ExecuteWithFallback<RT, ${KeyType}, ${ValueType}, TResult>(
         ${AlgebraName}Query<${KeyType}, ${ValueType}, TResult> primary,
         ${AlgebraName}Query<${KeyType}, ${ValueType}, TResult> fallback)
@@ -245,26 +244,23 @@ public static class ${AlgebraName}Boundary {
     public static Validation<Error, ${AlgebraName}Query<string, string, TResult>>
         ValidateUpsert<TResult>(${AlgebraName}Request request) =>
         (
-            ValidateKey(raw: request.RawKey),
-            ValidateValue(raw: request.RawValue)
+            request.RawKey.Trim() switch {
+                string trimmed when trimmed.Length > 0 =>
+                    Success<Error, string>(trimmed),
+                _ => Fail<Error, string>(Error.New(message: "Key must be non-empty."))
+            },
+            (request.RawValue.Length <= 4096) switch {
+                true => Success<Error, string>(request.RawValue),
+                false => Fail<Error, string>(Error.New(message: "Value exceeds maximum length."))
+            }
         ).Apply(
             (string key, string value) =>
                 (${AlgebraName}Query<string, string, TResult>)
                 new ${AlgebraName}Query<string, string, TResult>.Upsert(Key: key, Value: value));
-    private static Validation<Error, string> ValidateKey(string raw) =>
-        raw.Trim() switch {
-            string trimmed when trimmed.Length > 0 =>
-                Success<Error, string>(trimmed),
-            _ => Fail<Error, string>(Error.New(message: "Key must be non-empty."))
-        };
-    private static Validation<Error, string> ValidateValue(string raw) =>
-        (raw.Length <= 4096) switch {
-            true => Success<Error, string>(raw),
-            false => Fail<Error, string>(Error.New(message: "Value exceeds maximum length."))
-        };
 }
 
 // --- [EXPORT] ----------------------------------------------------------------
+
 // All types and static classes above use explicit accessibility.
 // No barrel files or re-exports.
 ```
@@ -278,15 +274,16 @@ public static class ${AlgebraName}Boundary {
 
 *Atom State + Decorators* -- `Atom<HashMap<K,V>>` provides lock-free atomic state with pure `Swap` transitions (see `effects.md` [7]). Decorators compose by nesting and inspect queries via Fold for cross-cutting concerns. Static lambdas on Fold in hot-path interpreters prevent closure allocations (see `performance.md` [7]); non-static lambdas are acceptable when Fold arms reference instance state. To promote a decorator to full observability, replace `Action<string> log` with `Observe.Outcome` tap on the returned `Fin<TResult>` -- see `observability.md` [4]. For debug-only span wrapping, use `Probe.Span` from a centralized `Diagnostics` module rather than inlining `ActivitySource` -- see `diagnostics.md` [1] and `diagnostics.md` [3].
 
-*Foldable/Traversable for Container-Generic Algorithms* -- When batch query results are wrapped in containers, use `Foldable<F>` for Sum/All/Count and `Traversable<F>` for effectful iteration -- see `composition.md` [4]. These are consumer-side concerns, not algebra-internal; constrain via LanguageExt traits.
+*Expression Trees vs Fold Catamorphism* -- Do NOT use `Expression<Func<...>>` compilation inside algebra interpreters. The Fold catamorphism already provides zero-overhead dispatch via pattern matching -- expression tree compilation adds startup latency (~10-40x slower than direct delegate creation) with no runtime benefit over Fold. Reserve compiled expression trees for infrastructure boundaries: pre-compiled property-to-tag extractors in observability (see `observability.md` [1] `TagPolicy.CompileTagExtractor`), dynamic LINQ query translation at adapter boundaries, or serialization source generators. The K<F,A> polymorphic interpreter achieves the same extensibility through type-level abstraction, not runtime code generation.
 
 ---
-**Post-Scaffold Checklist** (from `validation.md`)
+## [POST_SCAFFOLD]
 
-- [ ] TYPE_INTEGRITY: Smart constructor + `Fin<T>` factory on `${AlgebraName}Config`; no `{ get; set; }` bags
-- [ ] EFFECT_INTEGRITY: `Fin<T>` for sync Execute; `K<F,A>` for polymorphic; `Eff<RT,T>` for effectful; no `try`/`catch`
-- [ ] CONTROL_FLOW: Zero `if`/`else`/`while`/`for`/`foreach`; all dispatch via Fold + switch expressions
-- [ ] SURFACE_QUALITY: One `Execute` method; no sibling families; no single-call private helpers
-- [ ] DENSITY: ~400 LOC target; zero `var`; static lambdas where possible; named parameters everywhere
-- [ ] OBSERVABILITY: `${DecoratorName}` uses `Observe.Outcome` tap or delegates to a centralized `Diagnostics` module -- no inline `ActivitySource` creation; see `observability.md` [4], `diagnostics.md` [1]
-- [ ] DIAGNOSTIC_CLEANUP: All `Probe.Span` / `Probe.Tap` calls removed before production; `${DiagnosticLabel}` placeholder resolved; error codes in `${AlgebraName}Errors` carry `int` codes for dashboard use -- see `diagnostics.md` [3], `observability.md` [6]
+- [ ] Replace all `${...}` placeholders with domain-specific names
+- [ ] Verify all records are `sealed`; all value types are `readonly record struct`
+- [ ] Add `[MethodImpl(AggressiveInlining)]` to all pure hot-path functions
+- [ ] Confirm no `if`/`switch` statements in domain logic; `Match` at boundary only
+- [ ] Add `Telemetry.span` to all public service operations
+- [ ] Wire `Layer` into `ServicesLayer` in composition root
+- [ ] Write at least one property-based test per pure function
+- [ ] Run `dotnet build` and verify zero warnings/errors

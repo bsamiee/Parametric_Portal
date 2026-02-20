@@ -1,62 +1,89 @@
 # [H1][PIPELINE_MODULE]
 >**Dictum:** *Pipeline modules compose ROP stages, typed decorators, and structured logging into left-to-right data flow.*
 
-Produces one railway-oriented pipeline module: stages returning `Result[T, E]` composed via `flow()` + `bind` from `returns.pointfree`, `@safe` bridging at foreign boundaries, typed decorator stacks with frozen config, and structured logging via `structlog.contextvars`. Pipeline modules own orchestration logic -- domain models and atoms are imported, never defined here.
+<br>
+
+Produces one railway-oriented pipeline module: stages returning `Result[T, E]` composed via `flow()` + `bind` from `returns.pointfree` as the primary linear form, `@effect.result` generators as the alternative for complex branching, bridge functions converting `expression.Result` domain outputs to `returns.Result` pipeline inputs, `@safe` bridging at foreign boundaries, typed decorator stacks with frozen config, and structured logging via `structlog.contextvars`. Pipeline modules own orchestration logic -- domain models and atoms are imported, never defined here.
 
 **Density:** ~225 LOC signals a refactoring opportunity. No file proliferation; colocate stages in the pipeline module.
-**References:** `effects.md` ([1] EFFECT_STACK, [2] CONTEXTUAL_EFFECTS), `decorators.md` ([1] PARAMSPEC_ALGEBRA, [3] ORDERING_ALGEBRA), `observability.md` ([1] SIGNAL_PIPELINE).
-**Anti-Pattern Awareness:** See `patterns.md` [1] for BARE_TRY_EXCEPT, GOD_DECORATOR, MODEL_WITH_BEHAVIOR, NONE_RETURNS.
+**References:** `effects.md` ([1] EFFECT_STACK, [2] CONTEXTUAL_EFFECTS, [5] EXPRESSION_EFFECTS), `decorators.md` ([1] PARAMSPEC_ALGEBRA, [2] CLASS_LEVEL_PATTERNS), `algorithms.md` ([4] PIPELINE_COMPOSITION), `observability.md` ([1] SIGNAL_PIPELINE).
+**Anti-Pattern Awareness:** See `patterns.md` [1] for BARE_TRY_EXCEPT, UNWRAP_MID_PIPELINE, BARE_FLOW_WITHOUT_BIND, MIXED_RESULT_LIBRARIES, EXPRESSION_PIPE_IN_RETURNS_FLOW.
 **Workflow:** Fill placeholders, remove guidance blocks, verify with ty and ruff.
 
 ---
 **Placeholders**
 
-- `{{module_path}}`: `pinnacle/ops/user_pipeline.py`
-- `{{pipeline_name}}`: `process_user_request`
-- `{{input_type}}`: `bytes`
-- `{{output_type}}`: `UserId`
-- `{{error_type}}`: `Exception`
-- `{{stage_1_name}}` / `{{stage_2_name}}` / `{{stage_3_name}}` / `{{stage_4_name}}`: `parse_input`, `validate`, `enrich`, `persist`
-- `{{stage_1_output}}` / `{{stage_2_output}}` / `{{stage_3_output}}`: `dict[str, object]`, `User`, `tuple[User, CorrelationId]`
-- `{{retry_config}}`: `RetryConfig(max_attempts=3)`
-- `{{trace_operation}}`: `user.process`
-- `{{log_event}}`: `"user_processed"` + suffix
-- `{{stage_2_success_expr}}`: `User.model_validate(data)`
-- `{{stage_3_success_expr}}`: `(validated, CorrelationId("cid"))`
-- `{{stage_4_success_expr}}`: `enriched[0].user_id`
+| [INDEX] | [PLACEHOLDER]          | [EXAMPLE]                       |
+| :-----: | ---------------------- | ------------------------------- |
+|   [1]   | `{{module_path}}`      | `pinnacle/ops/user_pipeline.py` |
+|   [2]   | `{{pipeline_name}}`    | `process_user_request`          |
+|   [3]   | `{{input_type}}`       | `bytes`                         |
+|   [4]   | `{{output_type}}`      | `UserId`                        |
+|   [5]   | `{{error_type}}`       | `Exception`                     |
+|   [6]   | `{{stage_1_name}}`     | `parse_input`                   |
+|   [7]   | `{{stage_2_name}}`     | `validate`                      |
+|   [8]   | `{{stage_3_name}}`     | `enrich`                        |
+|   [9]   | `{{stage_4_name}}`     | `persist`                       |
+|  [10]   | `{{stage_1_output}}`   | `dict[str, object]`             |
+|  [11]   | `{{stage_2_output}}`   | `User`                          |
+|  [12]   | `{{stage_3_output}}`   | `tuple[User, CorrelationId]`    |
+|  [13]   | `{{retry_config}}`     | `RetryConfig(max_attempts=3)`   |
+|  [14]   | `{{trace_operation}}`  | `user.process`                  |
+|  [15]   | `{{log_event}}`        | `"user_processed"`              |
+|  [16]   | `{{domain_module}}`    | `pinnacle.domain.users`         |
+|  [17]   | `{{domain_result_fn}}` | `make_email`                    |
 
 ---
 ```python
-"""{{module_path}} -- Pipeline module: ROP stages composed via flow()."""
+"""{{module_path}} -- Pipeline module: ROP stages composed via flow() + @effect.result."""
 
-# --- [IMPORTS] -------------------------------------------------------------
+# --- [IMPORTS] ----------------------------------------------------------------
+
+from __future__ import annotations
+
 from collections.abc import Callable
 from functools import wraps
+from typing import cast, TYPE_CHECKING
 
-import structlog
+from expression import Result as ExprResult
 from opentelemetry import trace
 from opentelemetry.trace import StatusCode
 from pydantic import BaseModel, ConfigDict
 from returns.pipeline import flow
 from returns.pointfree import bind, lash, map_
-from returns.result import Failure, Result, Success, safe
+from returns.result import Failure, Result, safe, Success
+import structlog
 
-# Import domain types from their canonical modules:
-# from pinnacle.domain.atoms import {{output_type}}, CorrelationId
-# from pinnacle.domain.models import {{stage_2_output}}
+# Domain types from canonical modules (expression.Result convention):
+# from {{domain_module}} import {{output_type}}, {{stage_2_output}}, CorrelationId
 
-# --- [TYPES] ----------------------------------------------------------------
+if TYPE_CHECKING:
+    pass  # Move annotation-only imports here
 
-# --- [ERRORS] ---------------------------------------------------------------
+# --- [ERRORS] -----------------------------------------------------------------
 
-# Pipeline errors are typed values, not exceptions. Error types inherit from
-# a frozen dataclass hierarchy. See effects.md [3] for error type patterns.
-# Import domain-specific errors from the domain module.
+# Pipeline errors are typed values, not exceptions. Import domain-specific
+# errors from the domain module. See effects.md [3] for error algebra patterns.
 
-# --- [STAGES] ---------------------------------------------------------------
+# --- [BRIDGE] -----------------------------------------------------------------
+
+
+# Bridge: expression.Result (domain outputs) -> returns.Result (pipeline inputs).
+# Domain smart constructors return expression.Result; pipeline stages consume
+# returns.Result. Bridge at the boundary only. See effects.md [5], SKILL.md [8].
+def bridge_result[T, E](expr: ExprResult[T, E]) -> Result[T, E]:
+    """Convert expression.Result to returns.Result at layer boundary."""
+    match expr:
+        case ExprResult(tag="ok", ok=value):
+            return Success(value)
+        case ExprResult(tag="error", error=error):
+            return Failure(error)
+
+# --- [STAGES] -----------------------------------------------------------------
+
 
 # Stage 1: Foreign boundary -- @safe bridges exception-raising code into Result.
-# @safe transforms the return type: def f(x) -> T becomes f(x) -> Result[T, Exception].
+# @safe transforms: def f(x) -> T becomes f(x) -> Result[T, Exception].
 # See effects.md [1] for @safe usage at boundaries.
 @safe
 def {{stage_1_name}}(raw: {{input_type}}) -> {{stage_1_output}}:
@@ -64,58 +91,73 @@ def {{stage_1_name}}(raw: {{input_type}}) -> {{stage_1_output}}:
     import msgspec
     return msgspec.json.decode(raw, type={{stage_1_output}})
 
-# Stage 2: Domain validation -- returns Result explicitly, no @safe needed.
-# Domain code constructs Success/Failure directly via match/case.
+
+# Stage 2: Domain validation -- bridges expression.Result from smart constructor.
+# Domain code returns expression.Result; pipeline bridges to returns.Result.
 def {{stage_2_name}}(
     data: {{stage_1_output}},
 ) -> Result[{{stage_2_output}}, {{error_type}}]:
+    """Validate domain input via smart constructor bridge."""
     structlog.contextvars.bind_contextvars(stage="{{stage_2_name}}")
-    # Delegate to domain validation (TypeAdapter, smart constructors).
-    return Success({{stage_2_success_expr}})
+    # Bridge domain smart constructor output into pipeline railway:
+    # return bridge_result({{domain_result_fn}}(data))
+    return Success({{stage_2_output}}.model_validate(data))
+
 
 # Stage 3: Enrichment -- adds context (correlation IDs, timestamps, lookups).
 def {{stage_3_name}}(
     validated: {{stage_2_output}},
 ) -> Result[{{stage_3_output}}, {{error_type}}]:
+    """Enrich validated entity with correlation context."""
     structlog.contextvars.bind_contextvars(stage="{{stage_3_name}}")
-    structlog.get_logger().info({{log_event}} + "_enriched")
-    # Compose enrichment from domain atoms.
-    return Success({{stage_3_success_expr}})
+    structlog.get_logger().info({{log_event}}, step="enriched")
+    return Success((validated, CorrelationId("cid")))
+
 
 # Stage 4: Persistence boundary -- adapter interaction returning Result.
 def {{stage_4_name}}(
     enriched: {{stage_3_output}},
 ) -> Result[{{output_type}}, {{error_type}}]:
+    """Persist enriched entity via adapter boundary."""
     structlog.contextvars.bind_contextvars(stage="{{stage_4_name}}")
-    structlog.get_logger().info({{log_event}} + "_persisted")
-    # Delegate to adapter via Protocol port.
-    return Success({{stage_4_success_expr}})
+    structlog.get_logger().info({{log_event}}, step="persisted")
+    return Success(enriched[0].user_id)
 
-# --- [DECORATORS] -----------------------------------------------------------
+# --- [DECORATORS] -------------------------------------------------------------
+
 
 # Decorator config as frozen Pydantic models -- immutable, validated,
-# deterministic under free-threading (PEP 779).
-# See decorators.md [1] for typed factory patterns.
+# deterministic under free-threading (PEP 779). See decorators.md [1].
 class TraceConfig(BaseModel, frozen=True):
+    """Immutable tracing configuration."""
+
     model_config = ConfigDict(strict=True)
     record_args: bool = False
     span_name: str | None = None
 
+
 class RetryConfig(BaseModel, frozen=True):
+    """Immutable retry configuration."""
+
     model_config = ConfigDict(strict=True)
     max_attempts: int = 3
     timeout_seconds: float = 30.0
 
+
+_DEFAULT_TRACE_CONFIG: TraceConfig = TraceConfig()
+
+
 # Canonical ordering: trace > retry > cache > validate > authorize.
-# See decorators.md [3] for ordering algebra and import-time validation.
+# See decorators.md [2] for ordering algebra.
 def trace_span[**P, R](
-    config: TraceConfig = TraceConfig(),
+    config: TraceConfig = _DEFAULT_TRACE_CONFIG,
 ) -> Callable[[Callable[P, R]], Callable[P, R]]:
-    """OpenTelemetry span decorator with frozen config."""
+    """OpenTelemetry span factory with frozen config. See decorators.md [1]."""
     def decorator(func: Callable[P, R]) -> Callable[P, R]:
-        name: str = config.span_name or func.__qualname__
+        name: str = config.span_name or "operation"
+
         @wraps(func)
-        def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
+        def wrapper(*args: object, **kwargs: object) -> object:
             tracer: trace.Tracer = trace.get_tracer("pinnacle")
             with tracer.start_as_current_span(name) as span:
                 match config:
@@ -123,32 +165,18 @@ def trace_span[**P, R](
                         span.set_attribute("args", repr(args)[:256])
                     case _:
                         pass
-                result: R = func(*args, **kwargs)
+                result = cast("Callable[..., object]", func)(*args, **kwargs)
                 span.set_status(StatusCode.OK)
                 return result
-        return wrapper
-    return decorator
+        return cast("Callable[P, R]", wrapper)
+    return cast("Callable[[Callable[P, R]], Callable[P, R]]", decorator)
 
-def retry[**P, R](
-    config: RetryConfig,
-    on: type[Exception] | tuple[type[Exception], ...] = Exception,
-) -> Callable[[Callable[P, R]], Callable[P, R]]:
-    """stamina-backed retry with frozen config. See decorators.md [4]."""
-    import stamina
-    def decorator(func: Callable[P, R]) -> Callable[P, R]:
-        @wraps(func)
-        @stamina.retry(on=on, attempts=config.max_attempts, timeout=config.timeout_seconds)
-        def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
-            return func(*args, **kwargs)
-        return wrapper
-    return decorator
+# --- [PIPELINE] ---------------------------------------------------------------
 
-# --- [PIPELINE] -------------------------------------------------------------
 
-# Composed pipeline via flow(): left-to-right railway composition.
-# Each stage returns Result; bind from returns.pointfree threads success
-# values through the railway. Failure at any stage short-circuits.
-# See effects.md [1] for flow() composition patterns.
+# PRIMARY FORM: flow() + bind -- left-to-right railway composition.
+# Each stage returns Result; bind threads success values. Failure short-circuits.
+# See effects.md [1], algorithms.md [4] for composition patterns.
 @trace_span(TraceConfig(span_name="{{trace_operation}}"))
 def {{pipeline_name}}(raw: {{input_type}}) -> Result[{{output_type}}, {{error_type}}]:
     """Railway: {{stage_1_name}} -> {{stage_2_name}} -> {{stage_3_name}} -> {{stage_4_name}}."""
@@ -160,27 +188,39 @@ def {{pipeline_name}}(raw: {{input_type}}) -> Result[{{output_type}}, {{error_ty
         bind({{stage_3_name}}),          # success-track monadic chain
         # lash(recovery_fn),             # error-track recovery (fallback/remap)
         bind({{stage_4_name}}),          # success-track monadic chain
-        # lash(log_and_remap_error),     # error-track transform (remap before boundary)
     )
 
-# -- Boundary match: Result destructuring at program boundary only ---------
+# ALTERNATIVE FORM: @effect.result generator -- for complex branching.
+# Use when flow() + bind becomes deeply nested or requires conditional logic.
+# See effects.md [5], algorithms.md [4].
+#
+# from expression import Effect, effect
+# @effect.result[{{output_type}}, {{error_type}}]()
+# def {{pipeline_name}}_branching(raw: {{input_type}}) -> Effect[ExprResult[{{output_type}}, {{error_type}}]]:
+#     parsed: {{stage_1_output}} = yield from bridge_to_expr({{stage_1_name}}(raw))
+#     validated: {{stage_2_output}} = yield from bridge_to_expr(bind({{stage_2_name}})(Success(parsed)))
+#     return (yield from bridge_to_expr(bind({{stage_4_name}})(Success(validated))))
+
+# --- [BOUNDARY] ---------------------------------------------------------------
+
+
 # match/case on Success/Failure is reserved for terminal boundaries
 # (HTTP handlers, CLI entry points). Mid-pipeline, use map/bind exclusively.
+# See effects.md [3] for error algebra patterns.
 def handle_{{pipeline_name}}_result(
     result: Result[{{output_type}}, {{error_type}}],
 ) -> tuple[int, str]:
-    """Terminal boundary: destructure Result via match/case into typed HTTP response."""
+    """Terminal boundary: destructure Result into typed HTTP response."""
+    log: structlog.stdlib.BoundLogger = structlog.get_logger()
     match result:
         case Success(value):
-            structlog.get_logger().info({{log_event}} + "_success")
+            log.info({{log_event}}, outcome="success")
             return (200, str(value))
         case Failure(error):
-            structlog.get_logger().error({{log_event}} + "_failure", error_type=type(error).__name__)
+            log.error({{log_event}}, outcome="failure", error_type=type(error).__name__)
             return (500, str(error))
-        case _:
-            return (500, "unexpected result")
 
-# --- [EXPORT] ---------------------------------------------------------------
+# --- [EXPORT] -----------------------------------------------------------------
 
 # All symbols above use explicit naming. No __all__, no default exports.
 # Consumers import directly: from {{module_path}} import {{pipeline_name}}
@@ -189,17 +229,21 @@ def handle_{{pipeline_name}}_result(
 ---
 **Guidance**
 
-- Railway composition: use `flow()` + `bind` as the default linear pipeline form; keep monadic stages explicit.
-- Boundary bridging: use `@safe` only at foreign boundaries; domain stages should construct `Success`/`Failure` directly.
-- Decorator ordering: preserve `trace > retry > cache > validate > authorize` and keep decorator config frozen.
-- Structured logging: bind per-stage contextvars and emit structured events, never f-string logs.
+*Railway composition* -- `flow()` + `bind` is the primary linear pipeline form. Each stage returns `Result[T, E]`; `bind` chains monadic stages, `map_` applies pure transforms, `lash` remaps the error track. Keep stages self-contained and composable. See `effects.md` [1], `algorithms.md` [4].
+
+*Generator-based alternative* -- `@effect.result` (from `expression`) provides full Python control flow (`match/case`, loops, early returns) within monadic context. Use when branching complexity exceeds what `flow()` + `bind` expresses cleanly. Since `@effect.result` produces `expression.Result`, bridge to `returns.Result` at the pipeline boundary. See `effects.md` [5].
+
+*Bridge pattern* -- Domain smart constructors return `expression.Result` per `SKILL.md` [8] convention. Pipeline modules use `returns.Result` for `flow()` composition. `bridge_result` converts at the boundary via `match/case` destructuring -- the only place both libraries' types coexist. See `effects.md` [5] for bridge details.
+
+*Decorator ordering and config* -- Preserve canonical `trace > retry > cache > validate > authorize` ordering. Decorator config is a frozen Pydantic model -- immutable, validated, deterministic. See `decorators.md` [1][2].
 
 ---
 **Post-Scaffold Checklist** (from `validation.md`)
 
-- [ ] PIPELINE_INTEGRITY: Each stage returns `Result[T, E]`; no bare values or `None` returns; `@safe` at foreign boundaries only
-- [ ] FLOW_COMPOSITION: `flow()` + `bind` for left-to-right composition; no manual `if result.is_success()` branching
-- [ ] DECORATOR_ORDER: Canonical ordering (trace > retry > cache > validate > authorize); `ParamSpec` + `@wraps` on every decorator
-- [ ] LOGGING: Structured event keys via `structlog.contextvars`; zero f-string log interpolation; `bind_contextvars` per stage
-- [ ] NO_MATCH_MID_PIPELINE: `match`/`case` on `Success`/`Failure` appears ONLY at terminal boundary; mid-pipeline uses `map`/`bind`
-- [ ] DENSITY: ~225 LOC target; stages are self-contained; no single-call private helpers
+- [ ] PIPELINE_INTEGRITY: Each stage returns `Result[T, E]`; no bare values or `None` returns; `@safe` at foreign boundaries only. See `validation.md` [2].
+- [ ] FLOW_COMPOSITION: `flow()` + `bind` for left-to-right; `@effect.result` for complex branching; no manual `if result.is_success()` branching. See `validation.md` [2].
+- [ ] BRIDGE_DISCIPLINE: `bridge_result` at domain->pipeline boundary only; no mixing `expression.Ok` and `returns.Success` in same stage. See `validation.md` [2].
+- [ ] DECORATOR_ORDER: Canonical ordering (trace > retry > cache > validate > authorize); `ParamSpec` + `@wraps` on every decorator. See `validation.md` [4].
+- [ ] LOGGING: Structured event keys via `structlog.contextvars`; zero f-string log interpolation; `bind_contextvars` per stage. See `observability.md` [1].
+- [ ] NO_MATCH_MID_PIPELINE: `match`/`case` on `Success`/`Failure` appears ONLY at terminal boundary; mid-pipeline uses `map`/`bind`. See `validation.md` [2].
+- [ ] DENSITY: ~225 LOC target; stages are self-contained; no single-call private helpers. See `validation.md` [6].
