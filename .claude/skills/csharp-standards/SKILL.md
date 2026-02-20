@@ -15,6 +15,11 @@ description: >-
   FluentValidation, Npgsql, or any .NET library in this monorepo;
   (5) writing or editing FsCheck property tests, xUnit test projects,
   BenchmarkDotNet benchmarks, or test configuration.
+metadata:
+  token_estimates:
+    entry_point: 4800
+    full_load: 26500
+    max_load: 74000
 ---
 
 # [H1][CSHARP-STANDARDS]
@@ -57,15 +62,17 @@ References are complementary -- type discipline applies when writing effects; an
 |   [9]   | `observability.md` | Logs/traces/metrics      |
 |  [10]   | `concurrency.md`   | Channels + cancellation  |
 |  [11]   | `diagnostics.md`   | Debugging + profiling    |
+|  [12]   | `testing.md`       | PBT + benchmarks + containers |
+|  [13]   | `persistence.md`   | EF Core + repositories   |
 
 **Step 4 -- Template (scaffolding only)**
 
 | [INDEX] | [TEMPLATE]                      | [ARCHETYPE] |
 | :-----: | :------------------------------ | :---------: |
-|  [12]   | `pure-module.template.md`       |    Pure     |
-|  [13]   | `effect-module.template.md`     |   Effect    |
-|  [14]   | `algebra-module.template.md`    |   Algebra   |
-|  [15]   | `observable-module.template.md` | Observable  |
+|  [14]   | `pure-module.template.md`       |    Pure     |
+|  [15]   | `effect-module.template.md`     |   Effect    |
+|  [16]   | `algebra-module.template.md`    |   Algebra   |
+|  [17]   | `observable-module.template.md` | Observable  |
 
 ---
 ## [2][CONTRACTS]
@@ -155,6 +162,8 @@ Core + foundation references are always loaded per [1]. The routing table select
 |  [14]   | Refactor concurrency          | `concurrency.md`                    | --                              |
 |  [15]   | Debug/profile functional code | `diagnostics.md`                    | --                              |
 |  [16]   | Scaffold observable service   | `observability.md` `concurrency.md` | `observable-module.template.md` |
+|  [17]   | Write/review tests            | `testing.md`                        | --                              |
+|  [18]   | Implement persistence layer   | `persistence.md`                    | --                              |
 
 ---
 ## [4][DECISION_TREES]
@@ -212,6 +221,33 @@ Each anti-pattern names a structural defect that propagates if left unchecked. S
 - **EXCEPTION_CONTROL_FLOW** -- `try`/`catch`/`throw` hides failure from type signatures. `Fin`/`Validation`/`Eff` make failure *visible*.
 - **PREMATURE_MATCH_COLLAPSE** -- `.Match()` mid-pipeline destroys monadic context. `Map`/`Bind`/`BiMap` preserve the functor; reserve `Match` for boundaries.
 - **EARLY_RETURN_GUARDS** -- `if (!valid) return Error;` scatters cyclomatic exits. `Validation<Error,T>` applicative pipeline collects all failures in one pass.
+
+```csharp
+// [ANTI-PATTERN] VAR_INFERENCE -- hidden codomain
+var result = TransformPayload(data);
+```
+```csharp
+// [CORRECT] -- explicit effect type + named parameter
+Fin<DomainState> result = TransformPayload(payload: data);
+```
+
+```csharp
+// [ANTI-PATTERN] IMPERATIVE_BRANCH -- null check with early return
+if (state == null) return Error.New("vacant");
+```
+```csharp
+// [CORRECT] -- lift to Option, convert to Fin
+Optional(state).ToFin(Error.New(message: "Vacant state"));
+```
+
+```csharp
+// [ANTI-PATTERN] PREMATURE_MATCH_COLLAPSE -- Match destroys monadic context
+Fin<int> x = Parse(input).Match(Succ: v => FinSucc(v + 1), Fail: e => FinFail<int>(e));
+```
+```csharp
+// [CORRECT] -- Map preserves the functor
+Fin<int> x = Parse(input).Map((int value) => value + 1);
+```
 
 **Surface-area violations**
 - **OVERLOAD_SPAM** -- three methods at different arities. `params ReadOnlySpan<T>` + algebraic constraint collapses them. See `composition.md` [2].
