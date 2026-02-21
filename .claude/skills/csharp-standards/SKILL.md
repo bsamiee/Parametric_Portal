@@ -12,7 +12,7 @@ description: >-
   (3) configuring Directory.Build.props, .editorconfig, .csproj files, NuGet
   packages, or Roslyn analyzers (CSP0001-CSP0008);
   (4) working with Serilog, OpenTelemetry, Polly resilience, NodaTime,
-  FluentValidation, Npgsql, or any .NET library in this monorepo;
+  FluentValidation, Npgsql, Scrutor, or any .NET library in this monorepo;
   (5) writing or editing FsCheck property tests, xUnit test projects,
   BenchmarkDotNet benchmarks, or test configuration.
 metadata:
@@ -64,15 +64,16 @@ References are complementary -- type discipline applies when writing effects; an
 |  [11]   | `diagnostics.md`   | Debugging + profiling         |
 |  [12]   | `testing.md`       | PBT + benchmarks + containers |
 |  [13]   | `persistence.md`   | EF Core + repositories        |
+|  [14]   | `scrutor.md`       | DI scan/decorate/keyed graph  |
 
 **Step 4 -- Template (scaffolding only)**
 
 | [INDEX] | [TEMPLATE]                      | [ARCHETYPE] |
 | :-----: | :------------------------------ | :---------: |
-|  [14]   | `pure-module.template.md`       |    Pure     |
-|  [15]   | `effect-module.template.md`     |   Effect    |
-|  [16]   | `algebra-module.template.md`    |   Algebra   |
-|  [17]   | `observable-module.template.md` | Observable  |
+|  [15]   | `pure-module.template.md`       |    Pure     |
+|  [16]   | `effect-module.template.md`     |   Effect    |
+|  [17]   | `algebra-module.template.md`    |   Algebra   |
+|  [18]   | `observable-module.template.md` | Observable  |
 
 ---
 ## [2][CONTRACTS]
@@ -86,6 +87,7 @@ References are complementary -- type discipline applies when writing effects; an
 
 **Imports convention**
 - **`using static LanguageExt.Prelude;`** assumed in every module -- provides `Some`, `None`, `unit`, `pure`, `error`, `guard`, `liftIO`, `Seq`, `HashMap`, `Atom`, `ms`, `sec`. `Ref<T>` requires explicit `using LanguageExt;` (STM module, not in Prelude).
+- **Global using baseline** for new modules mirrors upstream: `LanguageExt`, `LanguageExt.Common`, `LanguageExt.Traits`, `LanguageExt.Effects`, `LanguageExt.Streaming`, `LanguageExt.Pretty`, `LanguageExt.Traits.Domain`, plus `using static LanguageExt.Prelude;`.
 
 **Type discipline**
 - **Zero `var`** -- all types explicit in declarations and lambda parameters.
@@ -121,7 +123,7 @@ result.Match(
 **Effect discipline**
 - **`Fin<T>`** for synchronous fallible operations (isomorphic to `Either<Error,A>`).
 - **`Validation<Error,T>`** for parallel error accumulation (applicative, zero short-circuit).
-- **`Eff<RT,T>`** for effectful pipelines with environmental DI via `Has<RT,Trait>`.
+- **`Eff<RT,T>`** for effectful pipelines with environmental DI via runtime records and `Eff<RT,T>.Asks(...)`.
 - **`IO<A>`** for boundary side effects (lazy effect: Pure/Fail/Sync/Async thunks).
 - **`K<F,A>`** for higher-kinded generic algorithms (`Fallible`, `Applicative`, `Monad` constraints).
 - **FluentValidation** for boundary-layer async rule sets (HTTP request DTOs, external payloads). Bridge to `Validation<Error,T>` via `ValidateAsync` before entering domain pipelines. See `validation.md` [2A].
@@ -165,6 +167,7 @@ Core + foundation references are always loaded per [1]. The routing table select
 |  [16]   | Scaffold observable service   | `observability.md` `concurrency.md` | `observable-module.template.md` |
 |  [17]   | Write/review tests            | `testing.md`                        | --                              |
 |  [18]   | Implement persistence layer   | `persistence.md`                    | --                              |
+|  [19]   | Refactor DI registration      | `scrutor.md`                        | --                              |
 
 ---
 ## [4][DECISION_TREES]
@@ -186,23 +189,23 @@ Core + foundation references are always loaded per [1]. The routing table select
 
 **Error channel** -- match the effect type to the failure mode.
 
-| [INDEX] | [FAILURE_SHAPE]                        | [USE]                  | [KEY_TRAIT]                                   |
-| :-----: | :------------------------------------- | ---------------------- | --------------------------------------------- |
-|   [1]   | **Synchronous fallible operation**     | `Fin<T>`               | `Bind`/`Map` chain; `Match` at boundary only  |
-|   [2]   | **Parallel multi-field validation**    | `Validation<Error,T>`  | Applicative `.Apply()` tuple; collects all    |
-|   [3]   | **Effectful pipeline with DI**         | `Eff<RT,T>`            | `Has<RT,Trait>` + LINQ `from..in..select`     |
-|   [4]   | **Boundary side effect**               | `IO<A>`                | Pure/Fail/Sync/Async + `Run`/`RunAsync`       |
-|   [5]   | **Algorithm generic over computation** | `K<F,A>` + constraints | `Fallible`/`Applicative`/`Monad`/`Foldable`   |
-|   [6]   | **Declarative fallback chain**         | `\|` operator          | `Alternative<F>`/`Choice<F>` trait on Eff/Fin |
+| [INDEX] | [FAILURE_SHAPE]                        | [USE]                  | [KEY_TRAIT]                                       |
+| :-----: | :------------------------------------- | ---------------------- | ------------------------------------------------- |
+|   [1]   | **Synchronous fallible operation**     | `Fin<T>`               | `Bind`/`Map` chain; `Match` at boundary only      |
+|   [2]   | **Parallel multi-field validation**    | `Validation<Error,T>`  | Applicative `.Apply()` tuple; collects all        |
+|   [3]   | **Effectful pipeline with DI**         | `Eff<RT,T>`            | Runtime record + `Asks` + LINQ `from..in..select` |
+|   [4]   | **Boundary side effect**               | `IO<A>`                | Pure/Fail/Sync/Async + `Run`/`RunAsync`           |
+|   [5]   | **Algorithm generic over computation** | `K<F,A>` + constraints | `Fallible`/`Applicative`/`Monad`/`Foldable`       |
+|   [6]   | **Declarative fallback chain**         | `\|` operator          | `Alternative<F>`/`Choice<F>` trait on Eff/Fin     |
 
 **Module archetype** -- determines which template to scaffold.
 
-| [INDEX] | [WHAT_YOU_ARE_BUILDING]                              | [ARCHETYPE] | [TEMPLATE]                      |
-| :-----: | :--------------------------------------------------- | :---------: | ------------------------------- |
-|   [1]   | **Types + validators + transforms + extensions**     |    Pure     | `pure-module.template.md`       |
-|   [2]   | **ROP pipelines + DI traits + boundary handling**    |   Effect    | `effect-module.template.md`     |
-|   [3]   | **Algebraic interfaces + HKT + query unions**        |   Algebra   | `algebra-module.template.md`    |
-|   [4]   | **ROP pipelines + DI traits + integrated telemetry** | Observable  | `observable-module.template.md` |
+| [INDEX] | [WHAT_YOU_ARE_BUILDING]                               | [ARCHETYPE] | [TEMPLATE]                      |
+| :-----: | :---------------------------------------------------- | :---------: | ------------------------------- |
+|   [1]   | **Types + validators + transforms + extensions**      |    Pure     | `pure-module.template.md`       |
+|   [2]   | **ROP pipelines + runtime DI + boundary handling**    |   Effect    | `effect-module.template.md`     |
+|   [3]   | **Algebraic interfaces + HKT + query unions**         |   Algebra   | `algebra-module.template.md`    |
+|   [4]   | **ROP pipelines + runtime DI + integrated telemetry** | Observable  | `observable-module.template.md` |
 
 ---
 ## [5][ANTI_PATTERNS]
@@ -272,9 +275,9 @@ Fin<int> x = Parse(input).Map((int value) => value + 1);
 <br>
 
 - **Pure domain module** (`pure-module.template.md`) -- types, smart constructors via `Fin<T>`, sealed DU hierarchies with exhaustive `Switch`/`Map`, C# 14 extension blocks.
-- **Effect service module** (`effect-module.template.md`) -- `Eff<RT,T>` ROP pipelines, `Has<RT,Trait>` environmental DI, LINQ comprehension with `guard`/`from..in..select`, `@catch` error recovery.
+- **Effect service module** (`effect-module.template.md`) -- `Eff<RT,T>` ROP pipelines, runtime-record DI via `Asks`, LINQ comprehension with `guard`/`from..in..select`, `@catch` error recovery, Scrutor-driven composition-root registration.
 - **Algebraic abstraction module** (`algebra-module.template.md`) -- query algebras as sealed DUs, `K<F,A>` higher-kinded bridge with `.As()` downcast, `Foldable`/`Traversable` trait constraints.
-- **Observable service module** (`observable-module.template.md`) -- `Eff<RT,T>` ROP pipelines with `ActivitySource` tracing, `Meter` metrics, `[LoggerMessage]` logging, and `Observe` tap combinators.
+- **Observable service module** (`observable-module.template.md`) -- `Eff<RT,T>` ROP pipelines with `ActivitySource` tracing, `Meter` metrics, `[LoggerMessage]` logging, `Observe` tap combinators, and Scrutor registration seams.
 
 ---
 ## [7][LANGEXT_V5_BETA77_CONVENTIONS]
@@ -283,8 +286,35 @@ Fin<int> x = Parse(input).Map((int value) => value + 1);
 <br>
 
 - **`.As()` downcast** -- `K<F,A>` results must be downcast to concrete types: `ParseInt<Fin>("123").As()` yields `Fin<int>`. Without `.As()`, consumers receive the unusable `K<Fin, int>`.
+- **Extension operators (.NET 10)** -- v5 betas add operator support for traited types (`Functor`/`Applicative`/`Monad`/`Choice`/`Fallible`/`Semigroup*`) and concrete monads (`Fin`, `Eff`, `IO`, `Option`, `Try`, `Validation`) to reduce adapter noise.
 - **`@catch` operator** -- declarative error recovery: `CallApi(request) | @catch(Errors.TimedOut, static error => Retry(request))`.
 - **`|` fallback** -- `LoadFromFile(path) | LoadFromEnvironment() | Pure(Config.Default)`. Works across `Eff`, `IO`, `Fin`, `Option`. Composes with `@catch` for typed fallback chains.
 - **Prefer LanguageExt collections** -- `Seq<T>` (array-backed, faster iteration/indexing than `Lst<T>`; trait-integrated via `K<Seq, A>`), `HashMap<K,V>` (CHAMP), `HashSet<T>`. BCL `ImmutableDictionary` does not implement `K<F,A>` traits.
 - **`Validation<Error,T>`** standardized -- `Error` implements `Monoid` in v5, so `Validation<Error,T>` is valid. Use this form over `Validation<Seq<Error>,T>`.
 - **Memoization boundary** -- `Atom<HashMap<K,V>>` for lock-free memoize combinators with CAS semantics: `Atom(HashMap<CacheKey, Result>.Empty)`. `ConcurrentDictionary` is an infrastructure escape hatch in boundary adapters only.
+- **Streaming/IO updates** -- treat `SourceT` (`|` merge with fallible propagation, `Monad.Recur` internals) and `awaitAny` cancellation defaults as canonical in async-effect guidance.
+
+---
+## [8][THINKTECTURE_V10_CONVENTIONS]
+>**Dictum:** *Thinktecture v10 source generation owns value-object/union boilerplate; adapters register integration once.*
+
+<br>
+
+- **Package set is split by concern** -- `Thinktecture.Runtime.Extensions` + `.SourceGenerator` + `.AspNetCore` + `.Json` (and Newtonsoft variant when needed).
+- **Canonical modeling attributes** -- `[ValueObject<T>]`, `[SmartEnum<T>]`, `[Union]`, ad-hoc `[Union<T1, ...>]` with generated `Switch`/`Map` as exhaustive dispatch surface.
+- **Boundary integration via registration, not hand-rolled converters** -- use `UseThinktectureValueConverters()`, `ThinktectureModelBinderProvider`, and `ThinktectureJsonConverterFactory` in host adapters.
+- **Custom primitive bridges** -- use `[ObjectFactory<T>]` for route/query, JSON, and EF scenarios that need custom projection.
+- **Serialization policy** -- regular unions prefer `JsonDerivedType` polymorphic metadata; ad-hoc unions require explicit object-factory conversion.
+
+---
+## [9][SCRUTOR_V7_CONVENTIONS]
+>**Dictum:** *Scrutor is composition-root algebra: bounded scans, explicit policy, deterministic decorators.*
+
+<br>
+
+- **Baseline** -- `Scrutor` `7.0.0`; extension surface is `Scan` + `Decorate`/`TryDecorate` on `IServiceCollection`.
+- **Scope** -- constrain assembly discovery (`FromAssemblyOf`/`FromAssembliesOf`/`FromDependencyContext` with predicate); avoid broad dependency scans.
+- **Policy** -- choose `RegistrationStrategy` deliberately (`Throw` default for strict modules; `Replace(...)` only when replacement intent is explicit).
+- **Keys and attributes** -- use `WithServiceKey(...)` and `UsingAttributes()` (`ServiceDescriptorAttribute`) to encode variant routing in registration, not runtime branching.
+- **Decorator topology** -- use ordered `Decorate` chains; use `TryDecorate` for optional modules; capture `DecoratedService<T>` when underlying chain access matters.
+- **Analyzer integration** -- composition-root analyzers should enforce `Scan(...).UsingRegistrationStrategy(...)`; boundary hosts without container seams require explicit exemptions, not silent bypass.

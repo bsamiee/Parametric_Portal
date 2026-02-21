@@ -19,29 +19,30 @@ Structural quality checklist for auditing `.cs` modules against csharp-standards
 
 Diagnostic table for structural issues. Consult FIRST when triaging code review findings.
 
-| [INDEX] | [SYMPTOM]                                   | [CAUSE]                       | [FIX]                                              |
-| :-----: | :------------------------------------------ | :---------------------------- | :------------------------------------------------- |
-|   [1]   | **`var x = ...` in domain code**            | Type inference hiding intent  | Replace with explicit `Fin<T>` / `Option<T>` type  |
-|   [2]   | **`if (x != null)` guard blocks**           | Null-based architecture       | Use `Option<T>` + `Match` at boundary              |
-|   [3]   | **`try { } catch (Exception e) { }`**       | Exception-driven control flow | Use `Fin<T>` / `Eff<RT,T>` error channel           |
-|   [4]   | **`foreach` + mutable accumulator**         | Imperative iteration          | Tail-recursive fold over `ReadOnlySpan<T>`         |
-|   [5]   | **Multiple overloads for same concept**     | Arity bloat                   | `params ReadOnlySpan<T>` + algebraic constraint    |
-|   [6]   | **`Match` called mid-pipeline**             | Premature context collapse    | Use `Map`/`Bind`/`BiMap` instead                   |
-|   [7]   | **Lambda captures method parameter**        | Hidden closure allocation     | `static` lambda + tuple threading                  |
-|   [8]   | **`IService` with single implementation**   | Interface pollution           | Remove interface; inject `Func<>` or use directly  |
-|   [9]   | **Entity with only `{ get; set; }`**        | Anemic domain model           | Smart constructors + `with`-expression transitions |
-|  [10]   | **`.Where().Sum()` on hot path**            | LINQ heap allocation          | `TensorPrimitives` / span-based processing         |
-|  [11]   | **`null` used for 2+ semantic meanings**    | Collapsed absence semantics   | `Option<T>` for absence, `Fin<T>` for failure      |
-|  [12]   | **3+ sibling methods (`Get`/`TryGet`/...)** | API surface inflation         | One `Execute<R>(Query)` entry point                |
-|  [13]   | **`private` method with single caller**     | Helper spam                   | Inline at call site or promote to domain type      |
-|  [14]   | **Repetitive switch arms, near-identical**  | Brute-force inlining          | Fold algebra or `K<F,A>` generic pipeline          |
+| [INDEX] | [SYMPTOM]                                   | [CAUSE]                       | [FIX]                                                 |
+| :-----: | :------------------------------------------ | :---------------------------- | :---------------------------------------------------- |
+|   [1]   | **`var x = ...` in domain code**            | Type inference hiding intent  | Replace with explicit `Fin<T>` / `Option<T>` type     |
+|   [2]   | **`if (x != null)` guard blocks**           | Null-based architecture       | Use `Option<T>` + `Match` at boundary                 |
+|   [3]   | **`try { } catch (Exception e) { }`**       | Exception-driven control flow | Use `Fin<T>` / `Eff<RT,T>` error channel              |
+|   [4]   | **`foreach` + mutable accumulator**         | Imperative iteration          | Tail-recursive fold over `ReadOnlySpan<T>`            |
+|   [5]   | **Multiple overloads for same concept**     | Arity bloat                   | `params ReadOnlySpan<T>` + algebraic constraint       |
+|   [6]   | **`Match` called mid-pipeline**             | Premature context collapse    | Use `Map`/`Bind`/`BiMap` instead                      |
+|   [7]   | **Lambda captures method parameter**        | Hidden closure allocation     | `static` lambda + tuple threading                     |
+|   [8]   | **`IService` with single implementation**   | Interface pollution           | Remove interface; inject `Func<>` or use directly     |
+|   [9]   | **Entity with only `{ get; set; }`**        | Anemic domain model           | Smart constructors + `with`-expression transitions    |
+|  [10]   | **`.Where().Sum()` on hot path**            | LINQ heap allocation          | `TensorPrimitives` / span-based processing            |
+|  [11]   | **`null` used for 2+ semantic meanings**    | Collapsed absence semantics   | `Option<T>` for absence, `Fin<T>` for failure         |
+|  [12]   | **3+ sibling methods (`Get`/`TryGet`/...)** | API surface inflation         | One `Execute<R>(Query)` entry point                   |
+|  [13]   | **`private` method with single caller**     | Helper spam                   | Inline at call site or promote to domain type         |
+|  [14]   | **Repetitive switch arms, near-identical**  | Brute-force inlining          | Fold algebra or `K<F,A>` generic pipeline             |
+|  [15]   | **Composition root has long `Add*` chains** | Registration drift risk       | Scrutor `Scan` + explicit `UsingRegistrationStrategy` |
 
 ---
 ## [3][EFFECT_INTEGRITY]
 
 - [ ] `Fin<T>` for synchronous fallible operations -- `Bind`/`Map` chain; `Match` appears ONLY at program/API boundaries
 - [ ] `Validation<Error,T>` for multi-field validation -- applicative `.Apply()` tuple; no sequential short-circuiting
-- [ ] `Eff<RT,T>` for effectful pipelines -- `Has<RT,Trait>` environmental DI; no constructor injection
+- [ ] `Eff<RT,T>` for effectful pipelines -- runtime-record DI via `Eff<RT,T>.Asks`; no constructor injection
 - [ ] No `try`/`catch`/`throw` in domain transforms under `Domain.*`; boundary adapters are limited to protocol-required `try/finally`/guarded flow only
 - [ ] No `Match` mid-pipeline -- if `.Match(Succ: ..., Fail: ...)` appears before the final return/boundary, it is premature; use `Map`/`Bind`/`BiMap` instead
 
@@ -62,6 +63,7 @@ Diagnostic table for structural issues. Consult FIRST when triaging code review 
 - [ ] **No surface inflation**: `Get`/`GetMany`/`TryGet`/`GetOrDefault` sibling families indicate a missing query algebra -- one `Execute<R>(Query<K,V,R>)` method owns all variation
 - [ ] **No interface pollution**: `IFoo` with exactly one `Foo` implementation adds indirection without value -- remove the interface; inject `Func<>` delegates for testability
 - [ ] **No null architecture**: `null` representing 2+ semantic states (not-found, error, uninitialized, default) requires `Option<T>` for absence and `Fin<T>` for failure
+- [ ] **Composition roots are deterministic**: use Scrutor scan/decorate flows with explicit registration strategy rather than ad-hoc `AddTransient`/`AddScoped` accumulation
 
 ---
 ## [6][DENSITY]
@@ -132,4 +134,4 @@ Concrete search patterns an agent can apply to any `.cs` file:
 
 - [ ] FluentValidation async rules (`MustAsync`, `CustomAsync`) execute via `ValidateAsync` only -- never `Validate` when async rules exist
 - [ ] RuleSets are boundary contracts (`IncludeRuleSets`) and map to `Validation<Error,T>` before entering domain pipelines
-- [ ] Bridge converts `ValidationResult` to `Validation<Error,T>` at boundary -- see `adapter-module.template.md` for canonical implementation
+- [ ] Bridge converts `ValidationResult` to `Validation<Error,T>` at boundary -- see `effect-module.template.md` for canonical implementation

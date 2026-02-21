@@ -1,10 +1,12 @@
 // Lock-gated mutable session state machine tracking lifecycle phase from Connected through Active to terminal states.
 // Mutability is confined here — all transitions return Fin<SessionSnapshot> and are serialized under _gate; no state escapes the lock.
+using System.Diagnostics;
 using LanguageExt;
 using LanguageExt.Common;
 using NodaTime;
 using ParametricPortal.Kargadan.Plugin.src.contracts;
 using ParametricPortal.Kargadan.Plugin.src.protocol;
+using Thinktecture;
 using static LanguageExt.Prelude;
 using Duration = NodaTime.Duration;
 
@@ -19,26 +21,27 @@ public sealed record SessionSnapshot(
     Instant LastHeartbeatAt,
     Duration HeartbeatInterval,
     Duration HeartbeatTimeout) {
-    public SessionLifecycleState State => Phase.State;
-    public Option<HandshakeAck> Handshake => Phase.Handshake;
-    public Option<FailureReason> FailureReason => Phase.FailureReason;
+    public SessionLifecycleState State => Phase switch {
+        SessionPhase.Connected => SessionLifecycleState.Connected,
+        SessionPhase.Active => SessionLifecycleState.Active,
+        SessionPhase.Terminal terminal => terminal.StateTag,
+        _ => throw new UnreachableException(),
+    };
+    public Option<HandshakeEnvelope.Ack> Handshake => Phase switch {
+        SessionPhase.Active active => Some(active.Ack),
+        _ => None,
+    };
+    public Option<FailureReason> FailureReason => Phase switch {
+        SessionPhase.Terminal terminal => terminal.Failure,
+        _ => None,
+    };
 }
-public abstract record SessionPhase {
-    private protected SessionPhase() { }
-    public abstract SessionLifecycleState State { get; }
-    public virtual Option<HandshakeAck> Handshake => None;
-    public virtual Option<FailureReason> FailureReason => None;
-}
-public sealed record SessionPhaseConnected : SessionPhase {
-    public override SessionLifecycleState State => SessionLifecycleState.Connected;
-}
-public sealed record SessionPhaseActive(HandshakeAck Ack) : SessionPhase {
-    public override SessionLifecycleState State => SessionLifecycleState.Active;
-    public override Option<HandshakeAck> Handshake => Some(Ack);
-}
-public sealed record SessionPhaseTerminal(SessionLifecycleState StateTag, Option<FailureReason> Failure) : SessionPhase {
-    public override SessionLifecycleState State => StateTag;
-    public override Option<FailureReason> FailureReason => Failure;
+[Union]
+public abstract partial record SessionPhase {
+    private SessionPhase() { }
+    public sealed record Connected : SessionPhase;
+    public sealed record Active(HandshakeEnvelope.Ack Ack) : SessionPhase;
+    public sealed record Terminal(SessionLifecycleState StateTag, Option<FailureReason> Failure) : SessionPhase;
 }
 
 // --- [ADAPTER] ---------------------------------------------------------------
@@ -50,14 +53,14 @@ public sealed class SessionHost {
     private readonly Lock _gate = new();
     private Option<SessionSnapshot> _current = None;
     // --- [INTERFACE] ---------------------------------------------------------
-    public Fin<SessionSnapshot> Activate(HandshakeAck ack, Instant now) =>
+    public Fin<SessionSnapshot> Activate(HandshakeEnvelope.Ack ack, Instant now) =>
         WithinGate(() =>
             UpdateCurrent(
                 transition: snapshot =>
                     TransitionFromMutablePhase(
                         snapshot: snapshot,
                         now: now,
-                        nextPhase: new SessionPhaseActive(Ack: ack),
+                        nextPhase: new SessionPhase.Active(Ack: ack),
                         operation: "activate"),
                 missingError: SessionNotOpen));
     public Fin<SessionSnapshot> Beat(HeartbeatEnvelope envelope) =>
@@ -75,7 +78,7 @@ public sealed class SessionHost {
                     TransitionFromMutablePhase(
                         snapshot: snapshot,
                         now: now,
-                        nextPhase: new SessionPhaseTerminal(
+                        nextPhase: new SessionPhase.Terminal(
                             StateTag: SessionLifecycleState.Closed,
                             Failure: None),
                         operation: "close"),
@@ -91,7 +94,7 @@ public sealed class SessionHost {
             (heartbeatInterval > Duration.Zero, heartbeatTimeout > Duration.Zero) switch {
                 (true, true) => ApplyState(snapshot: new SessionSnapshot(
                     Identity: identity,
-                    Phase: new SessionPhaseConnected(),
+                    Phase: new SessionPhase.Connected(),
                     OpenedAt: now,
                     LastHeartbeatAt: now,
                     HeartbeatInterval: heartbeatInterval,
@@ -107,7 +110,7 @@ public sealed class SessionHost {
                     TransitionFromMutablePhase(
                         snapshot: snapshot,
                         now: now,
-                        nextPhase: new SessionPhaseTerminal(
+                        nextPhase: new SessionPhase.Terminal(
                             StateTag: SessionLifecycleState.Rejected,
                             Failure: Some(reason)),
                         operation: "reject"),
@@ -119,7 +122,7 @@ public sealed class SessionHost {
                     TransitionFromMutablePhase(
                         snapshot: snapshot,
                         now: now,
-                        nextPhase: new SessionPhaseTerminal(
+                        nextPhase: new SessionPhase.Terminal(
                             StateTag: SessionLifecycleState.Reaped,
                             Failure: None),
                         operation: "reap"),
@@ -134,9 +137,8 @@ public sealed class SessionHost {
                 missingError: Error.New(message: "Session timeout requested while no session is active.")));
     // --- [INTERNAL] ----------------------------------------------------------
     private Fin<TValue> WithinGate<TValue>(Func<Fin<TValue>> operation) {
-        lock (_gate) {
-            return operation();
-        }
+        using Lock.Scope _ = _gate.EnterScope();
+        return operation();
     }
     private Fin<SessionSnapshot> UpdateCurrent(
         Func<SessionSnapshot, Fin<SessionSnapshot>> transition,
@@ -147,9 +149,7 @@ public sealed class SessionHost {
     private Fin<SessionSnapshot> BindCurrent(
         Func<SessionSnapshot, Fin<SessionSnapshot>> project,
         Error missingError) =>
-        _current.Match(
-            Some: project,
-            None: () => Fin.Fail<SessionSnapshot>(missingError));
+        _current.ToFin(missingError).Bind(project);
     // --- [TRANSITIONS] -------------------------------------------------------
     private Fin<SessionSnapshot> TransitionFromMutablePhase(
         SessionSnapshot snapshot,
@@ -157,37 +157,25 @@ public sealed class SessionHost {
         SessionPhase nextPhase,
         string operation) =>
         snapshot.Phase switch {
-            SessionPhaseConnected => ApplyState(snapshot with {
-                LastHeartbeatAt = now,
-                Phase = nextPhase,
-            }),
-            SessionPhaseActive => ApplyState(snapshot with {
-                LastHeartbeatAt = now,
-                Phase = nextPhase,
-            }),
-            SessionPhaseTerminal terminal => Fin.Fail<SessionSnapshot>(
-                Error.New(
-                    message: $"Cannot {operation}; session is already terminal in state '{terminal.State.Key}'.")),
+            SessionPhase.Connected or SessionPhase.Active => ApplyHeartbeatTransition(snapshot: snapshot, now: now, nextPhase: nextPhase),
+            SessionPhase.Terminal terminal => Fin.Fail<SessionSnapshot>(
+                Error.New(message: $"Cannot {operation}; session is already terminal in state '{terminal.StateTag.Key}'.")),
             _ => Fin.Fail<SessionSnapshot>(
                 Error.New(message: $"Unsupported session phase while attempting {operation}.")),
         };
     private Fin<SessionSnapshot> UpdateActiveHeartbeat(SessionSnapshot snapshot, Instant now) =>
         snapshot.Phase switch {
-            SessionPhaseActive active => ApplyState(snapshot with {
-                LastHeartbeatAt = now,
-                Phase = active,
-            }),
-            SessionPhaseConnected => Fin.Fail<SessionSnapshot>(
+            SessionPhase.Active active => ApplyHeartbeatTransition(snapshot: snapshot, now: now, nextPhase: active),
+            SessionPhase.Connected => Fin.Fail<SessionSnapshot>(
                 Error.New(message: "Cannot process heartbeat before handshake activation.")),
-            SessionPhaseTerminal terminal => Fin.Fail<SessionSnapshot>(
-                Error.New(message: $"Cannot process heartbeat for terminal state '{terminal.State.Key}'.")),
+            SessionPhase.Terminal terminal => Fin.Fail<SessionSnapshot>(
+                Error.New(message: $"Cannot process heartbeat for terminal state '{terminal.StateTag.Key}'.")),
             _ => Fin.Fail<SessionSnapshot>(Error.New(message: "Unsupported session phase.")),
         };
     private Fin<SessionSnapshot> TimeoutIfNeeded(SessionSnapshot snapshot, Instant now) =>
         snapshot.Phase switch {
-            SessionPhaseTerminal => Fin.Succ(snapshot),
-            SessionPhaseConnected => EvaluateTimeout(snapshot: snapshot, now: now),
-            SessionPhaseActive => EvaluateTimeout(snapshot: snapshot, now: now),
+            SessionPhase.Terminal => Fin.Succ(snapshot),
+            SessionPhase.Connected or SessionPhase.Active => EvaluateTimeout(snapshot: snapshot, now: now),
             _ => Fin.Fail<SessionSnapshot>(Error.New(message: "Unsupported session phase.")),
         };
     private Fin<SessionSnapshot> EvaluateTimeout(SessionSnapshot snapshot, Instant now) =>
@@ -197,7 +185,7 @@ public sealed class SessionHost {
             timeout: snapshot.HeartbeatTimeout) switch {
                 true => ApplyState(snapshot: snapshot with {
                     LastHeartbeatAt = now,
-                    Phase = new SessionPhaseTerminal(
+                    Phase = new SessionPhase.Terminal(
                         StateTag: SessionLifecycleState.TimedOut,
                         Failure: None),
                 }),
@@ -207,4 +195,12 @@ public sealed class SessionHost {
         _current = Some(snapshot);
         return Fin.Succ(snapshot);
     }
+    private Fin<SessionSnapshot> ApplyHeartbeatTransition(
+        SessionSnapshot snapshot,
+        Instant now,
+        SessionPhase nextPhase) =>
+        ApplyState(snapshot with {
+            LastHeartbeatAt = now,
+            Phase = nextPhase,
+        });
 }

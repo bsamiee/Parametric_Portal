@@ -2,6 +2,7 @@ using System.Text.Json;
 using LanguageExt;
 using LanguageExt.Common;
 using NodaTime;
+using Thinktecture;
 
 namespace ParametricPortal.Kargadan.Plugin.src.contracts;
 
@@ -18,69 +19,41 @@ public sealed record CommandEnvelope(
     JsonElement Payload,
     TelemetryContext TelemetryContext,
     int DeadlineMs);
-
-public abstract record CommandResultEnvelope {
-    private protected CommandResultEnvelope(
-        EnvelopeIdentity identity,
-        DedupeMetadata dedupe,
-        ExecutionMetadata execution,
-        TelemetryContext telemetryContext) {
-        Identity = identity;
-        Dedupe = dedupe;
-        Execution = execution;
-        TelemetryContext = telemetryContext;
-    }
-
-    public EnvelopeIdentity Identity { get; init; }
-    public DedupeMetadata Dedupe { get; init; }
-    public ExecutionMetadata Execution { get; init; }
-    public TelemetryContext TelemetryContext { get; init; }
+[Union]
+public abstract partial record CommandResultEnvelope {
+    private CommandResultEnvelope() { }
+    public sealed record Success(
+        EnvelopeIdentity Identity,
+        DedupeMetadata Dedupe,
+        JsonElement Result,
+        ExecutionMetadata Execution,
+        TelemetryContext TelemetryContext) : CommandResultEnvelope;
+    public sealed record Failure(
+        EnvelopeIdentity Identity,
+        DedupeMetadata Dedupe,
+        JsonElement Result,
+        ExecutionMetadata Execution,
+        CommandErrorEnvelope Error,
+        TelemetryContext TelemetryContext) : CommandResultEnvelope;
 }
-
-public sealed record CommandResultSuccessEnvelope(
-    EnvelopeIdentity Identity,
-    DedupeMetadata Dedupe,
-    JsonElement Result,
-    ExecutionMetadata Execution,
-    TelemetryContext TelemetryContext) : CommandResultEnvelope(
-        identity: Identity,
-        dedupe: Dedupe,
-        execution: Execution,
-        telemetryContext: TelemetryContext);
-
-public sealed record CommandResultFailureEnvelope(
-    EnvelopeIdentity Identity,
-    DedupeMetadata Dedupe,
-    JsonElement Result,
-    ExecutionMetadata Execution,
-    CommandErrorEnvelope Error,
-    TelemetryContext TelemetryContext) : CommandResultEnvelope(
-        identity: Identity,
-        dedupe: Dedupe,
-        execution: Execution,
-        telemetryContext: TelemetryContext);
-
-public abstract record HandshakeEnvelope {
-    private protected HandshakeEnvelope() { }
+[Union]
+public abstract partial record HandshakeEnvelope {
+    private HandshakeEnvelope() { }
+    public sealed record Init(
+        EnvelopeIdentity Identity,
+        CapabilitySet Capabilities,
+        AuthToken Auth,
+        TelemetryContext TelemetryContext) : HandshakeEnvelope;
+    public sealed record Ack(
+        EnvelopeIdentity Identity,
+        Seq<string> AcceptedCapabilities,
+        ServerInfo Server,
+        TelemetryContext TelemetryContext) : HandshakeEnvelope;
+    public sealed record Reject(
+        EnvelopeIdentity Identity,
+        FailureReason Reason,
+        TelemetryContext TelemetryContext) : HandshakeEnvelope;
 }
-
-public sealed record HandshakeInit(
-    EnvelopeIdentity Identity,
-    CapabilitySet Capabilities,
-    AuthToken Auth,
-    TelemetryContext TelemetryContext) : HandshakeEnvelope;
-
-public sealed record HandshakeAck(
-    EnvelopeIdentity Identity,
-    Seq<string> AcceptedCapabilities,
-    ServerInfo Server,
-    TelemetryContext TelemetryContext) : HandshakeEnvelope;
-
-public sealed record HandshakeReject(
-    EnvelopeIdentity Identity,
-    FailureReason Reason,
-    TelemetryContext TelemetryContext) : HandshakeEnvelope;
-
 public sealed record HeartbeatEnvelope(
     EnvelopeIdentity Identity,
     HeartbeatMode Mode,

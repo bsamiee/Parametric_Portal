@@ -150,6 +150,7 @@ dotnet_diagnostic.IDE0055.severity = error                                    # 
 # --- [QUALITY_ANALYZERS] -----------------------------------------------------
 # CSP0001-CSP0902 severities are defined in analyzer descriptors (default = error).
 dotnet_diagnostic.MA0048.severity = none                                      # Allow intentionally consolidated domain/type modules.
+dotnet_diagnostic.CA1034.severity = none                                      # Nested types are intentional for Thinktecture regular unions.
 dotnet_diagnostic.CA1002.severity = error                                     # Avoid exposing mutable List<T> in public APIs.
 dotnet_diagnostic.CA1008.severity = error                                     # Require enums to define a zero-valued member.
 dotnet_diagnostic.CA1021.severity = error                                     # Avoid out parameters for clearer API contracts.

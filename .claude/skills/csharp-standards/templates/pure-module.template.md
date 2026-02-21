@@ -242,6 +242,6 @@ public static class ${ExtensionClass} {
 - [ ] Add `[MethodImpl(AggressiveInlining)]` to all pure hot-path functions
 - [ ] Confirm no `if`/`switch` statements in domain logic
 - [ ] Add `Telemetry.span` to all public service operations
-- [ ] Wire `Layer` into `ServicesLayer` in composition root
+- [ ] Wire module registration via constrained Scrutor `Scan(...).UsingRegistrationStrategy(...)` in composition root
 - [ ] Write at least one property-based test per pure function
 - [ ] Run `dotnet build` and verify zero warnings/errors

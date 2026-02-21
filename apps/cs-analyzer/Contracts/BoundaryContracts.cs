@@ -8,6 +8,16 @@ public enum BoundaryImperativeReason {
     CleanupFinally = 2,
     ProtocolRequired = 3,
 }
+public static class BoundaryImperativeReasonFacts {
+    public static bool TryParse(object? raw, out BoundaryImperativeReason reason) {
+        (bool valid, BoundaryImperativeReason parsed) = raw switch {
+            int value when Enum.IsDefined(enumType: typeof(BoundaryImperativeReason), value: value) => (true, (BoundaryImperativeReason)value),
+            _ => (false, BoundaryImperativeReason.ProtocolRequired),
+        };
+        reason = parsed;
+        return valid;
+    }
+}
 
 // --- [ATTRIBUTES] ------------------------------------------------------------
 

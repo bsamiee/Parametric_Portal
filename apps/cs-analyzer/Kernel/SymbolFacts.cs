@@ -8,15 +8,33 @@ using Microsoft.CodeAnalysis.Operations;
 
 namespace ParametricPortal.CSharp.Analyzers.Kernel;
 
-// --- [ENUMS] -----------------------------------------------------------------
+// --- [SCOPE_KIND] -------------------------------------------------------------
 
-internal enum ScopeKind {
-    Generated = 0,
-    Test = 1,
-    Boundary = 2,
-    Domain = 3,
-    Application = 4,
-    Other = 5,
+internal sealed class ScopeKind {
+    // --- [CONSTRUCTORS] -------------------------------------------------------
+
+    private ScopeKind(string key, bool isAnalyzable, bool isBoundary, bool isDomainOrApplication) {
+        Key = key;
+        IsAnalyzable = isAnalyzable;
+        IsBoundary = isBoundary;
+        IsDomainOrApplication = isDomainOrApplication;
+    }
+
+    // --- [PROPERTIES] ---------------------------------------------------------
+
+    internal string Key { get; }
+    internal bool IsAnalyzable { get; }
+    internal bool IsBoundary { get; }
+    internal bool IsDomainOrApplication { get; }
+
+    // --- [SINGLETONS] ---------------------------------------------------------
+
+    internal static readonly ScopeKind Generated = new(key: "Generated", isAnalyzable: false, isBoundary: false, isDomainOrApplication: false);
+    internal static readonly ScopeKind Test = new(key: "Test", isAnalyzable: false, isBoundary: false, isDomainOrApplication: false);
+    internal static readonly ScopeKind Boundary = new(key: "Boundary", isAnalyzable: true, isBoundary: true, isDomainOrApplication: false);
+    internal static readonly ScopeKind Domain = new(key: "Domain", isAnalyzable: true, isBoundary: false, isDomainOrApplication: true);
+    internal static readonly ScopeKind Application = new(key: "Application", isAnalyzable: true, isBoundary: false, isDomainOrApplication: true);
+    internal static readonly ScopeKind Other = new(key: "Other", isAnalyzable: false, isBoundary: false, isDomainOrApplication: false);
 }
 
 // --- [SCOPE_MODEL] -----------------------------------------------------------
@@ -35,9 +53,9 @@ internal sealed class ScopeInfo {
     internal ScopeKind Kind { get; }
     internal string NamespaceName { get; }
     internal string FilePath { get; }
-    internal bool IsAnalyzable => Kind is ScopeKind.Domain or ScopeKind.Application or ScopeKind.Boundary;
-    internal bool IsBoundary => Kind == ScopeKind.Boundary;
-    internal bool IsDomainOrApplication => Kind is ScopeKind.Domain or ScopeKind.Application;
+    internal bool IsAnalyzable => Kind.IsAnalyzable;
+    internal bool IsBoundary => Kind.IsBoundary;
+    internal bool IsDomainOrApplication => Kind.IsDomainOrApplication;
     internal bool IsHotPath =>
         NamespaceName.Contains(value: ".Performance", comparisonType: StringComparison.Ordinal)
         || FilePath.Contains(value: "Performance", comparisonType: StringComparison.OrdinalIgnoreCase);
@@ -73,18 +91,18 @@ internal static class ScopeModel {
         };
         bool generated = Markers.GeneratedPath.Any(marker => filePath.Contains(value: marker, comparisonType: StringComparison.OrdinalIgnoreCase))
             || SymbolFacts.HasAnyAttribute(symbol, "GeneratedCodeAttribute", "CompilerGeneratedAttribute");
-        bool test = namespaceName.Contains(value: ".Tests", comparisonType: StringComparison.Ordinal)
-            || namespaceName.StartsWith(value: "Tests", comparisonType: StringComparison.Ordinal)
+        bool test = namespaceName.Contains(value: ".Tests", comparisonType: StringComparison.OrdinalIgnoreCase)
+            || namespaceName.StartsWith(value: "Tests", comparisonType: StringComparison.OrdinalIgnoreCase)
             || Markers.TestPath.Any(marker => filePath.Contains(value: marker, comparisonType: StringComparison.OrdinalIgnoreCase))
             || symbol.ContainingAssembly?.Name?.EndsWith(value: ".Tests", comparisonType: StringComparison.OrdinalIgnoreCase) == true;
-        bool boundary = Markers.BoundaryNamespace.Any(marker => namespaceName.Contains(value: marker, comparisonType: StringComparison.Ordinal))
+        bool boundary = Markers.BoundaryNamespace.Any(marker => namespaceName.Contains(value: marker, comparisonType: StringComparison.OrdinalIgnoreCase))
             || Markers.BoundaryPath.Any(marker => filePath.Contains(value: marker, comparisonType: StringComparison.OrdinalIgnoreCase))
             || SymbolFacts.HasAnyAttribute(symbol, "BoundaryAdapterAttribute", "BoundaryAdapter");
-        bool domain = namespaceName.StartsWith(value: Markers.DomainNamespace, comparisonType: StringComparison.Ordinal)
-            || namespaceName.Contains(value: Markers.DomainPrefix, comparisonType: StringComparison.Ordinal)
+        bool domain = namespaceName.StartsWith(value: Markers.DomainNamespace, comparisonType: StringComparison.OrdinalIgnoreCase)
+            || namespaceName.Contains(value: Markers.DomainPrefix, comparisonType: StringComparison.OrdinalIgnoreCase)
             || SymbolFacts.HasAnyAttribute(symbol, "DomainScopeAttribute", "DomainScope");
-        bool application = namespaceName.StartsWith(value: Markers.ApplicationNamespace, comparisonType: StringComparison.Ordinal)
-            || namespaceName.Contains(value: Markers.ApplicationPrefix, comparisonType: StringComparison.Ordinal);
+        bool application = namespaceName.StartsWith(value: Markers.ApplicationNamespace, comparisonType: StringComparison.OrdinalIgnoreCase)
+            || namespaceName.Contains(value: Markers.ApplicationPrefix, comparisonType: StringComparison.OrdinalIgnoreCase);
         ScopeKind kind = (generated, test, boundary, domain, application) switch {
             (true, _, _, _, _) => ScopeKind.Generated,
             (_, true, _, _, _) => ScopeKind.Test,

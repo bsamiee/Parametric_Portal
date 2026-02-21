@@ -39,7 +39,7 @@ public sealed class KargadanPlugin : PlugIn {
         ReadState().Map(static state => state.SessionHost);
     public Fin<Seq<PublishedEvent>> DrainPublishedEvents() =>
         ReadState().Map(static state => state.EventPublisher.Drain());
-    public Fin<HandshakeEnvelope> HandleHandshake(HandshakeInit init) =>
+    public Fin<HandshakeEnvelope> HandleHandshake(HandshakeEnvelope.Init init) =>
         ReadState().Bind(state => {
             Instant now = Instant.FromDateTimeOffset(_timeProvider.GetUtcNow());
             Fin<SessionSnapshot> opened = state.SessionHost.Open(
@@ -57,12 +57,11 @@ public sealed class KargadanPlugin : PlugIn {
                     PluginRevision: VersionString.Create(Version.ToString())),
                 now: now);
             return opened.Bind(_ =>
-                negotiated switch {
-                    HandshakeAck ack => state.SessionHost.Activate(ack, now).Map(_ => negotiated),
-                    HandshakeReject reject => state.SessionHost.Reject(reject.Reason, now).Map(_ => negotiated),
-                    _ => Fin.Fail<HandshakeEnvelope>(
-                        Error.New(message: "Unexpected handshake result variant.")),
-                });
+                negotiated.Switch(
+                    init: _ => Fin.Fail<HandshakeEnvelope>(
+                        Error.New(message: "Handshake negotiation cannot return init envelope.")),
+                    ack: ack => state.SessionHost.Activate(ack, now).Map(_ => negotiated),
+                    reject: reject => state.SessionHost.Reject(reject.Reason, now).Map(_ => negotiated)));
         });
     public static Fin<CommandResultEnvelope> RouteCommand(
         JsonElement envelope,

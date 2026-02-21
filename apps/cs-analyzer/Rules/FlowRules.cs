@@ -14,10 +14,9 @@ internal static class FlowRules {
     // --- [CONTROL_RULES] ------------------------------------------------------
 
     internal static void CheckImperativeConditional(OperationAnalysisContext context, AnalyzerState state, ScopeInfo scope, IConditionalOperation conditional) =>
-        AnalyzerState.Report(context.ReportDiagnostic, (scope.Kind, conditional.Syntax is IfStatementSyntax) switch {
-            (ScopeKind.Domain, true) => Diagnostic.Create(RuleCatalog.CSP0001, context.Operation.Syntax.GetLocation(), "conditional"),
-            (ScopeKind.Application, true) => Diagnostic.Create(RuleCatalog.CSP0001, context.Operation.Syntax.GetLocation(), "conditional"),
-            (ScopeKind.Boundary, true) => BoundaryDiagnostic(
+        AnalyzerState.Report(context.ReportDiagnostic, (scope.IsDomainOrApplication, scope.IsBoundary, conditional.Syntax is IfStatementSyntax) switch {
+            (true, _, true) => Diagnostic.Create(RuleCatalog.CSP0001, context.Operation.Syntax.GetLocation(), "conditional"),
+            (_, true, true) => BoundaryDiagnostic(
                 context, state, construct: "if",
                 reason: (SymbolFacts.IsBoundaryIfCancellationGuard(conditional), SymbolFacts.IsAsyncIteratorYieldGate(conditional)) switch {
                     (true, _) => BoundaryImperativeReason.CancellationGuard,
@@ -28,10 +27,9 @@ internal static class FlowRules {
             _ => null,
         });
     internal static void CheckImperativeLoop(OperationAnalysisContext context, AnalyzerState state, ScopeInfo scope, ILoopOperation loopOperation) =>
-        AnalyzerState.Report(context.ReportDiagnostic, scope.Kind switch {
-            ScopeKind.Domain => Diagnostic.Create(RuleCatalog.CSP0001, context.Operation.Syntax.GetLocation(), "loop"),
-            ScopeKind.Application => Diagnostic.Create(RuleCatalog.CSP0001, context.Operation.Syntax.GetLocation(), "loop"),
-            ScopeKind.Boundary => BoundaryDiagnostic(
+        AnalyzerState.Report(context.ReportDiagnostic, (scope.IsDomainOrApplication, scope.IsBoundary) switch {
+            (true, _) => Diagnostic.Create(RuleCatalog.CSP0001, context.Operation.Syntax.GetLocation(), "loop"),
+            (_, true) => BoundaryDiagnostic(
                 context, state, construct: "loop",
                 reason: loopOperation.Syntax is ForEachStatementSyntax { AwaitKeyword.RawKind: > 0 }
                     ? BoundaryImperativeReason.AsyncIteratorYieldGate
@@ -40,19 +38,17 @@ internal static class FlowRules {
             _ => null,
         });
     internal static void CheckExceptionTry(OperationAnalysisContext context, AnalyzerState state, ScopeInfo scope, ITryOperation tryOperation) =>
-        AnalyzerState.Report(context.ReportDiagnostic, (scope.Kind, tryOperation.Catches.Length > 0, tryOperation.Catches.Length == 0 && tryOperation.Finally is not null) switch {
-            (ScopeKind.Domain, true, _) => Diagnostic.Create(RuleCatalog.CSP0009, context.Operation.Syntax.GetLocation(), "try/catch"),
-            (ScopeKind.Application, true, _) => Diagnostic.Create(RuleCatalog.CSP0009, context.Operation.Syntax.GetLocation(), "try/catch"),
-            (ScopeKind.Boundary, true, _) => BoundaryDiagnostic(context, state, construct: "try/catch", reason: BoundaryImperativeReason.ProtocolRequired, ruleId: "CSP0009"),
-            (ScopeKind.Boundary, _, true) => BoundaryDiagnostic(context, state, construct: "try/finally", reason: BoundaryImperativeReason.CleanupFinally, ruleId: "CSP0009"),
+        AnalyzerState.Report(context.ReportDiagnostic, (scope.IsDomainOrApplication, scope.IsBoundary, tryOperation.Catches.Length > 0, tryOperation.Catches.Length == 0 && tryOperation.Finally is not null) switch {
+            (true, _, true, _) => Diagnostic.Create(RuleCatalog.CSP0009, context.Operation.Syntax.GetLocation(), "try/catch"),
+            (_, true, true, _) => BoundaryDiagnostic(context, state, construct: "try/catch", reason: BoundaryImperativeReason.ProtocolRequired, ruleId: "CSP0009"),
+            (_, true, _, true) => BoundaryDiagnostic(context, state, construct: "try/finally", reason: BoundaryImperativeReason.CleanupFinally, ruleId: "CSP0009"),
             _ => null,
         });
     internal static void CheckExceptionThrow(OperationAnalysisContext context, AnalyzerState state, ScopeInfo scope, IThrowOperation throwOperation) =>
-        AnalyzerState.Report(context.ReportDiagnostic, (scope.Kind, SymbolFacts.IsUnreachableThrow(throwOperation)) switch {
-            (_, true) => null,
-            (ScopeKind.Domain, false) => Diagnostic.Create(RuleCatalog.CSP0009, context.Operation.Syntax.GetLocation(), "throw"),
-            (ScopeKind.Application, false) => Diagnostic.Create(RuleCatalog.CSP0009, context.Operation.Syntax.GetLocation(), "throw"),
-            (ScopeKind.Boundary, false) => BoundaryDiagnostic(context, state, construct: "throw", reason: BoundaryImperativeReason.ProtocolRequired, ruleId: "CSP0009"),
+        AnalyzerState.Report(context.ReportDiagnostic, (scope.IsDomainOrApplication, scope.IsBoundary, SymbolFacts.IsUnreachableThrow(throwOperation)) switch {
+            (_, _, true) => null,
+            (true, _, false) => Diagnostic.Create(RuleCatalog.CSP0009, context.Operation.Syntax.GetLocation(), "throw"),
+            (_, true, false) => BoundaryDiagnostic(context, state, construct: "throw", reason: BoundaryImperativeReason.ProtocolRequired, ruleId: "CSP0009"),
             _ => null,
         });
 
@@ -63,15 +59,11 @@ internal static class FlowRules {
             (true, true, false, false) => Diagnostic.Create(RuleCatalog.CSP0002, context.Operation.Syntax.GetLocation()),
             _ => null,
         });
-    internal static void CheckMatchBoundaryStrict(OperationAnalysisContext context, ScopeInfo scope, IInvocationOperation invocation) {
-        bool anyMatchCall = invocation.TargetMethod.Name == Markers.MatchMethodName;
-        bool boundaryUsage = SymbolFacts.IsBoundaryMatchUsage(invocation);
-        bool regexMatch = SymbolFacts.IsRegexMatchCall(invocation);
-        AnalyzerState.Report(context.ReportDiagnostic, (scope.IsDomainOrApplication, anyMatchCall, boundaryUsage, regexMatch) switch {
+    internal static void CheckMatchBoundaryStrict(OperationAnalysisContext context, AnalyzerState state, ScopeInfo scope, IInvocationOperation invocation) =>
+        AnalyzerState.Report(context.ReportDiagnostic, (scope.IsBoundary, SymbolFacts.IsLanguageExtMatch(invocation, state.LanguageExtNamespace), SymbolFacts.IsBoundaryMatchUsage(invocation), SymbolFacts.IsRegexMatchCall(invocation)) switch {
             (true, true, false, false) => Diagnostic.Create(RuleCatalog.CSP0705, context.Operation.Syntax.GetLocation()),
             _ => null,
         });
-    }
     internal static void CheckRunInTransform(OperationAnalysisContext context, ScopeInfo scope, IInvocationOperation invocation) =>
         AnalyzerState.Report(context.ReportDiagnostic, (scope.IsDomainOrApplication, SymbolFacts.IsLanguageExtRunCollapse(invocation), invocation.TargetMethod.Name) switch {
             (true, true, string method) => Diagnostic.Create(RuleCatalog.CSP0303, context.Operation.Syntax.GetLocation(), method),

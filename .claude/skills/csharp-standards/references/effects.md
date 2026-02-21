@@ -302,6 +302,7 @@ public static class ResiliencePolicy {
 - [ALWAYS] `Fin<T>` for synchronous failures -- `Bind`/`Map` chain, `Match` at boundary.
 - [ALWAYS] `Validation<Error,T>` for parallel field validation -- applicative `.Apply()` tuple.
 - [ALWAYS] `Eff<RT,T>` for effectful pipelines -- `ReaderT<RT, IO, A>` environmental DI via runtime record.
+- [ALWAYS] Keep DI registration in composition roots; use constrained Scrutor scans/decorators so `Eff` modules remain wiring-agnostic.
 - [ALWAYS] `IO<A>` for boundary side effects -- `Run`/`RunAsync` interpretation.
 - [ALWAYS] `@catch` with predicate for selective error recovery -- no `Match` mid-pipeline.
 - [ALWAYS] `|` Alternative for fallback chains -- declarative try-then-fallback composition.

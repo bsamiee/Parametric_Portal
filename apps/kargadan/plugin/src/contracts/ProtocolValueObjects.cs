@@ -3,8 +3,6 @@ using Thinktecture;
 
 namespace ParametricPortal.Kargadan.Plugin.src.contracts;
 
-// --- [VALUE_OBJECTS] ---------------------------------------------------------
-
 // --- [GUID_VALUE_OBJECTS] ----------------------------------------------------
 
 [ValueObject<Guid>(KeyMemberName = "Value")]

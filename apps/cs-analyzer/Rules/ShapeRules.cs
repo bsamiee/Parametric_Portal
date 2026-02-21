@@ -13,11 +13,9 @@ namespace ParametricPortal.CSharp.Analyzers.Rules;
 internal static class ShapeRules {
     // --- [CONSTANTS] ----------------------------------------------------------
 
-    private static readonly SpecialType[] PrimitiveSpecialTypes =
-        [SpecialType.System_String, SpecialType.System_Int32, SpecialType.System_Int64, SpecialType.System_Boolean, SpecialType.System_Decimal];
+    private static readonly SpecialType[] PrimitiveSpecialTypes = [SpecialType.System_String, SpecialType.System_Int32, SpecialType.System_Int64, SpecialType.System_Boolean, SpecialType.System_Decimal];
     private static readonly HashSet<string> PrimitiveMetaNames = new(["Guid", "DateTime", "DateTimeOffset"], StringComparer.Ordinal);
-    private static readonly HashSet<string> ConcurrentCollectionNames =
-        new(["ConcurrentDictionary`2", "ConcurrentBag`1", "ConcurrentQueue`1", "ConcurrentStack`1"], StringComparer.Ordinal);
+    private static readonly HashSet<string> ConcurrentCollectionNames = new(["ConcurrentDictionary`2", "ConcurrentBag`1", "ConcurrentQueue`1", "ConcurrentStack`1"], StringComparer.Ordinal);
     private static readonly string[] InflationPrefixes = ["Get", "TryGet", "GetOr"];
     private static readonly HashSet<string> InterfaceExemptionAttributes = new(["UnionAttribute", "Union", "SmartEnumAttribute", "SmartEnum"], StringComparer.Ordinal);
 
@@ -146,10 +144,10 @@ internal static class ShapeRules {
             ? arguments.FirstOrDefault(argument => argument.NameColon is null)
             : null;
         string targetNamespace = invocation.TargetMethod.ContainingNamespace?.ToDisplayString() ?? string.Empty;
-        bool domainTarget = targetNamespace.StartsWith(value: Markers.DomainNamespace, comparisonType: StringComparison.Ordinal)
-            || targetNamespace.Contains(value: Markers.DomainPrefix, comparisonType: StringComparison.Ordinal)
-            || targetNamespace.StartsWith(value: Markers.ApplicationNamespace, comparisonType: StringComparison.Ordinal)
-            || targetNamespace.Contains(value: Markers.ApplicationPrefix, comparisonType: StringComparison.Ordinal);
+        bool domainTarget = targetNamespace.StartsWith(value: Markers.DomainNamespace, comparisonType: StringComparison.OrdinalIgnoreCase)
+            || targetNamespace.Contains(value: Markers.DomainPrefix, comparisonType: StringComparison.OrdinalIgnoreCase)
+            || targetNamespace.StartsWith(value: Markers.ApplicationNamespace, comparisonType: StringComparison.OrdinalIgnoreCase)
+            || targetNamespace.Contains(value: Markers.ApplicationPrefix, comparisonType: StringComparison.OrdinalIgnoreCase);
         AnalyzerState.Report(context.ReportDiagnostic, (scope.IsDomainOrApplication, domainTarget, firstPositional) switch {
             (true, true, not null) => Diagnostic.Create(RuleCatalog.CSP0502, firstPositional.GetLocation()),
             _ => null,
@@ -178,6 +176,35 @@ internal static class ShapeRules {
 
     // --- [CONVENTION_RULES] ---------------------------------------------------
 
+    internal static void CheckVarInference(SyntaxTreeAnalysisContext context) {
+        CompilationUnitSyntax? compilationUnit = context.Tree.GetRoot(context.CancellationToken) as CompilationUnitSyntax;
+        bool isDomainOrApplication = compilationUnit?.Members.OfType<BaseNamespaceDeclarationSyntax>()
+            .Any(namespaceDecl => {
+                string namespaceName = namespaceDecl.Name.ToString();
+                return namespaceName.StartsWith(value: Markers.DomainNamespace, comparisonType: StringComparison.OrdinalIgnoreCase)
+                    || namespaceName.Contains(value: Markers.DomainPrefix, comparisonType: StringComparison.OrdinalIgnoreCase)
+                    || namespaceName.StartsWith(value: Markers.ApplicationNamespace, comparisonType: StringComparison.OrdinalIgnoreCase)
+                    || namespaceName.Contains(value: Markers.ApplicationPrefix, comparisonType: StringComparison.OrdinalIgnoreCase);
+            }) ?? false;
+        IEnumerable<(Location Location, string Name)> varUsages = (isDomainOrApplication, compilationUnit) switch {
+            (true, CompilationUnitSyntax root) =>
+                root.DescendantNodes().OfType<VariableDeclarationSyntax>()
+                    .Where(static declaration => declaration.Type.IsVar)
+                    .SelectMany(declaration => declaration.Variables.Select(variable => (Location: declaration.Type.GetLocation(), Name: variable.Identifier.ValueText)))
+                    .Concat(root.DescendantNodes().OfType<ForEachStatementSyntax>()
+                        .Where(static statement => statement.Type.IsVar)
+                        .Select(statement => (Location: statement.Type.GetLocation(), Name: statement.Identifier.ValueText)))
+                    .Concat(root.DescendantNodes().OfType<DeclarationExpressionSyntax>()
+                        .Where(static declaration => declaration.Type is IdentifierNameSyntax { Identifier.ValueText: "var" })
+                        .SelectMany(declaration => declaration.Designation switch {
+                            SingleVariableDesignationSyntax single => [(Location: declaration.Type.GetLocation(), Name: single.Identifier.ValueText)],
+                            _ => Array.Empty<(Location Location, string Name)>(),
+                        })),
+            _ => [],
+        };
+        AnalyzerState.ReportEach(context.ReportDiagnostic, varUsages.Select(usage =>
+            Diagnostic.Create(RuleCatalog.CSP0015, usage.Location, usage.Name)));
+    }
     internal static void CheckMissingPreludeUsing(SyntaxTreeAnalysisContext context) {
         CompilationUnitSyntax? compilationUnit = context.Tree.GetRoot(context.CancellationToken) as CompilationUnitSyntax;
         bool hasPreludeUsing = compilationUnit?.Usings.Any(directive =>
@@ -186,10 +213,10 @@ internal static class ShapeRules {
         bool isDomainOrApplication = compilationUnit?.Members.OfType<BaseNamespaceDeclarationSyntax>()
             .Any(namespaceDecl => {
                 string namespaceName = namespaceDecl.Name.ToString();
-                return namespaceName.StartsWith(value: Markers.DomainNamespace, comparisonType: StringComparison.Ordinal)
-                    || namespaceName.Contains(value: Markers.DomainPrefix, comparisonType: StringComparison.Ordinal)
-                    || namespaceName.StartsWith(value: Markers.ApplicationNamespace, comparisonType: StringComparison.Ordinal)
-                    || namespaceName.Contains(value: Markers.ApplicationPrefix, comparisonType: StringComparison.Ordinal);
+                return namespaceName.StartsWith(value: Markers.DomainNamespace, comparisonType: StringComparison.OrdinalIgnoreCase)
+                    || namespaceName.Contains(value: Markers.DomainPrefix, comparisonType: StringComparison.OrdinalIgnoreCase)
+                    || namespaceName.StartsWith(value: Markers.ApplicationNamespace, comparisonType: StringComparison.OrdinalIgnoreCase)
+                    || namespaceName.Contains(value: Markers.ApplicationPrefix, comparisonType: StringComparison.OrdinalIgnoreCase);
             }) ?? false;
         string fileName = Path.GetFileName(context.Tree.FilePath);
         AnalyzerState.Report(context.ReportDiagnostic, (isDomainOrApplication, hasPreludeUsing) switch {

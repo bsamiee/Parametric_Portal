@@ -41,6 +41,7 @@ Effect orchestration lives in `effects.md`; polymorphic compression lives in `co
 
 Thinktecture v10 source-generates construction APIs; LanguageExt provides typed error channels.
 Use `TryCreate` for untrusted input and project to `Fin<T>` / `Validation<Error,T>` via DomainBridge.
+Boundary adapters register integration once: `UseThinktectureValueConverters()`, `ThinktectureModelBinderProvider`, and `ThinktectureJsonConverterFactory`.
 
 ```csharp
 namespace Domain.Objects;
@@ -223,6 +224,7 @@ public static class PaymentResultRole {
 
 [IMPORTANT]:
 - In v10, nested union case type names were simplified; bind to generated case names, not hand-authored aliases.
+- Regular unions are best serialized with polymorphic metadata (`JsonDerivedType`); ad-hoc unions use `[ObjectFactory<T>]` projection.
 
 ---
 ## [6][AGGREGATE_OBJECT_SHAPE]

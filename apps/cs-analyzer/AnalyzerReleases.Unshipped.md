@@ -41,7 +41,6 @@ CSP0405 | ResourceManagement    | Error    | ChannelFullModeRequired
 CSP0501 | SurfaceArea           | Error    | InterfacePollution
 CSP0502 | SurfaceArea           | Error    | PositionalDomainArguments
 CSP0503 | SurfaceArea           | Error    | SingleUsePrivateHelper
-CSP0504 | SurfaceArea           | Error    | BarrelExport
 CSP0601 | PerformanceDiscipline | Error    | HotPathLinq
 CSP0602 | PerformanceDiscipline | Error    | HotPathNonStaticLambda
 CSP0603 | PerformanceDiscipline | Error    | LibraryImportRequired

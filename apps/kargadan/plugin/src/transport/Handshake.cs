@@ -11,17 +11,15 @@ namespace ParametricPortal.Kargadan.Plugin.src.transport;
 
 internal static class Handshake {
     internal static HandshakeEnvelope Negotiate(
-        HandshakeInit init,
+        HandshakeEnvelope.Init init,
         int supportedMajor,
         int supportedMinor,
         Seq<string> supportedCapabilities,
         ServerInfo server,
         Instant now) {
         bool tokenExpired = init.Auth.ExpiresAt <= now;
-        bool majorCompatible =
-            init.Identity.ProtocolVersion.Major == supportedMajor;
-        bool minorCompatible =
-            init.Identity.ProtocolVersion.Minor <= supportedMinor;
+        bool majorCompatible = init.Identity.ProtocolVersion.Major == supportedMajor;
+        bool minorCompatible = init.Identity.ProtocolVersion.Minor <= supportedMinor;
         Seq<string> requiredCapabilities = init.Capabilities.Required;
         Seq<string> optionalCapabilities = init.Capabilities.Optional;
         Seq<string> missingCapabilities =
@@ -65,8 +63,10 @@ internal static class Handshake {
                 telemetryContext: init.TelemetryContext),
         };
     }
+
     // --- [INTERNAL] ----------------------------------------------------------
-    internal static HandshakeAck Ack(
+
+    internal static HandshakeEnvelope.Ack Ack(
         EnvelopeIdentity identity,
         Seq<string> acceptedCapabilities,
         ServerInfo server,
@@ -76,7 +76,7 @@ internal static class Handshake {
             AcceptedCapabilities: acceptedCapabilities,
             Server: server,
             TelemetryContext: telemetryContext);
-    internal static HandshakeReject Reject(
+    internal static HandshakeEnvelope.Reject Reject(
         EnvelopeIdentity identity,
         FailureReason reason,
         TelemetryContext telemetryContext) =>

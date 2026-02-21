@@ -23,14 +23,12 @@ internal static class AnalyzerDispatcher {
                 RuntimeRules.CheckLibraryImport(context, scope, method);
                 RuntimeRules.CheckGeneratedRegexCharsetValidation(context, scope, method);
                 RuntimeRules.CheckEnumeratorCancellation(context, scope, method);
-                FlowRules.CheckExemptionMetadata(context, state, method);
-                return;
+                break;
             case (_, IPropertySymbol property):
                 ShapeRules.CheckSignatures(context, scope, property);
                 ShapeRules.CheckMutableAutoProperty(context, scope, property);
                 TypeShapeRules.CheckAtomRefAsProperty(context, scope, property);
-                FlowRules.CheckExemptionMetadata(context, state, property);
-                return;
+                break;
             case (_, INamedTypeSymbol namedType):
                 state.TrackInterfaceImplementations(namedType: namedType);
                 ShapeRules.CheckSignatures(context, scope, namedType);
@@ -45,9 +43,11 @@ internal static class AnalyzerDispatcher {
                 TypeShapeRules.CheckAnemicEntity(context, scope, namedType);
                 TypeShapeRules.CheckInitOnlyBypassOnValidated(context, scope, namedType);
                 ShapeRules.CheckValidationTypeUsage(context, scope, namedType);
-                FlowRules.CheckExemptionMetadata(context, state, namedType);
+                break;
+            default:
                 return;
         }
+        FlowRules.CheckExemptionMetadata(context, state, context.Symbol);
     }
 
     // --- [OPERATION_DISPATCH] -------------------------------------------------
@@ -60,7 +60,7 @@ internal static class AnalyzerDispatcher {
             case (_, IInvocationOperation invocation):
                 state.TrackMethodInvocation(method: invocation.TargetMethod);
                 FlowRules.CheckMatchCollapse(context, state, scope, invocation);
-                FlowRules.CheckMatchBoundaryStrict(context, scope, invocation);
+                FlowRules.CheckMatchBoundaryStrict(context, state, scope, invocation);
                 FlowRules.CheckRunInTransform(context, scope, invocation);
                 FlowRules.CheckReferenceEqualsNull(context, scope, invocation);
                 FlowRules.CheckAsyncBlocking(context, scope, invocation);
@@ -128,8 +128,10 @@ internal static class AnalyzerDispatcher {
 
     // --- [SYNTAX_TREE_DISPATCH] -----------------------------------------------
 
-    internal static void Run(SyntaxTreeAnalysisContext context) =>
+    internal static void Run(SyntaxTreeAnalysisContext context) {
+        ShapeRules.CheckVarInference(context);
         ShapeRules.CheckMissingPreludeUsing(context);
+    }
 
     // --- [COMPILATION_DISPATCH] ----------------------------------------------
 

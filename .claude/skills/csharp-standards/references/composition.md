@@ -215,19 +215,26 @@ public static double Evaluate(Expr expression) =>
 
 <br>
 
-`Has<RT, Trait>` encodes capabilities. Sealed records compose traits via `Eff.Lift` + static lambdas. Test runtimes substitute stubs -- no mocks.
+Runtime records encode capabilities. Access dependencies via `Eff<RT,T>.Asks` + static lambdas. Test runtimes substitute stubs -- no mocks.
 ```csharp
 namespace Domain.Composition;
-public sealed record AppRuntime(DbClient Db, GatewayClient Gateway)
-    : Has<AppRuntime, DbClient>,
-      Has<AppRuntime, GatewayClient> {
-    static Eff<AppRuntime, DbClient> Has<AppRuntime, DbClient>.Ask =>
-        Eff<AppRuntime, DbClient>.Lift(static (AppRuntime runtime) => runtime.Db);
-    static Eff<AppRuntime, GatewayClient> Has<AppRuntime, GatewayClient>.Ask =>
-        Eff<AppRuntime, GatewayClient>.Lift(static (AppRuntime runtime) => runtime.Gateway);
+public sealed record AppRuntime(DbClient Db, GatewayClient Gateway);
+public static class RuntimeAccess {
+    public static Eff<AppRuntime, DbClient> AskDb =>
+        Eff<AppRuntime, DbClient>.Asks(static (AppRuntime runtime) => runtime.Db);
+    public static Eff<AppRuntime, GatewayClient> AskGateway =>
+        Eff<AppRuntime, GatewayClient>.Asks(static (AppRuntime runtime) => runtime.Gateway);
 }
-// TestRuntime: same Has<RT, Trait> shape with stub implementations -- zero mocks
-// Services constrain on Has<RT, Trait>, never the concrete runtime type
+// TestRuntime: same property shape with stub implementations -- zero mocks
+// Services constrain on runtime capability shape, never concrete infrastructure types
+
+// Composition root: wire runtime seams via Scrutor, not repetitive AddScoped chains.
+services.Scan(scan => scan
+    .FromAssemblyOf<AppRuntime>()
+    .AddClasses(classes => classes.InNamespaces("Domain.Composition"))
+    .UsingRegistrationStrategy(Scrutor.RegistrationStrategy.Throw)
+    .AsSelfWithInterfaces()
+    .WithScopedLifetime());
 ```
 
 ---
@@ -311,7 +318,7 @@ public static class SeqExtensions {
 - [ALWAYS] `Pipe` for left-to-right application; `Compose` for function chaining.
 - [ALWAYS] `params ReadOnlySpan<T>` for arity collapse -- one method, all arities.
 - [ALWAYS] `K<F,A>` with `.As()` downcast at consumption boundaries.
-- [ALWAYS] `Has<RT, Trait>` for runtime composition -- services never know the concrete runtime.
+- [ALWAYS] Runtime-record DI via `Eff<RT,T>.Asks` -- services never know concrete infrastructure types.
 - [ALWAYS] LanguageExt `HashMap`/`Seq`/`HashSet` over BCL immutable collections.
 - [ALWAYS] DU + `Fold` catamorphism for algebras -- not visitor classes.
 - [ALWAYS] `Atom<HashMap<K,V>>` for memoization -- `ConcurrentDictionary` for boundary adapters only.
@@ -332,6 +339,6 @@ public static class SeqExtensions {
 |   [5]   | **K<F,A> HKT + .As()**     | Algorithm generic over effect/container    | Fallible/Applicative/Monad           |
 |   [6]   | **Foldable/Traversable**   | Container-generic fold, traverse, sequence | Foldable<F> / Traversable<F>         |
 |   [7]   | **Algebraic compression**  | DU + Fold replaces N interpreters          | Catamorphism on sealed DU hierarchy  |
-|   [8]   | **Layer composition**      | Runtime wiring + test substitution         | Has<RT, Trait> sealed records        |
+|   [8]   | **Layer composition**      | Runtime wiring + test substitution         | Runtime records + `Asks` accessors   |
 |   [9]   | **Atom memoization**       | Thread-safe pure function caching          | Atom<HashMap> + CAS Swap             |
 |  [10]   | **Seq extensions**         | Windowing, scanning on LanguageExt Seq     | Seq.Fold + .Cons for O(1) prepend    |

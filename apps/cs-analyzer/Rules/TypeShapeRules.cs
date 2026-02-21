@@ -48,7 +48,9 @@ internal static class TypeShapeRules {
             .. namedType.GetTypeMembers().Where(caseType => SymbolEqualityComparer.Default.Equals(caseType.BaseType, namedType)),
         ];
         bool candidate = namedType.IsRecord && namedType.IsAbstract && unionCases.Length > 0;
+        bool thinktectureUnion = SymbolFacts.HasAnyAttribute(namedType, "UnionAttribute", "Union");
         bool privateProtectedCtor = namedType.InstanceConstructors.Any(constructor => constructor.DeclaredAccessibility == Accessibility.ProtectedAndInternal);
+        bool privateCtor = namedType.InstanceConstructors.Any(constructor => constructor.DeclaredAccessibility == Accessibility.Private);
         bool allCasesSealed = unionCases.All(caseType => caseType.IsSealed);
         bool hasUnreachableGuard = namedType.DeclaringSyntaxReferences
             .GroupBy(static (SyntaxReference reference) => reference.SyntaxTree)
@@ -64,7 +66,12 @@ internal static class TypeShapeRules {
                     .OfType<IThrowOperation>()
                     .Any(SymbolFacts.IsUnreachableThrow));
             });
-        bool valid = privateProtectedCtor && allCasesSealed && hasUnreachableGuard;
+        bool valid = (thinktectureUnion, privateProtectedCtor, privateCtor, allCasesSealed, hasUnreachableGuard) switch {
+            (true, _, true, true, _) => true,
+            (true, true, _, true, _) => true,
+            (false, true, _, true, true) => true,
+            _ => false,
+        };
         AnalyzerState.Report(context.ReportDiagnostic, (scope.IsDomainOrApplication, candidate, valid, namedType.Locations.Length) switch {
             (true, true, false, > 0) => Diagnostic.Create(RuleCatalog.CSP0702, namedType.Locations[0], namedType.Name),
             _ => null,

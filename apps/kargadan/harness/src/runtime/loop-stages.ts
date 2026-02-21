@@ -40,17 +40,17 @@ const planCommand = (input: { readonly deadline: number; readonly state: LoopSta
             Option.fromNullable(input.state.operations[0]).pipe(
                 Option.map((operation) => {
                     const identity = {
-                        appId: input.state.identityBase.appId,
-                        issuedAt: new Date(),
+                        appId:     input.state.identityBase.appId,
+                        issuedAt:  new Date(),
                         protocolVersion: input.state.identityBase.protocolVersion,
                         requestId: crypto.randomUUID(),
-                        runId: input.state.identityBase.runId,
+                        runId:     input.state.identityBase.runId,
                         sessionId: input.state.identityBase.sessionId,
                     } as const satisfies Kargadan.EnvelopeIdentity;
                     const telemetryContext = {
                         attempt: input.state.attempt,
                         operationTag: 'PLAN',
-                        spanId: crypto.randomUUID().replaceAll('-', ''),
+                        spanId:  crypto.randomUUID().replaceAll('-', ''),
                         traceId: crypto.randomUUID().replaceAll('-', ''),
                     } as const satisfies Kargadan.TelemetryContext;
                     const isWrite = operation.startsWith('write.');
@@ -62,7 +62,7 @@ const planCommand = (input: { readonly deadline: number; readonly state: LoopSta
                         : ({ includeAttributes: true, scope: 'active' } as const);
                     const command: Kargadan.CommandEnvelope = {
                         _tag: 'command',
-                        deadlineMs: input.deadline,
+                        deadlineMs:  input.deadline,
                         idempotency: isWrite
                             ? {
                                 idempotencyKey: `run:${input.state.identityBase.runId.slice(0, 8)}:seq:${String(input.state.sequence).padStart(4, '0')}`,
@@ -78,7 +78,7 @@ const planCommand = (input: { readonly deadline: number; readonly state: LoopSta
                                 {
                                     objectId: '00000000-0000-0000-0000-000000000100',
                                     sourceRevision: 0,
-                                    typeTag: 'Brep',
+                                    typeTag:  'Brep',
                                 },
                             ],
                         operation,
@@ -99,10 +99,10 @@ const handleDecision = (input: {
     readonly command: Kargadan.CommandEnvelope;
     readonly context: {
         readonly correctionMax: number;
-        readonly retryMax: number;
-        readonly trace: PersistenceTrace;
+        readonly retryMax:      number;
+        readonly trace:         PersistenceTrace;
     };
-    readonly state: LoopState.Type;
+    readonly state:        LoopState.Type;
     readonly verification: Verification.Type;
 }) =>
     Verification.$match(input.verification, {
@@ -117,19 +117,19 @@ const handleDecision = (input: {
                 Match.when('compensatable', () =>
                     input.context.trace
                         .appendTransition({
-                            appId: input.state.identityBase.appId,
-                            createdAt: new Date(),
-                            eventId: crypto.randomUUID(),
-                            eventType: 'command.compensate',
+                            appId:       input.state.identityBase.appId,
+                            createdAt:   new Date(),
+                            eventId:     crypto.randomUUID(),
+                            eventType:   'command.compensate',
                             payload: { code: error.code, compensation: 'required' },
-                            requestId: input.command.identity.requestId,
-                            runId: input.state.identityBase.runId,
-                            sequence: input.state.sequence + 1,
-                            sessionId: input.state.identityBase.sessionId,
+                            requestId:   input.command.identity.requestId,
+                            runId:       input.state.identityBase.runId,
+                            sequence:    input.state.sequence + 1,
+                            sessionId:   input.state.identityBase.sessionId,
                             telemetryContext: {
                                 attempt: input.state.attempt,
                                 operationTag: 'DECIDE',
-                                spanId: crypto.randomUUID().replaceAll('-', ''),
+                                spanId:  crypto.randomUUID().replaceAll('-', ''),
                                 traceId: crypto.randomUUID().replaceAll('-', ''),
                             },
                             ...(input.command.idempotency === undefined
@@ -146,24 +146,24 @@ const handleDecision = (input: {
                                 attempt: input.state.attempt + 1,
                                 command: nextAttemptCommand,
                                 correctionCycles: input.state.correctionCycles + 1,
-                                status: 'Planning',
-                            } satisfies LoopState.Type)
+                                status:  'Planning',
+                            } satisfies  LoopState.Type)
                         : failedState,
                     ),
                 ),
                 Match.when('fatal', () =>
                     input.context.trace
                         .appendArtifact({
-                            appId: input.state.identityBase.appId,
-                            artifactId: crypto.randomUUID(),
-                            artifactType: 'incident',
-                            body: error.message,
-                            createdAt: new Date(),
-                            metadata: { code: error.code, escalated: true, failureClass: error.failureClass },
-                            runId: input.state.identityBase.runId,
+                            appId:               input.state.identityBase.appId,
+                            artifactId:          crypto.randomUUID(),
+                            artifactType:        'incident',
+                            body:                error.message,
+                            createdAt:           new Date(),
+                            metadata: { code:    error.code, escalated: true, failureClass: error.failureClass },
+                            runId:               input.state.identityBase.runId,
                             sourceEventSequence: input.state.sequence,
-                            title: 'Fatal failure escalation',
-                            updatedAt: new Date(),
+                            title:               'Fatal failure escalation',
+                            updatedAt:           new Date(),
                         })
                         .pipe(Effect.as(failedState)),
                 ),
@@ -174,7 +174,7 @@ const handleDecision = (input: {
                                 ...input.state,
                                 attempt: input.state.attempt + 1,
                                 command: nextAttemptCommand,
-                                status: 'Planning',
+                                status:  'Planning',
                             } satisfies LoopState.Type)
                         : failedState,
                     ),
@@ -194,11 +194,11 @@ const handleDecision = (input: {
                     } satisfies LoopState.Type)
                     : ({
                         ...input.state,
-                        attempt: 1,
-                        command: undefined,
+                        attempt:    1,
+                        command:    undefined,
                         correctionCycles: 0,
                         operations: remaining,
-                        status: 'Planning',
+                        status:     'Planning',
                     } satisfies LoopState.Type),
             );
         },
@@ -210,9 +210,9 @@ const verifyResult = (result: Kargadan.ResultEnvelope): Verification.Type =>
             error:
                 result.error === undefined
                     ? {
-                        code: 'UNKNOWN_FAILURE',
+                        code:         'UNKNOWN_FAILURE',
                         failureClass: 'fatal',
-                        message: 'Result error payload is missing',
+                        message:      'Result error payload is missing',
                     }
                     : {
                         ...result.error.reason,

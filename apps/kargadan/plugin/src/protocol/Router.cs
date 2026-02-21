@@ -37,7 +37,6 @@ public static class CommandRouter {
             _ => Fin.Fail<CommandEnvelope>(
                 Error.New(message: $"Envelope root must be an object; observed {envelope.ValueKind}.")),
         };
-
         Fin<CommandEnvelope> DecodeObject(
             JsonElement envelope,
             EnvelopeIdentity sessionIdentity,
@@ -165,8 +164,7 @@ public static class CommandRouter {
             _ => Fin.Fail<int>(Error.New(message: errorMessage)),
         };
     private static Fin<ObjectId> ParseObjectId(string raw) =>
-        Guid.TryParse(raw, out Guid parsedGuid) switch {
-            true => DomainBridge.ParseValueObject<ObjectId, Guid>(candidate: parsedGuid),
-            false => Fin.Fail<ObjectId>(Error.New(message: "objectId must be a valid GUID.")),
-        };
+        DomainBridge.TryCreateValueObjectFromGuidString<ObjectId>(
+            raw: raw,
+            failureMessage: "objectId must be a valid GUID.");
 }

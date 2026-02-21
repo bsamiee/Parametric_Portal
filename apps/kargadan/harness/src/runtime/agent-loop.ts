@@ -38,9 +38,7 @@ class AgentLoop extends Effect.Service<AgentLoop>()('kargadan/AgentLoop', {
                         Effect.catchAll((error) => {
                             const dispatchError = Match.value(error).pipe(
                                 Match.when(Match.instanceOf(CommandDispatchError), F.identity),
-                                Match.orElse(
-                                    F.constant(CommandDispatchError.of('transport', { error: String(error) })),
-                                ),
+                                Match.orElse(F.constant(CommandDispatchError.of('transport', { error: String(error) })),),
                             ) as CommandDispatchError;
                             return Effect.succeed({
                                 _tag: 'result',

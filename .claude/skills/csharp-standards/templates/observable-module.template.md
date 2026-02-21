@@ -39,7 +39,9 @@ using System.Threading.Channels;
 using LanguageExt;
 using LanguageExt.Common;
 using LanguageExt.Traits;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Scrutor;
 using Serilog.Context;
 using static LanguageExt.Prelude;
 
@@ -115,8 +117,10 @@ public interface ${DependencyTrait} {
     Eff<string> ${DependencyMethod}(${ValidatedMessage} message);
 }
 public interface ${ServiceName}Runtime<RT>
-    : Has<RT, IObservabilityProvider>, Has<RT, ${DependencyTrait}>
-    where RT : ${ServiceName}Runtime<RT>;
+    where RT : ${ServiceName}Runtime<RT> {
+    IObservabilityProvider ObservabilityProvider { get; }
+    ${DependencyTrait} Dependency { get; }
+}
 
 // --- [FUNCTIONS] -------------------------------------------------------------
 
@@ -198,8 +202,8 @@ public static class ${ServiceName} {
     public static Eff<RT, StreamOutcome<${ResultType}>> Consume<RT>(
         ChannelReader<Fin<${ValidatedMessage}>> reader)
         where RT : ${ServiceName}Runtime<RT> =>
-        from observability in default(RT).ObservabilityProvider
-        from dependency in default(RT).${DependencyTrait}
+        from observability in Eff<RT, IObservabilityProvider>.Asks(static (RT runtime) => runtime.ObservabilityProvider)
+        from dependency in Eff<RT, ${DependencyTrait}>.Asks(static (RT runtime) => runtime.Dependency)
         from outcome in IO.lift(
             () => Signals.Source.StartActivity("${Operation}.consume", ActivityKind.Internal))
             .Bracket(
@@ -242,6 +246,16 @@ public static class ${ServiceName} {
 
 // --- [LAYERS] ----------------------------------------------------------------
 
+public static class ${ServiceName}Composition {
+    public static IServiceCollection Add${ServiceName}Module(IServiceCollection services) =>
+        services.Scan(scan => scan
+            .FromAssemblyOf<${ServiceName}>()
+            .AddClasses(classes => classes.InNamespaces("${Namespace}"))
+            .UsingRegistrationStrategy(RegistrationStrategy.Throw)
+            .AsSelfWithInterfaces()
+            .WithScopedLifetime());
+}
+
 public static class ${ServiceName}Boundary {
     public static Fin<long> RunStream<RT>(
         Seq<${MessageType}> messages, RT runtime, ILogger logger)
@@ -282,6 +296,10 @@ public static class ${ServiceName}Boundary {
 
 `Observe.Outcome` on `StreamOutcome<T>` is the single fused projection surface. The `Fold` catamorphism dispatches to success/failure/completion telemetry paths: counters (`Produced`, `Consumed`, `Faults`), histogram (`ProcessDuration`), gauge (`Inflight`), structured logs via `[LoggerMessage]`, and `Activity` span status. `Observe.Validation` handles validation failure counting independently. All metric dimensions follow the `operation` + `outcome` taxonomy from `observability.md` `TagPolicy.Outcome`.
 
+**Guidance: F-Bounded Runtime (CRTP)**
+
+`${ServiceName}Runtime<RT> where RT : ${ServiceName}Runtime<RT>` is the Curiously Recurring Template Pattern (CRTP), also called F-bounded polymorphism. The self-referential constraint lets `Eff<RT, T>` pipelines preserve the concrete runtime type through every composition step -- no upcasting to an abstract base. Concrete runtime records (e.g. `AppRuntime`) implement `${ServiceName}Runtime<AppRuntime>` and carry `IObservabilityProvider` and `${DependencyTrait}` as instance properties, making all capabilities available via the `RT` type parameter without service-locator lookups.
+
 ---
 ## [POST_SCAFFOLD]
 
@@ -290,6 +308,6 @@ public static class ${ServiceName}Boundary {
 - [ ] Add `[MethodImpl(AggressiveInlining)]` to all pure hot-path functions
 - [ ] Confirm no `if`/`switch` statements in domain logic; `Fold` at boundary only
 - [ ] Add `Telemetry.span` to all public service operations
-- [ ] Wire `Layer` into `ServicesLayer` in composition root
+- [ ] Wire `${ServiceName}Composition.Add${ServiceName}Module` into composition root
 - [ ] Write at least one property-based test per pure function
 - [ ] Run `dotnet build` and verify zero warnings/errors

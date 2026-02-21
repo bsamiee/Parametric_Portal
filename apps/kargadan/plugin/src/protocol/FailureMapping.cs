@@ -50,8 +50,10 @@ internal static class FailureMapping {
                     fallback: "Unhandled transport/runtime exception."),
         };
     internal static Error ToError(FailureReason reason) =>
-        Error.New(message: $"{reason.Code.Key}:{reason.FailureClass}:{reason.Message}");
+        Error.New(message: $"{reason.Code.Key}:{reason.FailureClass.Key}:{reason.Message}");
+
     // --- [INTERNAL] ----------------------------------------------------------
+
     private static FailureReason BuildFailure(
         ErrorCode code,
         string message,
@@ -66,7 +68,5 @@ internal static class FailureMapping {
                 0 => None,
                 _ => Some(trimmed),
             })
-            .Match(
-                Some: static trimmed => trimmed,
-                None: () => fallback);
+            .IfNone(fallback);
 }

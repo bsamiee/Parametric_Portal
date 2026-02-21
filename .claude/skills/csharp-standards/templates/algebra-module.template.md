@@ -207,21 +207,24 @@ public static class ${AlgebraName}Interpret {
 
 // --- [EFFECTFUL_INTERPRETER] -------------------------------------------------
 
-// Lifts the pure interface into Eff<RT,T> via Has<RT,Trait> DI.
+// Lifts the pure interface into Eff<RT,T> via runtime-record DI.
 // Composes with the polymorphic interpreter when callers need K<F,A>
 // generality; delegates to the monomorphic interface for Fin-only paths.
 // See effects.md [2] for Eff pipelines, [3] for @catch.
 public interface Has${AlgebraName}<RT, ${KeyType}, ${ValueType}>
-    : Has<RT, ${InterfaceName}<${KeyType}, ${ValueType}>>
     where RT : Has${AlgebraName}<RT, ${KeyType}, ${ValueType}>
-    where ${KeyType} : notnull;
+    where ${KeyType} : notnull {
+    ${InterfaceName}<${KeyType}, ${ValueType}> Trait { get; }
+}
 public static class ${AlgebraName}Eff {
     public static Eff<RT, TResult> Execute<RT, ${KeyType}, ${ValueType}, TResult>(
         ${AlgebraName}Query<${KeyType}, ${ValueType}, TResult> query)
         where RT : Has${AlgebraName}<RT, ${KeyType}, ${ValueType}>
         where ${KeyType} : notnull =>
-        // default(RT).Trait: phantom access via Has<RT,Trait> -- see effects.md [2]
-        default(RT).Trait.Execute(query: query).ToEff();
+        from algebra in Eff<RT, ${InterfaceName}<${KeyType}, ${ValueType}>>
+            .Asks(static (RT runtime) => runtime.Trait)
+        from result in algebra.Execute(query: query).ToEff()
+        select result;
     // @catch / | Alternative: declarative error recovery.
     // [DEBUG] Wrap in Probe.Span(pipeline: ..., spanName: ${DiagnosticLabel})
     // for debug Activity; remove before production -- see diagnostics.md [3].
@@ -284,6 +287,6 @@ public static class ${AlgebraName}Boundary {
 - [ ] Add `[MethodImpl(AggressiveInlining)]` to all pure hot-path functions
 - [ ] Confirm no `if`/`switch` statements in domain logic; `Match` at boundary only
 - [ ] Add `Telemetry.span` to all public service operations
-- [ ] Wire `Layer` into `ServicesLayer` in composition root
+- [ ] Wire module registration via constrained Scrutor `Scan(...).UsingRegistrationStrategy(...)` in composition root
 - [ ] Write at least one property-based test per pure function
 - [ ] Run `dotnet build` and verify zero warnings/errors

@@ -24,8 +24,7 @@ using Serilog.Context;
 using static LanguageExt.Prelude;
 
 public interface IObservabilityProvider { ILogger Logger { get; } }
-public interface HasObservability<RT> : Has<RT, IObservabilityProvider>
-    where RT : HasObservability<RT>;
+public interface IObservabilityRuntime { IObservabilityProvider ObservabilityProvider { get; } }
 
 public readonly record struct ObserveSpec(string Operation, TagList Dimensions);
 
@@ -203,8 +202,8 @@ public static class Observe {
 public static class ObserveEff {
     public static Eff<RT, T> Pipeline<RT, T>(
         Eff<RT, T> pipeline, string operation, TagList dimensions)
-        where RT : HasObservability<RT> =>
-        from provider in default(RT).ObservabilityProvider
+        where RT : IObservabilityRuntime =>
+        from provider in Eff<RT, IObservabilityProvider>.Asks(static (RT runtime) => runtime.ObservabilityProvider)
         from result in IO.lift(() => Signals.Source.StartActivity(operation, ActivityKind.Internal))
             .Bracket(
                 Use: (Activity? activity) => {
@@ -248,6 +247,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Http.Resilience;
 using OpenTelemetry.Exporter;
 using OpenTelemetry.Resources;
+using Scrutor;
 using Serilog;
 using Serilog.Events;
 using Serilog.Exceptions;
@@ -281,6 +281,12 @@ public static class TelemetryBootstrap {
                 .AddAspNetCoreInstrumentation().AddHttpClientInstrumentation()
                 .AddRuntimeInstrumentation().AddOtlpExporter());
         // RetryProjection + Polly composition
+        builder.Services.Scan(scan => scan
+            .FromAssembliesOf(typeof(Signals), typeof(Observe))
+            .AddClasses(classes => classes.InNamespaces("Domain.Observability"))
+            .UsingRegistrationStrategy(RegistrationStrategy.Throw)
+            .AsSelfWithInterfaces()
+            .WithSingletonLifetime());
         builder.Services.AddHttpClient("upstream")
             .AddStandardResilienceHandler(options => {
                 options.TotalRequestTimeout.Timeout = TimeSpan.FromSeconds(10);

@@ -3,7 +3,7 @@
 
 <br>
 
-Produces one effectful service module: domain primitives replacing raw DTOs with validated commands, trait interfaces for DI via `Has<RT,Trait>`, `K<F,A>`-polymorphic applicative validation, `Eff<RT,T>` ROP pipelines via LINQ comprehension, `@catch` error recovery with `|` Alternative fallback, `Fin<T>` standalone sync pipelines, `Atom<T>` for thread-safe concurrent state, schedule-based retry, `Option<T>` absence-to-error conversion, `MapFail` error annotation, and double-Run boundary interpretation.
+Produces one effectful service module: domain primitives replacing raw DTOs with validated commands, runtime-record DI via `Eff<RT,T>.Asks(...)`, `K<F,A>`-polymorphic applicative validation, `Eff<RT,T>` ROP pipelines via LINQ comprehension, `@catch` error recovery with `|` Alternative fallback, `Fin<T>` standalone sync pipelines, `Atom<T>` for thread-safe concurrent state, schedule-based retry, `Option<T>` absence-to-error conversion, `MapFail` error annotation, and double-Run boundary interpretation.
 
 **Density:** ~400 LOC signals a refactoring opportunity. No file proliferation; helpers are always a code smell.
 **References:** `effects.md` (Fin, Eff, Validation, IO, @catch, Schedule, STM), `types.md` (domain primitives, sealed DUs), `objects.md` (boundary adapter mapping), `composition.md` (Pipe, arity collapse, HKT encoding, extension members), `performance.md` (static lambdas, tuple threading), `algorithms.md` (Kleisli composition), `diagnostics.md` (pipeline probes, error chains, Probe.Span, EnrichDebug), `observability.md` (structured logging, tracing, metrics, ROP combinators).
@@ -13,24 +13,24 @@ Produces one effectful service module: domain primitives replacing raw DTOs with
 ---
 **Placeholders**
 
-| [INDEX] | [PLACEHOLDER]            | [EXAMPLE]                                                |
-| :-----: | ------------------------ | -------------------------------------------------------- |
-|   [1]   | `${Namespace}`           | `Domain.Orchestration`                                   |
-|   [2]   | `${ServiceName}`         | `OrderPipeline`                                          |
-|   [3]   | `${TraitInterface}`      | `IGatewayProvider`                                       |
-|   [4]   | `${TraitProperty}`       | `GatewayProvider`                                        |
-|   [5]   | `${HasConstraint}`       | `HasGatewayProvider`                                     |
-|   [6]   | `${TraitMethod}`         | `TransmitPayload(TransactionState.Pending pendingState)` |
-|   [7]   | `${RequestType}`         | `InitializationRequest`                                  |
-|   [8]   | `${ValidatedCommand}`    | `ValidatedInitialization`                                |
-|   [9]   | `${ResponseType}`        | `OrderConfirmation`                                      |
-|  [10]   | `${PrimitiveA}`          | `DomainIdentity`                                         |
-|  [11]   | `${PrimitiveB}`          | `TransactionAmount`                                      |
-|  [12]   | `${GuardPredicate}`      | `command.Items.Count > 0`                                |
-|  [13]   | `${GuardMessage}`        | `"Order must have items"`                                |
-|  [14]   | `${SchedulePolicy}`      | `Schedule.exponential(baseDelay: 100 * ms)`              |
-|  [15]   | `${StateType}`           | `ServiceMetrics`                                         |
-|  [16]   | `${DiagnosticNamespace}` | `Domain.Diagnostics`                                     |
+| [INDEX] | [PLACEHOLDER]            | [EXAMPLE]                                   |
+| :-----: | ------------------------ | ------------------------------------------- |
+|   [1]   | `${Namespace}`           | `Domain.Orchestration`                      |
+|   [2]   | `${ServiceName}`         | `OrderPipeline`                             |
+|   [3]   | `${TraitInterface}`      | `IGatewayProvider`                          |
+|   [4]   | `${TraitProperty}`       | `GatewayProvider`                           |
+|   [5]   | `${HasConstraint}`       | `HasGatewayProvider`                        |
+|   [6]   | `${TraitMethod}`         | `TransmitPayload`                           |
+|   [7]   | `${RequestType}`         | `InitializationRequest`                     |
+|   [8]   | `${ValidatedCommand}`    | `ValidatedInitialization`                   |
+|   [9]   | `${ResponseType}`        | `OrderConfirmation`                         |
+|  [10]   | `${PrimitiveA}`          | `DomainIdentity`                            |
+|  [11]   | `${PrimitiveB}`          | `TransactionAmount`                         |
+|  [12]   | `${GuardPredicate}`      | `command.Items.Count > 0`                   |
+|  [13]   | `${GuardMessage}`        | `"Order must have items"`                   |
+|  [14]   | `${SchedulePolicy}`      | `Schedule.exponential(baseDelay: 100 * ms)` |
+|  [15]   | `${StateType}`           | `ServiceMetrics`                            |
+|  [16]   | `${DiagnosticNamespace}` | `Domain.Diagnostics`                        |
 
 ---
 ```csharp
@@ -42,6 +42,8 @@ using NodaTime;
 using LanguageExt;
 using LanguageExt.Common;
 using LanguageExt.Traits;
+using Microsoft.Extensions.DependencyInjection;
+using Scrutor;
 using static LanguageExt.Prelude;
 // Diagnostics: Probe.Span / Probe.Tap / EnrichDebug live in ${DiagnosticNamespace} -- see diagnostics.md [3][7].
 
@@ -74,13 +76,14 @@ public static class ${ServiceName}Errors {
 
 // --- [SERVICES] --------------------------------------------------------------
 
-// Trait interface justified by Has<RT,Trait> DI seam -- not INTERFACE_POLLUTION.
+// Trait interface justified by runtime DI seam -- not INTERFACE_POLLUTION.
 public interface ${TraitInterface} {
-    Eff<${ResponseType}> ${TraitMethod};
+    Eff<string> ${TraitMethod}(${ValidatedCommand} command);
     Eff<Option<string>> LookupOptional(${PrimitiveA} id);
 }
-public interface ${HasConstraint}<RT> : Has<RT, ${TraitInterface}>
-    where RT : ${HasConstraint}<RT>;
+public interface ${HasConstraint}<RT> where RT : ${HasConstraint}<RT> {
+    ${TraitInterface} ${TraitProperty} { get; }
+}
 
 // --- [FUNCTIONS] -------------------------------------------------------------
 
@@ -101,11 +104,10 @@ public static class ${ServiceName} {
                     Amount: validAmount));
     // Applicative instantiation: collects all errors via Error Monoid.
     // Convenience over Validation<Error,T> -- use ValidateGeneric<F> directly
-    // when callers need Fin (fail-fast) or Eff (effectful) contexts:
+    // when callers need Fin (fail-fast) contexts:
     //   ValidateGeneric<Fin>(request).As()
-    //   ValidateGeneric<Eff>(request).As()
     // Note: .As() downcast required to convert K<F,A> to concrete type.
-    // Example: ValidateGeneric<Fin<Error>>(request).As() => Fin<Error, ValidatedCommand>
+    // Example: ValidateGeneric<Fin>(request).As() => Fin<${ValidatedCommand}>
     private static Validation<Error, ${ValidatedCommand}> Validate(
         ${RequestType} request) =>
         ValidateGeneric<Validation<Error>>(request: request).As();
@@ -133,8 +135,8 @@ public static class ${ServiceName} {
     // produces BottomError; .ToFin(Error) preserves domain error identity.
     public static Eff<RT, string> RequireResource<RT>(
         ${PrimitiveA} id) where RT : ${HasConstraint}<RT> =>
-        from optionalResult in default(RT).${TraitProperty}
-            .LookupOptional(id: id)
+        from trait in Eff<RT, ${TraitInterface}>.Asks(static (RT runtime) => runtime.${TraitProperty})
+        from optionalResult in trait.LookupOptional(id: id)
         from resolved in optionalResult
             .ToFin(${ServiceName}Errors.NotFound)
             .ToEff()
@@ -143,7 +145,9 @@ public static class ${ServiceName} {
     // Shared dependency accessor -- called from Execute AND RetryDependency.
     private static Eff<RT, string> CallDependency<RT>(
         ${ValidatedCommand} command) where RT : ${HasConstraint}<RT> =>
-        default(RT).${TraitProperty}.${TraitMethod};
+        from trait in Eff<RT, ${TraitInterface}>.Asks(static (RT runtime) => runtime.${TraitProperty})
+        from response in trait.${TraitMethod}(command: command)
+        select response;
     // Named recovery method: extracts @catch + | composition from the LINQ
     // comprehension for cleaner pipeline hygiene.
     private static Eff<RT, string> CallWithRecovery<RT>(
@@ -196,6 +200,16 @@ public static class ${ServiceName}State {
 
 // --- [LAYERS] ----------------------------------------------------------------
 
+public static class ${ServiceName}Composition {
+    public static IServiceCollection Add${ServiceName}Module(IServiceCollection services) =>
+        services.Scan(scan => scan
+            .FromAssemblyOf<${ServiceName}>()
+            .AddClasses(classes => classes.InNamespaces("${Namespace}"))
+            .UsingRegistrationStrategy(RegistrationStrategy.Throw)
+            .AsSelfWithInterfaces()
+            .WithScopedLifetime());
+}
+
 public static class ${ServiceName}Boundary {
     // Double-Run: .Run(runtime) resolves ReaderT<RT, IO, A> to IO<A>;
     // .Run() executes the IO effect. Match at boundary only.
@@ -220,7 +234,7 @@ public static class ${ServiceName}Boundary {
 ---
 **Guidance: Polymorphic Validation**
 
-`ValidateGeneric<F>` encodes validation as a `K<F,A>` algebra independent of the execution context. The caller selects `F` at the call site: `ValidateGeneric<Fin>` for fail-fast sync, `ValidateGeneric<Validation<Error>>` for applicative accumulation, `ValidateGeneric<Eff>` for lifting directly into an effect pipeline. Domain primitives must expose `CreateK<F>` alongside `Create` (returning `K<F,T>` with `Fallible<F>, Applicative<F>` constraints). This eliminates duplicated validate paths -- one algebra serves all contexts. See `composition.md` [4] for HKT encoding and `.As()` downcast at consumption boundaries.
+`ValidateGeneric<F>` encodes validation as a `K<F,A>` algebra independent of execution context. The caller selects `F` at the call site: `ValidateGeneric<Fin>` for fail-fast sync and `ValidateGeneric<Validation<Error>>` for applicative accumulation. Domain primitives must expose `CreateK<F>` alongside `Create` (returning `K<F,T>` with `Fallible<F>, Applicative<F>` constraints). This eliminates duplicated validate paths -- one algebra serves all contexts. See `composition.md` [4] for HKT encoding and `.As()` downcast at consumption boundaries.
 
 **Guidance: Eff Pipeline and Error Recovery**
 
@@ -238,6 +252,6 @@ Double-Run resolves `ReaderT<RT, IO, A>`: first `.Run(runtime)` strips the Reade
 - [ ] Add `[MethodImpl(AggressiveInlining)]` to all pure hot-path functions
 - [ ] Confirm no `if`/`switch` statements in domain logic; `Match` at boundary only
 - [ ] Add `Telemetry.span` to all public service operations
-- [ ] Wire `Layer` into `ServicesLayer` in composition root
+- [ ] Wire `${ServiceName}Composition.Add${ServiceName}Module` into composition root
 - [ ] Write at least one property-based test per pure function
 - [ ] Run `dotnet build` and verify zero warnings/errors

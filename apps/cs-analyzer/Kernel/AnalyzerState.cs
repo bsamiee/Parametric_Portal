@@ -33,7 +33,7 @@ internal sealed class AnalyzerState {
 
     // --- [CONSTRUCTORS] -------------------------------------------------------
 
-    private AnalyzerState(Compilation compilation, INamespaceSymbol? languageExtNamespace, DateTime analysisUtcNow) {
+    private AnalyzerState(Compilation compilation, INamespaceSymbol? languageExtNamespace, DateTimeOffset analysisUtcNow) {
         Compilation = compilation;
         LanguageExtNamespace = languageExtNamespace;
         AnalysisUtcNow = analysisUtcNow;
@@ -43,13 +43,13 @@ internal sealed class AnalyzerState {
 
     internal Compilation Compilation { get; }
     internal INamespaceSymbol? LanguageExtNamespace { get; }
-    internal DateTime AnalysisUtcNow { get; }
+    internal DateTimeOffset AnalysisUtcNow { get; }
 
     // --- [FACTORIES] ----------------------------------------------------------
 
     internal static AnalyzerState Create(Compilation compilation) {
         INamespaceSymbol? languageExtNamespace = compilation.GetTypeByMetadataName("LanguageExt.Option`1")?.ContainingNamespace;
-        DateTime analysisUtcNow = DateTime.UtcNow;
+        DateTimeOffset analysisUtcNow = DateTimeOffset.UtcNow;
         return new AnalyzerState(compilation: compilation, languageExtNamespace: languageExtNamespace, analysisUtcNow: analysisUtcNow);
     }
 
@@ -160,7 +160,7 @@ internal sealed class AnalyzerState {
 
         // --- [CONSTRUCTORS] ---------------------------------------------------
 
-        private BoundaryExemptionInfo(string ruleId, BoundaryImperativeReason reason, string ticket, string expiresOnUtc, bool isMetadataValid, bool hasExpiry, DateTime expiryUtc) {
+        private BoundaryExemptionInfo(string ruleId, BoundaryImperativeReason reason, string ticket, string expiresOnUtc, bool isMetadataValid, bool hasExpiry, DateTimeOffset expiryUtc) {
             RuleId = ruleId;
             Reason = reason;
             Ticket = ticket;
@@ -178,11 +178,11 @@ internal sealed class AnalyzerState {
         internal string ExpiresOnUtc { get; }
         internal bool IsMetadataValid { get; }
         internal bool HasExpiry { get; }
-        internal DateTime ExpiryUtc { get; }
+        internal DateTimeOffset ExpiryUtc { get; }
 
         // --- [QUERIES] --------------------------------------------------------
 
-        internal bool IsExpired(DateTime utcNow) =>
+        internal bool IsExpired(DateTimeOffset utcNow) =>
             (IsMetadataValid, HasExpiry) switch {
                 (true, true) => ExpiryUtc <= utcNow,
                 _ => false,
@@ -196,9 +196,7 @@ internal sealed class AnalyzerState {
             object? reasonRaw = args.Length > 1 ? args[1].Value : null;
             string ticket = args.Length > 2 ? args[2].Value?.ToString() ?? string.Empty : string.Empty;
             string expiresOnUtc = args.Length > 3 ? args[3].Value?.ToString() ?? string.Empty : string.Empty;
-            BoundaryImperativeReason reason = reasonRaw is int raw && Enum.IsDefined(enumType: typeof(BoundaryImperativeReason), value: raw)
-                ? (BoundaryImperativeReason)raw
-                : BoundaryImperativeReason.ProtocolRequired;
+            bool reasonValid = BoundaryImperativeReasonFacts.TryParse(raw: reasonRaw, reason: out BoundaryImperativeReason reason);
             bool hasExpiry = DateTimeOffset.TryParseExact(
                 expiresOnUtc,
                 UtcFormats,
@@ -207,7 +205,6 @@ internal sealed class AnalyzerState {
                 out DateTimeOffset expiryOffset);
             bool hasRuleId = !string.IsNullOrWhiteSpace(value: ruleId);
             bool hasTicket = !string.IsNullOrWhiteSpace(value: ticket);
-            bool reasonValid = reasonRaw is int reasonCode && Enum.IsDefined(enumType: typeof(BoundaryImperativeReason), value: reasonCode);
             bool metadataValid = hasRuleId && hasTicket && hasExpiry && reasonValid;
             return new BoundaryExemptionInfo(
                 ruleId: ruleId,
@@ -216,7 +213,7 @@ internal sealed class AnalyzerState {
                 expiresOnUtc: expiresOnUtc,
                 isMetadataValid: metadataValid,
                 hasExpiry: hasExpiry,
-                expiryUtc: hasExpiry ? expiryOffset.UtcDateTime : DateTime.MinValue);
+                expiryUtc: hasExpiry ? expiryOffset : DateTimeOffset.MinValue);
         }
     }
 }

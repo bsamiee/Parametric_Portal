@@ -18,28 +18,31 @@ public sealed partial class ErrorCode {
     public static readonly ErrorCode IdempotencyInvalid = new("IDEMPOTENCY_INVALID");
     public static readonly ErrorCode PayloadMalformed = new("PAYLOAD_MALFORMED");
     public static readonly ErrorCode UnexpectedRuntime = new("UNEXPECTED_RUNTIME");
-
-    public string FailureClass =>
+    public FailureClass FailureClass =>
         Map(
-            protocolIncompatible: "fatal",
-            tokenInvalid: "fatal",
-            tokenExpired: "fatal",
-            capabilityUnsupported: "correctable",
-            transientIo: "retryable",
-            idempotencyInvalid: "correctable",
-            payloadMalformed: "correctable",
-            unexpectedRuntime: "fatal");
-
+            protocolIncompatible: FailureClass.Fatal,
+            tokenInvalid: FailureClass.Fatal,
+            tokenExpired: FailureClass.Fatal,
+            capabilityUnsupported: FailureClass.Correctable,
+            transientIo: FailureClass.Retryable,
+            idempotencyInvalid: FailureClass.Correctable,
+            payloadMalformed: FailureClass.Correctable,
+            unexpectedRuntime: FailureClass.Fatal);
     public Error ToError() =>
-        Error.New(message: $"{Key}: {FailureClass}");
+        Error.New(message: $"{Key}: {FailureClass.Key}");
 }
-
+[SmartEnum<string>]
+public sealed partial class FailureClass {
+    public static readonly FailureClass Fatal = new("fatal");
+    public static readonly FailureClass Retryable = new("retryable");
+    public static readonly FailureClass Correctable = new("correctable");
+    public static readonly FailureClass Compensatable = new("compensatable");
+}
 [SmartEnum<string>]
 public sealed partial class HeartbeatMode {
     public static readonly HeartbeatMode Ping = new("ping");
     public static readonly HeartbeatMode Pong = new("pong");
 }
-
 [SmartEnum<string>]
 public sealed partial class SessionLifecycleState {
     public static readonly SessionLifecycleState Connected = new("connected");
@@ -51,7 +54,6 @@ public sealed partial class SessionLifecycleState {
     public static readonly SessionLifecycleState Reaped = new("reaped");
     public static readonly SessionLifecycleState Rejected = new("rejected");
 }
-
 [SmartEnum<string>]
 public sealed partial class CommandOperation {
     public static readonly CommandOperation SceneSummary = new("read.scene.summary");
@@ -66,17 +68,14 @@ public sealed partial class CommandOperation {
     public static readonly CommandOperation LayerUpdate = new("write.layer.update");
     public static readonly CommandOperation ViewportUpdate = new("write.viewport.update");
     public static readonly CommandOperation AnnotationUpdate = new("write.annotation.update");
-
     public bool IsRead =>
         Key.StartsWith(value: "read.", comparisonType: StringComparison.Ordinal);
-
     public bool IsWrite => !IsRead;
 
     // --- [CAPABILITIES] -------------------------------------------------------
 
     private static readonly Lazy<System.Collections.Generic.HashSet<string>> SupportedCapabilityLookup = new(
         valueFactory: static () => SupportedCapabilities.ToHashSet(comparer: StringComparer.Ordinal));
-
     public static Seq<string> SupportedCapabilities =>
         Seq(
             SceneSummary,
@@ -91,11 +90,9 @@ public sealed partial class CommandOperation {
             LayerUpdate,
             ViewportUpdate,
             AnnotationUpdate).Map(static (CommandOperation operation) => operation.Key);
-
     public static bool SupportsCapability(string capability) =>
         SupportedCapabilityLookup.Value.Contains(item: capability);
 }
-
 [SmartEnum<string>]
 public sealed partial class SceneObjectType {
     public static readonly SceneObjectType Brep = new("Brep");
@@ -106,14 +103,12 @@ public sealed partial class SceneObjectType {
     public static readonly SceneObjectType Instance = new("Instance");
     public static readonly SceneObjectType LayoutDetail = new("LayoutDetail");
 }
-
 [SmartEnum<string>]
 public sealed partial class DedupeDecision {
     public static readonly DedupeDecision Executed = new("executed");
     public static readonly DedupeDecision Duplicate = new("duplicate");
     public static readonly DedupeDecision Rejected = new("rejected");
 }
-
 [SmartEnum<string>]
 public sealed partial class EventType {
     public static readonly EventType ObjectsChanged = new("objects.changed");

@@ -20,7 +20,7 @@ internal static class RuleCatalog {
     // --- [FOUNDATION_RULES] ---------------------------------------------------
 
     internal static readonly DiagnosticDescriptor CSP0001 = Err("CSP0001", "ImperativeControlFlow", "Imperative control flow '{0}' is forbidden; use switch expressions and monadic Bind/Map", "FunctionalDiscipline");
-    internal static readonly DiagnosticDescriptor CSP0002 = Err("CSP0002", "MatchCollapse", "'.Match()' is boundary-only; use Map/Bind/BiMap in domain pipelines", "FunctionalDiscipline");
+    internal static readonly DiagnosticDescriptor CSP0002 = Err("CSP0002", "MatchCollapse", "'Match' is boundary-only; use Map/Bind/BiMap in domain pipelines", "FunctionalDiscipline");
     internal static readonly DiagnosticDescriptor CSP0003 = Err("CSP0003", "PrimitiveSignature", "Raw primitive '{0}' leaked in public domain signature; wrap in a branded type", "TypeDiscipline");
     internal static readonly DiagnosticDescriptor CSP0004 = Err("CSP0004", "CollectionSignature", "BCL collection '{0}' leaked in public domain signature; use LanguageExt Seq<T>/HashMap<K,V>/HashSet<T>", "TypeDiscipline");
     internal static readonly DiagnosticDescriptor CSP0005 = Err("CSP0005", "OverloadSpam", "Method family '{0}' has {1} overloads; collapse to params ReadOnlySpan<T> or query algebra", "SurfaceArea");
@@ -85,7 +85,7 @@ internal static class RuleCatalog {
     internal static readonly DiagnosticDescriptor CSP0702 = Err("CSP0702", "DuShape", "Discriminated union '{0}' must remain closed: private-protected base constructor, sealed cases, and defensive unreachable arm", "TypeDiscipline");
     internal static readonly DiagnosticDescriptor CSP0703 = Err("CSP0703", "ValidationType", "Validation type '{0}' is forbidden; use Validation<Error,T> and avoid Seq<Error> wrappers", "TypeDiscipline");
     internal static readonly DiagnosticDescriptor CSP0704 = Err("CSP0704", "RegexRuntimeConstruction", "Runtime regex construction '{0}' is forbidden in domain/application flow; use GeneratedRegex", "PerformanceDiscipline");
-    internal static readonly DiagnosticDescriptor CSP0705 = Err("CSP0705", "MatchBoundaryOnlyStrict", "'.Match()' must terminate at method boundary return; avoid mid-pipeline context collapse", "FunctionalDiscipline");
+    internal static readonly DiagnosticDescriptor CSP0705 = Err("CSP0705", "MatchBoundaryOnlyStrict", "'Match' must terminate at method boundary return; avoid mid-pipeline context collapse", "FunctionalDiscipline");
     internal static readonly DiagnosticDescriptor CSP0706 = Err("CSP0706", "EarlyReturnGuardChain", "Early-return guard chain detected; compose validation as Validation<Error,T> applicative pipeline", "FunctionalDiscipline");
     internal static readonly DiagnosticDescriptor CSP0707 = Err("CSP0707", "VariableReassignment", "Reassignment-driven pipeline on '{0}' is forbidden; use Map/Bind composition", "FunctionalDiscipline");
     internal static readonly DiagnosticDescriptor CSP0708 = Err("CSP0708", "ApiSurfaceInflationByPrefix", "Method family prefix inflation detected on '{0}'; collapse Get/TryGet/GetOr variants into query algebra", "SurfaceArea");
@@ -108,7 +108,6 @@ internal static class RuleCatalog {
     // CSP0016 retired -- replaced by CSP0715 (AnemicEntityDetection) with full implementation
     internal static readonly DiagnosticDescriptor CSP0016 = Err("CSP0016", "AnemicDomainRetired", "Retired: use CSP0715 (AnemicEntityDetection) instead", "TypeDiscipline");
     internal static readonly DiagnosticDescriptor CSP0017 = Err("CSP0017", "NonStaticHotPathClosure", "Non-static lambda capturing '{0}' in performance namespace is forbidden; use static lambda and tuple threading", "PerformanceDiscipline");
-    internal static readonly DiagnosticDescriptor CSP0504 = Err("CSP0504", "BarrelExport", "Barrel file pattern detected in '{0}'; import directly from source modules", "SurfaceArea");
 
     // --- [GOVERNANCE_RULES] ---------------------------------------------------
 
@@ -124,7 +123,7 @@ internal static class RuleCatalog {
         CSP0201, CSP0202, CSP0203, CSP0204,
         CSP0301, CSP0302, CSP0303,
         CSP0401, CSP0402, CSP0403, CSP0404, CSP0405,
-        CSP0501, CSP0502, CSP0503, CSP0504,
+        CSP0501, CSP0502, CSP0503,
         CSP0601, CSP0602, CSP0603, CSP0604, CSP0605, CSP0606, CSP0607, CSP0608,
         CSP0701, CSP0702, CSP0703, CSP0704, CSP0705, CSP0706, CSP0707, CSP0708, CSP0709,
         CSP0710, CSP0711, CSP0712, CSP0713, CSP0714, CSP0715, CSP0716, CSP0717, CSP0718, CSP0719, CSP0720,
