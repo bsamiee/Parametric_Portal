@@ -5,6 +5,7 @@
     "type": "module",
     "workspaces": [
         "apps/*",
+        "apps/*/*",
         "packages/*"
     ],
     "scripts": {
@@ -16,18 +17,18 @@
     },
     "devDependencies": {
         "@anthropic-ai/tokenizer": "catalog:",
+        "@ast-grep/cli": "catalog:",
         "@berenddeboer/nx-biome": "catalog:",
         "@biomejs/biome": "catalog:",
-        "@ast-grep/cli": "catalog:",
         "@effect/experimental": "catalog:",
         "@effect/platform": "catalog:",
         "@effect/platform-browser": "catalog:",
         "@effect/vitest": "catalog:",
         "@mermaid-js/mermaid-cli": "catalog:",
-        "@nx/dotnet": "catalog:",
-        "@nx/docker": "catalog:",
         "@nx-extend/pulumi": "catalog:",
         "@nx-tools/nx-container": "catalog:",
+        "@nx/docker": "catalog:",
+        "@nx/dotnet": "catalog:",
         "@nx/js": "catalog:",
         "@nx/playwright": "catalog:",
         "@nx/react": "catalog:",
@@ -105,7 +106,7 @@
         "not ie <= 11"
     ],
     "engines": {
-        "node": "25.2.1"
+        "node": "25.6.1"
     },
     "knip": {
         "ignoreBinaries": [
@@ -142,7 +143,7 @@
             }
         }
     },
-    "packageManager": "pnpm@10.29.3",
+    "packageManager": "pnpm@10.30.1",
     "pnpm": {
         "overrides": {
             "jiti": "2.6.1",

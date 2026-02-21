@@ -186,7 +186,7 @@ public static class ${ServiceName} {
                 Error.New(message: "${ServiceName} validation failed.", inner: error))
             .ToEff()
         from _ in guard(
-            writer.TryWrite(item: FinSucc(validated)),
+            writer.TryWrite(item: Fin.Succ(validated)),
             ${ServiceName}Errors.BackpressureExceeded)
         from __ in liftEff(static () => {
             Signals.Produced.Add(1, new TagList { { "operation", "${Operation}" } });
@@ -259,7 +259,7 @@ public static class ${ServiceName}Boundary {
         channel.Writer.Complete();
         Log.StreamCompleted(logger, "${Operation}", produced);
         activity?.SetStatus(ActivityStatusCode.Ok);
-        return FinSucc(produced);
+        return Fin.Succ(produced);
     }
 }
 

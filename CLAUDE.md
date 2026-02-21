@@ -1,12 +1,24 @@
----
-description: Senior developer protocol for Parametric Portal monorepo
-alwaysApply: true
----
-
 # [H1][CLAUDE_MANIFEST]
 >**Dictum:** *Protocol governs agent execution in monorepo context.*
 
-Operate as senior developer in bleeding-edge Nx/Vite/Effect monorepo with workflow-driven agentic automation. Align with `REQUIREMENTS.md` standards. Workspace queries via skill scripts: `nx-tools`, `github-tools`, `greptile-tools`, `perplexity-tools`, `exa-tools`, `context7-tools`, `sonarcloud-tools`, `tavily-tools`.
+Operate as senior developer in bleeding-edge Nx/Vite/Effect monorepo designed for hundreds of unique apps, multi-tenant workloads, mixed deployment modes (cluster/single), and workflow-driven agentic automation. Align with `REQUIREMENTS.md` standards. Workspace queries via skill scripts: `nx-tools`, `github-tools`, `greptile-tools`, `perplexity-tools`, `exa-tools`, `context7-tools`, `sonarcloud-tools`, `tavily-tools`.
+
+[IMPORTANT]:
+- [ALWAYS] Treat monorepo code as polymorphic, agnostic, and universal by default.
+- [ALWAYS] Identify canonical object shapes, field names, and semantics that scale across packages and apps.
+- [ALWAYS] Reuse established naming patterns; prefer universal names (`countBy`) over narrow variants (`countByIp`, `countByX`).
+- [NEVER] Rename a canonical concept across schemas/models/classes, parameters, and return keys within the same bounded context.
+- [ALWAYS] If an external contract requires a different name, isolate mapping at boundary adapters and keep canonical names internally.
+
+REQUIRED STANDARDS:
+If reviewing, refining, editing, creating, or modifying X file type, use skill Y (required):
+
+| [INDEX] | [FILE_TYPE]                | [REQUIRED_SKILL]        |
+| :-----: | -------------------------- | ----------------------- |
+|   [1]   | TypeScript (`.ts`, `.tsx`) | `ts-standards`          |
+|   [2]   | C# (`.cs`)                 | `csharp-standards`      |
+|   [3]   | Python (`.py`)             | `python-standards`      |
+|   [4]   | Bash/sh (`.sh`, `.bash`)   | `bash-script-generator` |
 
 ---
 ## [1][BEHAVIOR]
@@ -79,6 +91,12 @@ Operate as senior developer in bleeding-edge Nx/Vite/Effect monorepo with workfl
 - [ALWAYS] Packages own: types, schemas, factories, CSS variable slots.
 - [ALWAYS] Apps own: CSS variable values, factory invocations.
 - [NEVER] Color/font/spacing literals in `packages/*`.
+
+[IMPORTANT]: **External-Lib-First** — Approved dependencies are primary implementation surface.
+- [ALWAYS] Treat dependencies declared in `pyproject.toml`, `pnpm-workspace.yaml`, `Directory.Build.props`/`build.props` as first-class libraries.
+- [ALWAYS] Integrate approved external libraries directly; use native APIs end-to-end.
+- [NEVER] Hand-roll functionality already provided by approved dependencies.
+- [NEVER] Prefer stdlib alternatives when approved external libraries already cover requirement.
 
 ---
 ## [3][CONSTRAINTS]

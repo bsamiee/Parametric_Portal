@@ -1,4 +1,6 @@
 using System.Collections.Immutable;
+using System.Globalization;
+using System.Text.RegularExpressions;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
@@ -101,6 +103,11 @@ internal static class SymbolFacts {
     // --- [CONSTANTS] ----------------------------------------------------------
 
     private static readonly HashSet<string> BlockingMethods = new(["Wait", "WaitAll", "WaitAny", "GetResult", "Sleep"], StringComparer.Ordinal);
+    private const int RegexOptionNonBacktrackingBit = 1024;
+    private const int SearchValuesFriendlyRegexOptionMask =
+        (int)RegexOptions.CultureInvariant
+        | (int)RegexOptions.Compiled
+        | RegexOptionNonBacktrackingBit;
     // --- [FLOW_FACTS] ---------------------------------------------------------
     internal static bool IsLanguageExtMatch(IInvocationOperation invocation, INamespaceSymbol? languageExtNamespace) {
         bool typeNamespaceMatch = invocation.TargetMethod.ContainingType?.ContainingNamespace is INamespaceSymbol ns
@@ -112,6 +119,47 @@ internal static class SymbolFacts {
     internal static bool IsRegexMatchCall(IInvocationOperation invocation) =>
         invocation.TargetMethod.Name == Markers.MatchMethodName
         && invocation.TargetMethod.ContainingType?.OriginalDefinition.ToDisplayString() == "System.Text.RegularExpressions.Regex";
+    internal static bool TryGetGeneratedRegexPattern(IMethodSymbol method, out string pattern, out RegexOptions options) {
+        AttributeData? generatedRegex = method
+            .GetAttributes()
+            .FirstOrDefault(attribute => IsGeneratedRegexAttribute(attribute.AttributeClass));
+        ImmutableArray<TypedConstant> constructorArguments = generatedRegex?.ConstructorArguments ?? [];
+        pattern = constructorArguments.Length switch {
+            > 0 when constructorArguments[0].Value is string text => text,
+            _ => string.Empty,
+        };
+        options = ReadGeneratedRegexOptions(constructorArguments);
+        return pattern.Length > 0;
+    }
+    internal static bool IsSearchValuesFriendlyRegexOptions(RegexOptions options) =>
+        ((int)options & ~SearchValuesFriendlyRegexOptionMask) == 0;
+    internal static bool IsSimpleCharsetLengthRegex(string pattern) {
+        bool anchored = pattern.StartsWith(value: "^[", comparisonType: StringComparison.Ordinal)
+            && pattern.EndsWith(value: "$", comparisonType: StringComparison.Ordinal);
+        int closeBracket = anchored ? pattern.IndexOf(']') : -1;
+        bool hasBracket = closeBracket > 2;
+        int openBrace = hasBracket ? closeBracket + 1 : -1;
+        bool hasBrace = openBrace >= 0 && openBrace < pattern.Length && pattern[openBrace] == '{';
+        int closeBrace = hasBrace ? pattern.IndexOf('}', openBrace + 1) : -1;
+        bool quantifierAtEnd = closeBrace == pattern.Length - 2;
+        bool singleClass = hasBracket
+            && pattern.IndexOf('[', 2) < 0
+            && pattern.IndexOf(']', closeBracket + 1) < 0;
+        bool singleQuantifier = hasBrace
+            && pattern.IndexOf('{', openBrace + 1) < 0
+            && pattern.IndexOf('}', closeBrace + 1) < 0;
+        string charSet = hasBracket
+            ? pattern.Substring(startIndex: 2, length: closeBracket - 2)
+            : string.Empty;
+        string quantifier = quantifierAtEnd && hasBrace
+            ? pattern.Substring(startIndex: openBrace + 1, length: closeBrace - openBrace - 1)
+            : string.Empty;
+        bool literalCharSet = charSet.Length > 0
+            && !HasPotentialRange(charSet)
+            && charSet.All(IsSearchValuesLiteralChar);
+        bool fixedQuantifier = IsFixedLengthQuantifier(quantifier);
+        return anchored && hasBracket && hasBrace && quantifierAtEnd && singleClass && singleQuantifier && literalCharSet && fixedQuantifier;
+    }
 
     // --- [ASYNC_FACTS] --------------------------------------------------------
     internal static bool IsTaskRun(IInvocationOperation invocation) =>
@@ -255,6 +303,29 @@ internal static class SymbolFacts {
         && namedType.ContainingNamespace.ToDisplayString() == "System.Collections.Generic"
         && namedType.TypeArguments.Length == 1
         && IsTaskLikeType(namedType.TypeArguments[0]);
+    private static bool IsSearchValuesLiteralChar(char value) =>
+        char.IsLetterOrDigit(value) || value is '_' or ':' or '-';
+    private static bool HasPotentialRange(string charSet) =>
+        charSet.Length > 2 && charSet.AsSpan(start: 1, length: charSet.Length - 2).IndexOf('-') >= 0;
+    private static bool IsFixedLengthQuantifier(string value) {
+        int separator = value.IndexOf(',');
+        return separator switch {
+            < 0 => int.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out int exact) && exact > 0,
+            > 0 when separator < value.Length - 1 && value.IndexOf(',', separator + 1) < 0
+                => int.TryParse(value.Substring(startIndex: 0, length: separator), NumberStyles.None, CultureInfo.InvariantCulture, out int min)
+                    && int.TryParse(value.Substring(startIndex: separator + 1), NumberStyles.None, CultureInfo.InvariantCulture, out int max)
+                    && min > 0
+                    && max >= min,
+            _ => false,
+        };
+    }
+    private static bool IsGeneratedRegexAttribute(INamedTypeSymbol? attributeType) =>
+        attributeType?.ToDisplayString() == "System.Text.RegularExpressions.GeneratedRegexAttribute";
+    private static RegexOptions ReadGeneratedRegexOptions(ImmutableArray<TypedConstant> constructorArguments) =>
+        constructorArguments.Length switch {
+            > 1 when constructorArguments[1].Value is int raw => (RegexOptions)raw,
+            _ => RegexOptions.None,
+        };
     private static bool HasYieldDescendant(SyntaxNode syntax) =>
         syntax.DescendantNodes(descendIntoChildren: static _ => true)
             .Any(node => node.IsKind(SyntaxKind.YieldReturnStatement) || node.IsKind(SyntaxKind.YieldBreakStatement));

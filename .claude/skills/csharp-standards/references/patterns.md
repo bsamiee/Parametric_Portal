@@ -38,7 +38,7 @@ Every overload is a separate compilation unit the JIT must specialize. One polym
 **EXCEPTION_CONTROL_FLOW**
 
 [ANTI-PATTERN]: `if (val < 0) throw new ArgumentException();`
-[CORRECT]: `return FinFail<TransactionAmount>(Error.New(message: "Negative value"));`
+[CORRECT]: `return Fin.Fail<TransactionAmount>(Error.New(message: "Negative value"));`
 `throw` exits the function's declared return type via an invisible channel the caller cannot statically verify. `Fin<T>` makes failure a first-class value in the codomain -- callers handle both paths via `Bind`/`Map`/`Match`. See `effects.md [1]`.
 
 **LINQ_HOT_PATH**

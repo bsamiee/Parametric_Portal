@@ -67,13 +67,13 @@ public static class Probe {
                 Diagnostics.ProbeCount.Add(1,
                     new TagList { { "label", label }, { "outcome", "succ" } });
                 Log.ProbeSuccess(logger, label, success?.ToString() ?? "null");
-                return FinSucc(success);
+                return Fin.Succ(success);
             },
             Fail: (Error error) => {
                 Diagnostics.ProbeCount.Add(1,
                     new TagList { { "label", label }, { "outcome", "fail" } });
                 Log.ProbeFailure(logger, label, error.Message);
-                return FinFail<T>(error);
+                return Fin.Fail<T>(error);
             });
     public static Eff<RT, T> Span<RT, T>(
         Eff<RT, T> pipeline, string spanName) =>

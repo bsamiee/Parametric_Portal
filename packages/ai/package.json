@@ -13,6 +13,11 @@
             "import": "./src/runtime.ts",
             "default": "./src/runtime.ts"
         },
+        "./runtime-provider": {
+            "types": "./src/runtime-provider.ts",
+            "import": "./src/runtime-provider.ts",
+            "default": "./src/runtime-provider.ts"
+        },
         "./search": {
             "types": "./src/search.ts",
             "import": "./src/search.ts",

@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
@@ -81,6 +82,16 @@ internal static class RuntimeRules {
             && RegexStaticMethods.Contains(invocation.TargetMethod.Name);
         AnalyzerState.Report(context.ReportDiagnostic, (scope.IsDomainOrApplication, regexStatic) switch {
             (true, true) => Diagnostic.Create(RuleCatalog.CSP0606, context.Operation.Syntax.GetLocation(), invocation.TargetMethod.Name),
+            _ => null,
+        });
+    }
+    internal static void CheckGeneratedRegexCharsetValidation(SymbolAnalysisContext context, ScopeInfo scope, IMethodSymbol method) {
+        bool hasGeneratedRegex = SymbolFacts.TryGetGeneratedRegexPattern(method, out string pattern, out RegexOptions options);
+        bool simpleCharsetValidation = hasGeneratedRegex
+            && SymbolFacts.IsSearchValuesFriendlyRegexOptions(options)
+            && SymbolFacts.IsSimpleCharsetLengthRegex(pattern);
+        AnalyzerState.Report(context.ReportDiagnostic, (scope.IsDomainOrApplication, simpleCharsetValidation, method.Locations.Length) switch {
+            (true, true, > 0) => Diagnostic.Create(RuleCatalog.CSP0607, method.Locations[0], method.Name),
             _ => null,
         });
     }

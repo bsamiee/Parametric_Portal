@@ -106,16 +106,16 @@ public static class DomainBridge {
     public static Fin<TValueObject> ParseValueObject<TValueObject, TKey>(TKey candidate)
         where TValueObject : IValueObjectFactory<TValueObject, TKey, ValidationError> =>
         TValueObject.TryCreate(candidate, out TValueObject value, out ValidationError? validationError) switch {
-            true => FinSucc(value),
-            false => FinFail<TValueObject>(
+            true => Fin.Succ(value),
+            false => Fin.Fail<TValueObject>(
                 Error.New(validationError?.Message ?? $"{typeof(TValueObject).Name} validation failed for '{candidate}'."))
         };
     // --- [PARSE_SMART_ENUM] --------------------------------------------------
     public static Fin<TEnum> ParseSmartEnum<TEnum, TKey>(TKey candidate)
         where TEnum : class, ISmartEnum<TEnum, TKey> =>
         TEnum.TryGet(candidate, out TEnum? enumValue) switch {
-            true when enumValue is not null => FinSucc(enumValue),
-            _ => FinFail<TEnum>(Error.New($"Unknown {typeof(TEnum).Name} '{candidate}'."))
+            true when enumValue is not null => Fin.Succ(enumValue),
+            _ => Fin.Fail<TEnum>(Error.New($"Unknown {typeof(TEnum).Name} '{candidate}'."))
         };
 }
 ```
@@ -164,9 +164,9 @@ public static class OrderStateRole {
         public Fin<OrderState> EnsureProgressable() =>
             // state threaded as parameter to enable static lambda (zero closure allocation)
             state.Switch(state,
-                draft: static current => FinSucc(current),
-                confirmed: static current => FinSucc(current),
-                cancelled: static _ => FinFail<OrderState>(Error.New("Cancelled state is terminal.")));
+                draft: static current => Fin.Succ(current),
+                confirmed: static current => Fin.Succ(current),
+                cancelled: static _ => Fin.Fail<OrderState>(Error.New("Cancelled state is terminal."));
     }
 }
 ```
@@ -213,9 +213,9 @@ public static class PaymentResultRole {
                 providerFailure: "TECHNICAL_FAILURE");
         public Fin<string> RequireAuthorizationCode() =>
             result.Switch(
-                authorized: static authorized => FinSucc(authorized.AuthorizationCode),
-                declined: static declined => FinFail<string>(Error.New($"Declined: {declined.Reason}")),
-                providerFailure: static failure => FinFail<string>(
+                authorized: static authorized => Fin.Succ(authorized.AuthorizationCode),
+                declined: static declined => Fin.Fail<string>(Error.New($"Declined: {declined.Reason}")),
+                providerFailure: static failure => Fin.Fail<string>(
                     Error.New($"ProviderFailure {failure.Code}: {failure.Message}")));
     }
 }
@@ -285,7 +285,7 @@ public readonly ref struct Utf8Window(ReadOnlySpan<byte> source) {
     public Fin<Utf8Window> Slice(int start, int length) =>
         (start >= 0 && length >= 0 && (start + length) <= Length) switch {
             true => new Utf8Window(Source.Slice(start, length)),
-            false => FinFail<Utf8Window>(LanguageExt.Common.Error.New("Invalid Utf8Window slice."))
+            false => Fin.Fail<Utf8Window>(LanguageExt.Common.Error.New("Invalid Utf8Window slice."))
         };
 }
 ```

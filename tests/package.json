@@ -4,8 +4,9 @@
     "private": true,
     "type": "module",
     "scripts": {
+        "check": "biome check .",
         "test": "vitest run --root .. --project root-tests --reporter tree --reporter hanging-process",
-        "typecheck": "tsc --project tsconfig.json --noEmit && biome check ."
+        "typecheck": "tsc --project tsconfig.json --noEmit"
     },
     "devDependencies": {
         "@dopplerhq/node-sdk": "catalog:",

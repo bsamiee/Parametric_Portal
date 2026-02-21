@@ -1,212 +1,140 @@
-import { AnthropicClient, AnthropicLanguageModel, AnthropicTokenizer } from '@effect/ai-anthropic';
+import { AnthropicClient, AnthropicLanguageModel } from '@effect/ai-anthropic';
 import { GoogleClient, GoogleLanguageModel } from '@effect/ai-google';
-import { OpenAiClient, OpenAiEmbeddingModel, OpenAiLanguageModel, OpenAiTokenizer } from '@effect/ai-openai';
+import { OpenAiClient, OpenAiEmbeddingModel, OpenAiLanguageModel } from '@effect/ai-openai';
 import { FetchHttpClient } from '@effect/platform';
-import { Config, Duration, Effect, Layer, Match, Option, Redacted, Schema as S } from 'effect';
-import { pipe } from 'effect/Function';
+import { Config, Duration, Effect, Layer, Match, Option, Schema as S } from 'effect';
 
-// --- [CONSTANTS] -------------------------------------------------------------
+// --- [SCHEMA] ----------------------------------------------------------------
 
-const _CONFIG = {
-    defaults: {
-        embedding: {
-            cacheCapacity: 1000,
-            cacheTtlMinutes: 30,
-            dimensions: 1536,
-            maxBatchSize: 256,
-            mode: 'batched',
-            model: 'text-embedding-3-small',
-            provider: 'openai',
-            windowMs: 200,
-        },
-        language: { fallback: [], maxTokens: 4096, model: 'gpt-4o', provider: 'openai', temperature: 1, topK: 40, topP: 1 },
-        policy: {
-            maxRequestsPerMinute: 60,
-            maxTokensPerDay: 1_000_000,
-            maxTokensPerRequest: 16384,
-            tools: { mode: 'allow' as const, names: [] as Array<string> },
-        },
-    },
-    embeddingDimensions: {
-        'text-embedding-3-large': 3072,
-        'text-embedding-3-small': 1536,
-        'text-embedding-ada-002': 1536,
-    },
-    envKeys: { anthropic: 'ANTHROPIC_API_KEY', gemini: 'GEMINI_API_KEY', openai: 'OPENAI_API_KEY' },
-} as const;
+const _SettingsSchema = S.Struct({
+    embedding: S.optionalWith(
+        S.Struct({
+            cacheCapacity:   S.optionalWith(S.Int, { default: () => 1000 }),
+            cacheTtlMinutes: S.optionalWith(S.Int, { default: () => 30 }),
+            dimensions:      S.optionalWith(S.Int, { default: () => 1536 }),
+            maxBatchSize:    S.optionalWith(S.Int, { default: () => 256 }),
+            mode:            S.optionalWith(S.Literal('batched', 'data-loader'), { default: () => 'batched' as const }),
+            model:           S.optionalWith(S.String, { default: () => 'text-embedding-3-small' }),
+            provider:        S.optionalWith(S.Literal('openai'), { default: () => 'openai' as const }),
+            windowMs:        S.optionalWith(S.Int, { default: () => 200 }),
+        }),
+        { default: () => ({ cacheCapacity: 1000, cacheTtlMinutes: 30, dimensions: 1536, maxBatchSize: 256, mode: 'batched' as const, model: 'text-embedding-3-small', provider: 'openai' as const, windowMs: 200 }) },
+    ),
+    language: S.optionalWith(
+        S.Struct({
+            fallback:    S.optionalWith(S.Array(S.Literal('anthropic', 'gemini', 'openai')), { default: () => [] }),
+            maxTokens:   S.optionalWith(S.Int, { default: () => 4096 }),
+            model:       S.optionalWith(S.String, { default: () => 'gpt-4o' }),
+            provider:    S.optionalWith(S.Literal('anthropic', 'gemini', 'openai'), { default: () => 'openai' as const }),
+            temperature: S.optionalWith(S.Number, { default: () => 1 }),
+            topK:        S.optionalWith(S.Number, { default: () => 40 }),
+            topP:        S.optionalWith(S.Number, { default: () => 1 }),
+        }),
+        { default: () => ({ fallback: [] as ReadonlyArray<'anthropic' | 'gemini' | 'openai'>, maxTokens: 4096, model: 'gpt-4o', provider: 'openai' as const, temperature: 1, topK: 40, topP: 1 }) },
+    ),
+    policy: S.optionalWith(
+        S.Struct({
+            maxRequestsPerMinute: S.optionalWith(S.Int, { default: () => 60 }),
+            maxTokensPerDay:      S.optionalWith(S.Int, { default: () => 1_000_000 }),
+            maxTokensPerRequest:  S.optionalWith(S.Int, { default: () => 16384 }),
+            tools:     S.optionalWith(S.Struct({
+                mode:  S.Literal('allow', 'deny'),
+                names: S.Array(S.String),
+            }), { default: () => ({ mode: 'allow' as const, names: [] as Array<string> }) }),
+        }),
+        { default: () => ({ maxRequestsPerMinute: 60, maxTokensPerDay: 1_000_000, maxTokensPerRequest: 16384, tools: { mode: 'allow' as const, names: [] as Array<string> } }) },
+    ),
+});
+const _AppSettingsSchema = S.Struct({ ai: S.optional(_SettingsSchema) });
+
+// --- [LAYERS] ----------------------------------------------------------------
+
+const _anthropicClient = AnthropicClient.layerConfig({ apiKey: Config.redacted('ANTHROPIC_API_KEY') }).pipe(Layer.provide(FetchHttpClient.layer));
+const _geminiClient = GoogleClient.layerConfig({ apiKey: Config.redacted('GEMINI_API_KEY') }).pipe(Layer.provide(FetchHttpClient.layer));
+const _openAiClient = OpenAiClient.layerConfig({ apiKey: Config.redacted('OPENAI_API_KEY') }).pipe(Layer.provide(FetchHttpClient.layer));
+const _languageModel = (settings: S.Schema.Type<typeof _SettingsSchema>['language']) =>
+    Match.value(settings.provider).pipe(
+        Match.when('anthropic', () =>
+            AnthropicLanguageModel.modelWithTokenizer(settings.model, {
+                max_tokens:  settings.maxTokens,
+                temperature: settings.temperature,
+                top_k:       settings.topK,
+                top_p:       settings.topP,
+            }).pipe(Layer.provide(_anthropicClient)),
+        ),
+        Match.when('gemini', () =>
+            GoogleLanguageModel.model(settings.model, {
+                generationConfig: {
+                    maxOutputTokens: settings.maxTokens,
+                    temperature:     settings.temperature,
+                    topK:            settings.topK,
+                    topP:            settings.topP,
+                },
+                toolConfig: {},
+            }).pipe(Layer.provide(_geminiClient)),
+        ),
+        Match.when('openai', () =>
+            OpenAiLanguageModel.modelWithTokenizer(settings.model, {
+                max_output_tokens: settings.maxTokens,
+                temperature: settings.temperature,
+                top_p: settings.topP,
+            }).pipe(Layer.provide(_openAiClient)),
+        ),
+        Match.exhaustive,
+    );
+const _embeddingModel = (settings: S.Schema.Type<typeof _SettingsSchema>['embedding']) =>
+    Match.value(settings.mode).pipe(
+        Match.when('batched', () =>
+            OpenAiEmbeddingModel.model(settings.model, {
+                cache: {
+                    capacity:   settings.cacheCapacity,
+                    timeToLive: Duration.minutes(settings.cacheTtlMinutes),
+                },
+                dimensions:   settings.dimensions,
+                maxBatchSize: settings.maxBatchSize,
+                mode:         'batched',
+            }).pipe(Layer.provide(_openAiClient)),
+        ),
+        Match.when('data-loader', () =>
+            OpenAiEmbeddingModel.model(settings.model, {
+                dimensions:   settings.dimensions,
+                maxBatchSize: settings.maxBatchSize,
+                mode:         'data-loader',
+                window:       Duration.millis(settings.windowMs),
+            }).pipe(Layer.provide(_openAiClient)),
+        ),
+        Match.exhaustive,
+    );
 
 // --- [ENTRY_POINT] -----------------------------------------------------------
 
-const AiRegistry = (() => {
-    // --- [SCHEMA] -----------------------------------------------------------
-    const SettingsSchema = S.Struct({
-        embedding: S.optionalWith(
-            S.Struct({
-                cacheCapacity:   S.optionalWith(S.Int, { default: () => _CONFIG.defaults.embedding.cacheCapacity }),
-                cacheTtlMinutes: S.optionalWith(S.Int, { default: () => _CONFIG.defaults.embedding.cacheTtlMinutes }),
-                dimensions:      S.optionalWith(S.Int, { default: () => _CONFIG.defaults.embedding.dimensions }),
-                maxBatchSize:    S.optionalWith(S.Int, { default: () => _CONFIG.defaults.embedding.maxBatchSize }),
-                mode:            S.optionalWith(S.Literal('batched', 'data-loader'), {default: () => _CONFIG.defaults.embedding.mode,}),
-                model:           S.optionalWith(S.String, { default: () => _CONFIG.defaults.embedding.model }),
-                provider:        S.optionalWith(S.Literal('openai'), { default: () => _CONFIG.defaults.embedding.provider }),
-                windowMs:        S.optionalWith(S.Int, { default: () => _CONFIG.defaults.embedding.windowMs }),
-            }),
-            { default: () =>    _CONFIG.defaults.embedding },
-        ),
-        language: S.optionalWith(
-            S.Struct({
-                fallback:        S.optionalWith(S.Array(S.Literal('anthropic', 'gemini', 'openai')), { default: () => _CONFIG.defaults.language.fallback }),
-                maxTokens:       S.optionalWith(S.Int, { default: () => _CONFIG.defaults.language.maxTokens }),
-                model:           S.optionalWith(S.String, { default: () => _CONFIG.defaults.language.model }),
-                provider:        S.optionalWith(S.Literal('anthropic', 'gemini', 'openai'), {default: () => _CONFIG.defaults.language.provider,}),
-                temperature:     S.optionalWith(S.Number, { default: () => _CONFIG.defaults.language.temperature }),
-                topK:            S.optionalWith(S.Number, { default: () => _CONFIG.defaults.language.topK }),
-                topP:            S.optionalWith(S.Number, { default: () => _CONFIG.defaults.language.topP }),
-            }),
-            { default: () =>    _CONFIG.defaults.language },
-        ),
-        policy: S.optionalWith(
-            S.Struct({
-                maxRequestsPerMinute: S.optionalWith(S.Int, { default: () => _CONFIG.defaults.policy.maxRequestsPerMinute }),
-                maxTokensPerDay:      S.optionalWith(S.Int, { default: () => _CONFIG.defaults.policy.maxTokensPerDay }),
-                maxTokensPerRequest:  S.optionalWith(S.Int, { default: () => _CONFIG.defaults.policy.maxTokensPerRequest }),
-                tools: S.optionalWith(S.Struct({
-                    mode:  S.Literal('allow', 'deny'),
-                    names: S.Array(S.String),
-                }), { default: () => _CONFIG.defaults.policy.tools }),
-            }),
-            { default: () => _CONFIG.defaults.policy },
-        ),
-    });
-    const AppSettingsSchema =    S.Struct({ ai: S.optional(SettingsSchema) });
-    // --- [LAYERS] ------------------------------------------------------------
-    const httpLayer = FetchHttpClient.layer;
-    const apiKeyConfig = (envKey: string, apiKey?: string) => apiKey === undefined ? Config.redacted(envKey) : Config.succeed(Redacted.make(apiKey));
-    const clientLayers = {
-        anthropic: (apiKey?: string) => AnthropicClient.layerConfig({ apiKey: apiKeyConfig(_CONFIG.envKeys.anthropic, apiKey) }).pipe(Layer.provide(httpLayer),),
-        gemini: (apiKey?: string) => GoogleClient.layerConfig({ apiKey: apiKeyConfig(_CONFIG.envKeys.gemini, apiKey) }).pipe(Layer.provide(httpLayer),),
-        openai: (apiKey?: string) => OpenAiClient.layerConfig({ apiKey: apiKeyConfig(_CONFIG.envKeys.openai, apiKey) }).pipe(Layer.provide(httpLayer),),
-    } as const;
-    const languageLayer = (settings: S.Schema.Type<typeof SettingsSchema>['language']) =>
-        Match.value(settings.provider).pipe(
-            Match.when('anthropic', () =>
-                AnthropicLanguageModel.layerWithTokenizer({
-                    config: {
-                        max_tokens: settings.maxTokens,
-                        temperature: settings.temperature,
-                        top_k: settings.topK,
-                        top_p: settings.topP,
-                    },
-                    model: settings.model,
-                }).pipe(Layer.provide(clientLayers.anthropic())),
-            ),
-            Match.when('gemini', () =>
-                GoogleLanguageModel.layer({
-                    config: {
-                        generationConfig: {
-                            maxOutputTokens: settings.maxTokens,
-                            temperature: settings.temperature,
-                            topK: settings.topK,
-                            topP: settings.topP,
-                        },
-                        toolConfig: {},
-                    },
-                    model: settings.model,
-                }).pipe(Layer.provide(clientLayers.gemini())),
-            ),
-            Match.when('openai', () =>
-                OpenAiLanguageModel.layerWithTokenizer({
-                    config: {
-                        max_output_tokens: settings.maxTokens,
-                        temperature: settings.temperature,
-                        top_p: settings.topP,
-                    },
-                    model: settings.model,
-                }).pipe(Layer.provide(clientLayers.openai())),
-            ),
-            Match.exhaustive,
-        );
-    const embeddingLayer = (settings: S.Schema.Type<typeof SettingsSchema>['embedding']) =>
-        Match.value(settings.mode).pipe(
-            Match.when('batched', () =>
-                OpenAiEmbeddingModel.layerBatched({
-                    config: {
-                        cache: {
-                            capacity: settings.cacheCapacity,
-                            timeToLive: Duration.minutes(settings.cacheTtlMinutes),
-                        },
-                        dimensions: settings.dimensions,
-                        maxBatchSize: settings.maxBatchSize,
-                    },
-                    model: settings.model,
-                }).pipe(Layer.provide(clientLayers.openai())),
-            ),
-            Match.when('data-loader', () =>
-                OpenAiEmbeddingModel.layerDataLoader({
-                    config: {
-                        dimensions: settings.dimensions,
-                        maxBatchSize: settings.maxBatchSize,
-                        window: Duration.millis(settings.windowMs),
-                    },
-                    model: settings.model,
-                }).pipe(Layer.provide(clientLayers.openai())),
-            ),
-            Match.exhaustive,
-        );
-    const tokenizerLayer = (settings: S.Schema.Type<typeof SettingsSchema>['language']) =>
-        Match.value(settings.provider).pipe(
-            Match.when('anthropic', () => AnthropicTokenizer.layer),
-            Match.when('openai', () => OpenAiTokenizer.layer({ model: settings.model })),
-            Match.when('gemini', () => Layer.empty),
-            Match.exhaustive,
-        );
-    // --- [PURE_FUNCTIONS] ----------------------------------------------------
-    const resolveEmbeddingDimensions = (model: string, dimensions?: number): number =>
-        pipe(
-            Option.fromNullable(dimensions),
-            Option.orElse(() =>
-                pipe(
-                    model,
-                    Option.liftPredicate((key): key is keyof typeof _CONFIG.embeddingDimensions => Object.hasOwn(_CONFIG.embeddingDimensions, key),),
-                    Option.map((key) => _CONFIG.embeddingDimensions[key]),
+// biome-ignore lint/correctness/noUnusedVariables: const+namespace merge pattern
+const AiRegistry = {
+    decodeAppSettings: (raw: unknown) =>
+        S.decodeUnknown(_AppSettingsSchema)(raw).pipe(
+            Effect.flatMap((settings) =>
+                Option.fromNullable(settings.ai).pipe(
+                    Option.match({
+                        onNone: () => S.decodeUnknown(_SettingsSchema)({}),
+                        onSome: Effect.succeed,
+                    }),
                 ),
             ),
-            Option.getOrElse(() => _CONFIG.defaults.embedding.dimensions),
-        );
-    const normalizeEmbedding = (settings: S.Schema.Type<typeof SettingsSchema>['embedding']) => ({
-        ...settings,
-        dimensions: resolveEmbeddingDimensions(settings.model, settings.dimensions),
-    });
-    const decodeSettings = (raw: unknown) =>
-        S.decodeUnknown(SettingsSchema)(raw).pipe(
-            Effect.map((settings) => ({
-                ...settings,
-                embedding: normalizeEmbedding(settings.embedding),
-            })),
-        );
-    const decodeAppSettings = (raw: unknown) =>
-        S.decodeUnknown(AppSettingsSchema)(raw).pipe(
-            Effect.map((settings) => settings.ai ?? _CONFIG.defaults),
-            Effect.flatMap(decodeSettings),
-        );
-    const fallbackLanguageLayers = (settings: S.Schema.Type<typeof SettingsSchema>) =>
-        settings.language.fallback.map((provider) => languageLayer({ ...settings.language, provider }));
-    const layers = (settings: S.Schema.Type<typeof SettingsSchema>) => {
-        const embedding = normalizeEmbedding(settings.embedding);
-        return {
-            embedding: embeddingLayer(embedding),
-            fallbackLanguage: fallbackLanguageLayers(settings),
-            language: languageLayer(settings.language),
-            policy: settings.policy,
-            tokenizer: tokenizerLayer(settings.language),
-        } as const;
-    };
-    return {
-        decodeAppSettings,
-        layers,
-        schema: SettingsSchema,
-    } as const;
-})();
+        ),
+    layers: (settings: S.Schema.Type<typeof _SettingsSchema>) => ({
+        embedding:        _embeddingModel(settings.embedding),
+        fallbackLanguage: settings.language.fallback.map((provider) => _languageModel({ ...settings.language, provider }),),
+        language:         _languageModel(settings.language),
+        policy:           settings.policy,
+    }),
+    schema:               _SettingsSchema,
+} as const;
+
+// --- [NAMESPACE] -------------------------------------------------------------
+
+namespace AiRegistry {
+    export type Settings = S.Schema.Type<typeof _SettingsSchema>;
+}
 
 // --- [EXPORT] ----------------------------------------------------------------
 

@@ -128,6 +128,7 @@ result.Match(
 
 **Surface minimization**
 - **`params ReadOnlySpan<T>`** for arity collapse. See `composition.md` [2].
+- **`SearchValues<char>` + `ContainsAnyExcept`/`IndexOfAnyExcept`** for fixed char-set validations (`length + allowed chars`) on hot paths; reserve `[GeneratedRegex]` for richer grammars. See `performance.md` [7A].
 - **Sealed DU hierarchies**: `sealed abstract record` base + `sealed record` cases. Static factories on abstract base for construction.
 - **`static` lambdas** on hot-path closures -- zero closure allocations.
 - **C# 14 extension blocks** for behavior projection without inheritance. See `types.md` [4].
@@ -242,7 +243,7 @@ Optional(state).ToFin(Error.New(message: "Vacant state"));
 
 ```csharp
 // [ANTI-PATTERN] PREMATURE_MATCH_COLLAPSE -- Match destroys monadic context
-Fin<int> x = Parse(input).Match(Succ: v => FinSucc(v + 1), Fail: e => FinFail<int>(e));
+Fin<int> x = Parse(input).Match(Succ: v => Fin.Succ(v + 1), Fail: e => Fin.Fail<int>(e));
 ```
 ```csharp
 // [CORRECT] -- Map preserves the functor

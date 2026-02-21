@@ -1,5 +1,5 @@
 {
-    "$schema": "https://biomejs.dev/schemas/2.4.0/schema.json",
+    "$schema": "https://biomejs.dev/schemas/2.4.4/schema.json",
     "plugins": [],
     "vcs": { "enabled": true, "clientKind": "git", "useIgnoreFile": true, "defaultBranch": "main" },
     "files": {
@@ -172,15 +172,10 @@
         },
         {
             "includes": [
-                "packages/server/src/**/*.ts",
-                "packages/database/src/**/*.ts",
-                "apps/api/src/**/*.ts",
-                "packages/theme/src/**/*.ts",
-                "packages/types/src/**/*.ts",
-                "packages/runtime/src/**/*.ts",
-                "packages/ai/src/**/*.ts",
-                "packages/components-next/src/**/*.ts",
-                "packages/components-next/src/**/*.tsx",
+                "apps/**/*.ts",
+                "apps/**/*.tsx",
+                "packages/**/*.ts",
+                "packages/**/*.tsx",
                 "infrastructure/src/**/*.ts",
                 "tests/**/*.ts",
                 "tests/**/*.spec.ts",

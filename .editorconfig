@@ -26,7 +26,6 @@ dotnet_style_require_accessibility_modifiers = always:error                   # 
 csharp_using_directive_placement = outside_namespace:error                    # Keep using directives outside namespace blocks.
 dotnet_sort_system_directives_first = true                                    # Keep System usings ordered first.
 dotnet_separate_import_directive_groups = false                               # Avoid blank-line grouping in imports.
-dotnet_diagnostic.IDE0005.severity = error                                    # Remove unnecessary using directives; no XML doc comments means no false positives from <see cref> references.
 
 # --- [TYPE_EXPLICITNESS] ----------------------------------------------------
 csharp_style_var_for_built_in_types = false:error                             # Use explicit built-in types instead of var.
@@ -150,6 +149,7 @@ dotnet_diagnostic.IDE0055.severity = error                                    # 
 
 # --- [QUALITY_ANALYZERS] -----------------------------------------------------
 # CSP0001-CSP0902 severities are defined in analyzer descriptors (default = error).
+dotnet_diagnostic.MA0048.severity = none                                      # Allow intentionally consolidated domain/type modules.
 dotnet_diagnostic.CA1002.severity = error                                     # Avoid exposing mutable List<T> in public APIs.
 dotnet_diagnostic.CA1008.severity = error                                     # Require enums to define a zero-valued member.
 dotnet_diagnostic.CA1021.severity = error                                     # Avoid out parameters for clearer API contracts.

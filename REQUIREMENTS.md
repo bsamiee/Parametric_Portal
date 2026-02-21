@@ -1,8 +1,3 @@
----
-description: Technical specification and quality standards for Parametric Portal
-alwaysApply: true
----
-
 # Parametric Portal — Technical Specification
 
 ## [1][CONSTRAINTS]
@@ -277,6 +272,8 @@ const AppRuntime = ManagedRuntime.make(AppLayer);
 
 **Separator Format**: `// --- [LABEL] ` + dashes to column 80
 
+**Canonical Scope**: Existing canonical list below is TS/Effect-first. C# has a dedicated canonical schema.
+
 ```typescript
 // --- [TYPES] -----------------------------------------------------------------
 // --- [SCHEMA] ----------------------------------------------------------------
@@ -288,7 +285,7 @@ const AppRuntime = ManagedRuntime.make(AppLayer);
 // --- [EXPORT] ----------------------------------------------------------------
 ```
 
-**Canonical Sections** (omit unused):
+**Canonical Sections [TS_EFFECT]** (omit unused):
 
 | [INDEX] | [SECTION]      | [CONTAINS]                                    |
 | :-----: | -------------- | --------------------------------------------- |
@@ -301,9 +298,18 @@ const AppRuntime = ManagedRuntime.make(AppLayer);
 |   [7]   | `[LAYERS]`     | Layer composition                             |
 |   [8]   | `[EXPORT]`     | Named exports                                 |
 
-**Domain Extensions**:
+**Domain Extensions [TS_EFFECT]**:
 - Database: `[TABLES]` after SCHEMA, `[REPOSITORIES]` after SERVICES
 - API: `[GROUPS]` after SCHEMA, `[MIDDLEWARE]` after SERVICES
+
+**Canonical Sections [CSHARP]** (choose archetype):
+
+| [INDEX] | [ARCHETYPE]               | [SECTION_ORDER]                                                                 |
+| :-----: | ------------------------- | ------------------------------------------------------------------------------- |
+|   [1]   | Boundary Adapter          | `[ADAPTER]` -> `[TYPES]` -> `[CONSTANTS]` -> `[STATE]` -> `[LIFECYCLE]` -> `[INTERFACE]` -> `[INTERNAL]` -> `[TRANSITIONS]` |
+|   [2]   | Stateless Helper          | `[FUNCTIONS]` -> `[INTERNAL]`                                                   |
+|   [3]   | Contracts/Models          | `[VALUE_OBJECTS]` -> `[ENUMS]` -> `[RECORDS]` -> `[ENVELOPES]` -> `[BRIDGE]` -> `[VALIDATION]` -> `[PATTERNS]` |
+|   [4]   | Analyzer / RuleSet Module | `[ANALYZER]` or `[<RULESET>_RULES]` -> `[CONSTANTS]` -> grouped rule sections -> `[REPORTS]` -> `[PRIVATE_FUNCTIONS]` |
 
 **FORBIDDEN labels**: `Helpers`, `Handlers`, `Utils`, `Config`, `Dispatch_Tables`, `Namespace_Objects`.
 

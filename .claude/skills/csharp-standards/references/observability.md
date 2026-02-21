@@ -148,7 +148,7 @@ public static class Observe {
                 Signals.Duration.Record(elapsed.TotalSeconds, tags);
                 activity?.SetStatus(ActivityStatusCode.Ok);
                 Log.Succeeded(logger, spec.Operation, elapsed.TotalMilliseconds);
-                return FinSucc(value);
+                return Fin.Succ(value);
             },
             Fail: (Error error) => {
                 TagList tags = TagPolicy.Outcome(spec, "failure", Some(error.Code));
@@ -156,7 +156,7 @@ public static class Observe {
                 Signals.Duration.Record(elapsed.TotalSeconds, tags);
                 TagPolicy.AnnotateFailure(activity, error);
                 Log.Failed(logger, spec.Operation, error.Code, error.Message);
-                return FinFail<T>(error);
+                return Fin.Fail<T>(error);
             });
 }
 ```
@@ -215,12 +215,12 @@ public static class ObserveEff {
                     Log.Started(provider.Logger, operation);
                     return pipeline
                         .Map((T value) => {
-                            Observe.Outcome(FinSucc(value), provider.Logger,
+                            Observe.Outcome(Fin.Succ(value), provider.Logger,
                                 spec, startTimestamp, activity);
                             return value;
                         })
                         .MapFail((Error error) => {
-                            Observe.Outcome(FinFail<Unit>(error), provider.Logger,
+                            Observe.Outcome(Fin.Fail<Unit>(error), provider.Logger,
                                 spec, startTimestamp, activity);
                             return error;
                         }).As();

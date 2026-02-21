@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+    <PropertyGroup>
+        <AssemblyName>ParametricPortal.Kargadan.Plugin</AssemblyName>
+        <RootNamespace>ParametricPortal.Kargadan.Plugin</RootNamespace>
+        <IsPackable>false</IsPackable>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <Compile Remove="tests/**" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <PackageReference Include="RhinoCommon" Version="$(RhinoCommonVersion)" />
+        <PackageReference Include="Rhino.Inside" Version="$(RhinoInsideVersion)" />
+    </ItemGroup>
+</Project>

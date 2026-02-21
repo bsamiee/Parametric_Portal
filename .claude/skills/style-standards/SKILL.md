@@ -31,13 +31,13 @@ Govern file creation and modification in monorepo.
 
 **References:**
 
-| Domain     | File                                           |
-| ---------- | ---------------------------------------------- |
-| Keywords   | [keywords.md](references/keywords.md)          |
-| Taxonomy   | [taxonomy.md](references/taxonomy.md)          |
-| Voice      | [voice.md](references/voice.md)                |
-| Formatting | [formatting.md](references/formatting.md)      |
-| Validation | [validation.md](references/validation.md)      |
+| Domain     | File                                      |
+| ---------- | ----------------------------------------- |
+| Keywords   | [keywords.md](references/keywords.md)     |
+| Taxonomy   | [taxonomy.md](references/taxonomy.md)     |
+| Voice      | [voice.md](references/voice.md)           |
+| Formatting | [formatting.md](references/formatting.md) |
+| Validation | [validation.md](references/validation.md) |
 
 ---
 ## [1][TAXONOMY]
@@ -108,6 +108,7 @@ Separators encode hierarchy. Whitespace: semantic, not cosmetic. Patterns enable
 - `Separators` - Use `---` for hard boundaries (H2 → H2, H3 → H3). Use `<br>` for soft transitions (H2 → H3).
 - `Spacing` - Place 1 blank after header. Place none after `---`. Place none between list items.
 - `Dividers` - Pad code separators `// --- [LABEL] ---` to column 80.
+- `Language` - Canonical code divider order is language-scoped: use TS canonical for `.ts/.tsx`, C# canonical for `.cs`.
 - `Tables` - Include `[INDEX]` first column. Format headers as `[HEADER]` sigil. Align: center index, right numeric, left prose.
 
 **Best-Practices:**<br>
@@ -133,6 +134,7 @@ Separators encode hierarchy. Whitespace: semantic, not cosmetic. Patterns enable
 - [ ] Structure: Nesting ≤H3, critical constraints at sequence start.
 - [ ] Voice: Active voice, no stopwords, no hedging, no self-reference.
 - [ ] Formatting: Separators correct, spacing rules applied.
+- [ ] Language: Selected canonical divider order matches file language.
 - [ ] Consistency: All markers use canonical keywords.
 
 [REFERENCE] Operational checklist: [→validation.md](./references/validation.md)

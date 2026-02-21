@@ -6,6 +6,7 @@ import { createServer } from 'node:http';
 import { HttpApiBuilder, HttpApiSwagger, HttpMiddleware, HttpServer, HttpServerResponse } from '@effect/platform';
 import { NodeFileSystem, NodeHttpServer, NodeRuntime } from '@effect/platform-node';
 import { AiRuntime } from '@parametric-portal/ai/runtime';
+import { AiRuntimeProvider } from '@parametric-portal/ai/runtime-provider';
 import { SearchService } from '@parametric-portal/ai/search';
 import { Client } from '@parametric-portal/database/client';
 import { DatabaseService } from '@parametric-portal/database/repos';
@@ -66,15 +67,46 @@ const PlatformLayer = Layer.unwrapEffect(Env.Service.pipe(Effect.map((env) => La
 // All application services in dependency order. Single provideMerge chain.
 // Crons: domain services own their schedules (PollingService.Crons, PurgeService.Crons, SearchService.EmbeddingCron)
 
-const ServicesLayer = Layer.mergeAll(Auth.Service.Default, EmailAdapter.Default, FeatureService.Default, NotificationService.Default, StorageService.Default, TransferService.Default, AiRuntime.Default, SearchService.Default, JobService.Default, PollingService.Default, EventBus.Default, WebhookService.Default, WebSocketService.Default, PolicyService.Default, DopplerService.Default).pipe(
-    Layer.provideMerge(Layer.mergeAll(PollingService.Crons, PurgeService.Crons, PurgeService.SweepCron, SearchService.EmbeddingCron)),
+const CoreServicesLayer = Layer.mergeAll(
+    Auth.Service.Default,
+    EmailAdapter.Default,
+    FeatureService.Default,
+    NotificationService.Default,
+    StorageService.Default,
+    TransferService.Default,
+    AiRuntime.Default,
+    AiRuntimeProvider.Server,
+    SearchService.Default,
+    JobService.Default,
+    PollingService.Default,
+    EventBus.Default,
+    WebhookService.Default,
+    WebSocketService.Default,
+    PolicyService.Default,
+    DopplerService.Default,
+);
+const ServiceCronsLayer = Layer.mergeAll(
+    PollingService.Crons,
+    PurgeService.Crons,
+    PurgeService.SweepCron,
+    SearchService.EmbeddingCron,
+);
+const ServiceInfraLayer = Layer.mergeAll(
+    DatabaseService.Default,
+    MetricsService.Default,
+    Crypto.Service.Default,
+    StreamingService.Default,
+    ClusterService.Default,
+);
+const ServicesLayer = CoreServicesLayer.pipe(
+    Layer.provideMerge(ServiceCronsLayer),
     Layer.provideMerge(TenantLifecycleService.Layer),
     Layer.provideMerge(PurgeService.Handlers),
     Layer.provideMerge(Layer.mergeAll(StorageAdapter.Default, AuditService.Default)),
     Layer.provideMerge(ReplayGuardService.Default),
     Layer.provideMerge(CacheService.Layer),
     Layer.provideMerge(Resilience.Layer),
-    Layer.provideMerge(Layer.mergeAll(DatabaseService.Default, MetricsService.Default, Crypto.Service.Default, StreamingService.Default, ClusterService.Default)),
+    Layer.provideMerge(ServiceInfraLayer),
     Layer.provideMerge(PlatformLayer),
 );
 

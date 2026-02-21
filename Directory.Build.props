@@ -3,6 +3,7 @@
         <TargetFramework>net10.0</TargetFramework>
         <Nullable>enable</Nullable>
         <ImplicitUsings>enable</ImplicitUsings>
+        <GenerateDocumentationFile>false</GenerateDocumentationFile>
         <Deterministic>true</Deterministic>
         <Optimize>true</Optimize>
         <CheckForOverflowUnderflow>true</CheckForOverflowUnderflow>
@@ -47,6 +48,9 @@
         <TestcontainersPostgreSqlVersion>4.10.0</TestcontainersPostgreSqlVersion>
         <FsCheckVersion>3.3.2</FsCheckVersion>
         <BenchmarkDotNetVersion>0.15.8</BenchmarkDotNetVersion>
+        <RhinoCommonVersion>9.0.25350.305-wip</RhinoCommonVersion>
+        <RhinoInsideVersion>9.0.26013.15500-beta</RhinoInsideVersion>
+        <RhinoTestingVersion>9.0.5-beta</RhinoTestingVersion>
     </PropertyGroup>
 
     <ItemGroup Label="Global Libraries" Condition="'$(IsLocalCSharpAnalyzerProject)' != 'true'">

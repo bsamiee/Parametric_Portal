@@ -9,8 +9,10 @@ export default defineConfig(
     Effect.runSync(
         createConfig({
             entry: {
+                mcp: './src/mcp.ts',
                 registry: './src/registry.ts',
                 runtime: './src/runtime.ts',
+                'runtime-provider': './src/runtime-provider.ts',
                 search: './src/search.ts',
             },
             external: [

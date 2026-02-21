@@ -56,5 +56,12 @@ jobs:
         uses: anthropics/claude-code-action@7145c3e0510bcdbdd29f67cc4a8c1958f1acfa2f # v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          settings: ".claude/settings.json"
           additional_permissions: |
             actions: read
+          prompt: |
+            [LOAD_STANDARDS]
+            1. Read CLAUDE.md.
+            2. Read REQUIREMENTS.md.
+            3. Read .claude/skills/style-standards/SKILL.md.
+            4. Load appropriate skill per language `csharp-standards`, `ts-standards`, `python-standards`, `bash-script-generator`, etc as needed.

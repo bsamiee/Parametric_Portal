@@ -181,23 +181,23 @@ public static class ${ExtensionClass} {
                 on${VariantB}: static (${DUName}.${VariantB} _) => false,
                 on${VariantC}: static (${DUName}.${VariantC} _) => true,
                 on${VariantD}: static (${DUName}.${VariantD} _) => true);
-        // State transition via Fold: valid transitions produce FinSucc;
-        // invalid transitions produce FinFail with typed error.
+        // State transition via Fold: valid transitions produce Fin.Succ;
+        // invalid transitions produce Fin.Fail with typed error.
         // Routes through Fold for compile-time exhaustiveness on all variants.
         public Fin<${DUName}> ${TransitionMethod} =>
             state.Fold<Fin<${DUName}>>(
                 on${VariantA}: (${DUName}.${VariantA} pending) =>
-                    FinSucc<${DUName}>(
+                    Fin.Succ<${DUName}>(
                         pending with {
                             Status = ${DUName}Status.Active,
                             ActivatedAt = SystemClock.Instance.GetCurrentInstant()
                         }),
                 on${VariantB}: static (${DUName}.${VariantB} _) =>
-                    FinFail<${DUName}>(${PrimitiveName}Errors.InvalidTransition),
+                    Fin.Fail<${DUName}>(${PrimitiveName}Errors.InvalidTransition),
                 on${VariantC}: static (${DUName}.${VariantC} _) =>
-                    FinFail<${DUName}>(${PrimitiveName}Errors.InvalidTransition),
+                    Fin.Fail<${DUName}>(${PrimitiveName}Errors.InvalidTransition),
                 on${VariantD}: static (${DUName}.${VariantD} _) =>
-                    FinFail<${DUName}>(${PrimitiveName}Errors.InvalidTransition));
+                    Fin.Fail<${DUName}>(${PrimitiveName}Errors.InvalidTransition));
     }
     extension(Seq<${DUName}> items) {
         public Seq<${DUName}> ActiveOnly =>

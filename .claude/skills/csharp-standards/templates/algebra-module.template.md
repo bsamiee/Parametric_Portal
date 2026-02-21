@@ -46,8 +46,8 @@ public readonly record struct ${AlgebraName}Config {
     private ${AlgebraName}Config(${ConfigReprType} value) { Value = value; }
     public static Fin<${AlgebraName}Config> Create(${ConfigReprType} candidate) =>
         (${ConfigValid}) switch {
-            true => FinSucc(new ${AlgebraName}Config(value: candidate)),
-            false => FinFail<${AlgebraName}Config>(
+            true => Fin.Succ(new ${AlgebraName}Config(value: candidate)),
+            false => Fin.Fail<${AlgebraName}Config>(
                 Error.New(message: ${ConfigMessage}))
         };
 }
@@ -134,17 +134,17 @@ public sealed class ${ImplName}<${KeyType}, ${ValueType}>(
             onGet: (${AlgebraName}Query<${KeyType}, ${ValueType}, TResult>.Get getQuery) =>
                 // [MONOMORPHIC-PATH] K<F,A> requires object boxing when F is erased at runtime.
                 // Prefer ${AlgebraName}Interpret.Execute path when F is known -- avoids double-cast.
-                FinSucc((TResult)(object)_state.Value.Find(key: getQuery.Key)),
+                Fin.Succ((TResult)(object)_state.Value.Find(key: getQuery.Key)),
             onUpsert: (${AlgebraName}Query<${KeyType}, ${ValueType}, TResult>.Upsert upsertQuery) =>
                 _state.Swap((HashMap<${KeyType}, ${ValueType}> current) =>
                     current.AddOrUpdate(key: upsertQuery.Key, value: upsertQuery.Value))
                     .Pipe(static (HashMap<${KeyType}, ${ValueType}> _) =>
-                        FinSucc((TResult)(object)unit)),
+                        Fin.Succ((TResult)(object)unit)),
             onDelete: (${AlgebraName}Query<${KeyType}, ${ValueType}, TResult>.Delete deleteQuery) =>
                 _state.Swap((HashMap<${KeyType}, ${ValueType}> current) =>
                     current.Remove(key: deleteQuery.Key))
                     .Pipe(static (HashMap<${KeyType}, ${ValueType}> _) =>
-                        FinSucc((TResult)(object)unit)));
+                        Fin.Succ((TResult)(object)unit));
     // Batch: params ReadOnlySpan<T> collapses all arities -- see composition.md [2].
     /// <summary>
     /// Execute multiple queries in batch. Note: materializes the span into an array

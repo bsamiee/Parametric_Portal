@@ -91,7 +91,7 @@
     "plugins": [
         {
             "exclude": ["tools/**/*", "**/node_modules/**", "**/dist/**"],
-            "include": ["apps/*/vite.config.ts", "packages/*/vite.config.ts"],
+            "include": ["apps/*/vite.config.ts", "apps/*/*/vite.config.ts", "packages/*/vite.config.ts"],
             "options": {
                 "buildTargetName": "build",
                 "previewTargetName": "preview",
@@ -102,7 +102,7 @@
         },
         {
             "exclude": ["tools/**/*", "**/node_modules/**", "**/dist/**"],
-            "include": ["apps/*/vite.config.ts", "packages/*/vite.config.ts"],
+            "include": ["apps/*/vite.config.ts", "apps/*/*/vite.config.ts", "packages/*/vite.config.ts"],
             "options": { "testMode": "run", "testTargetName": "test" },
             "plugin": "@nx/vitest"
         },
@@ -258,7 +258,6 @@
         },
         "typecheck": {
             "cache": true,
-            "dependsOn": ["^typecheck"],
             "inputs": ["typescript", "sharedGlobals"]
         }
     },

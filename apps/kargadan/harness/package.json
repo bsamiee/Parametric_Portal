@@ -1,0 +1,28 @@
+{
+    "name": "@parametric-portal/kargadan-harness",
+    "version": "0.1.0",
+    "private": true,
+    "type": "module",
+    "scripts": {
+        "build": "vite build --config vite.config.ts",
+        "check": "biome check .",
+        "dev": "vite dev --host --config vite.config.ts",
+        "fix": "biome check --write .",
+        "test": "vitest run --passWithNoTests",
+        "typecheck": "tsc --project tsconfig.json --noEmit"
+    },
+    "dependencies": {
+        "@effect/experimental": "catalog:",
+        "@effect/platform": "catalog:",
+        "@effect/platform-node": "catalog:",
+        "@parametric-portal/types": "workspace:*",
+        "effect": "catalog:"
+    },
+    "devDependencies": {
+        "@effect/vitest": "catalog:",
+        "@types/node": "catalog:",
+        "typescript": "catalog:",
+        "vite": "catalog:",
+        "vitest": "catalog:"
+    }
+}

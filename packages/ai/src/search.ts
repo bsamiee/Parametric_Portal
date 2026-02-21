@@ -4,8 +4,8 @@ import { ClusterService } from '@parametric-portal/server/infra/cluster';
 import { AuditService } from '@parametric-portal/server/observe/audit';
 import { MetricsService } from '@parametric-portal/server/observe/metrics';
 import { Telemetry } from '@parametric-portal/server/observe/telemetry';
-import { Array as A, Cron, Data, Effect, Option, pipe } from 'effect';
-import { constant } from 'effect/Function';
+import { Array as A, Cron, Effect, Match, Option } from 'effect';
+import { AiError } from './errors.ts';
 import { AiRuntime } from './runtime.ts';
 
 // --- [CONSTANTS] -------------------------------------------------------------
@@ -17,28 +17,6 @@ const _CONFIG = {
     users:  { anonymous: 'anonymous', system: 'system' },
 } as const;
 
-// --- [PURE_FUNCTIONS] --------------------------------------------------------
-
-const _sourceText = (src: { readonly contentText: string | null; readonly displayText: string; readonly metadata: unknown }) =>
-    A.filter(
-        [
-            src.displayText,
-            src.contentText ?? undefined,
-            Option.fromNullable(src.metadata).pipe(
-                Option.map((m) => JSON.stringify(m)),
-                Option.getOrUndefined,
-            ),
-        ],
-        (value): value is string => value !== undefined && value !== '',
-    ).join(_CONFIG.text.joiner);
-
-// --- [CLASSES] ---------------------------------------------------------------
-
-class AiSearchError extends Data.TaggedError('AiSearchError')<{
-    readonly operation: string;
-    readonly cause: unknown;
-}> {}
-
 // --- [SERVICES] --------------------------------------------------------------
 
 class SearchService extends Effect.Service<SearchService>()('ai/Search', {
@@ -49,13 +27,13 @@ class SearchService extends Effect.Service<SearchService>()('ai/Search', {
             MetricsService,
             AiRuntime,
         ]);
-        const _observe = (
+        const observe = (
             operation: string,
-            details: Record<string, unknown>,
-            metric: Parameters<typeof MetricsService.inc>[0],
+            details:   Record<string, unknown>,
+            metric:    Parameters<typeof MetricsService.inc>[0],
             subjectId: string,
-            tenantId: string,
-            labels?: Record<string, string>,
+            tenantId:  string,
+            labels?:   Record<string, string>,
         ) =>
             Effect.all([
                 audit.log(operation, { details, subjectId }),
@@ -65,11 +43,19 @@ class SearchService extends Effect.Service<SearchService>()('ai/Search', {
             Context.Request.current.pipe(
                 Effect.map((ctx) => ({
                     ctx,
-                    scopeId: ctx.tenantId === Context.Request.Id.system ? null : ctx.tenantId,
-                    subjectId: pipe(ctx.session, Option.map((session) => session.userId), Option.getOrElse(constant(fallback))),
+                    scopeId: Match.value(ctx.tenantId).pipe(
+                        Match.when(Context.Request.Id.system, () => null),
+                        Match.orElse(() => ctx.tenantId),
+                    ),
+                    subjectId: ctx.session.pipe(
+                        Option.match({
+                            onNone: () => fallback,
+                            onSome: (session) => session.userId,
+                        }),
+                    ),
                 })),
             );
-        const query = (
+        const query = Effect.fn('SearchService.query')((
             options: {
                 readonly entityTypes?:     readonly string[] | undefined;
                 readonly includeFacets?:   boolean | undefined;
@@ -108,26 +94,29 @@ class SearchService extends Effect.Service<SearchService>()('ai/Search', {
                     },
                     pagination,
                 );
-                yield* _observe('Search.read', { entityTypes: options.entityTypes, resultCount: result.total, term: options.term }, metrics.search.queries, subjectId, ctx.tenantId);
+                yield* observe('Search.read', { entityTypes: options.entityTypes, resultCount: result.total, term: options.term }, metrics.search.queries, subjectId, ctx.tenantId);
                 return result;
-            }).pipe(Telemetry.span('search.query', { 'search.term': options.term }));
-        const suggest = (options: {
+            }).pipe(Telemetry.span('search.query', { 'search.term': options.term })),
+        );
+        const suggest = Effect.fn('SearchService.suggest')((options: {
             readonly includeGlobal?: boolean | undefined;
             readonly limit?: number | undefined;
             readonly prefix: string;}) =>
             Effect.gen(function* () {
                 const { ctx, scopeId, subjectId } = yield* requestContext(_CONFIG.users.anonymous);
                 const result = yield* database.search.suggest({ ...options, scopeId });
-                yield* _observe('Search.list', { prefix: options.prefix, resultCount: result.length }, metrics.search.suggestions, subjectId, ctx.tenantId);
+                yield* observe('Search.list', { prefix: options.prefix, resultCount: result.length }, metrics.search.suggestions, subjectId, ctx.tenantId);
                 return result;
-            }).pipe(Telemetry.span('search.suggest', { 'search.prefix': options.prefix }));
-        const refresh = (includeGlobal = false) =>
+            }).pipe(Telemetry.span('search.suggest', { 'search.prefix': options.prefix })),
+        );
+        const refresh = Effect.fn('SearchService.refresh')((includeGlobal = false) =>
             Effect.gen(function* () {
                 const { ctx, scopeId, subjectId } = yield* requestContext(_CONFIG.users.system);
                 yield* database.search.refresh(scopeId, includeGlobal);
-                yield* _observe('Search.refresh', { includeGlobal, kind: 'index', scopeId }, metrics.search.refreshes, subjectId, ctx.tenantId);
-            }).pipe(Telemetry.span('search.refresh', { 'search.includeGlobal': includeGlobal }));
-        const refreshEmbeddings = (options?: {
+                yield* observe('Search.refresh', { includeGlobal, kind: 'index', scopeId }, metrics.search.refreshes, subjectId, ctx.tenantId);
+            }).pipe(Telemetry.span('search.refresh', { 'search.includeGlobal': includeGlobal })),
+        );
+        const refreshEmbeddings = Effect.fn('SearchService.refreshEmbeddings')((options?: {
             readonly entityTypes?: readonly string[] | undefined;
             readonly includeGlobal?: boolean | undefined;
             readonly limit?: number | undefined;}) =>
@@ -137,17 +126,31 @@ class SearchService extends Effect.Service<SearchService>()('ai/Search', {
                 const { dimensions, model } = appSettings.embedding;
                 const sources = yield* database.search.embeddingSources({
                     dimensions,
-                    entityTypes: options?.entityTypes ?? [],
+                    entityTypes:   options?.entityTypes ?? [],
                     includeGlobal: options?.includeGlobal ?? false,
-                    limit: options?.limit,
+                    limit:         options?.limit,
                     model,
                     scopeId,
                 });
-                const texts = A.map(sources, _sourceText);
-                const embeddings = yield* ai.embed(texts);
-                yield* embeddings.length === sources.length
-                    ? Effect.void
-                    : Effect.fail(new AiSearchError({ cause: { actual: embeddings.length, expected: sources.length }, operation: 'refreshEmbeddings' }));
+                const embeddings = yield* ai.embed(
+                    A.map(
+                        sources,
+                        (source) =>
+                            A.filter(
+                                [
+                                    source.displayText,
+                                    source.contentText ?? undefined,
+                                    source.metadata == null ? undefined : JSON.stringify(source.metadata),
+                                ],
+                                (value): value is string => value !== undefined && value !== '',
+                            ).join(_CONFIG.text.joiner),
+                    ),
+                ).pipe(
+                    Effect.filterOrFail(
+                        (value) => value.length === sources.length,
+                        (value) => new AiError({ cause: { actual: value.length, expected: sources.length }, operation: 'refreshEmbeddings', reason: 'unknown' }),
+                    ),
+                );
                 yield* Effect.forEach(
                     A.zip(sources, embeddings),
                     ([source, embedding]) =>
@@ -155,16 +158,17 @@ class SearchService extends Effect.Service<SearchService>()('ai/Search', {
                             dimensions,
                             documentHash: source.documentHash,
                             embedding,
-                            entityId: source.entityId,
-                            entityType: source.entityType,
+                            entityId:     source.entityId,
+                            entityType:   source.entityType,
                             model,
-                            scopeId: source.scopeId,
+                            scopeId:      source.scopeId,
                         }),
                     { discard: true },
                 );
-                yield* _observe('Search.refresh', { count: sources.length, includeGlobal: options?.includeGlobal ?? false, kind: _CONFIG.labels.embeddings, scopeId }, metrics.search.refreshes, subjectId, ctx.tenantId, { kind: _CONFIG.labels.embeddings });
+                yield* observe('Search.refresh', { count: sources.length, includeGlobal: options?.includeGlobal ?? false, kind: _CONFIG.labels.embeddings, scopeId }, metrics.search.refreshes, subjectId, ctx.tenantId, { kind: _CONFIG.labels.embeddings });
                 return { count: sources.length };
-            }).pipe(Telemetry.span('search.refreshEmbeddings', { 'search.includeGlobal': options?.includeGlobal ?? false }),);
+            }).pipe(Telemetry.span('search.refreshEmbeddings', { 'search.includeGlobal': options?.includeGlobal ?? false }),),
+        );
         return { query, refresh, refreshEmbeddings, suggest };
     }),
 }) {

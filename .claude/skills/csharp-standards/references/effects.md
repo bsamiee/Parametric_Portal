@@ -11,7 +11,7 @@ Effect types in LanguageExt v5 make the codomain honest: `Fin<T>` for sync failu
 
 <br>
 
-`Fin<T>` is isomorphic to `Either<Error,T>`. Construct via `FinSucc(value)` / `FinFail<T>(error)` (Prelude). Chain via `Bind`/`Map`. Convert to `Validation` via `.ToValidation()` or to `Eff` via `.ToEff()`. Reserve `Match` for boundaries only.
+`Fin<T>` is isomorphic to `Either<Error,T>`. Construct via `Fin.Succ(value)` / `Fin.Fail<T>(error)` (static class). Chain via `Bind`/`Map`. Convert to `Validation` via `.ToValidation()` or to `Eff` via `.ToEff()`. Reserve `Match` for boundaries only.
 
 ```csharp
 namespace Domain.Effects;
@@ -19,8 +19,8 @@ namespace Domain.Effects;
 public static class TotalParsing {
     public static Fin<decimal> SafeDivide(decimal numerator, decimal denominator) =>
         denominator switch {
-            0m => FinFail<decimal>(Error.New(message: "Division by zero")),
-            _ => FinSucc(numerator / denominator)
+            0m => Fin.Fail<decimal>(Error.New(message: "Division by zero")),
+            _ => Fin.Succ(numerator / denominator)
         };
 }
 ```

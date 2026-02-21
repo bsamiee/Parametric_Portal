@@ -1,0 +1,72 @@
+/**
+ * Resolves environment-driven HarnessConfig for the Kargadan harness via Effect Config.
+ * Parses protocol version, socket URL, capability sets, and loop operations; decodes operations against CommandOperationSchema at boundary.
+ */
+import { Kargadan } from '@parametric-portal/types/kargadan';
+import { Config, Effect, Schema as S } from 'effect';
+
+// --- [CONSTANTS] -------------------------------------------------------------
+
+const _pluginHost =              Config.string('KARGADAN_PLUGIN_HOST').pipe(Config.withDefault('127.0.0.1'));
+const _pluginPort =              Config.integer('KARGADAN_PLUGIN_PORT').pipe(Config.withDefault(9181));
+const _protocolVersion =         Config.string('KARGADAN_PROTOCOL_VERSION').pipe(Config.withDefault('1.0'));
+const _commandDeadlineMs =       Config.integer('KARGADAN_COMMAND_DEADLINE_MS').pipe(Config.withDefault(5_000));
+const _retryMaxAttempts =        Config.integer('KARGADAN_RETRY_MAX_ATTEMPTS').pipe(Config.withDefault(5));
+const _correctionCycles =        Config.integer('KARGADAN_CORRECTION_MAX_CYCLES').pipe(Config.withDefault(1));
+const _loopOperations =          Config.string('KARGADAN_LOOP_OPERATIONS').pipe(Config.withDefault('read.object.metadata,write.object.update'),);
+const _sessionToken =            Config.string('KARGADAN_SESSION_TOKEN').pipe(Config.withDefault('kargadan-local-token'));
+const _simulatedPluginRevision = Config.string('KARGADAN_SIMULATED_PLUGIN_REVISION').pipe(Config.withDefault('harness-simulated'),);
+const _capabilityRequired =      Config.string('KARGADAN_CAP_REQUIRED').pipe(Config.withDefault('read.scene.summary,write.object.create'),);
+const _capabilityOptional =      Config.string('KARGADAN_CAP_OPTIONAL').pipe(Config.withDefault('view.capture'));
+
+// --- [SCHEMA] ----------------------------------------------------------------
+
+const _decodeOperations = S.decodeUnknown(S.Array(Kargadan.CommandOperationSchema));
+
+// --- [FUNCTIONS] -------------------------------------------------------------
+
+const _parseCsv = (csv: string): ReadonlyArray<string> =>
+    csv
+        .split(',')
+        .map((entry) => entry.trim())
+        .filter((entry) => entry.length > 0);
+const _resolveProtocolVersion = _protocolVersion.pipe(Effect.flatMap(S.decodeUnknown(S.transform(
+    S.String.pipe(S.pattern(/^\d+\.\d+$/)),
+    Kargadan.ProtocolVersionSchema,
+    {
+        decode: (value) => {
+            const [major = '0', minor = '0'] = value.split('.');
+            return { major: Number.parseInt(major, 10), minor: Number.parseInt(minor, 10) };
+        },
+        encode: (version) => `${version.major}.${version.minor}`,
+        strict: true,
+    },
+))));
+const _resolveSocketUrl = Effect.all([_pluginHost, _pluginPort]).pipe(
+    Effect.map(([host, port]) => `ws://${host}:${port}` as const),
+);
+const _resolveCapabilities = Effect.all([_capabilityRequired, _capabilityOptional]).pipe(
+    Effect.map(([required, optional]) => ({
+        optional: _parseCsv(optional),
+        required: _parseCsv(required),
+    })),
+);
+const _resolveLoopOperations = _loopOperations.pipe(
+    Effect.map(_parseCsv),
+    Effect.flatMap((operations) => _decodeOperations(operations)),
+);
+const HarnessConfig = {
+    commandDeadlineMs:       _commandDeadlineMs,
+    correctionCycles:        _correctionCycles,
+    protocolVersion:         _resolveProtocolVersion,
+    resolveCapabilities:     _resolveCapabilities,
+    resolveLoopOperations:   _resolveLoopOperations,
+    resolveSocketUrl:        _resolveSocketUrl,
+    retryMaxAttempts:        _retryMaxAttempts,
+    sessionToken:            _sessionToken,
+    simulatedPluginRevision: _simulatedPluginRevision,
+} as const;
+
+// --- [EXPORT] ----------------------------------------------------------------
+
+export { HarnessConfig };

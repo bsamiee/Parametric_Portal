@@ -21,6 +21,7 @@ internal static class AnalyzerDispatcher {
                 ShapeRules.CheckSignatures(context, scope, method);
                 FlowRules.CheckAsyncVoid(context, scope, method);
                 RuntimeRules.CheckLibraryImport(context, scope, method);
+                RuntimeRules.CheckGeneratedRegexCharsetValidation(context, scope, method);
                 RuntimeRules.CheckEnumeratorCancellation(context, scope, method);
                 FlowRules.CheckExemptionMetadata(context, state, method);
                 return;

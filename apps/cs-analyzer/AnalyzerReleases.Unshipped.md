@@ -48,6 +48,7 @@ CSP0603 | PerformanceDiscipline | Error    | LibraryImportRequired
 CSP0604 | PerformanceDiscipline | Error    | TelemetryIdentityConstruction
 CSP0605 | PerformanceDiscipline | Error    | HardcodedOtlpEndpoint
 CSP0606 | PerformanceDiscipline | Error    | RegexStaticMethodCall
+CSP0607 | PerformanceDiscipline | Error    | GeneratedRegexCharsetValidation
 CSP0608 | AsyncDiscipline       | Error    | EnumeratorCancellationMissing
 CSP0701 | TypeDiscipline        | Error    | PrimitiveShape
 CSP0702 | TypeDiscipline        | Error    | DuShape

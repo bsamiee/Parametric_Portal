@@ -107,8 +107,8 @@ public static class SinglePass {
                 folder: static (decimal acc, decimal cost) => acc + cost,
                 keepGoing: (decimal acc) => acc < budget) switch {
             decimal total => (total > 0m) switch {
-                true => FinSucc(total),
-                false => FinFail<decimal>(Error.New(message: "No positive-cost items or zero sum"))
+                true => Fin.Succ(total),
+                false => Fin.Fail<decimal>(Error.New(message: "No positive-cost items or zero sum"))
             }
         };
 }
@@ -143,8 +143,8 @@ public readonly record struct JsonCodec : ICodec<JsonCodec> {
         Prelude.Try(() => JsonSerializer.SerializeToUtf8Bytes(value: value)).Run();
     public static Fin<T> Decode<T>(ReadOnlySpan<byte> data) =>
         JsonSerializer.Deserialize<T>(utf8Json: data) switch {
-            { } result => FinSucc(result),
-            null => FinFail<T>(Error.New(message: "Null deserialization result"))
+            { } result => Fin.Succ(result),
+            null => Fin.Fail<T>(Error.New(message: "Null deserialization result"))
         };
 }
 public static class CodecDispatch {
@@ -180,8 +180,8 @@ public static class SafeConvert {
         where TSource : INumberBase<TSource>
         where TTarget : INumberBase<TTarget> =>
         TTarget.TryCreate(value: value, result: out TTarget? result) switch {
-            true => FinSucc(result!),
-            false => FinFail<TTarget>(
+            true => Fin.Succ(result!),
+            false => Fin.Fail<TTarget>(
                 Error.New(message: "Numeric overflow on conversion"))
         };
 }
@@ -193,8 +193,8 @@ public static class SpanParsing {
             s: text,
             provider: CultureInfo.InvariantCulture,
             result: out T? parsed) switch {
-            true => FinSucc(parsed!),
-            false => FinFail<T>(
+            true => Fin.Succ(parsed!),
+            false => Fin.Fail<T>(
                 Error.New(message: "Failed to parse from span"))
         };
 }
@@ -210,8 +210,8 @@ public sealed record MoneyAmount :
         new(cents: leftOperand.Cents + rightOperand.Cents);
     public static Fin<MoneyAmount> Create(long cents) =>
         (cents >= 0L) switch {
-            true => FinSucc(new MoneyAmount(cents: cents)),
-            false => FinFail<MoneyAmount>(
+            true => Fin.Succ(new MoneyAmount(cents: cents)),
+            false => Fin.Fail<MoneyAmount>(
                 Error.New(message: "Negative amount"))
         };
 }
@@ -234,7 +234,7 @@ public static class BranchingScope {
         Seq<decimal> lineItems,
         decimal loyaltyMultiplier) =>
         lineItems.IsEmpty switch {
-            true => FinFail<decimal>(
+            true => Fin.Fail<decimal>(
                 Error.New(message: "Empty order")),
             false => lineItems.Fold(
                 state: 0m,
@@ -243,11 +243,11 @@ public static class BranchingScope {
                     baseRate: total * 0.10m,
                     loyaltyBonus: loyaltyMultiplier * 0.05m * total) switch {
                     (decimal baseRate, decimal loyaltyBonus) =>
-                        FinSucc(baseRate + loyaltyBonus)
+                        Fin.Succ(baseRate + loyaltyBonus)
                 },
                 decimal total when total > 500m =>
-                    FinSucc(total * 0.05m),
-                _ => FinSucc(0m)
+                    Fin.Succ(total * 0.05m),
+                _ => Fin.Succ(0m)
             }
         };
 }

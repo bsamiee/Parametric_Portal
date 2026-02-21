@@ -80,7 +80,7 @@ These checks apply ONLY to code annotated as hot-path or residing in performance
 - [ ] `TensorPrimitives` or `Vector512` for numeric aggregation -- not IEnumerable LINQ
 - [ ] `stackalloc` for small fixed-size buffers; `ArrayPool` for dynamic-size buffers
 - [ ] `ValueTask<T>` for operations that complete synchronously in the common case (cache hits)
-- [ ] `[GeneratedRegex]` for regex-validated smart constructors -- compile-time source generation eliminates runtime `Regex` construction; pattern: `[GeneratedRegex(@"^\d{3}$")] private static partial Regex Pattern();` on partial class, then `Pattern().IsMatch(value)` in `Fin<T>` factory
+- [ ] For bounded `length + allowed chars`, use cached `SearchValues<char>` + `ContainsAnyExcept`/`IndexOfAnyExcept`; reserve `[GeneratedRegex]` for structural grammars. See `performance.md` [7A]
 
 ---
 ## [8][TESTING_INTEGRITY]

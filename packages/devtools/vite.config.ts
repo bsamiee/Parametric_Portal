@@ -13,6 +13,7 @@ export default defineConfig(
             },
             external: [
                 '@effect/experimental',
+                '@effect/platform',
                 'effect',
                 'react',
                 'react-dom',

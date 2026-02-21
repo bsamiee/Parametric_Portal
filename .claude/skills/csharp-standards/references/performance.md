@@ -18,7 +18,7 @@ public readonly struct VectorizedTransducer {
         Memory<double> targetSpace,
         double scalarMultiplier) =>
         (originSpace.Length == targetSpace.Length) switch {
-            false => FinFail<ReadOnlyMemory<double>>(
+            false => Fin.Fail<ReadOnlyMemory<double>>(
                          Error.New(message: "Spaces are misaligned.")),
             true => ExecuteProjection(
                          origin: originSpace,
@@ -31,7 +31,7 @@ public readonly struct VectorizedTransducer {
         double multiplier) {
         TensorPrimitives.Multiply(x: origin, y: multiplier, destination: target.Span);
         // Allocation isolated to capture boundary -- caller-provided Memory<T> avoids copy
-        return FinSucc<ReadOnlyMemory<double>>(target);
+        return Fin.Succ<ReadOnlyMemory<double>>(target);
     }
 }
 ```
@@ -261,8 +261,8 @@ public static class SpanAlgorithms {
         int index = MemoryExtensions.BinarySearch(
             span: (ReadOnlySpan<T>)span, comparable: target);
         return index switch {
-            >= 0 => FinSucc(index),
-            _ => FinFail<int>(
+            >= 0 => Fin.Succ(index),
+            _ => Fin.Fail<int>(
                      Error.New(message: "Element not found in sorted span"))
         };
     }
@@ -287,6 +287,60 @@ ReadOnlySpan<double> doubles = MemoryMarshal.Cast<byte, double>(byteSpan);
 ```
 
 [CRITICAL]: Both types must be unmanaged value types. Alignment is caller's responsibility. No allocation, no copy -- pointer reinterpretation only.
+
+---
+## [7A][CHARSET_VALIDATION]
+>**Dictum:** *For `length + allowed-chars` constraints, `SearchValues<char>` beats regex state machines.*
+
+When a validator is strictly `length + allowed chars`, cache `SearchValues<char>` once, then validate the candidate span with a length gate plus `ContainsAnyExcept` (or `IndexOfAnyExcept` when index is required). This path is vectorized, allocation-free, and avoids regex state-machine overhead.
+
+```csharp
+namespace Domain.Performance;
+
+public static class PayloadHashValidation {
+    private static readonly SearchValues<char> Hex = SearchValues.Create("0123456789abcdef".AsSpan());
+    public static bool IsValid(ReadOnlySpan<char> candidate) => candidate.Length == 64 && !candidate.ContainsAnyExcept(Hex);
+    public static int FirstInvalidIndex(ReadOnlySpan<char> candidate) => candidate.IndexOfAnyExcept(Hex);
+}
+```
+
+```csharp
+namespace Domain.Performance;
+
+using System.Text.RegularExpressions;
+
+public static partial class SemVerValidation {
+    [GeneratedRegex(
+        @"^(?<major>0|[1-9]\d*)\.(?<minor>0|[1-9]\d*)\.(?<patch>0|[1-9]\d*)(?:-(?<pre>[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+(?<build>[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$",
+        RegexOptions.NonBacktracking | RegexOptions.CultureInvariant,
+        matchTimeoutMilliseconds: 250)]
+    private static partial Regex SemVerRegex();
+    public static bool IsValid(ReadOnlySpan<char> candidate) => SemVerRegex().IsMatch(candidate);
+}
+```
+
+```csharp
+namespace Domain.Performance;
+
+using System.Collections.Immutable;
+using System.Text.RegularExpressions;
+
+public static partial class LogfmtTokenizer {
+    [GeneratedRegex(
+        @"[A-Za-z_][A-Za-z0-9_]*=(?:""[^""]*""|[^\s""]+)",
+        RegexOptions.NonBacktracking | RegexOptions.CultureInvariant,
+        matchTimeoutMilliseconds: 250)]
+    private static partial Regex PairRegex();
+
+    public static ImmutableArray<(int Start, int Length)> Pairs(ReadOnlySpan<char> line) {
+        ImmutableArray<(int Start, int Length)>.Builder pairs = ImmutableArray.CreateBuilder<(int Start, int Length)>();
+        foreach (ValueMatch match in PairRegex().EnumerateMatches(line)) {pairs.Add((Start: match.Index, Length: match.Length));}
+        return pairs.MoveToImmutable();
+    }
+}
+```
+
+[IMPORTANT]: Prefer `ContainsAnyExcept` for pass/fail checks; use `IndexOfAnyExcept` only when callers need the failing position. For structural grammar (groups/alternation/anchors/multi-segment tokenization), use `[GeneratedRegex(..., RegexOptions.NonBacktracking)]`.
 
 ---
 ## [8][BENCHMARK_GATE]
@@ -329,6 +383,7 @@ public static class PerfGate {
 - [ALWAYS] `static` on every lambda in hot paths -- zero closure bytes.
 - [ALWAYS] `stackalloc` for small buffers; `ArrayPool` for large; `try/finally` for pool cleanup.
 - [ALWAYS] `MemoryExtensions.Sort`/`BinarySearch` over heap-based `SortedSet<T>` on hot paths.
+- [ALWAYS] `SearchValues<char>` + `ContainsAnyExcept`/`IndexOfAnyExcept` for fixed char-set validation hot paths (`length + allowed chars`).
 - [ALWAYS] Validate hot-path claims with BenchmarkDotNet before standardizing micro-optimizations.
 - [ALWAYS] Use `unchecked { }` blocks around hot-path integer arithmetic when overflow semantics are intentional; project-wide `CheckForOverflowUnderflow` is enabled.
 - [NEVER] Return `Span<T>` backed by `stackalloc` -- consume within the declaring method.
@@ -337,21 +392,23 @@ public static class PerfGate {
 - [NEVER] Micro-optimize before profiling -- .NET 10 JIT escape analysis handles many cases.
 - [PREFER] Let JIT decide inlining; use `AggressiveInlining` only on proven bottleneck trampolines.
 - [PREFER] `Vector<T>` (auto-width) over `Vector512<T>` unless hardware is guaranteed.
+- [PREFER] `[GeneratedRegex]` for structural pattern validation; avoid runtime-constructed `Regex` on hot paths.
 - [ALLOW] `bool switch { true => ..., false => ... }` as functional conditional -- preferred over `if/else` per project constraints.
 - [ALWAYS] `[LibraryImport]` over `[DllImport]` for native interop -- source-generated marshalling is AOT-safe and inlineable; `[DllImport]` generates IL stubs at runtime (incompatible with NativeAOT).
 
 ---
 ## [10][QUICK_REFERENCE]
 
-| [INDEX] | [PATTERN]                 | [WHEN]                                       | [KEY_TRAIT]                        |
-| :-----: | ------------------------- | -------------------------------------------- | ---------------------------------- |
-|   [1]   | **TensorPrimitives**      | Hardware-accelerated numeric math            | `Multiply`/`Sum` over `Span<T>`    |
-|   [2]   | **Vector SIMD**           | Branchless conditional logic                 | Mask + `ConditionalSelect` + loop  |
-|  [2A]   | **Zero-copy reinterpret** | Bit-level span projection                    | `MemoryMarshal.Cast`/`AsBytes`     |
-|   [3]   | **Buffer hybrid**         | Stack/pool strategy selection                | `stackalloc` + `ArrayPool`         |
-|   [4]   | **ValueTask**             | Synchronous cache-hit fast path              | `FromResult` fast path             |
-|   [5]   | **NativeAOT**             | Trimmed AOT binaries, source-gen             | `JsonSerializerContext` source-gen |
-|  [5A]   | **LibraryImport**         | AOT-safe native interop                      | Source-gen marshalling, no IL stub |
-|   [6]   | **Static lambdas**        | Zero closure bytes on hot paths              | `static` keyword + tuple threading |
-|   [7]   | **Span algorithms**       | Allocation-free sort/search/`SeparateEither` | `MemoryExtensions` + fold          |
-|   [8]   | **Benchmark gate**        | Evidence-backed perf claims                  | `[MemoryDiagnoser]` + baseline     |
+| [INDEX] | [PATTERN]                 | [WHEN]                                       | [KEY_TRAIT]                                |
+| :-----: | ------------------------- | -------------------------------------------- | ------------------------------------------ |
+|   [1]   | **TensorPrimitives**      | Hardware-accelerated numeric math            | `Multiply`/`Sum` over `Span<T>`            |
+|   [2]   | **Vector SIMD**           | Branchless conditional logic                 | Mask + `ConditionalSelect` + loop          |
+|  [2A]   | **Zero-copy reinterpret** | Bit-level span projection                    | `MemoryMarshal.Cast`/`AsBytes`             |
+|   [3]   | **Buffer hybrid**         | Stack/pool strategy selection                | `stackalloc` + `ArrayPool`                 |
+|   [4]   | **ValueTask**             | Synchronous cache-hit fast path              | `FromResult` fast path                     |
+|   [5]   | **NativeAOT**             | Trimmed AOT binaries, source-gen             | `JsonSerializerContext` source-gen         |
+|  [5A]   | **LibraryImport**         | AOT-safe native interop                      | Source-gen marshalling, no IL stub         |
+|   [6]   | **Static lambdas**        | Zero closure bytes on hot paths              | `static` keyword + tuple threading         |
+|   [7]   | **Span algorithms**       | Allocation-free sort/search/`SeparateEither` | `MemoryExtensions` + fold                  |
+|  [7A]   | **Charset validation**    | Fixed `length + allowed chars` checks        | `SearchValues<char>` + `ContainsAnyExcept` |
+|   [8]   | **Benchmark gate**        | Evidence-backed perf claims                  | `[MemoryDiagnoser]` + baseline             |

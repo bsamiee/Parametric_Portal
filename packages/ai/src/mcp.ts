@@ -1,52 +1,37 @@
 import { McpServer } from '@effect/ai';
-import { Array as A, Layer, Match, Option, pipe } from 'effect';
+import { Array as A, Data, Layer, Match } from 'effect';
 
-// --- [CONSTANTS] -------------------------------------------------------------
+// --- [TYPES] -----------------------------------------------------------------
 
-const _CONFIG = {transport: { http: 'http', httpRouter: 'http-router', stdio: 'stdio' },} as const;
+type _Transport = Data.TaggedEnum<{
+    readonly Stdio:      { readonly options: Parameters<typeof McpServer.layerStdio>[0]      };
+    readonly Http:       { readonly options: Parameters<typeof McpServer.layerHttp>[0]       };
+    readonly HttpRouter: { readonly options: Parameters<typeof McpServer.layerHttpRouter>[0] };
+}>;
 
 // --- [ENTRY_POINT] -----------------------------------------------------------
 
 // biome-ignore lint/correctness/noUnusedVariables: const+namespace merge pattern
-const Mcp = (() => {
-    type Transport =
-        | { readonly _tag: typeof _CONFIG.transport.stdio; readonly options: Parameters<typeof McpServer.layerStdio>[0] }
-        | { readonly _tag: typeof _CONFIG.transport.http; readonly options: Parameters<typeof McpServer.layerHttp>[0] }
-        | { readonly _tag: typeof _CONFIG.transport.httpRouter; readonly options: Parameters<typeof McpServer.layerHttpRouter>[0] };
-    const isArray = <A>(value: A | ReadonlyArray<A>): value is ReadonlyArray<A> => Array.isArray(value);
-    const normalize = <A>(input: A | ReadonlyArray<A> | undefined): ReadonlyArray<A> =>
-        Option.match(Option.fromNullable(input), {
-            onNone: () => [],
-            onSome: (value) => (isArray(value) ? value : [value]),
-        });
-    const transport = {
-        http: (options: Parameters<typeof McpServer.layerHttp>[0]) => ({ _tag: _CONFIG.transport.http, options }),
-        httpRouter: (options: Parameters<typeof McpServer.layerHttpRouter>[0]) => ({ _tag: _CONFIG.transport.httpRouter, options }),
-        stdio: (options: Parameters<typeof McpServer.layerStdio>[0]) => ({ _tag: _CONFIG.transport.stdio, options }),
-    } as const;
-    const transportLayer = (input: Transport) =>
-        Match.value(input).pipe(
-            Match.tag(_CONFIG.transport.stdio, ({ options }) => McpServer.layerStdio(options)),
-            Match.tag(_CONFIG.transport.http, ({ options }) => McpServer.layerHttp(options)),
-            Match.tag(_CONFIG.transport.httpRouter, ({ options }) => McpServer.layerHttpRouter(options)),
-            Match.exhaustive,
-        );
-    const layer = (input: {
-        readonly transport: Transport;
+const Mcp = {
+    ...Data.taggedEnum<_Transport>(),
+    layer: (input: {
+        readonly transport: _Transport;
         readonly toolkits?: Parameters<typeof McpServer.toolkit>[0] | ReadonlyArray<Parameters<typeof McpServer.toolkit>[0]>;
-        readonly layers?: Layer.Layer<never, never, unknown> | ReadonlyArray<Layer.Layer<never, never, unknown>>;
-    }) => {
-        const base = transportLayer(input.transport);
-        const toolkitLayers = pipe(
-            normalize(input.toolkits),
-            A.map((toolkit): Layer.Layer<never, never, unknown> => McpServer.toolkit(toolkit)),
-        );
-        const extraLayers = normalize(input.layers);
-        const layers: ReadonlyArray<Layer.Layer<never, never, unknown>> = A.appendAll(toolkitLayers, extraLayers);
-        return A.reduce(layers, base, (acc, layer) => Layer.merge(acc, layer));
-    };
-    return { layer, transport } as const;
-})();
+        readonly layers?:   Layer.Layer<never, never, unknown> | ReadonlyArray<Layer.Layer<never, never, unknown>>;
+    }) =>
+        A.reduce(
+            A.appendAll(
+                A.ensure(input.toolkits ?? []).map((t): Layer.Layer<never, never, unknown> => McpServer.toolkit(t)),
+                A.ensure(input.layers ?? []),
+            ),
+            Match.valueTags(input.transport, {
+                Http:       ({ options }) => McpServer.layerHttp(options),
+                HttpRouter: ({ options }) => McpServer.layerHttpRouter(options),
+                Stdio:      ({ options }) => McpServer.layerStdio(options),
+            }),
+            (acc, layer) => Layer.merge(acc, layer),
+        )
+} as const;
 
 // --- [NAMESPACE] -------------------------------------------------------------
 

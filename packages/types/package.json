@@ -23,6 +23,11 @@
             "import": "./src/icons.ts",
             "default": "./src/icons.ts"
         },
+        "./kargadan": {
+            "types": "./src/kargadan/kargadan-schemas.ts",
+            "import": "./src/kargadan/kargadan-schemas.ts",
+            "default": "./src/kargadan/kargadan-schemas.ts"
+        },
         "./svg": {
             "types": "./src/svg.ts",
             "import": "./src/svg.ts",

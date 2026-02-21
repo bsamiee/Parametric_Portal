@@ -22,8 +22,8 @@ public readonly record struct DomainIdentity {
     private DomainIdentity(Guid value) { Value = value; }
     public static Fin<DomainIdentity> Create(Guid candidate) =>
         candidate.Equals(g: Guid.Empty) switch {
-            true => FinFail<DomainIdentity>(Error.New(message: "Identity must not be empty.")),
-            false => FinSucc(new DomainIdentity(value: candidate))
+            true => Fin.Fail<DomainIdentity>(Error.New(message: "Identity must not be empty.")),
+            false => Fin.Succ(new DomainIdentity(value: candidate))
         };
 }
 public readonly record struct TransactionAmount {
@@ -33,9 +33,9 @@ public readonly record struct TransactionAmount {
     private TransactionAmount(decimal value) { Value = value; }
     public static Fin<TransactionAmount> Create(decimal candidate) =>
         (candidate > 0.0m) switch {
-            true => FinSucc(new TransactionAmount(
+            true => Fin.Succ(new TransactionAmount(
                 value: decimal.Round(d: candidate, decimals: 4))),
-            false => FinFail<TransactionAmount>(Error.New(message: "Amount must be strictly positive."))
+            false => Fin.Fail<TransactionAmount>(Error.New(message: "Amount must be strictly positive."))
         };
 }
 ```
@@ -54,11 +54,11 @@ using NodaTime;
 public readonly record struct OccurredAt {
     public Instant Value { get; }
     private OccurredAt(Instant value) => Value = value;
-    public static Fin<OccurredAt> Create(Instant value) => FinSucc(new OccurredAt(value));
+    public static Fin<OccurredAt> Create(Instant value) => Fin.Succ(new OccurredAt(value));
     // FromClock wraps in Fin<OccurredAt> for API uniformity with Create -- clock reads are
     // infallible, but a consistent Fin<T> return surface lets callers compose both factories
     // via the same Bind/Map pipeline without special-casing the clock acquisition path.
-    public static Fin<OccurredAt> FromClock(IClock clock) => FinSucc(new OccurredAt(clock.GetCurrentInstant()));
+    public static Fin<OccurredAt> FromClock(IClock clock) => Fin.Succ(new OccurredAt(clock.GetCurrentInstant()));
 }
 ```
 
@@ -170,11 +170,11 @@ public static class TransactionLifecycleRole {
         public Fin<TransactionState> Authorize(string token) =>
             state switch {
                 TransactionState.Pending pending =>
-                    FinSucc<TransactionState>(
+                    Fin.Succ<TransactionState>(
                         new TransactionState.Authorized(Id: pending.Id, AuthorizationToken: token)),
                 TransactionState.Authorized authorized =>
-                    FinSucc<TransactionState>(authorized),
-                _ => FinFail<TransactionState>(
+                    Fin.Succ<TransactionState>(authorized),
+                _ => Fin.Fail<TransactionState>(
                     Error.New(message: "Only pending transactions can be authorized."))
             };
     }
@@ -196,8 +196,8 @@ public readonly record struct UserId<TState>(Guid Value);
 public static class UserIdOps {
     public static Fin<UserId<Validated>> Validate(UserId<Unvalidated> raw) =>
         (raw.Value != Guid.Empty) switch {
-            true => FinSucc(new UserId<Validated>(Value: raw.Value)),
-            false => FinFail<UserId<Validated>>(
+            true => Fin.Succ(new UserId<Validated>(Value: raw.Value)),
+            false => Fin.Fail<UserId<Validated>>(
                 Error.New(message: "UserId cannot be empty"))
         };
 }
@@ -242,8 +242,8 @@ public readonly record struct Percentage :
     private Percentage(decimal value) => _value = value;
     public static Fin<Percentage> Create(decimal value) =>
         value switch {
-            >= 0m and <= 100m => FinSucc(new Percentage(value: value)),
-            _ => FinFail<Percentage>(Error.New(message: "Percentage must be 0-100."))
+            >= 0m and <= 100m => Fin.Succ(new Percentage(value: value)),
+            _ => Fin.Fail<Percentage>(Error.New(message: "Percentage must be 0-100."))
         };
     public int CompareTo(Percentage other) => _value.CompareTo(other._value);
     public static Percentage operator +(Percentage left, Percentage right) =>
@@ -273,8 +273,8 @@ public readonly record struct OrderQuantity : IValidatedFactory<OrderQuantity, i
     private OrderQuantity(int value) => _value = value;
     public static Fin<OrderQuantity> Create(int candidate) =>
         (candidate > 0 && candidate <= 10_000) switch {
-            true => FinSucc(new OrderQuantity(value: candidate)),
-            false => FinFail<OrderQuantity>(Error.New(message: "Quantity must be 1-10000."))
+            true => Fin.Succ(new OrderQuantity(value: candidate)),
+            false => Fin.Fail<OrderQuantity>(Error.New(message: "Quantity must be 1-10000."))
         };
     public static int Extract(OrderQuantity value) => value._value;
 }

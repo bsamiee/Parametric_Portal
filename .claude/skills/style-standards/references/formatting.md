@@ -65,8 +65,13 @@
 
 [^1]: Pad with dashes to column 80. Comment delimiter is language-dependent.
 
-**Canonical Code Section Order** (omit unused): TYPES -> SCHEMA -> CONSTANTS -> ERRORS -> SERVICES -> FUNCTIONS -> LAYERS -> EXPORT.<br>
-**Domain Extensions:** TABLES (after SCHEMA), REPOSITORIES (after SERVICES), GROUPS (after SCHEMA), MIDDLEWARE (after SERVICES).<br>
+**Canonical Code Section Orders** (language-scoped):<br>
+`[TS_EFFECT]` TYPES -> SCHEMA -> CONSTANTS -> ERRORS -> SERVICES -> FUNCTIONS -> LAYERS -> EXPORT.<br>
+`[CSHARP_ADAPTER]` ADAPTER -> TYPES -> CONSTANTS -> STATE -> LIFECYCLE -> INTERFACE -> INTERNAL -> TRANSITIONS.<br>
+`[CSHARP_FUNCTIONS]` FUNCTIONS -> INTERNAL.<br>
+`[CSHARP_CONTRACTS]` VALUE_OBJECTS -> ENUMS -> RECORDS -> ENVELOPES -> BRIDGE -> VALIDATION -> PATTERNS.<br>
+`[CSHARP_ANALYZERS]` ANALYZER/RULESET -> CONSTANTS -> RULE_GROUPS -> REPORTS -> PRIVATE_FUNCTIONS.<br>
+**TS Domain Extensions:** TABLES (after SCHEMA), REPOSITORIES (after SERVICES), GROUPS (after SCHEMA), MIDDLEWARE (after SERVICES).<br>
 **Forbidden Labels:** `Helpers`, `Handlers`, `Utils`, `Config`, `Dispatch_Tables`.
 
 [IMPORTANT]:

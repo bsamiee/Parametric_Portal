@@ -76,6 +76,7 @@ internal static class RuleCatalog {
     internal static readonly DiagnosticDescriptor CSP0604 = Err("CSP0604", "TelemetryIdentityConstruction", "Telemetry identity construction '{0}' outside observability surface is forbidden", "PerformanceDiscipline");
     internal static readonly DiagnosticDescriptor CSP0605 = Err("CSP0605", "HardcodedOtlpEndpoint", "Hardcoded telemetry endpoint literal '{0}' is forbidden outside composition root", "PerformanceDiscipline");
     internal static readonly DiagnosticDescriptor CSP0606 = Err("CSP0606", "RegexStaticMethodCall", "Static Regex.{0}() recompiles the pattern on every call; use [GeneratedRegex] source generator", "PerformanceDiscipline");
+    internal static readonly DiagnosticDescriptor CSP0607 = Err("CSP0607", "GeneratedRegexCharsetValidation", "[GeneratedRegex] method '{0}' encodes fixed length + allowed chars validation; prefer SearchValues<char> with ContainsAnyExcept/IndexOfAnyExcept", "PerformanceDiscipline");
     internal static readonly DiagnosticDescriptor CSP0608 = Err("CSP0608", "EnumeratorCancellationMissing", "CancellationToken parameter on async enumerable method '{0}' must have [EnumeratorCancellation] attribute", "AsyncDiscipline");
 
     // --- [MODEL_RULES] --------------------------------------------------------
@@ -124,7 +125,7 @@ internal static class RuleCatalog {
         CSP0301, CSP0302, CSP0303,
         CSP0401, CSP0402, CSP0403, CSP0404, CSP0405,
         CSP0501, CSP0502, CSP0503, CSP0504,
-        CSP0601, CSP0602, CSP0603, CSP0604, CSP0605, CSP0606, CSP0608,
+        CSP0601, CSP0602, CSP0603, CSP0604, CSP0605, CSP0606, CSP0607, CSP0608,
         CSP0701, CSP0702, CSP0703, CSP0704, CSP0705, CSP0706, CSP0707, CSP0708, CSP0709,
         CSP0710, CSP0711, CSP0712, CSP0713, CSP0714, CSP0715, CSP0716, CSP0717, CSP0718, CSP0719, CSP0720,
         CSP0901, CSP0902);
