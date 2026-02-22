@@ -179,7 +179,6 @@ dotnet_diagnostic.CA1511.severity = error                                     # 
 dotnet_diagnostic.CA1512.severity = error                                     # Use ArgumentOutOfRangeException throw helper methods.
 dotnet_diagnostic.CA1513.severity = error                                     # Use ObjectDisposedException throw helper methods.
 dotnet_diagnostic.CA1514.severity = error                                     # Avoid redundant length argument checks.
-dotnet_diagnostic.CA1515.severity = error                                     # Consider limiting unnecessary public API surface.
 dotnet_diagnostic.CA1516.severity = error                                     # Prefer cross-platform intrinsics over architecture-specific APIs.
 dotnet_diagnostic.CA1806.severity = error                                     # Prevent ignoring method results unintentionally.
 dotnet_diagnostic.CA1812.severity = error                                     # Remove internal types that are never instantiated.
