@@ -1,6 +1,7 @@
 /**
  * Orchestrates Kargadan WebSocket protocol surface: handshake negotiation, command execution, heartbeat round-trips, and inbound event streaming.
  * Bridges KargadanSocketClient and SessionSupervisor into a single typed service; all failure paths surface as CommandDispatchError variants.
+ * Propagates DisconnectedError from transport layer as CommandDispatchError('disconnected') so callers can trigger reconnection flow.
  */
 import type { Kargadan } from '@parametric-portal/types/kargadan';
 import { Data, Duration, Effect, Match } from 'effect';
@@ -11,7 +12,7 @@ import { KargadanSocketClient } from '../socket';
 // --- [ERRORS] ----------------------------------------------------------------
 
 class CommandDispatchError extends Data.TaggedError('CommandDispatchError')<{
-    readonly reason: 'protocol' | 'rejected' | 'transport';
+    readonly reason: 'disconnected' | 'protocol' | 'rejected' | 'transport';
     readonly details?: unknown;
     readonly failureClass?: Kargadan.FailureClass;
 }> {
@@ -32,6 +33,7 @@ class CommandDispatchError extends Data.TaggedError('CommandDispatchError')<{
 class CommandDispatch extends Effect.Service<CommandDispatch>()('kargadan/CommandDispatch', {
     effect: Effect.gen(function* () {
         const [session, socket] = yield* Effect.all([SessionSupervisor, KargadanSocketClient]);
+
         const handshake = Effect.fn('CommandDispatch.handshake')(
             (input: { readonly identity: Kargadan.EnvelopeIdentity; readonly token: string; readonly traceId: string }) =>
                 Effect.gen(function* () {
@@ -53,7 +55,11 @@ class CommandDispatch extends Effect.Service<CommandDispatch>()('kargadan/Comman
                             traceId: input.traceId,
                         },
                     } satisfies Kargadan.HandshakeEnvelope;
-                    const response = yield* socket.write.request(envelope);
+                    const response = yield* socket.write.request(envelope).pipe(
+                        Effect.catchTag('DisconnectedError', (error) =>
+                            Effect.fail(CommandDispatchError.of('disconnected', error.reason)),
+                        ),
+                    );
                     return yield* Match.value(response).pipe(
                         Match.when({ _tag: 'handshake.ack' }, (ack) =>
                             session.transition(SessionTransition.Authenticate({ at: new Date() })).pipe(
@@ -76,8 +82,12 @@ class CommandDispatch extends Effect.Service<CommandDispatch>()('kargadan/Comman
                     );
                 }),
         );
+
         const execute = Effect.fn('CommandDispatch.execute')((command: Kargadan.CommandEnvelope) =>
             socket.write.request(command).pipe(
+                Effect.catchTag('DisconnectedError', (error) =>
+                    Effect.fail(CommandDispatchError.of('disconnected', error.reason)),
+                ),
                 Effect.flatMap((response) =>
                     Match.value(response).pipe(
                     Match.when({ _tag: 'result' }, (result) => Effect.succeed(result)),
@@ -91,6 +101,7 @@ class CommandDispatch extends Effect.Service<CommandDispatch>()('kargadan/Comman
                 ),
             ),
         );
+
         const heartbeat = Effect.fn('CommandDispatch.heartbeat')((identity: Kargadan.EnvelopeIdentity, traceId: string, attempt = 1) => {
             const requestId = crypto.randomUUID();
             const envelope: Kargadan.HeartbeatEnvelope = {
@@ -101,6 +112,9 @@ class CommandDispatch extends Effect.Service<CommandDispatch>()('kargadan/Comman
                 telemetryContext: { attempt, operationTag: 'heartbeat', spanId: requestId.replaceAll('-', ''), traceId },
             };
             return socket.write.request(envelope).pipe(
+                Effect.catchTag('DisconnectedError', (error) =>
+                    Effect.fail(CommandDispatchError.of('disconnected', error.reason)),
+                ),
                 Effect.flatMap((response) =>
                     Match.value(response).pipe(
                         Match.when({ _tag: 'heartbeat', mode: 'pong' }, (pong) =>
@@ -136,8 +150,10 @@ class CommandDispatch extends Effect.Service<CommandDispatch>()('kargadan/Comman
                 ),
             );
         });
+
         const start = Effect.fn('CommandDispatch.start')(() => socket.lifecycle.start());
         const takeEvent = Effect.fn('CommandDispatch.takeEvent')(() => socket.read.takeEvent());
+
         return {
             command:   { execute },
             protocol:  { handshake, heartbeat },
