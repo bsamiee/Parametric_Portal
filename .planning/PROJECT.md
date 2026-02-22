@@ -47,6 +47,7 @@ The agent can execute any operation a human can perform in Rhino 9 through natur
 - [ ] Architect/Editor model split: strong reasoning model (Opus/Sonnet) for planning, faster model for execution
 - [ ] Local integration testing workflow: real Rhino 9 WIP feedback loop with the plugin loaded
 - [ ] Rhino command knowledge base seeding: catalog Rhino commands with descriptions, parameters, examples for embedding
+- [ ] Vision-based verification: unified verification pipeline supporting both deterministic checks (geometry validity) and visual checks (ViewCapture.CaptureToBitmap with Metal-aware frame timing) — integrated from the start to avoid parallel systems
 
 ### Out of Scope
 
@@ -60,7 +61,6 @@ The agent can execute any operation a human can perform in Rhino 9 through natur
 - Multi-document simultaneous sessions — single active document per agent session for v1; multi-document requires event ordering research specific to macOS
 - Real-time parametric dragging — 200ms debounce latency incompatible with real-time feedback; deferred to future transport optimization
 - Shared types in packages/types for Kargadan — app-specific schemas belong in the app; universal concepts graduate to appropriate packages
-- Vision-based verification — ViewCapture.CaptureToBitmap has Metal-specific capture timing issues on macOS; defer until verified reliable
 - Intel Mac support — Rhino 9 WIP dropped Intel July 2025; Apple Silicon only
 
 ## Context
