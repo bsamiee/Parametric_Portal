@@ -1,7 +1,9 @@
-// Rhino PlugIn entry point; wires EventPublisher and SessionHost in OnLoad; routes handshake and command dispatch to transport and protocol layers.
+// Rhino PlugIn entry point; wires EventPublisher, SessionHost, and WebSocketHost in OnLoad; routes handshake and command dispatch to transport and protocol layers.
 // Singleton constraint is Rhino-imposed — mutability is confined to this adapter; all internal state is Option<T> with None as the unloaded sentinel.
 using System;
 using System.Text.Json;
+using System.Threading;
+using System.Threading.Tasks;
 using LanguageExt;
 using LanguageExt.Common;
 using NodaTime;
@@ -21,10 +23,17 @@ namespace ParametricPortal.Kargadan.Plugin.src.boundary;
 [BoundaryAdapter]
 public sealed class KargadanPlugin : PlugIn {
     // --- [TYPES] -------------------------------------------------------------
-    private readonly record struct BoundaryState(EventPublisher EventPublisher, SessionHost SessionHost);
+    private readonly record struct BoundaryState(
+        EventPublisher EventPublisher,
+        SessionHost SessionHost,
+        WebSocketHost WebSocketHost);
     // --- [CONSTANTS] ---------------------------------------------------------
     private static readonly Duration HandshakeHeartbeatInterval = Duration.FromSeconds(5);
     private static readonly Duration HandshakeHeartbeatTimeout = Duration.FromSeconds(15);
+    private static readonly JsonSerializerOptions JsonOptions = new() {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        WriteIndented = false,
+    };
     // --- [STATE] -------------------------------------------------------------
     private static readonly Atom<Option<KargadanPlugin>> _instance = Atom(Option<KargadanPlugin>.None);
     private readonly TimeProvider _timeProvider;
@@ -32,6 +41,7 @@ public sealed class KargadanPlugin : PlugIn {
     // --- [LIFECYCLE] ---------------------------------------------------------
     public KargadanPlugin() : this(timeProvider: TimeProvider.System) { }
     internal KargadanPlugin(TimeProvider timeProvider) => _timeProvider = timeProvider;
+    public override PlugInLoadTime LoadTime => PlugInLoadTime.AtStartup;
     // --- [INTERFACE] ---------------------------------------------------------
     public static Fin<KargadanPlugin> Instance =>
         _instance.Value.ToFin(Error.New(message: "KargadanPlugin has not been loaded."));
@@ -118,20 +128,83 @@ public sealed class KargadanPlugin : PlugIn {
                             TelemetryContext: heartbeat.TelemetryContext)),
                         pong: Fin.Succ(heartbeat))));
         });
+    // --- [DISPATCH] ----------------------------------------------------------
+    private async Task<Fin<JsonElement>> DispatchMessageAsync(
+        string tag,
+        JsonElement message,
+        CancellationToken cancellationToken) =>
+        tag switch {
+            "handshake.init" => await DispatchHandshakeAsync(message: message, cancellationToken: cancellationToken).ConfigureAwait(false),
+            "command" => await DispatchCommandAsync(message: message, cancellationToken: cancellationToken).ConfigureAwait(false),
+            "heartbeat" => SerializeHeartbeat(message: message),
+            _ => Fin.Fail<JsonElement>(Error.New(message: $"Unknown message tag: {tag}")),
+        };
+    // [BOUNDARY ADAPTER -- async dispatch to UI thread via ThreadMarshaler for RhinoDoc safety]
+    private async Task<Fin<JsonElement>> DispatchHandshakeAsync(
+        JsonElement message,
+        CancellationToken cancellationToken) {
+        Fin<JsonElement> result = await ThreadMarshaler.RunOnUiThreadAsync(() => {
+            HandshakeEnvelope.Init? init = JsonSerializer.Deserialize<HandshakeEnvelope.Init>(
+                element: message, options: JsonOptions);
+            return init switch {
+                null => Fin.Fail<JsonElement>(
+                    Error.New(message: "Failed to deserialize handshake init envelope.")),
+                _ => HandleHandshake(init: init).Map(
+                    envelope => JsonSerializer.SerializeToElement(value: envelope, options: JsonOptions)),
+            };
+        }).WaitAsync(cancellationToken).ConfigureAwait(false);
+        return result;
+    }
+    private async Task<Fin<JsonElement>> DispatchCommandAsync(
+        JsonElement message,
+        CancellationToken cancellationToken) {
+        Fin<JsonElement> result = await ThreadMarshaler.RunOnUiThreadAsync(() =>
+            ReadState().Bind(state => {
+                Instant now = Instant.FromDateTimeOffset(_timeProvider.GetUtcNow());
+                return state.SessionHost.Timeout(now).Bind(snapshot =>
+                    HandleCommand(
+                        envelope: message,
+                        sessionIdentity: snapshot.Identity,
+                        onCommand: static _ => Fin.Fail<CommandResultEnvelope>(
+                            Error.New(message: "Command execution not yet implemented."))
+                    ).Map(envelope =>
+                        JsonSerializer.SerializeToElement(value: envelope, options: JsonOptions)));
+            })
+        ).WaitAsync(cancellationToken).ConfigureAwait(false);
+        return result;
+    }
+    private Fin<JsonElement> SerializeHeartbeat(JsonElement message) {
+        HeartbeatEnvelope? heartbeat = JsonSerializer.Deserialize<HeartbeatEnvelope>(
+            element: message, options: JsonOptions);
+        return heartbeat switch {
+            null => Fin.Fail<JsonElement>(
+                Error.New(message: "Failed to deserialize heartbeat envelope.")),
+            _ => HandleHeartbeat(heartbeat: heartbeat).Map(
+                envelope => JsonSerializer.SerializeToElement(value: envelope, options: JsonOptions)),
+        };
+    }
     // --- [INTERNAL] ----------------------------------------------------------
     private Fin<BoundaryState> ReadState() =>
         _state.Value.ToFin(Error.New(message: "Plugin boundary state is unavailable before plugin load."));
     protected override LoadReturnCode OnLoad(ref string errorMessage) {
         _ = _instance.Swap(_ => Some(this));
-        _ = _state.Swap(static _ => Some(new BoundaryState(
-            EventPublisher: new EventPublisher(),
-            SessionHost: new SessionHost())));
+        _ = _state.Swap(_ => {
+            WebSocketHost webSocketHost = new(dispatcher: DispatchMessageAsync);
+            BoundaryState boundaryState = new(
+                EventPublisher: new EventPublisher(),
+                SessionHost: new SessionHost(),
+                WebSocketHost: webSocketHost);
+            webSocketHost.Start();
+            return Some(boundaryState);
+        });
         return LoadReturnCode.Success;
     }
     protected override void OnShutdown() {
         Instant now = Instant.FromDateTimeOffset(_timeProvider.GetUtcNow());
-        _ = ReadState().Bind(state =>
-            state.SessionHost.Close(reason: "plugin-shutdown", now: now).Map(_ => unit));
+        _ = ReadState().Bind(state => {
+            state.WebSocketHost.Dispose();
+            return state.SessionHost.Close(reason: "plugin-shutdown", now: now).Map(_ => unit);
+        });
         _ = _state.Swap(static _ => None);
         _ = _instance.Swap(static _ => None);
         base.OnShutdown();
