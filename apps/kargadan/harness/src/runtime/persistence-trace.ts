@@ -1,6 +1,8 @@
+// [DEPRECATED] -- replaced by CheckpointService; remove in Phase 4
 /**
  * In-memory trace store for run events, snapshots, and retrieval artifacts; SHA-256 canonical state hashing enables deterministic snapshot comparison.
- * Provides appendTransition, snapshot, replay, and listArtifacts — all mutations validated against Kargadan schemas at write time.
+ * Provides appendTransition, snapshot, replay, and listArtifacts -- all mutations validated against Kargadan schemas at write time.
+ * hashCanonicalState is still imported by CheckpointService and loop-stages; PersistenceTrace class is no longer wired into ServicesLayer.
  */
 import { createHash } from 'node:crypto';
 import { Kargadan } from '@parametric-portal/types/kargadan';

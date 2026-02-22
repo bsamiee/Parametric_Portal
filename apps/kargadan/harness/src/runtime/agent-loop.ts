@@ -6,8 +6,8 @@ import type { Kargadan } from '@parametric-portal/types/kargadan';
 import { Data, Duration, Effect, Fiber, Function as F, Match } from 'effect';
 import { HarnessConfig } from '../config';
 import { CommandDispatch, CommandDispatchError } from '../protocol/dispatch';
+import { CheckpointService } from '../persistence/checkpoint';
 import { handleDecision, planCommand, type Verification, verifyResult } from './loop-stages';
-import { PersistenceTrace } from './persistence-trace';
 
 // --- [ALGEBRAS] --------------------------------------------------------------
 
@@ -67,10 +67,10 @@ namespace LoopCommand {
 
 class AgentLoop extends Effect.Service<AgentLoop>()('kargadan/AgentLoop', {
     effect: Effect.gen(function* () {
-        const [dispatch, trace, commandDeadlineMs, retryMax, correctionMax, operations, simulatedPluginRevision] =
+        const [dispatch, checkpoint, commandDeadlineMs, retryMax, correctionMax, operations, simulatedPluginRevision] =
             yield* Effect.all([
                 CommandDispatch,
-                PersistenceTrace,
+                CheckpointService,
                 HarnessConfig.commandDeadlineMs,
                 HarnessConfig.retryMaxAttempts,
                 HarnessConfig.correctionCycles,
@@ -82,7 +82,7 @@ class AgentLoop extends Effect.Service<AgentLoop>()('kargadan/AgentLoop', {
                 DECIDE: ({ state, command, verification }) =>
                     handleDecision({
                         command,
-                        context: { correctionMax, retryMax, trace },
+                        context: { checkpoint, correctionMax, retryMax },
                         state,
                         verification,
                     }),
@@ -121,7 +121,7 @@ class AgentLoop extends Effect.Service<AgentLoop>()('kargadan/AgentLoop', {
                         Effect.flatMap((result) => run(LoopCommand.VERIFY({ command, result, state }))),
                     ),
                 PERSIST: ({ state, command, result, verification }) =>
-                    trace
+                    checkpoint
                         .appendTransition({
                             appId: state.identityBase.appId,
                             createdAt: new Date(),
@@ -141,7 +141,7 @@ class AgentLoop extends Effect.Service<AgentLoop>()('kargadan/AgentLoop', {
                         })
                         .pipe(
                             Effect.andThen(
-                                trace.snapshot({
+                                checkpoint.snapshot({
                                     appId:    state.identityBase.appId,
                                     runId:    state.identityBase.runId,
                                     sequence: state.sequence + 1,
@@ -170,7 +170,7 @@ class AgentLoop extends Effect.Service<AgentLoop>()('kargadan/AgentLoop', {
                 PLAN: ({ state }) =>
                     Effect.gen(function* () {
                         const command = yield* planCommand({ deadline: commandDeadlineMs, state });
-                        yield* trace.appendTransition({
+                        yield* checkpoint.appendTransition({
                             appId:     state.identityBase.appId,
                             createdAt: new Date(),
                             eventId:   crypto.randomUUID(),
@@ -276,7 +276,7 @@ class AgentLoop extends Effect.Service<AgentLoop>()('kargadan/AgentLoop', {
                     }).pipe(
                         Effect.ensuring(stopRuntimeFibers),
                     );
-                    const replay = yield* trace.replay({ runId: finalState.identityBase.runId });
+                    const replay = yield* checkpoint.replay({ runId: finalState.identityBase.runId });
                     return { replay, state: finalState } as const;
                 }),
         );

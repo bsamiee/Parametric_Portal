@@ -6,7 +6,8 @@ import type { Kargadan } from '@parametric-portal/types/kargadan';
 import { Data, Effect, Match, Option, pipe } from 'effect';
 import type { LoopState } from './agent-loop';
 import { CommandDispatchError } from '../protocol/dispatch';
-import { hashCanonicalState, type PersistenceTrace } from './persistence-trace';
+import type { CheckpointService } from '../persistence/checkpoint';
+import { hashCanonicalState } from './persistence-trace';
 
 // --- [ALGEBRAS] --------------------------------------------------------------
 
@@ -93,9 +94,9 @@ const planCommand = (input: { readonly deadline: number; readonly state: LoopSta
 const handleDecision = (input: {
     readonly command: Kargadan.CommandEnvelope;
     readonly context: {
+        readonly checkpoint:    CheckpointService;
         readonly correctionMax: number;
         readonly retryMax:      number;
-        readonly trace:         PersistenceTrace;
     };
     readonly state:        LoopState.Type;
     readonly verification: Verification.Type;
@@ -123,7 +124,7 @@ const handleDecision = (input: {
             } as const;
             return Match.value(error.failureClass).pipe(
                 Match.when('compensatable', () =>
-                    input.context.trace
+                    input.context.checkpoint
                         .appendTransition({
                             ...decisionTransitionBase,
                             eventType:   'command.compensate',
@@ -145,7 +146,7 @@ const handleDecision = (input: {
                     ),
                 ),
                 Match.when('fatal', () =>
-                    input.context.trace
+                    input.context.checkpoint
                         .appendArtifact({
                             appId:               input.state.identityBase.appId,
                             artifactId:          crypto.randomUUID(),
