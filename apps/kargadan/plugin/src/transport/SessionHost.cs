@@ -20,7 +20,8 @@ public sealed record SessionSnapshot(
     Instant OpenedAt,
     Instant LastHeartbeatAt,
     Duration HeartbeatInterval,
-    Duration HeartbeatTimeout);
+    Duration HeartbeatTimeout,
+    Option<Instant> TerminatedAt);
 [Union]
 public abstract partial record SessionPhase {
     private SessionPhase() { }
@@ -82,7 +83,8 @@ public sealed class SessionHost {
                     OpenedAt: now,
                     LastHeartbeatAt: now,
                     HeartbeatInterval: heartbeatInterval,
-                    HeartbeatTimeout: heartbeatTimeout)),
+                    HeartbeatTimeout: heartbeatTimeout,
+                    TerminatedAt: None)),
                 _ => Fin.Fail<SessionSnapshot>(
                     Error.New(
                         message: "Heartbeat interval/timeout must be positive.")),
@@ -126,16 +128,17 @@ public sealed class SessionHost {
             SessionPhase.Connected or SessionPhase.Active => ApplyState(snapshot with {
                 LastHeartbeatAt = now,
                 Phase = nextPhase,
+                TerminatedAt = nextPhase is SessionPhase.Terminal ? Some(now) : snapshot.TerminatedAt,
             }),
             SessionPhase.Terminal terminal => Fin.Fail<SessionSnapshot>(
                 Error.New(message: $"Cannot {operation}; session is already terminal in state '{terminal.StateTag.Key}'.")),
+
             _ => Fin.Fail<SessionSnapshot>(UnexpectedSessionPhase(operation: operation, phase: snapshot.Phase)),
         };
     private Fin<SessionSnapshot> UpdateActiveHeartbeat(SessionSnapshot snapshot, Instant now) =>
         snapshot.Phase switch {
-            SessionPhase.Active active => ApplyState(snapshot with {
+            SessionPhase.Active => ApplyState(snapshot with {
                 LastHeartbeatAt = now,
-                Phase = active,
             }),
             SessionPhase.Connected => Fin.Fail<SessionSnapshot>(
                 Error.New(message: "Cannot process heartbeat before handshake activation.")),
@@ -152,7 +155,7 @@ public sealed class SessionHost {
     private Fin<SessionSnapshot> EvaluateTimeout(SessionSnapshot snapshot, Instant now) =>
         ((now - snapshot.LastHeartbeatAt) > snapshot.HeartbeatTimeout) switch {
             true => ApplyState(snapshot: snapshot with {
-                LastHeartbeatAt = now,
+                TerminatedAt = Some(now),
                 Phase = new SessionPhase.Terminal(
                     StateTag: SessionLifecycleState.TimedOut,
                     Failure: None),
