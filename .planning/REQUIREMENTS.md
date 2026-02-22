@@ -128,63 +128,63 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| TRAN-01 | — | Pending |
-| TRAN-02 | — | Pending |
-| TRAN-03 | — | Pending |
-| TRAN-04 | — | Pending |
-| TRAN-05 | — | Pending |
-| TRAN-06 | — | Pending |
-| EXEC-01 | — | Pending |
-| EXEC-02 | — | Pending |
-| EXEC-03 | — | Pending |
-| EXEC-04 | — | Pending |
-| EXEC-05 | — | Pending |
-| EXEC-06 | — | Pending |
-| AGNT-01 | — | Pending |
-| AGNT-02 | — | Pending |
-| AGNT-03 | — | Pending |
-| AGNT-04 | — | Pending |
-| AGNT-05 | — | Pending |
-| AGNT-06 | — | Pending |
-| AGNT-07 | — | Pending |
-| AGNT-08 | — | Pending |
-| AGNT-09 | — | Pending |
-| AGNT-10 | — | Pending |
-| PROV-01 | — | Pending |
-| PROV-02 | — | Pending |
-| PROV-03 | — | Pending |
-| PROV-04 | — | Pending |
-| PERS-01 | — | Pending |
-| PERS-02 | — | Pending |
-| PERS-03 | — | Pending |
-| PERS-04 | — | Pending |
-| PERS-05 | — | Pending |
-| SCEN-01 | — | Pending |
-| SCEN-02 | — | Pending |
-| SCEN-03 | — | Pending |
-| SCEN-04 | — | Pending |
-| CLI-01 | — | Pending |
-| CLI-02 | — | Pending |
-| CLI-03 | — | Pending |
-| CLI-04 | — | Pending |
-| CLI-05 | — | Pending |
-| CLI-06 | — | Pending |
-| SCHM-01 | — | Pending |
-| SCHM-02 | — | Pending |
-| SCHM-03 | — | Pending |
-| SCHM-04 | — | Pending |
-| SCHM-05 | — | Pending |
-| SCHM-06 | — | Pending |
-| VRFY-01 | — | Pending |
-| VRFY-02 | — | Pending |
-| VRFY-03 | — | Pending |
-| VRFY-04 | — | Pending |
+| TRAN-01 | Phase 1 | Pending |
+| TRAN-02 | Phase 1 | Pending |
+| TRAN-03 | Phase 1 | Pending |
+| TRAN-04 | Phase 1 | Pending |
+| TRAN-05 | Phase 1 | Pending |
+| TRAN-06 | Phase 1 | Pending |
+| EXEC-01 | Phase 2 | Pending |
+| EXEC-02 | Phase 2 | Pending |
+| EXEC-03 | Phase 2 | Pending |
+| EXEC-04 | Phase 2 | Pending |
+| EXEC-05 | Phase 2 | Pending |
+| EXEC-06 | Phase 7 | Pending |
+| AGNT-01 | Phase 5 | Pending |
+| AGNT-02 | Phase 5 | Pending |
+| AGNT-03 | Phase 5 | Pending |
+| AGNT-04 | Phase 5 | Pending |
+| AGNT-05 | Phase 5 | Pending |
+| AGNT-06 | Phase 6 | Pending |
+| AGNT-07 | Phase 6 | Pending |
+| AGNT-08 | Phase 7 | Pending |
+| AGNT-09 | Phase 5 | Pending |
+| AGNT-10 | Phase 5 | Pending |
+| PROV-01 | Phase 5 | Pending |
+| PROV-02 | Phase 5 | Pending |
+| PROV-03 | Phase 5 | Pending |
+| PROV-04 | Phase 5 | Pending |
+| PERS-01 | Phase 4 | Pending |
+| PERS-02 | Phase 4 | Pending |
+| PERS-03 | Phase 4 | Pending |
+| PERS-04 | Phase 4 | Pending |
+| PERS-05 | Phase 4 | Pending |
+| SCEN-01 | Phase 6 | Pending |
+| SCEN-02 | Phase 6 | Pending |
+| SCEN-03 | Phase 6 | Pending |
+| SCEN-04 | Phase 6 | Pending |
+| VRFY-01 | Phase 7 | Pending |
+| VRFY-02 | Phase 7 | Pending |
+| VRFY-03 | Phase 7 | Pending |
+| VRFY-04 | Phase 7 | Pending |
+| CLI-01 | Phase 8 | Pending |
+| CLI-02 | Phase 8 | Pending |
+| CLI-03 | Phase 8 | Pending |
+| CLI-04 | Phase 8 | Pending |
+| CLI-05 | Phase 8 | Pending |
+| CLI-06 | Phase 8 | Pending |
+| SCHM-01 | Phase 3 | Pending |
+| SCHM-02 | Phase 3 | Pending |
+| SCHM-03 | Phase 3 | Pending |
+| SCHM-04 | Phase 3 | Pending |
+| SCHM-05 | Phase 3 | Pending |
+| SCHM-06 | Phase 3 | Pending |
 
 **Coverage:**
-- v1 requirements: 50 total
-- Mapped to phases: 0
-- Unmapped: 50
+- v1 requirements: 51 total
+- Mapped to phases: 51
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-02-22*
-*Last updated: 2026-02-22 after initial definition*
+*Last updated: 2026-02-22 after roadmap creation — all 51 requirements mapped to phases*
