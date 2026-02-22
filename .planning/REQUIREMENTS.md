@@ -12,9 +12,9 @@ Requirements for initial release. Each maps to roadmap phases.
 - [ ] **TRAN-01**: Plugin opens a WebSocket/TCP listener on localhost inside Rhino on a configurable port, accepting connections from the CLI harness
 - [ ] **TRAN-02**: Plugin targets net9.0 single-target for Rhino 9 only — no Rhino 8, no multi-target build (user decision: Phase 1 CONTEXT.md override)
 - [ ] **TRAN-03**: Plugin marshals all incoming WebSocket commands to Rhino's UI thread via `RhinoApp.InvokeOnUiThread` before executing any RhinoDoc operation
-- [ ] **TRAN-04**: Harness detects plugin disconnection (Rhino quit/crash) and reconnects automatically when the plugin becomes available again
-- [ ] **TRAN-05**: Session state survives plugin disconnection — harness restores context from PostgreSQL checkpoint on reconnection without losing conversation history
-- [ ] **TRAN-06**: Heartbeat keepalive between harness and plugin detects stale connections within a configurable timeout
+- [x] **TRAN-04**: Harness detects plugin disconnection (Rhino quit/crash) and reconnects automatically when the plugin becomes available again
+- [x] **TRAN-05**: Session state survives plugin disconnection — harness restores context from PostgreSQL checkpoint on reconnection without losing conversation history
+- [x] **TRAN-06**: Heartbeat keepalive between harness and plugin detects stale connections within a configurable timeout
 
 ### Execution
 
@@ -131,9 +131,9 @@ Which phases cover which requirements. Updated during roadmap creation.
 | TRAN-01 | Phase 1 | Pending |
 | TRAN-02 | Phase 1 | Pending |
 | TRAN-03 | Phase 1 | Pending |
-| TRAN-04 | Phase 1 | Pending |
-| TRAN-05 | Phase 1 | Pending |
-| TRAN-06 | Phase 1 | Pending |
+| TRAN-04 | Phase 1 | Complete |
+| TRAN-05 | Phase 1 | Complete |
+| TRAN-06 | Phase 1 | Complete |
 | EXEC-01 | Phase 2 | Pending |
 | EXEC-02 | Phase 2 | Pending |
 | EXEC-03 | Phase 2 | Pending |
