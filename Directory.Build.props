@@ -74,6 +74,16 @@
         <PackageReference Include="Npgsql.OpenTelemetry" Version="$(NpgsqlOpenTelemetryVersion)" />
     </ItemGroup>
 
+    <ItemGroup Label="Global LanguageExt Usings" Condition="'$(IsLocalCSharpAnalyzerProject)' != 'true'">
+        <Using Include="LanguageExt" />
+        <Using Include="LanguageExt.Common" />
+        <Using Include="LanguageExt.Traits" />
+        <Using Include="LanguageExt.Effects" />
+        <Using Include="LanguageExt.Pretty" />
+        <Using Include="LanguageExt.Traits.Domain" />
+        <Using Include="LanguageExt.Prelude" Static="true" />
+    </ItemGroup>
+
     <ItemGroup Label="Analyzer Packages" Condition="'$(IsLocalCSharpAnalyzerProject)' != 'true'">
         <PackageReference Include="Microsoft.VisualStudio.Threading.Analyzers" Version="$(MicrosoftVisualStudioThreadingAnalyzersVersion)" PrivateAssets="all" />
         <PackageReference Include="Meziantou.Analyzer" Version="$(MeziantouAnalyzerVersion)" PrivateAssets="all" />

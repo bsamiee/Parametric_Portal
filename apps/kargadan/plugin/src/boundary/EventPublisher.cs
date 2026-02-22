@@ -2,6 +2,7 @@
 // Lifetime is managed by KargadanPlugin.OnLoad/OnShutdown — queue reference is never exposed outside the boundary adapter.
 using LanguageExt;
 using NodaTime;
+using ParametricPortal.CSharp.Analyzers.Contracts;
 using ParametricPortal.Kargadan.Plugin.src.contracts;
 using static LanguageExt.Prelude;
 
@@ -13,6 +14,7 @@ public readonly record struct PublishedEvent(EventEnvelope Envelope, Instant Pub
 
 // --- [ADAPTER] ---------------------------------------------------------------
 
+[BoundaryAdapter]
 public sealed class EventPublisher {
     // --- [STATE] -------------------------------------------------------------
     private readonly Ref<Seq<PublishedEvent>> _queue = Ref(Seq<PublishedEvent>());

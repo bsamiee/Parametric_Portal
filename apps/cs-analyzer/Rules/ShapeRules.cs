@@ -18,6 +18,7 @@ internal static class ShapeRules {
     private static readonly HashSet<string> ConcurrentCollectionNames = new(["ConcurrentDictionary`2", "ConcurrentBag`1", "ConcurrentQueue`1", "ConcurrentStack`1"], StringComparer.Ordinal);
     private static readonly string[] InflationPrefixes = ["Get", "TryGet", "GetOr"];
     private static readonly HashSet<string> InterfaceExemptionAttributes = new(["UnionAttribute", "Union", "SmartEnumAttribute", "SmartEnum"], StringComparer.Ordinal);
+    private static readonly HashSet<string> TypeClassHintAttributes = new(["TypeClassAttribute", "TypeClass", "TraitAttribute", "Trait"], StringComparer.Ordinal);
 
     // --- [SIGNATURE_RULES] ----------------------------------------------------
 
@@ -118,7 +119,7 @@ internal static class ShapeRules {
                 .Where(method => method.MethodKind == MethodKind.Ordinary)
                 .GroupBy(method => method.Name)
                 .Select(group => group.ToImmutableArray())
-                .Where(members => members.Length > 2)
+                .Where(ShouldReportOverloadCollapse)
                 .Where(members => members[0].Locations.Length > 0)
                 .Select(members => Diagnostic.Create(RuleCatalog.CSP0005, members[0].Locations[0], members[0].Name, members.Length)),
             _ => [],
@@ -140,16 +141,52 @@ internal static class ShapeRules {
         });
     }
     internal static void CheckPositionalArguments(OperationAnalysisContext context, ScopeInfo scope, IInvocationOperation invocation) {
-        ArgumentSyntax? firstPositional = invocation.Syntax is InvocationExpressionSyntax { ArgumentList.Arguments: { Count: > 1 } arguments }
-            ? arguments.FirstOrDefault(argument => argument.NameColon is null)
-            : null;
+        ImmutableArray<ArgumentSyntax> positionalArguments = invocation.Syntax is InvocationExpressionSyntax { ArgumentList.Arguments: { Count: > 0 } arguments }
+            ? [.. arguments.Where(argument => argument.NameColon is null)]
+            : [];
         string targetNamespace = invocation.TargetMethod.ContainingNamespace?.ToDisplayString() ?? string.Empty;
-        bool domainTarget = targetNamespace.StartsWith(value: Markers.DomainNamespace, comparisonType: StringComparison.OrdinalIgnoreCase)
-            || targetNamespace.Contains(value: Markers.DomainPrefix, comparisonType: StringComparison.OrdinalIgnoreCase)
-            || targetNamespace.StartsWith(value: Markers.ApplicationNamespace, comparisonType: StringComparison.OrdinalIgnoreCase)
-            || targetNamespace.Contains(value: Markers.ApplicationPrefix, comparisonType: StringComparison.OrdinalIgnoreCase);
-        AnalyzerState.Report(context.ReportDiagnostic, (scope.IsDomainOrApplication, domainTarget, firstPositional) switch {
-            (true, true, not null) => Diagnostic.Create(RuleCatalog.CSP0502, firstPositional.GetLocation()),
+        bool domainTarget = SymbolFacts.IsDomainOrApplicationNamespace(targetNamespace);
+        IEnumerable<Diagnostic> diagnostics = (scope.IsDomainOrApplication, domainTarget) switch {
+            (true, true) => positionalArguments.Select(argument => Diagnostic.Create(RuleCatalog.CSP0502, argument.GetLocation())),
+            _ => [],
+        };
+        AnalyzerState.ReportEach(context.ReportDiagnostic, diagnostics);
+    }
+    internal static void CheckEffectReturnPolicy(SymbolAnalysisContext context, ScopeInfo scope, IMethodSymbol method) {
+        bool ordinaryMethod = method.MethodKind == MethodKind.Ordinary;
+        bool disallowedReturn = method.ReturnsVoid || SymbolFacts.IsTaskLikeType(method.ReturnType);
+        bool interfaceContract = method.IsOverride || method.ExplicitInterfaceImplementations.Length > 0;
+        string returnType = method.ReturnsVoid ? "void" : method.ReturnType.ToDisplayString();
+        AnalyzerState.Report(context.ReportDiagnostic, (scope.IsDomainOrApplication, ordinaryMethod, disallowedReturn, interfaceContract, method.Locations.Length) switch {
+            (true, true, true, false, > 0) => Diagnostic.Create(RuleCatalog.CSP0504, method.Locations[0], method.Name, returnType),
+            _ => null,
+        });
+    }
+    internal static void CheckTypeClassStaticAbstractPolicy(SymbolAnalysisContext context, ScopeInfo scope, INamedTypeSymbol namedType) {
+        bool candidate = namedType.TypeKind == TypeKind.Interface && IsTypeClassInterfaceCandidate(namedType);
+        bool hasStaticAbstractMember = namedType.GetMembers().Any(member =>
+            member switch {
+                IMethodSymbol method => method.IsStatic && method.IsAbstract,
+                IPropertySymbol property => property.IsStatic && property.IsAbstract,
+                IEventSymbol @event => @event.IsStatic && @event.IsAbstract,
+                _ => false,
+            });
+        AnalyzerState.Report(context.ReportDiagnostic, (scope.IsDomainOrApplication, candidate, hasStaticAbstractMember, namedType.Locations.Length) switch {
+            (true, true, false, > 0) => Diagnostic.Create(RuleCatalog.CSP0505, namedType.Locations[0], namedType.Name),
+            _ => null,
+        });
+    }
+    internal static void CheckExtensionProjectionPolicy(SymbolAnalysisContext context, ScopeInfo scope, IMethodSymbol method) {
+        ITypeSymbol? receiverType = method.Parameters.Length > 0 ? UnwrapNullable(method.Parameters[0].Type) : null;
+        string receiverName = receiverType?.ToDisplayString() ?? string.Empty;
+        bool staticOrdinaryMethod = method.MethodKind == MethodKind.Ordinary && method.IsStatic;
+        bool receiverDomainOrApplication = receiverType is ITypeSymbol type && SymbolFacts.IsDomainOrApplicationNamespace(type.ContainingNamespace?.ToDisplayString() ?? string.Empty);
+        bool externalReceiver = receiverType switch {
+            INamedTypeSymbol namedReceiver => !SymbolEqualityComparer.Default.Equals(namedReceiver, method.ContainingType),
+            _ => true,
+        };
+        AnalyzerState.Report(context.ReportDiagnostic, (scope.IsDomainOrApplication, staticOrdinaryMethod, method.IsExtensionMethod, receiverDomainOrApplication, externalReceiver, method.Locations.Length) switch {
+            (true, true, false, true, true, > 0) => Diagnostic.Create(RuleCatalog.CSP0506, method.Locations[0], method.Name, receiverName),
             _ => null,
         });
     }
@@ -181,10 +218,7 @@ internal static class ShapeRules {
         bool isDomainOrApplication = compilationUnit?.Members.OfType<BaseNamespaceDeclarationSyntax>()
             .Any(namespaceDecl => {
                 string namespaceName = namespaceDecl.Name.ToString();
-                return namespaceName.StartsWith(value: Markers.DomainNamespace, comparisonType: StringComparison.OrdinalIgnoreCase)
-                    || namespaceName.Contains(value: Markers.DomainPrefix, comparisonType: StringComparison.OrdinalIgnoreCase)
-                    || namespaceName.StartsWith(value: Markers.ApplicationNamespace, comparisonType: StringComparison.OrdinalIgnoreCase)
-                    || namespaceName.Contains(value: Markers.ApplicationPrefix, comparisonType: StringComparison.OrdinalIgnoreCase);
+                return SymbolFacts.IsDomainOrApplicationNamespace(namespaceName);
             }) ?? false;
         IEnumerable<(Location Location, string Name)> varUsages = (isDomainOrApplication, compilationUnit) switch {
             (true, CompilationUnitSyntax root) =>
@@ -213,10 +247,7 @@ internal static class ShapeRules {
         bool isDomainOrApplication = compilationUnit?.Members.OfType<BaseNamespaceDeclarationSyntax>()
             .Any(namespaceDecl => {
                 string namespaceName = namespaceDecl.Name.ToString();
-                return namespaceName.StartsWith(value: Markers.DomainNamespace, comparisonType: StringComparison.OrdinalIgnoreCase)
-                    || namespaceName.Contains(value: Markers.DomainPrefix, comparisonType: StringComparison.OrdinalIgnoreCase)
-                    || namespaceName.StartsWith(value: Markers.ApplicationNamespace, comparisonType: StringComparison.OrdinalIgnoreCase)
-                    || namespaceName.Contains(value: Markers.ApplicationPrefix, comparisonType: StringComparison.OrdinalIgnoreCase);
+                return SymbolFacts.IsDomainOrApplicationNamespace(namespaceName);
             }) ?? false;
         string fileName = Path.GetFileName(context.Tree.FilePath);
         AnalyzerState.Report(context.ReportDiagnostic, (isDomainOrApplication, hasPreludeUsing) switch {
@@ -239,5 +270,30 @@ internal static class ShapeRules {
             .Any(attribute => InterfaceExemptionAttributes.Contains(attribute.AttributeClass?.Name ?? string.Empty));
         return hasTraitPattern || hasStaticAbstract || hasExemptionAttribute;
     }
+    private static bool IsTypeClassInterfaceCandidate(INamedTypeSymbol interfaceSymbol) {
+        bool nameHint = interfaceSymbol.Name.Contains(value: "TypeClass", comparisonType: StringComparison.Ordinal)
+            || interfaceSymbol.Name.EndsWith(value: "Trait", comparisonType: StringComparison.Ordinal);
+        bool attributeHint = interfaceSymbol.GetAttributes()
+            .Any(attribute => TypeClassHintAttributes.Contains(attribute.AttributeClass?.Name ?? string.Empty));
+        bool selfTypeHint = interfaceSymbol.TypeParameters.Any(parameter =>
+            parameter.Name.Equals(value: "TSelf", comparisonType: StringComparison.Ordinal)
+            || parameter.Name.Equals(value: "TSelfType", comparisonType: StringComparison.Ordinal));
+        return nameHint || attributeHint || selfTypeHint;
+    }
+    private static bool ShouldReportOverloadCollapse(ImmutableArray<IMethodSymbol> overloads) {
+        bool hasReadOnlySpanCollapse = overloads.Any(IsParamsReadOnlySpanOverload);
+        bool arityLadder = overloads.Select(overload => overload.Parameters.Length).Distinct().Count() > 1;
+        bool overloadPressure = overloads.Length > 2 || (overloads.Length > 1 && arityLadder);
+        return overloadPressure && !hasReadOnlySpanCollapse;
+    }
+    private static bool IsParamsReadOnlySpanOverload(IMethodSymbol overload) =>
+        overload.Parameters switch {
+            { Length: > 0 } parameters => parameters[parameters.Length - 1] switch {
+                { IsParams: true, Type: INamedTypeSymbol { OriginalDefinition.MetadataName: "ReadOnlySpan`1", ContainingNamespace: { } ns } }
+                    => ns.ToDisplayString() == "System",
+                _ => false,
+            },
+            _ => false,
+        };
     private static ITypeSymbol UnwrapNullable(ITypeSymbol type) => SymbolFacts.UnwrapNullable(type);
 }

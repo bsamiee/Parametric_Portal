@@ -13,7 +13,10 @@ For object-shape selection and Thinktecture routing, load `objects.md` first.
 ```csharp
 namespace Domain.Types;
 
+using NodaTime;
 using static LanguageExt.Prelude;
+
+// --- [VALIDATED_SCALARS] -----------------------------------------------------
 
 public readonly record struct DomainIdentity {
     // { get; } only -- no init accessor. Prevents with-expression bypass
@@ -27,8 +30,6 @@ public readonly record struct DomainIdentity {
         };
 }
 public readonly record struct TransactionAmount {
-    // { get; } only -- normalization runs in factory, not property accessor.
-    // Prevents with-expression bypass of validation (CSP0720).
     public decimal Value { get; }
     private TransactionAmount(decimal value) { Value = value; }
     public static Fin<TransactionAmount> Create(decimal candidate) =>
@@ -38,31 +39,26 @@ public readonly record struct TransactionAmount {
             false => Fin.Fail<TransactionAmount>(Error.New(message: "Amount must be strictly positive."))
         };
 }
-```
 
-[CRITICAL]: Every domain primitive follows this shape. No public constructors on validated types.
-
-[IMPORTANT]: For high-volume primitives with simple constraints, Thinktecture Runtime Extensions (`[ValueObject<T>]`) source-generates wrappers. Use manual `Fin<T>` factory when validation logic is custom.
-
----
-## [1A][TEMPORAL_PRIMITIVES]
->**Dictum:** *Time is a typed dependency; wall-clock reads are boundary concerns.*
-
-```csharp
-using NodaTime;
+// --- [TEMPORAL_PRIMITIVES] ---------------------------------------------------
+// Time is a typed dependency; wall-clock reads are boundary concerns.
+// Domain types use Instant + injected IClock; avoid DateTime*/DateTimeOffset*.
 
 public readonly record struct OccurredAt {
     public Instant Value { get; }
     private OccurredAt(Instant value) => Value = value;
     public static Fin<OccurredAt> Create(Instant value) => Fin.Succ(new OccurredAt(value));
-    // FromClock wraps in Fin<OccurredAt> for API uniformity with Create -- clock reads are
-    // infallible, but a consistent Fin<T> return surface lets callers compose both factories
-    // via the same Bind/Map pipeline without special-casing the clock acquisition path.
-    public static Fin<OccurredAt> FromClock(IClock clock) => Fin.Succ(new OccurredAt(clock.GetCurrentInstant()));
+    // FromClock returns Fin<OccurredAt> for API uniformity -- clock reads are infallible,
+    // but consistent Fin<T> surface lets callers compose via Bind/Map without special-casing.
+    public static Fin<OccurredAt> FromClock(IClock clock) =>
+        Fin.Succ(new OccurredAt(clock.GetCurrentInstant()));
 }
 ```
 
-[CRITICAL]: Domain types use `Instant` + injected `IClock`; avoid direct `DateTime*`/`DateTimeOffset*` in domain flows.
+[CRITICAL]: Every domain primitive follows this shape. No public constructors on validated types. Temporal primitives use `NodaTime.Instant` with injected `IClock` -- never `DateTime*`/`DateTimeOffset*`.
+
+[IMPORTANT]: For high-volume primitives with simple constraints, Thinktecture Runtime Extensions (`[ValueObject<T>]`) source-generates wrappers. Use manual `Fin<T>` factory when validation logic is custom.
+
 
 ---
 ## [2][NEWTYPE_GENERIC]
@@ -133,13 +129,14 @@ Fin<NonEmptyText> name = Domain.Make<NonEmptyTextTag, string>(
         onTrue: () => candidate));
 ```
 
-[REF]: Span-based parsing via `TryParseSpan<A>` + `Parse<A>` is canonicalized in `performance.md` [2][SPAN_PARSING]. Import from there; do not redefine.
+Span-based parsing via `ISpanParsable<TSelf>` is canonicalized in `algorithms.md` [4] `SpanParsing.ParseSpannable` -- the `Fin<T>`-wrapped `TryParse` factory using `CultureInfo.InvariantCulture`. Import from there; do not redefine.
 
 ---
 ## [4][DISCRIMINATED_UNIONS]
 >**Dictum:** *Sealed hierarchies exhaust state space; the compiler enforces totality.*
 
 Sealed abstract record with `private protected` constructor closes the hierarchy. C# 14 extension members project behavior without inheritance. Until C# ships first-class DU exhaustiveness (targeted C# 15), include `_ => throw new UnreachableException()` defensively.
+**C# 14 extension block supported members**: static/instance methods, properties, operators, conversions. **Not supported**: fields, events, indexers, nested types, constructors. Extension indexers were proposed but did not ship in C# 14.
 
 ```csharp
 using NodaTime;
@@ -192,18 +189,27 @@ Empty `readonly struct` markers parameterize a generic record. Method signatures
 ```csharp
 public readonly struct Unvalidated;
 public readonly struct Validated;
-public readonly record struct UserId<TState>(Guid Value);
+public readonly record struct UserId<TState> {
+    public Guid Value { get; }
+    private UserId(Guid value) => Value = value;
+    // UnsafeWrap: internal factory for validated construction only.
+    // All external callers go through UserIdOps.Validate().
+    internal static UserId<TState> UnsafeWrap(Guid value) => new(value);
+}
 public static class UserIdOps {
     public static Fin<UserId<Validated>> Validate(UserId<Unvalidated> raw) =>
         (raw.Value != Guid.Empty) switch {
-            true => Fin.Succ(new UserId<Validated>(Value: raw.Value)),
+            true => Fin.Succ(UserId<Validated>.UnsafeWrap(value: raw.Value)),
             false => Fin.Fail<UserId<Validated>>(
                 Error.New(message: "UserId cannot be empty"))
         };
+    // Entry point: wrap raw Guid as Unvalidated for pipeline intake.
+    public static UserId<Unvalidated> FromRaw(Guid raw) =>
+        UserId<Unvalidated>.UnsafeWrap(value: raw);
 }
 ```
 
-[CRITICAL]: `LoadUser(UserId<Validated> id)` rejects `UserId<Unvalidated>` at compile time. The phantom parameter carries no runtime data.
+[CRITICAL]: `LoadUser(UserId<Validated> id)` rejects `UserId<Unvalidated>` at compile time. Private constructor prevents bypass -- all construction routes through `UnsafeWrap` (internal) gated by `Validate`.
 
 ---
 ## [6][GENERIC_MATH]
@@ -221,7 +227,8 @@ public static class NumericAggregates {
     public static Fin<double> WeightedAverage(Seq<(double Value, double Weight)> items) =>
         items.Fold(
             (sum: 0.0, weight: 0.0),
-            static (acc, pair) => (acc.sum + pair.Value * pair.Weight, acc.weight + pair.Weight)
+            static ((double sum, double weight) acc, (double Value, double Weight) pair) =>
+                (acc.sum + pair.Value * pair.Weight, acc.weight + pair.Weight)
         ) switch
         {
             (_, 0.0) => Fail(Error.New("WeightedAverage: zero total weight")),
@@ -257,7 +264,7 @@ public readonly record struct Percentage :
 }
 ```
 
-[IMPORTANT]: Full `INumber<Percentage>` only when the type participates in generic numeric algorithms. Target: O(log n) persistent operations; benchmark via BenchmarkDotNet before claiming specific ratios.
+[IMPORTANT]: Full `INumber<Percentage>` only when the type participates in generic numeric algorithms. Target: O(log n) persistent operations; benchmark via BenchmarkDotNet before claiming specific ratios. For algebraic monoid abstraction over these same interfaces (`IAlgebraicMonoid<TSelf>`), see `composition.md` [3] arity collapse -- same Generic Math foundation, monoid-constrained fold.
 
 **Typeclass Encoding via Static Abstract** -- `static abstract` members encode Haskell-style typeclasses in C#. The CRTP constraint `TSelf : ITypeclass<TSelf>` enables generic algorithms to call static members on the implementing type without boxing. This is how `INumber<T>`, `IParsable<T>`, and `ISpanParsable<T>` work internally.
 
@@ -311,7 +318,13 @@ HashMap<string, decimal> balances = HashMap(("alice", 1000m), ("bob", 500m));
 Option<decimal> alice = balances.Find(key: "alice");
 ```
 
-[CRITICAL]: `Seq<T>` over `List<T>` / `IEnumerable<T>`; `HashMap<K,V>` over `Dictionary` / `ImmutableDictionary`. LanguageExt collections compose with `Traverse`, `Sequence`, `Bind` via the trait system.
+**Boundary materialization** -- EF Core / async queries return `List<T>`. Convert at the persistence boundary:
+
+```csharp
+Seq<TEntity> entities = toSeq(await query.ToListAsync(ct));
+```
+
+[CRITICAL]: `Seq<T>` over `List<T>` / `IEnumerable<T>`; `HashMap<K,V>` over `Dictionary` / `ImmutableDictionary`. LanguageExt collections compose with `Traverse`, `Sequence`, `Bind` via the trait system. See `persistence.md` [1] `DbAccess.QueryAll` for the canonical `toSeq(await query.ToListAsync(ct))` pattern.
 
 ---
 ## [8][RULES]

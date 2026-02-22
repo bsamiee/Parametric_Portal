@@ -1,7 +1,7 @@
 # [H1][PERFORMANCE]
 >**Dictum:** *Performance is structural; align types with the JIT; make allocation-freedom normal-form.*
 
-Value-typed domain atoms align with JIT struct promotion, span-based APIs eliminate allocation, SIMD intrinsics replace branching, NativeAOT makes trimming a first-class constraint. Span-based parsing (`TryParseSpan<A>`, `Parse<A>`) is canonicalized in `types.md` [3] -- see there for delegate shape and smart-constructor integration. Performance characteristics: zero allocation via method-group delegate binding.
+Value-typed domain atoms align with JIT struct promotion, span-based APIs eliminate allocation, SIMD intrinsics replace branching, NativeAOT makes trimming a first-class constraint. Span-based parsing via `ISpanParsable<TSelf>` is canonicalized in `algorithms.md` [4] `SpanParsing.ParseSpannable` -- see there for the `Fin<T>`-wrapped `TryParse` factory using `CultureInfo.InvariantCulture`. Smart constructors in `types.md` [3] use `Domain.Make`/`Domain.Require` for non-span validation. Performance characteristics: zero allocation via method-group delegate binding.
 
 ---
 ## [1][SIMD_TENSOR]
@@ -79,35 +79,23 @@ public static class QuantitativeRiskEngine {
 }
 ```
 
-[CRITICAL]: Zero branching in the vectorized pass. `Vector<double>` auto-selects hardware width -- no hard-coded `Vector512` dependency. Scalar tail handles arbitrary alignment.
-
----
-## [2A][ZERO_COPY_REINTERPRET]
->**Dictum:** *`MemoryMarshal.Cast` reinterprets memory without copying.*
-
-`MemoryMarshal.Cast<TFrom, TTo>` performs zero-copy reinterpretation over `ReadOnlySpan<T>` -- the functional equivalent of C++ `reinterpret_cast` within safe managed code. `AsBytes` projects any unmanaged struct span as raw bytes. Neither allocates; both return a view over the same memory.
+[CRITICAL]: Zero branching in the vectorized pass. `Vector<double>` auto-selects hardware width. Scalar tail handles arbitrary alignment. For AVX-512: gate with `Vector512.IsHardwareAccelerated` (JIT-intrinsic constant -- eliminated at compile time on non-AVX-512), then fall back to `Vector<T>` auto-width, then scalar tail. Same `[BoundaryImperativeExemption]` applies to all loops.<br>
+[CRITICAL]: The `while` loops trigger CSP0001 (ImperativeControlFlow). SIMD loops use `ProtocolRequired`. Annotate with `[BoundaryImperativeExemption]`:
 
 ```csharp
-namespace Domain.Performance;
-
-public static class ZeroCopyProjection {
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static ReadOnlySpan<byte> AsBytes(ReadOnlySpan<double> source) =>
-        MemoryMarshal.AsBytes(source);
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static ReadOnlySpan<float> NarrowPrecision(ReadOnlySpan<double> source,
-        Span<float> destination) {
-        TensorPrimitives.ConvertTruncating(source, destination);
-        return destination;
-    }
-    // Cast between unmanaged value types sharing the same byte width
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static ReadOnlySpan<int> ReinterpretAsInt32(ReadOnlySpan<float> source) =>
-        MemoryMarshal.Cast<float, int>(source);
-}
+[BoundaryImperativeExemption(
+    ruleId: "CSP0001",
+    reason: BoundaryImperativeReason.ProtocolRequired,
+    ticket: "PERF-001",
+    expiresOnUtc: "2027-01-01")]
+public static double CalculateTotalExposure(
+    ReadOnlySpan<double> prices, double threshold, double tax) { ... }
 ```
 
-[CRITICAL]: `Cast` bypasses constructors -- the target type receives raw bit patterns, not validated values. Use only between unmanaged primitives of compatible layout. Neither `TFrom` nor `TTo` may contain managed references.
+Reason enum values: `CancellationGuard`, `AsyncIteratorYieldGate`, `CleanupFinally`, `ProtocolRequired`. Ticket ID and expiry are mandatory -- CSP0901 validates metadata, CSP0902 flags expired exemptions.
+
+**Hot-path scope** -- CSP0601 (HotPathLinq), CSP0602 (HotPathNonStaticLambda), CSP0017 (NonStaticHotPathClosure) are scope-gated via `ScopeInfo.IsHotPath`. Activate by placing code in a `.Performance` namespace (e.g., `Domain.Performance.Pricing`). Without this signal, SIMD code gets zero hot-path rule coverage. CSP0013 (ClosureCapture) fires in ALL domain/application namespaces regardless. Boundary namespaces are never hot-path scoped.<br>
+**Zero-copy reinterpretation** -- `MemoryMarshal.Cast<TFrom, TTo>` reinterprets a `Span<TFrom>` as `Span<TTo>` without copying. `AsBytes` projects any unmanaged struct span as raw bytes. Both types must be unmanaged value types -- `Cast` bypasses constructors (raw bit patterns).
 
 ---
 ## [3][BUFFER_HYBRID]
@@ -141,7 +129,19 @@ public static class BufferProcessing {
 }
 ```
 
-[IMPORTANT]: `try/finally` guarantees `ArrayPool.Return` regardless of exceptions -- the one justified exception to zero-try/catch.
+[IMPORTANT]: `try/finally` guarantees `ArrayPool.Return` regardless of exceptions -- the one justified exception to zero-try/catch.<br>
+[CRITICAL]: The `try/finally` above triggers CSP0009 (ExceptionControlFlow). Buffer lifecycle requires deterministic cleanup. Annotate with `[BoundaryImperativeExemption]`:
+
+```csharp
+[BoundaryImperativeExemption(
+    ruleId: "CSP0009",
+    reason: BoundaryImperativeReason.CleanupFinally,
+    ticket: "PERF-002",
+    expiresOnUtc: "2027-01-01")]
+public static string ProcessBuffer(ReadOnlySpan<byte> input) { ... }
+```
+
+`CleanupFinally` is the designated reason for `try/finally` resource cleanup. CSP0101 fires when the exemption attribute is missing; CSP0102 fires when the reason enum does not match the construct.
 
 ---
 ## [4][VALUETASK]
@@ -175,7 +175,7 @@ public sealed class LayeredCache<TKey, TValue>(
 }
 ```
 
-[IMPORTANT]: `IDistributedCache` dependency is illustrative -- substitute your caching abstraction. `Deserialize` null handled via pattern match, not `!` operator.
+[IMPORTANT]: `Deserialize` null handled via pattern match, not `!` operator. `IDistributedCache` is the boundary dependency; swap for your concrete cache provider.
 
 ---
 ## [5][NATIVEAOT]
@@ -203,13 +203,7 @@ public static class Serialization {
 
 [IMPORTANT]: Source generators produce serialization at compile time -- trimming-safe and AOT-safe by construction.
 
-**P/Invoke AOT migration** -- `[LibraryImport]` replaces `[DllImport]` for AOT-safe native interop. Source generator produces marshalling at compile time (no runtime IL stub). `[DllImport]` generates IL stubs at runtime -- incompatible with NativeAOT trimming.
-
----
-## [5A][LIBRARY_IMPORT]
->**Dictum:** *Source-generated marshalling replaces runtime IL stubs.*
-
-Key migration differences: `CharSet` becomes `StringMarshalling`, `CallingConvention` becomes `[UnmanagedCallConv]`, ANSI removed (UTF-8 first-class).
+**P/Invoke AOT migration** -- `[LibraryImport]` replaces `[DllImport]` for AOT-safe native interop. Source generator produces marshalling at compile time (no runtime IL stub). Migration: `CharSet` becomes `StringMarshalling`, `CallingConvention` becomes `[UnmanagedCallConv]`, ANSI removed (UTF-8 first-class).
 
 ---
 ## [6][STATIC_LAMBDAS]
@@ -245,6 +239,11 @@ public static class HotPath<T> where T : notnull {
 
 [CRITICAL]: Outer `Bind` lambdas are `static` -- zero implicit captures. `ValueTuple` fields thread state explicitly through the chain. Local static functions inside method bodies guarantee zero closure capture for recursive helpers.
 
+**Enforcement chain**: Static lambda discipline is triple-enforced:
+- **CSP0013** (ClosureCapture) -- fires in ALL domain/application namespaces when a non-static lambda captures outer variables
+- **CSP0602** (HotPathNonStaticLambda) -- fires in hot-path scope (see [2]) when any lambda is non-static, even without captures
+- `.editorconfig` `csharp_prefer_static_anonymous_function = true:error` -- IDE/build enforcement across all scopes
+
 ---
 ## [7][SPAN_ALGORITHMS]
 >**Dictum:** *MemoryExtensions bring allocation-free sorting and search to span-based pipelines.*
@@ -270,23 +269,15 @@ public static class SpanAlgorithms {
         items.Fold(
             (LanguageExt.Seq<A>.Empty, LanguageExt.Seq<B>.Empty),
             static (acc, item) => item.Match(
-                Left: (A left) => (acc.Item1.Add(left), acc.Item2),
-                Right: (B right) => (acc.Item1, acc.Item2.Add(right))
-            )
-        );
+                Left: (A left) => (left.Cons(acc.Item1), acc.Item2),
+                Right: (B right) => (acc.Item1, right.Cons(acc.Item2))))
+        switch {
+            (Seq<A> lefts, Seq<B> rights) => (lefts.Rev(), rights.Rev())
+        };
 }
 ```
 
-[IMPORTANT]: `SeparateEither` folds via `Either.Match` -- each arm appends to the correct accumulator. Static lambda on the fold body prevents closure capture.
-
-**Zero-copy reinterpretation** -- `MemoryMarshal.Cast<TFrom, TTo>` reinterprets a `Span<TFrom>` as `Span<TTo>` without copying. Useful for treating `byte[]` payloads as numeric spans for SIMD processing:
-
-```csharp
-// Zero-copy byte→double reinterpretation for TensorPrimitives input
-ReadOnlySpan<double> doubles = MemoryMarshal.Cast<byte, double>(byteSpan);
-```
-
-[CRITICAL]: Both types must be unmanaged value types. Alignment is caller's responsibility. No allocation, no copy -- pointer reinterpretation only.
+[IMPORTANT]: `SeparateEither` uses `.Cons` (O(1) prepend) + `.Rev()` at the fold boundary -- never `.Add` which is O(N) array-double-and-copy inside fold accumulators. Static lambda on the fold body prevents closure capture. See `algorithms.md` [8] for the general rule against `Seq.Add` in folds. For zero-copy reinterpretation (`MemoryMarshal.Cast`), see [2].
 
 ---
 ## [7A][CHARSET_VALIDATION]
@@ -319,28 +310,26 @@ public static partial class SemVerValidation {
 }
 ```
 
+[IMPORTANT]: `SearchValues<char>` + `ContainsAnyExcept` for fixed `length + allowed chars`. `[GeneratedRegex(..., RegexOptions.NonBacktracking)]` for structural grammar (groups/alternation/anchors). Use `IndexOfAnyExcept` only when callers need the failing position.
+
+**Enforcement**: CSP0607 (GeneratedRegexCharsetValidation) fires when `[GeneratedRegex]` is reducible to `SearchValues<char>`. CA1870 (UseSearchValuesInstance) enforces cached instance.<br>
+**Fin<T> hot-path escape** -- `Fin<T>` wraps `Either<Error, T>` with heap-allocated `Error`. On innermost loops (millions of iterations), use raw `bool` + `out T` for the kernel; lift to `Fin<T>` at the public surface. Pre-allocate `static readonly Error` fields for error messages:
+
 ```csharp
-namespace Domain.Performance;
-
-using System.Collections.Immutable;
-using System.Text.RegularExpressions;
-
-public static partial class LogfmtTokenizer {
-    [GeneratedRegex(
-        @"[A-Za-z_][A-Za-z0-9_]*=(?:""[^""]*""|[^\s""]+)",
-        RegexOptions.NonBacktracking | RegexOptions.CultureInvariant,
-        matchTimeoutMilliseconds: 250)]
-    private static partial Regex PairRegex();
-
-    public static ImmutableArray<(int Start, int Length)> Pairs(ReadOnlySpan<char> line) {
-        ImmutableArray<(int Start, int Length)>.Builder pairs = ImmutableArray.CreateBuilder<(int Start, int Length)>();
-        foreach (ValueMatch match in PairRegex().EnumerateMatches(line)) {pairs.Add((Start: match.Index, Length: match.Length));}
-        return pairs.MoveToImmutable();
+public static class HotLoopEscape {
+    private static readonly Error ComputeFailed = Error.New(message: "Computation failed for input range");
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static bool TryCompute(ReadOnlySpan<double> input, out double result) {
+        result = TensorPrimitives.Sum(input);
+        return !double.IsNaN(result) && !double.IsInfinity(result);
     }
+    public static Fin<double> Compute(ReadOnlySpan<double> input) =>
+        TryCompute(input: input, result: out double result) switch {
+            true => Fin.Succ(result),
+            false => ComputeFailed
+        };
 }
 ```
-
-[IMPORTANT]: Prefer `ContainsAnyExcept` for pass/fail checks; use `IndexOfAnyExcept` only when callers need the failing position. For structural grammar (groups/alternation/anchors/multi-segment tokenization), use `[GeneratedRegex(..., RegexOptions.NonBacktracking)]`.
 
 ---
 ## [8][BENCHMARK_GATE]
@@ -353,27 +342,47 @@ using BenchmarkDotNet.Attributes;
 using BenchmarkDotNet.Running;
 
 [MemoryDiagnoser]
-public sealed class SpanVsHeapBenchmarks {
-    private readonly string _input = "12345";
+public sealed class PerformanceBenchmarks {
+    private readonly double[] _prices = Enumerable.Range(start: 0, count: 10_000)
+        .Select(static (int index) => (double)index * 1.1).ToArray();
+    private readonly Seq<double> _seqPrices = toSeq(Enumerable.Range(start: 0, count: 10_000)
+        .Select(static (int index) => (double)index * 1.1));
+    private static readonly SearchValues<char> HexChars =
+        SearchValues.Create("0123456789abcdef".AsSpan());
+    [GeneratedRegex(@"^[0123456789abcdef]{64}$",
+        RegexOptions.NonBacktracking | RegexOptions.CultureInvariant)]
+    private static partial Regex HexRegex();
+    private readonly string _hexInput = new('a', count: 64);
+    // Fold vs TensorPrimitives -- validates SIMD uplift claim
     [Benchmark(Baseline = true)]
-    public int ParseHeap() => int.Parse(_input);
+    public double SeqFoldSum() => _seqPrices.Fold(
+        state: 0.0,
+        folder: static (double acc, double value) => acc + value);
     [Benchmark]
-    public int ParseSpan() => int.Parse(_input.AsSpan());
-    // Expected output (validate per environment):
-    // |     Method |     Mean | Allocated |
-    // |----------- |---------:|----------:|
-    // |  ParseHeap | ~18.5 ns |       0 B |
-    // |  ParseSpan | ~17.2 ns |       0 B |
+    public double TensorSum() => TensorPrimitives.Sum(_prices.AsSpan());
+    // Static vs non-static lambda -- validates closure allocation claim
+    [Benchmark]
+    public Seq<double> StaticLambdaFilter() =>
+        _seqPrices.Filter(static (double value) => value > 5000.0);
+    [Benchmark]
+    public Seq<double> ClosureLambdaFilter() {
+        double threshold = 5000.0;
+        return _seqPrices.Filter((double value) => value > threshold);
+    }
+    // SearchValues vs GeneratedRegex -- validates [7A] claim
+    [Benchmark]
+    public bool SearchValuesCheck() =>
+        _hexInput.Length == 64 && !_hexInput.AsSpan().ContainsAnyExcept(HexChars);
+    [Benchmark]
+    public bool GeneratedRegexCheck() => HexRegex().IsMatch(_hexInput);
 }
-
 public static class PerfGate {
-    public static void Run() => BenchmarkRunner.Run<SpanVsHeapBenchmarks>();
+    public static void Run() => BenchmarkRunner.Run<PerformanceBenchmarks>();
 }
 ```
 
-[CRITICAL]: Every performance claim in this file uses "target:" framing. Validate with BenchmarkDotNet before standardizing micro-optimizations. Pin runtime version + hardware in benchmark reports.
-
-[IMPORTANT]: .NET 10 escape analysis now reasons about struct fields -- including `Span<T>`'s internal `ref T` + `int` length. Delegates, small arrays, and span-backed buffers that provably do not escape are stack-allocated by the JIT. Example: `BitConverter.GetBytes(...).AsSpan().CopyTo(dest)` chains achieve zero allocation in .NET 10 (was 32B in .NET 9). Validate escape behavior with `[MemoryDiagnoser]` when upgrading -- patterns that previously required manual `stackalloc` may now be JIT-optimized automatically.
+[CRITICAL]: Every performance claim in this file uses "target:" framing. Validate with BenchmarkDotNet before standardizing micro-optimizations. Pin runtime version + hardware in benchmark reports. The benchmarks above validate the core claims: SIMD uplift ([1]), closure cost ([6]), and charset validation ([7A]).<br>
+[IMPORTANT]: .NET 10 JIT escape analysis covers struct fields, delegates, small arrays, and span-backed buffers (e.g., `BitConverter.GetBytes(...).AsSpan().CopyTo(dest)` is zero-alloc in .NET 10, was 32B in .NET 9). Validate with `[MemoryDiagnoser]` -- escape analysis is heuristic and can regress across JIT updates.
 
 ---
 ## [9][RULES]
@@ -399,16 +408,15 @@ public static class PerfGate {
 ---
 ## [10][QUICK_REFERENCE]
 
-| [INDEX] | [PATTERN]                 | [WHEN]                                       | [KEY_TRAIT]                                |
-| :-----: | ------------------------- | -------------------------------------------- | ------------------------------------------ |
-|   [1]   | **TensorPrimitives**      | Hardware-accelerated numeric math            | `Multiply`/`Sum` over `Span<T>`            |
-|   [2]   | **Vector SIMD**           | Branchless conditional logic                 | Mask + `ConditionalSelect` + loop          |
-|  [2A]   | **Zero-copy reinterpret** | Bit-level span projection                    | `MemoryMarshal.Cast`/`AsBytes`             |
-|   [3]   | **Buffer hybrid**         | Stack/pool strategy selection                | `stackalloc` + `ArrayPool`                 |
-|   [4]   | **ValueTask**             | Synchronous cache-hit fast path              | `FromResult` fast path                     |
-|   [5]   | **NativeAOT**             | Trimmed AOT binaries, source-gen             | `JsonSerializerContext` source-gen         |
-|  [5A]   | **LibraryImport**         | AOT-safe native interop                      | Source-gen marshalling, no IL stub         |
-|   [6]   | **Static lambdas**        | Zero closure bytes on hot paths              | `static` keyword + tuple threading         |
-|   [7]   | **Span algorithms**       | Allocation-free sort/search/`SeparateEither` | `MemoryExtensions` + fold                  |
-|  [7A]   | **Charset validation**    | Fixed `length + allowed chars` checks        | `SearchValues<char>` + `ContainsAnyExcept` |
-|   [8]   | **Benchmark gate**        | Evidence-backed perf claims                  | `[MemoryDiagnoser]` + baseline             |
+| [INDEX] | [PATTERN]                 | [WHEN]                                     | [KEY_TRAIT]                                   |
+| :-----: | ------------------------- | ------------------------------------------ | --------------------------------------------- |
+|   [1]   | **TensorPrimitives**      | Hardware-accelerated numeric math          | `Multiply`/`Sum` over `Span<T>`               |
+|   [2]   | **Vector SIMD**           | Branchless conditional + Vector512 + scope | Mask + `ConditionalSelect` + hot-path opt-in  |
+|  [2A]   | **Zero-copy reinterpret** | Bit-level span projection                  | `MemoryMarshal.Cast`/`AsBytes`                |
+|   [3]   | **Buffer hybrid**         | Stack/pool strategy selection              | `stackalloc` + `ArrayPool`                    |
+|   [4]   | **ValueTask**             | Synchronous cache-hit fast path            | `FromResult` fast path                        |
+|   [5]   | **NativeAOT**             | Trimmed AOT binaries + `LibraryImport`     | `JsonSerializerContext` + source-gen P/Invoke |
+|   [6]   | **Static lambdas**        | Zero closure bytes on hot paths            | `static` keyword + tuple threading            |
+|   [7]   | **Span algorithms**       | Sort/search/`SeparateEither`/Fin escape    | `MemoryExtensions` + fold + raw kernel        |
+|  [7A]   | **Charset validation**    | Fixed `length + allowed chars` checks      | `SearchValues<char>` + `ContainsAnyExcept`    |
+|   [8]   | **Benchmark gate**        | Evidence-backed perf claims                | `[MemoryDiagnoser]` + baseline                |

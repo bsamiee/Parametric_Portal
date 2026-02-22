@@ -4,7 +4,7 @@
  */
 import type { Kargadan } from '@parametric-portal/types/kargadan';
 import { Data, Duration, Effect, Match } from 'effect';
-import { HarnessConfig } from '../config';
+import { createTelemetryContext, HarnessConfig } from '../config';
 import { SessionSupervisor, SessionTransition } from './supervisor';
 import { KargadanSocketClient } from '../socket';
 
@@ -33,7 +33,7 @@ class CommandDispatch extends Effect.Service<CommandDispatch>()('kargadan/Comman
     effect: Effect.gen(function* () {
         const [session, socket] = yield* Effect.all([SessionSupervisor, KargadanSocketClient]);
         const handshake = Effect.fn('CommandDispatch.handshake')(
-            (input: { readonly identity: Kargadan.EnvelopeIdentity; readonly token: string }) =>
+            (input: { readonly identity: Kargadan.EnvelopeIdentity; readonly token: string; readonly traceId: string }) =>
                 Effect.gen(function* () {
                     const capabilities = yield* HarnessConfig.resolveCapabilities;
                     yield* session.transition(SessionTransition.Connect({ sessionId: input.identity.sessionId }));
@@ -46,12 +46,12 @@ class CommandDispatch extends Effect.Service<CommandDispatch>()('kargadan/Comman
                         },
                         capabilities,
                         identity: input.identity,
-                        telemetryContext: {
+                        telemetryContext: createTelemetryContext({
                             attempt: 1,
                             operationTag: 'handshake',
-                            spanId: crypto.randomUUID().replaceAll('-', ''),
-                            traceId: crypto.randomUUID().replaceAll('-', ''),
-                        },
+                            requestId: input.identity.requestId,
+                            traceId: input.traceId,
+                        }),
                     } satisfies Kargadan.HandshakeEnvelope;
                     const response = yield* socket.write.request(envelope);
                     return yield* Match.value(response).pipe(
@@ -90,18 +90,19 @@ class CommandDispatch extends Effect.Service<CommandDispatch>()('kargadan/Comman
                 );
             }),
         );
-        const heartbeat = Effect.fn('CommandDispatch.heartbeat')((identity: Kargadan.EnvelopeIdentity) => {
+        const heartbeat = Effect.fn('CommandDispatch.heartbeat')((identity: Kargadan.EnvelopeIdentity, traceId: string, attempt = 1) => {
+            const requestId = crypto.randomUUID();
             const envelope: Kargadan.HeartbeatEnvelope = {
                 _tag: 'heartbeat',
-                identity: { ...identity, issuedAt: new Date(), requestId: crypto.randomUUID() },
+                identity: { ...identity, issuedAt: new Date(), requestId },
                 mode: 'ping',
                 serverTime: new Date(),
-                telemetryContext: {
-                    attempt: 1,
+                telemetryContext: createTelemetryContext({
+                    attempt,
                     operationTag: 'heartbeat',
-                    spanId: crypto.randomUUID().replaceAll('-', ''),
-                    traceId: crypto.randomUUID().replaceAll('-', ''),
-                },
+                    requestId,
+                    traceId,
+                }),
             };
             return socket.write.request(envelope).pipe(
                 Effect.flatMap((response) =>

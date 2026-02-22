@@ -68,8 +68,9 @@ public static class OrchestrationPipeline {
     public static Eff<AppRuntime, TransactionState> ExecuteWorkflow(
         InitializationRequest request) =>
         TransactionValidator.ValidateRequest(request: request)
-            .ToEither()
-            .MapLeft(f: (Seq<Error> errors) => Error.New(message: "Validation fault", inner: errors.Head))
+            .ToFin()
+            .MapFail((Error error) =>
+                Error.New(message: "Validation fault", inner: error))
             .ToEff()
             .Bind(f: (TransactionState.Pending pending) =>
                 Eff<AppRuntime, IGatewayProvider>.Asks(static (AppRuntime rt) => rt.Gateway)
@@ -88,6 +89,9 @@ public static class OrchestrationPipeline {
 ```csharp
 public static Eff<AppRuntime, OrderConfirmation> ProcessOrder(
     OrderRequest request) =>
+    // guard : (bool, Error) -> Guard<Error, Unit>
+    // guardnot : (bool, Error) -> Guard<Error, Unit>
+    // Guard<Error, Unit> integrates with Eff/IO LINQ via SelectMany extensions.
     from _         in guard(request.Items.Count > 0, Error.New(message: "Order must have items"))
     from __        in guardnot(request.IsExpired, Error.New(message: "Order has expired"))
     from svc       in Eff<AppRuntime, IOrderService>.Asks(static (AppRuntime rt) => rt.OrderService)
@@ -125,13 +129,31 @@ public static class Errors {
     public static readonly Error NotFound = Error.New(message: "Resource not found");
 }
 
+// --- [ERROR_HIERARCHY] -------------------------------------------------------
+
+// Domain error hierarchy via Expected (recoverable) / Exceptional (system) subtypes:
+public sealed record NotFoundError(string Resource, string Key)
+    : Expected(message: $"{Resource} '{Key}' not found", code: 404);
+public sealed record ConflictError(string Resource, string Key)
+    : Expected(message: $"{Resource} '{Key}' conflict", code: 409);
+
 // --- [CATCH] -----------------------------------------------------------------
 
-// @catch -- predicate overload: recover from specific errors in Eff pipelines
+// @catch overloads (CatchM<Error, M, A> factory via Prelude):
+// 1. | @catch((Error err) => recover(err))            -- catch-all with factory
+// 2. | @catch(Errors.TimedOut, (Error err) => f(err)) -- equality + factory
+// 3. | @catch((Error err) => err.Code == 504, eff)    -- predicate + eager
+// 4. | @catch(Errors.NotFound, defaultEff)             -- equality + eager
+
 Eff<AppRuntime, HttpResponse> resilientCall = CallApi(request: request)
     | @catch((Error err) => err == Errors.TimedOut, RetryWithFallback(request: request))
     | @catch((Error err) => err == Errors.NotFound,
         Eff<AppRuntime, HttpResponse>.Pure(new HttpResponse(Status: 404)));
+
+// Typed recovery via Expected subtype predicate:
+Eff<AppRuntime, Resource> typedRecovery = LoadResource(key: key)
+    | @catch((Error err) => err is NotFoundError, handleNotFoundEff)
+    | @catch((Error err) => err is ConflictError, handleConflictEff);
 
 // --- [ALTERNATIVE] -----------------------------------------------------------
 
@@ -310,7 +332,22 @@ public static class ResiliencePolicy {
 - [NEVER] `try`/`catch`/`throw` in domain code -- effects are typed.
 - [NEVER] Early `Match` in mid-pipeline -- prefer `Map`/`Bind`/`BiMap`.
 - [NEVER] v4 `Has<RT, Trait>` / `default(RT)` pattern -- use v5 `Eff<RT, T>.Asks` with runtime record.
-- [IMPORTANT] Encode cancellation boundaries explicitly via `Eff` -- delimit uninterruptible regions rather than scattering `CancellationToken` checks.
+- [NEVER] `await` inside methods returning `Eff<RT,T>` -- CSP0711 catches mixed paradigms where `async`/`await` appears in an Eff-returning method body. Bridge async operations via `.ToEff()` on `Fin<T>` results, or `liftIO(IO.liftAsync(...))` for raw `Task` boundaries. The Eff pipeline owns scheduling; injecting `await` breaks the monadic composition and loses error-channel typing.
+- [IMPORTANT] Encode cancellation boundaries explicitly via `Eff` -- delimit uninterruptible regions rather than scattering `CancellationToken` checks. See `concurrency.md` [1] for `WithTimeout` via `Bracket`; `concurrency.md` [3] for async stream cancellation patterns.
+
+```csharp
+// [ANTI-PATTERN] CSP0711 -- await inside Eff-returning method mixes paradigms
+// public static Eff<RT, string> Fetch<RT>(HttpClient client, string url) {
+//     string result = await client.GetStringAsync(url);  // async/await in Eff body
+//     return Eff<RT, string>.Pure(result);
+// }
+
+// [CORRECT] -- lift async boundary via IO.liftAsync, compose in Eff
+public static Eff<RT, string> Fetch<RT>(HttpClient client, string url) =>
+    liftIO(IO.liftAsync(
+        async () => await client.GetStringAsync(url).ConfigureAwait(false)))
+    .ToEff<RT, string>();
+```
 
 ---
 ## [10][QUICK_REFERENCE]

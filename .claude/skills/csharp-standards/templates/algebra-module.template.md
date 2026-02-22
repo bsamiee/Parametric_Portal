@@ -5,8 +5,8 @@
 
 Produces one algebraic abstraction module: query union as a sealed DU with `Fold` catamorphism, a single-method interface dispatching through the fold, an `Atom<HashMap<K,V>>`-backed pure interpreter, a `K<F,A>`-polymorphic interpreter that eliminates `(TResult)(object)` double-casts, an effectful `Eff<RT,T>` interpreter composing with the polymorphic path, a decorator composing cross-cutting behavior via fold wrapping, C# 14 extension members on the algebra, `params ReadOnlySpan<T>` batch execution, and applicative boundary validation.
 
-**Density:** ~400 LOC signals a refactoring opportunity. No file proliferation; helpers are always a code smell.
-**References:** `composition.md` ([4] HKT encoding, [2] arity collapse, [5] algebraic compression), `effects.md` ([2] Eff pipelines, [7] STM/Atom, [3] @catch), `types.md` ([1] domain primitives, [4] DUs), `objects.md` ([7] boundary adapters), `performance.md` ([7] static lambdas), `validation.md` ([1]-[6] post-scaffold checklist), `algorithms.md` ([1] recursion schemes, [6] Kleisli).
+**Density:** ~400 LOC signals a refactoring opportunity. No file proliferation; helpers are always a code smell.<br>
+**References:** `composition.md` ([4] HKT encoding, [2] arity collapse, [5] algebraic compression), `effects.md` ([2] Eff pipelines, [7] STM/Atom, [3] @catch), `types.md` ([1] domain primitives, [4] DUs), `objects.md` ([7] boundary adapters), `performance.md` ([7] static lambdas), `validation.md` ([1]-[6] post-scaffold checklist), `algorithms.md` ([1] recursion schemes, [6] Kleisli).<br>
 **Workflow:** Fill placeholders, remove guidance blocks, run post-scaffold checklist, verify compilation.
 
 ---
@@ -25,6 +25,7 @@ Produces one algebraic abstraction module: query union as a sealed DU with `Fold
 |   [9]   | **`${ConfigValid}`**     | `candidate.Length > 0`      |
 |  [10]   | **`${ConfigMessage}`**   | `"Name must be non-empty."` |
 |  [11]   | **`${DiagnosticLabel}`** | `"store.execute"`           |
+|  [12]   | **`${RuntimeName}`**     | `StoreRuntime`              |
 
 ---
 ```csharp
@@ -83,13 +84,13 @@ public abstract record ${AlgebraName}Query<${KeyType}, ${ValueType}, TResult>
                 message: "Exhaustive: all ${AlgebraName}Query variants handled")
         };
 }
-// C# 14 extension members -- pure projections via Fold.
-// file static class keeps projection helpers file-private and off the public API surface.
-file static class ${AlgebraName}QueryExtensions {
+// C# 14 extension block -- pure projections via Fold.
+// file-scoped extension block keeps projection helpers file-private and off the public API surface.
+// See types.md [4] for extension block syntax and composition.md [2] for arity collapse.
+file extension(${AlgebraName}Query<${KeyType}, ${ValueType}, TResult> query)
+    where ${KeyType} : notnull {
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static bool IsMutation<${KeyType}, ${ValueType}, TResult>(
-        this ${AlgebraName}Query<${KeyType}, ${ValueType}, TResult> query)
-        where ${KeyType} : notnull =>
+    public bool IsMutation() =>
         query.Fold(
             onGet: static _ => false,
             onUpsert: static _ => true,
@@ -120,7 +121,6 @@ public interface ${InterfaceName}<${KeyType}, ${ValueType}>
 }
 
 // --- [FUNCTIONS] -------------------------------------------------------------
-
 // Pure interpreter backed by Atom<HashMap<K,V>> -- lock-free atomic state
 // with persistent CHAMP trie. See effects.md [7] for Atom/Ref STM patterns.
 public sealed class ${ImplName}<${KeyType}, ${ValueType}>(
@@ -128,12 +128,14 @@ public sealed class ${ImplName}<${KeyType}, ${ValueType}>(
     : ${InterfaceName}<${KeyType}, ${ValueType}>
     where ${KeyType} : notnull {
     private readonly Atom<HashMap<${KeyType}, ${ValueType}>> _state = Atom(seed);
+    // [DEPRECATED] Monomorphic Execute<TResult> requires (TResult)(object) double-cast
+    // because TResult is erased at runtime. Prefer ${AlgebraName}Interpret.Execute<F,...>
+    // which eliminates the cast entirely via K<F,A> type-level dispatch.
+    // This path is retained only for Fin-only consumers that cannot select F at the call site.
     public Fin<TResult> Execute<TResult>(
         ${AlgebraName}Query<${KeyType}, ${ValueType}, TResult> query) =>
         query.Fold(
             onGet: (${AlgebraName}Query<${KeyType}, ${ValueType}, TResult>.Get getQuery) =>
-                // [MONOMORPHIC-PATH] K<F,A> requires object boxing when F is erased at runtime.
-                // Prefer ${AlgebraName}Interpret.Execute path when F is known -- avoids double-cast.
                 Fin.Succ((TResult)(object)_state.Value.Find(key: getQuery.Key)),
             onUpsert: (${AlgebraName}Query<${KeyType}, ${ValueType}, TResult>.Upsert upsertQuery) =>
                 _state.Swap((HashMap<${KeyType}, ${ValueType}> current) =>
@@ -144,7 +146,7 @@ public sealed class ${ImplName}<${KeyType}, ${ValueType}>(
                 _state.Swap((HashMap<${KeyType}, ${ValueType}> current) =>
                     current.Remove(key: deleteQuery.Key))
                     .Pipe(static (HashMap<${KeyType}, ${ValueType}> _) =>
-                        Fin.Succ((TResult)(object)unit));
+                        Fin.Succ((TResult)(object)unit)));
     // Batch: params ReadOnlySpan<T> collapses all arities -- see composition.md [2].
     /// <summary>
     /// Execute multiple queries in batch. Note: materializes the span into an array
@@ -161,7 +163,6 @@ public sealed class ${ImplName}<${KeyType}, ${ValueType}>(
 }
 
 // --- [DECORATORS] ------------------------------------------------------------
-
 // Wraps Execute with cross-cutting behavior via fold label extraction.
 // Compose by nesting: new Logging(new Caching(new InMemory(seed))).
 // Replace Action<string> with Observe.Outcome tap for unified telemetry
@@ -183,7 +184,6 @@ public sealed class ${DecoratorName}<${KeyType}, ${ValueType}>(
 }
 
 // --- [POLYMORPHIC_INTERPRETER] -----------------------------------------------
-
 // K<F,A>-polymorphic interpreter: eliminates (TResult)(object) double-cast
 // by parameterizing the effect context. The caller selects F at the call site:
 //   Interpret<Fin, K, V, Option<V>>(getQuery, lookup).As()
@@ -206,23 +206,23 @@ public static class ${AlgebraName}Interpret {
 }
 
 // --- [EFFECTFUL_INTERPRETER] -------------------------------------------------
-
-// Lifts the pure interface into Eff<RT,T> via runtime-record DI.
-// Composes with the polymorphic interpreter when callers need K<F,A>
-// generality; delegates to the monomorphic interface for Fin-only paths.
-// See effects.md [2] for Eff pipelines, [3] for @catch.
-public interface Has${AlgebraName}<RT, ${KeyType}, ${ValueType}>
-    where RT : Has${AlgebraName}<RT, ${KeyType}, ${ValueType}>
-    where ${KeyType} : notnull {
-    ${InterfaceName}<${KeyType}, ${ValueType}> Trait { get; }
-}
+// Lifts the pure interface into Eff<RT,T> via v5 runtime-record DI.
+// RT is a plain sealed record with a property of type ${InterfaceName}<K,V> --
+// no Has<RT, Trait> CRTP. Access via Eff<RT, T>.Asks on the property.
+// See effects.md [2]:45 -- v5 forbids Has<RT, Trait> interface indirection.
+// Composes with the polymorphic interpreter when callers need K<F,A> generality.
+//
+// USAGE: Define the runtime record in the composition root, e.g.:
+//   public sealed record ${RuntimeName}(
+//       ${InterfaceName}<${KeyType}, ${ValueType}> ${AlgebraName}Store,
+//       IClock Clock);
 public static class ${AlgebraName}Eff {
     public static Eff<RT, TResult> Execute<RT, ${KeyType}, ${ValueType}, TResult>(
         ${AlgebraName}Query<${KeyType}, ${ValueType}, TResult> query)
-        where RT : Has${AlgebraName}<RT, ${KeyType}, ${ValueType}>
+        where RT : allows ref struct
         where ${KeyType} : notnull =>
         from algebra in Eff<RT, ${InterfaceName}<${KeyType}, ${ValueType}>>
-            .Asks(static (RT runtime) => runtime.Trait)
+            .Asks(static (RT runtime) => runtime.${AlgebraName}Store)
         from result in algebra.Execute(query: query).ToEff()
         select result;
     // @catch / | Alternative: declarative error recovery.
@@ -231,7 +231,7 @@ public static class ${AlgebraName}Eff {
     public static Eff<RT, TResult> ExecuteWithFallback<RT, ${KeyType}, ${ValueType}, TResult>(
         ${AlgebraName}Query<${KeyType}, ${ValueType}, TResult> primary,
         ${AlgebraName}Query<${KeyType}, ${ValueType}, TResult> fallback)
-        where RT : Has${AlgebraName}<RT, ${KeyType}, ${ValueType}>
+        where RT : allows ref struct
         where ${KeyType} : notnull =>
         Execute<RT, ${KeyType}, ${ValueType}, TResult>(query: primary)
         | @catch(${AlgebraName}Errors.NotFound,
@@ -239,7 +239,6 @@ public static class ${AlgebraName}Eff {
 }
 
 // --- [VALIDATION] ------------------------------------------------------------
-
 // Boundary adapter: applicative validation for query construction from
 // external input. See objects.md [7], validation.md [2].
 public readonly record struct ${AlgebraName}Request(string RawKey, string RawValue);
@@ -263,7 +262,6 @@ public static class ${AlgebraName}Boundary {
 }
 
 // --- [EXPORT] ----------------------------------------------------------------
-
 // All types and static classes above use explicit accessibility.
 // No barrel files or re-exports.
 ```
@@ -271,13 +269,11 @@ public static class ${AlgebraName}Boundary {
 ---
 **Guidance**
 
-*Query Union + Fold* -- The sealed DU with `Fold` catamorphism is the algebra's core. New operations add new variants and Fold parameters; existing interpretations compile unchanged. The `_` arm with `UnreachableException` guards until C# ships native DU exhaustiveness. For recursive algebras (expression trees), Fold recurses into sub-expressions per `composition.md` [5] and `algorithms.md` [1].
-
-*Polymorphic Interpreter via K<F,A>* -- `${AlgebraName}Interpret.Execute` parameterizes the effect context via `F : Fallible<F>, Applicative<F>`, eliminating the `(TResult)(object)` double-cast from the monomorphic path. Callers select `F` at the call site and must call `.As()` to downcast `K<F,A>` to the concrete type -- see `composition.md` [4]. The `Eff` interpreter composes with this path when callers need generic effect selection; the monomorphic `${InterfaceName}.Execute` remains for `Fin`-only consumers.
-
-*Atom State + Decorators* -- `Atom<HashMap<K,V>>` provides lock-free atomic state with pure `Swap` transitions (see `effects.md` [7]). Decorators compose by nesting and inspect queries via Fold for cross-cutting concerns. Static lambdas on Fold in hot-path interpreters prevent closure allocations (see `performance.md` [7]); non-static lambdas are acceptable when Fold arms reference instance state. To promote a decorator to full observability, replace `Action<string> log` with `Observe.Outcome` tap on the returned `Fin<TResult>` -- see `observability.md` [4]. For debug-only span wrapping, use `Probe.Span` from a centralized `Diagnostics` module rather than inlining `ActivitySource` -- see `diagnostics.md` [1] and `diagnostics.md` [3].
-
-*Expression Trees vs Fold Catamorphism* -- Do NOT use `Expression<Func<...>>` compilation inside algebra interpreters. The Fold catamorphism already provides zero-overhead dispatch via pattern matching -- expression tree compilation adds startup latency (~10-40x slower than direct delegate creation) with no runtime benefit over Fold. Reserve compiled expression trees for infrastructure boundaries: pre-compiled property-to-tag extractors in observability (see `observability.md` [1] `TagPolicy.CompileTagExtractor`), dynamic LINQ query translation at adapter boundaries, or serialization source generators. The K<F,A> polymorphic interpreter achieves the same extensibility through type-level abstraction, not runtime code generation.
+*Query Union + Fold:* The sealed DU with `Fold` catamorphism is the algebra's core. New operations add new variants and Fold parameters; existing interpretations compile unchanged. The `_` arm with `UnreachableException` guards until C# ships native DU exhaustiveness. For recursive algebras (expression trees), Fold recurses into sub-expressions per `composition.md` [5] and `algorithms.md` [1].<br>
+*Polymorphic Interpreter via K<F,A>:* `${AlgebraName}Interpret.Execute` parameterizes the effect context via `F : Fallible<F>, Applicative<F>`, eliminating the `(TResult)(object)` double-cast from the monomorphic path. Callers select `F` at the call site and must call `.As()` to downcast `K<F,A>` to the concrete type -- see `composition.md` [4]. The `Eff` interpreter composes with this path when callers need generic effect selection; the deprecated monomorphic `${InterfaceName}.Execute` path remains only for `Fin`-only consumers that cannot select `F` at the call site.<br>
+*Runtime Record (v5 DI Pattern):* `${AlgebraName}Eff` accesses `${InterfaceName}<K,V>` via `Eff<RT, T>.Asks(rt => rt.${AlgebraName}Store)` where `RT` is a plain `sealed record`. No `Has<RT, Trait>` CRTP interface -- that pattern was abolished in LanguageExt v5; see `effects.md` [2]:45. Define `${RuntimeName}` in the composition root alongside all other dependency properties. The `where RT : allows ref struct` constraint replaces the old F-bounded constraint.<br>
+*Atom State + Decorators:* `Atom<HashMap<K,V>>` provides lock-free atomic state with pure `Swap` transitions (see `effects.md` [7]). Decorators compose by nesting and inspect queries via Fold for cross-cutting concerns. Static lambdas on Fold in hot-path interpreters prevent closure allocations (see `performance.md` [7]); non-static lambdas are acceptable when Fold arms reference instance state. To promote a decorator to full observability, replace `Action<string> log` with `Observe.Outcome` tap on the returned `Fin<TResult>` -- see `observability.md` [4]. For debug-only span wrapping, use `Probe.Span` from a centralized `Diagnostics` module rather than inlining `ActivitySource` -- see `diagnostics.md` [1] and `diagnostics.md` [3].<br>
+*Expression Trees vs Fold Catamorphism:* Do NOT use `Expression<Func<...>>` compilation inside algebra interpreters. The Fold catamorphism already provides zero-overhead dispatch via pattern matching -- expression tree compilation adds startup latency (~10-40x slower than direct delegate creation) with no runtime benefit over Fold. Reserve compiled expression trees for infrastructure boundaries: pre-compiled property-to-tag extractors in observability (see `observability.md` [1] `TagPolicy.CompileTagExtractor`), dynamic LINQ query translation at adapter boundaries, or serialization source generators. The K<F,A> polymorphic interpreter achieves the same extensibility through type-level abstraction, not runtime code generation.
 
 ---
 ## [POST_SCAFFOLD]

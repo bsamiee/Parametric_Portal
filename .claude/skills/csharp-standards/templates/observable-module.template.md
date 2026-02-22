@@ -5,9 +5,9 @@
 
 Produces one observable service module: `BoundedChannel<Fin<T>>` for backpressure-aware streaming, `Eff<RT,T>` producer/consumer lifecycle via bracketed `use`, `Fin<T>` error propagation through the stream without channel collapse, `IAsyncDisposable` resource cleanup, `ObserveSpec`-driven telemetry projection on stream events, and `K<F,A>`-polymorphic message validation.
 
-**Density:** ~400 LOC signals a refactoring opportunity. No file proliferation; helpers are always a code smell.
-**References:** `effects.md` (Fin, Eff, IO, @catch, Schedule), `types.md` (domain primitives, sealed DUs), `composition.md` (HKT encoding, extension members), `performance.md` (static lambdas), `observability.md` (structured logging, tracing, metrics, ObserveSpec, TagPolicy), `concurrency.md` (channel patterns, backpressure).
-**Anti-Pattern Awareness:** See `patterns.md` [1] for PREMATURE_MATCH_COLLAPSE, NULL_ARCHITECTURE, OVERLOAD_SPAM, VARIABLE_REASSIGNMENT.
+**Density:** ~400 LOC signals a refactoring opportunity. No file proliferation; helpers are always a code smell.<br>
+**References:** `effects.md` (Fin, Eff, IO, @catch, Schedule), `types.md` (domain primitives, sealed DUs), `composition.md` (HKT encoding, extension members), `performance.md` (static lambdas), `observability.md` (structured logging, tracing, metrics, ObserveSpec, TagPolicy), `concurrency.md` (channel patterns, backpressure).<br>
+**Anti-Pattern Awareness:** See `patterns.md` [1] for PREMATURE_MATCH_COLLAPSE, NULL_ARCHITECTURE, OVERLOAD_SPAM, VARIABLE_REASSIGNMENT.<br>
 **Workflow:** Fill placeholders, remove guidance blocks, verify compilation.
 
 ---
@@ -27,6 +27,7 @@ Produces one observable service module: `BoundedChannel<Fin<T>>` for backpressur
 |  [10]   | `${DependencyMethod}` | `Persist`                                              |
 |  [11]   | `${ChannelCapacity}`  | `256`                                                  |
 |  [12]   | `${RetrySchedule}`    | `Schedule.exponential(100 * ms) \| Schedule.recurs(3)` |
+|  [13]   | `${RuntimeName}`      | `EventStreamRuntime`                                   |
 
 ---
 ```csharp
@@ -112,15 +113,19 @@ internal static partial class Log {
 
 // --- [SERVICES] --------------------------------------------------------------
 
-public interface IObservabilityProvider { ILogger Logger { get; } }
+// NOTE: IObservabilityProvider lives in shared infrastructure. Import, do not redeclare.
+// Declaring it here causes duplicate-definition errors when multiple modules scaffold
+// from this template within the same project. Reference the shared assembly type instead.
 public interface ${DependencyTrait} {
     Eff<string> ${DependencyMethod}(${ValidatedMessage} message);
 }
-public interface ${ServiceName}Runtime<RT>
-    where RT : ${ServiceName}Runtime<RT> {
-    IObservabilityProvider ObservabilityProvider { get; }
-    ${DependencyTrait} Dependency { get; }
-}
+// v5 runtime record: plain sealed record carrying all dependencies as properties.
+// No Has<RT, Trait> CRTP -- abolished in LanguageExt v5; see effects.md [2]:45.
+// Access via Eff<${RuntimeName}, T>.Asks(static (${RuntimeName} rt) => rt.Property).
+// Define ${RuntimeName} in the composition root alongside all other dependency properties.
+public sealed record ${RuntimeName}(
+    IObservabilityProvider ObservabilityProvider,
+    ${DependencyTrait} Dependency);
 
 // --- [FUNCTIONS] -------------------------------------------------------------
 
@@ -179,9 +184,9 @@ public static class ${ServiceName} {
                 SingleWriter = false, SingleReader = true
             });
     // Produce: validate, write to channel. Backpressure via TryWrite gate.
-    public static Eff<RT, Unit> Produce<RT>(
-        ChannelWriter<Fin<${ValidatedMessage}>> writer, ${MessageType} message)
-        where RT : ${ServiceName}Runtime<RT> =>
+    // RT is the plain runtime record defined at the composition root -- no CRTP.
+    public static Eff<${RuntimeName}, Unit> Produce(
+        ChannelWriter<Fin<${ValidatedMessage}>> writer, ${MessageType} message) =>
         from validated in Observe.Validation(
                 ValidateGeneric<Validation<Error>>(message: message).As(),
                 "${Operation}.validate")
@@ -197,45 +202,48 @@ public static class ${ServiceName} {
             return unit;
         })
         select unit;
-    // Consume: read one item, process via dependency, emit telemetry.
+    // ProcessItem: named pipeline that classifies a single Fin<ValidatedMessage>.
+    // Extracted to keep Consume under 4 nesting levels (CLAUDE.md [3]).
+    // Fin<T>.Match is exhaustive; no imperative switch -- see SKILL.md [2].
+    private static Eff<${RuntimeName}, StreamOutcome<${ResultType}>> ProcessItem(
+        Fin<${ValidatedMessage}> item, ${DependencyTrait} dependency) =>
+        item.Match(
+            Succ: (${ValidatedMessage} validated) =>
+                dependency.${DependencyMethod}(message: validated)
+                    .Retry(schedule: ${RetrySchedule} & Schedule.upto(30 * sec))
+                    .Map((string confirmation) =>
+                        (StreamOutcome<${ResultType}>)new StreamOutcome<${ResultType}>.Yielded(
+                            new ${ResultType}(Id: validated.Id, Confirmation: confirmation))),
+            Fail: (Error error) =>
+                Pure((StreamOutcome<${ResultType}>)
+                    new StreamOutcome<${ResultType}>.Faulted(error)));
+    // Consume: read one item, delegate to ProcessItem, emit telemetry.
     // Bracket owns Activity span lifecycle; Inflight gauge tracks depth.
-    public static Eff<RT, StreamOutcome<${ResultType}>> Consume<RT>(
-        ChannelReader<Fin<${ValidatedMessage}>> reader)
-        where RT : ${ServiceName}Runtime<RT> =>
-        from observability in Eff<RT, IObservabilityProvider>.Asks(static (RT runtime) => runtime.ObservabilityProvider)
-        from dependency in Eff<RT, ${DependencyTrait}>.Asks(static (RT runtime) => runtime.Dependency)
+    // Nesting: Consume body (1) -> Bracket.Use lambda (2) -> ProcessItem call (3) -- within cap.
+    public static Eff<${RuntimeName}, StreamOutcome<${ResultType}>> Consume(
+        ChannelReader<Fin<${ValidatedMessage}>> reader) =>
+        from observability in Eff<${RuntimeName}, IObservabilityProvider>
+            .Asks(static (${RuntimeName} runtime) => runtime.ObservabilityProvider)
+        from dependency in Eff<${RuntimeName}, ${DependencyTrait}>
+            .Asks(static (${RuntimeName} runtime) => runtime.Dependency)
         from outcome in IO.lift(
             () => Signals.Source.StartActivity("${Operation}.consume", ActivityKind.Internal))
             .Bracket(
                 Use: (Activity? activity) => {
                     long start = TimeProvider.System.GetTimestamp();
                     Signals.Inflight.Add(1);
-                    return reader.TryRead(out Fin<${ValidatedMessage}>? item) switch {
-                        false => liftEff(static () => {
+                    Eff<${RuntimeName}, StreamOutcome<${ResultType}>> pipeline =
+                        reader.TryRead(out Fin<${ValidatedMessage}>? item)
+                            ? ProcessItem(item: item!, dependency: dependency)
+                            : Pure((StreamOutcome<${ResultType}>)
+                                new StreamOutcome<${ResultType}>.Completed());
+                    return pipeline
+                        .Map((StreamOutcome<${ResultType}> result) => {
                             Signals.Inflight.Add(-1);
-                            return (StreamOutcome<${ResultType}>)
-                                new StreamOutcome<${ResultType}>.Completed();
-                        }),
-                        true => item!.Match(
-                            Succ: (${ValidatedMessage} validated) =>
-                                dependency.${DependencyMethod}(message: validated)
-                                    .Retry(schedule: ${RetrySchedule} & Schedule.upto(30 * sec))
-                                    .Map((string confirmation) => {
-                                        Signals.Inflight.Add(-1);
-                                        return (StreamOutcome<${ResultType}>)
-                                            new StreamOutcome<${ResultType}>.Yielded(
-                                                new ${ResultType}(
-                                                    Id: validated.Id,
-                                                    Confirmation: confirmation));
-                                    }),
-                            Fail: (Error error) => liftEff(() => {
-                                Signals.Inflight.Add(-1);
-                                return (StreamOutcome<${ResultType}>)
-                                    new StreamOutcome<${ResultType}>.Faulted(error);
-                            }))
-                    }.Map((StreamOutcome<${ResultType}> result) =>
-                        Observe.Outcome(result, observability.Logger,
-                            "${Operation}.consume", start)).As();
+                            return Observe.Outcome(result, observability.Logger,
+                                "${Operation}.consume", start);
+                        })
+                        .As();
                 },
                 Fin: static (Activity? activity) => IO.lift(() => {
                     activity?.Dispose();
@@ -255,18 +263,16 @@ public static class ${ServiceName}Composition {
             .AsSelfWithInterfaces()
             .WithScopedLifetime());
 }
-
 public static class ${ServiceName}Boundary {
-    public static Fin<long> RunStream<RT>(
-        Seq<${MessageType}> messages, RT runtime, ILogger logger)
-        where RT : ${ServiceName}Runtime<RT> {
+    public static Fin<long> RunStream(
+        Seq<${MessageType}> messages, ${RuntimeName} runtime, ILogger logger) {
         using Activity? activity = Signals.Source.StartActivity(
             "${Operation}", ActivityKind.Internal);
         Channel<Fin<${ValidatedMessage}>> channel = ${ServiceName}.CreateChannel();
         Log.ProducerStarted(logger, "${Operation}", ${ChannelCapacity});
         long produced = messages.Fold(0L,
             (long count, ${MessageType} message) =>
-                ${ServiceName}.Produce<RT>(writer: channel.Writer, message: message)
+                ${ServiceName}.Produce(writer: channel.Writer, message: message)
                     .Run(runtime).Run()
                     .Match(Succ: static (Unit _, long current) => current + 1,
                            Fail: static (Error _, long current) => current, count));
@@ -285,20 +291,16 @@ public static class ${ServiceName}Boundary {
 
 ---
 **Guidance: Channel-Based Reactive Streams**
-
 `System.Threading.Channels` provides the reactive substrate: `BoundedChannel<Fin<T>>` enforces backpressure via `BoundedChannelFullMode.Wait`, the writer blocks cooperatively when the buffer is full. Wrapping items in `Fin<T>` propagates errors through the channel without collapsing the stream -- a faulted message is one item, not a terminal signal. The `StreamOutcome<T>` sealed DU with `Fold` catamorphism classifies consumer results exhaustively: `Yielded` for successful processing, `Faulted` for per-message errors, `Completed` for stream termination. This avoids `if`/`switch` in consumer logic.
 
 **Guidance: Producer/Consumer Lifecycle**
-
 `Produce` validates via `K<F,A>`-polymorphic `ValidateGeneric`, writes to the bounded channel via `guard` + `TryWrite`, and emits `Signals.Produced` metrics. `Consume` reads from `ChannelReader`, brackets each message in an `Activity` span, delegates to the dependency trait with retry schedule, and projects telemetry through `Observe.Outcome`. The bracket pattern (`IO.lift(...).Bracket(Use:..., Fin:...)`) ensures the `Activity` is disposed regardless of success or failure -- no leaked spans. `Signals.Inflight` tracks concurrent processing depth.
 
 **Guidance: Telemetry Projection**
-
 `Observe.Outcome` on `StreamOutcome<T>` is the single fused projection surface. The `Fold` catamorphism dispatches to success/failure/completion telemetry paths: counters (`Produced`, `Consumed`, `Faults`), histogram (`ProcessDuration`), gauge (`Inflight`), structured logs via `[LoggerMessage]`, and `Activity` span status. `Observe.Validation` handles validation failure counting independently. All metric dimensions follow the `operation` + `outcome` taxonomy from `observability.md` `TagPolicy.Outcome`.
 
-**Guidance: F-Bounded Runtime (CRTP)**
-
-`${ServiceName}Runtime<RT> where RT : ${ServiceName}Runtime<RT>` is the Curiously Recurring Template Pattern (CRTP), also called F-bounded polymorphism. The self-referential constraint lets `Eff<RT, T>` pipelines preserve the concrete runtime type through every composition step -- no upcasting to an abstract base. Concrete runtime records (e.g. `AppRuntime`) implement `${ServiceName}Runtime<AppRuntime>` and carry `IObservabilityProvider` and `${DependencyTrait}` as instance properties, making all capabilities available via the `RT` type parameter without service-locator lookups.
+**Guidance: v5 Runtime Record (No CRTP)**
+`${RuntimeName}` is a plain `sealed record` carrying `IObservabilityProvider` and `${DependencyTrait}` as primary-constructor properties. LanguageExt v5 abolished the `Has<RT, Trait>` / CRTP pattern (`where RT : ${ServiceName}Runtime<RT>`) -- see `effects.md` [2]:45. `Eff<${RuntimeName}, T>.Asks(static (${RuntimeName} rt) => rt.Property)` lifts a property accessor into the effect; no interface hierarchy, no F-bounded constraint. Define `${RuntimeName}` in the composition root alongside all other dependency properties; inject it as a singleton. `IObservabilityProvider` lives in shared infrastructure -- import it, do not redeclare it in this module (see [SERVICES] note above).
 
 ---
 ## [POST_SCAFFOLD]

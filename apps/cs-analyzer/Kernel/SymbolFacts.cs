@@ -5,6 +5,7 @@ using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Operations;
+using ParametricPortal.CSharp.Analyzers.Contracts;
 
 namespace ParametricPortal.CSharp.Analyzers.Kernel;
 
@@ -75,7 +76,6 @@ internal static class Markers {
     internal static readonly string[] GeneratedPath = [".g.cs", ".designer.cs", "/obj/", "\\obj\\"];
     internal static readonly string[] TestPath = ["/tests/", "\\tests\\", ".Tests", "Test.cs", "Tests.cs"];
     internal static readonly string[] ObservabilityParts = ["Observability", "Telemetry"];
-    internal static readonly string[] DomainPrefixes = [DomainNamespace, ApplicationNamespace];
 }
 
 // --- [CLASSIFICATION] --------------------------------------------------------
@@ -97,12 +97,10 @@ internal static class ScopeModel {
             || symbol.ContainingAssembly?.Name?.EndsWith(value: ".Tests", comparisonType: StringComparison.OrdinalIgnoreCase) == true;
         bool boundary = Markers.BoundaryNamespace.Any(marker => namespaceName.Contains(value: marker, comparisonType: StringComparison.OrdinalIgnoreCase))
             || Markers.BoundaryPath.Any(marker => filePath.Contains(value: marker, comparisonType: StringComparison.OrdinalIgnoreCase))
-            || SymbolFacts.HasAnyAttribute(symbol, "BoundaryAdapterAttribute", "BoundaryAdapter");
-        bool domain = namespaceName.StartsWith(value: Markers.DomainNamespace, comparisonType: StringComparison.OrdinalIgnoreCase)
-            || namespaceName.Contains(value: Markers.DomainPrefix, comparisonType: StringComparison.OrdinalIgnoreCase)
-            || SymbolFacts.HasAnyAttribute(symbol, "DomainScopeAttribute", "DomainScope");
-        bool application = namespaceName.StartsWith(value: Markers.ApplicationNamespace, comparisonType: StringComparison.OrdinalIgnoreCase)
-            || namespaceName.Contains(value: Markers.ApplicationPrefix, comparisonType: StringComparison.OrdinalIgnoreCase);
+            || SymbolFacts.HasAnyAttribute(symbol, nameof(BoundaryAdapterAttribute), "BoundaryAdapter");
+        bool domain = SymbolFacts.IsDomainNamespace(namespaceName)
+            || SymbolFacts.HasAnyAttribute(symbol, nameof(DomainScopeAttribute), "DomainScope");
+        bool application = SymbolFacts.IsApplicationNamespace(namespaceName);
         ScopeKind kind = (generated, test, boundary, domain, application) switch {
             (true, _, _, _, _) => ScopeKind.Generated,
             (_, true, _, _, _) => ScopeKind.Test,
@@ -206,10 +204,30 @@ internal static class SymbolFacts {
         && (invocation.TargetMethod.ContainingType?.Name ?? string.Empty) is "Eff" or "IO" or "Fin" or "Try" or "TryOption" or "Option" or "Validation";
     internal static bool IsBlockingInvocation(IInvocationOperation invocation) =>
         BlockingMethods.Contains(invocation.TargetMethod.Name)
-        && (invocation.TargetMethod.ContainingType.Name.StartsWith(value: "Task", comparisonType: StringComparison.Ordinal)
-            || invocation.TargetMethod.ContainingType.ToDisplayString() == "System.Threading.Thread");
+        && invocation.TargetMethod.ContainingType is INamedTypeSymbol containingType
+        && (IsTaskOrAwaiterType(containingType)
+            || containingType.ToDisplayString() == "System.Threading.Thread");
     internal static bool IsTaskLikeType(ITypeSymbol? type) =>
         type?.OriginalDefinition.ToDisplayString() is "System.Threading.Tasks.Task" or "System.Threading.Tasks.Task<TResult>" or "System.Threading.Tasks.ValueTask" or "System.Threading.Tasks.ValueTask<TResult>";
+    private static bool IsTaskOrAwaiterType(INamedTypeSymbol type) {
+        string displayName = type.OriginalDefinition.ToDisplayString();
+        bool knownTaskLike = displayName is
+            "System.Threading.Tasks.Task"
+            or "System.Threading.Tasks.Task<TResult>"
+            or "System.Threading.Tasks.TaskFactory"
+            or "System.Runtime.CompilerServices.TaskAwaiter"
+            or "System.Runtime.CompilerServices.TaskAwaiter<TResult>"
+            or "System.Runtime.CompilerServices.ConfiguredTaskAwaitable.ConfiguredTaskAwaiter"
+            or "System.Runtime.CompilerServices.ConfiguredTaskAwaitable<TResult>.ConfiguredTaskAwaiter"
+            or "System.Runtime.CompilerServices.ValueTaskAwaiter"
+            or "System.Runtime.CompilerServices.ValueTaskAwaiter<TResult>"
+            or "System.Runtime.CompilerServices.ConfiguredValueTaskAwaitable.ConfiguredValueTaskAwaiter"
+            or "System.Runtime.CompilerServices.ConfiguredValueTaskAwaitable<TResult>.ConfiguredValueTaskAwaiter";
+        bool awaiterByContract = type.Name.EndsWith(value: "Awaiter", comparisonType: StringComparison.Ordinal)
+            && type.AllInterfaces.Any(interfaceType =>
+                interfaceType.ToDisplayString() is "System.Runtime.CompilerServices.INotifyCompletion" or "System.Runtime.CompilerServices.ICriticalNotifyCompletion");
+        return knownTaskLike || awaiterByContract;
+    }
 
     // --- [RUNTIME_FACTS] ------------------------------------------------------
 
@@ -267,6 +285,14 @@ internal static class SymbolFacts {
 
     // --- [DOMAIN_FACTS] -------------------------------------------------------
 
+    internal static bool IsDomainNamespace(string namespaceName) =>
+        namespaceName.StartsWith(value: Markers.DomainNamespace, comparisonType: StringComparison.OrdinalIgnoreCase)
+        || namespaceName.Contains(value: Markers.DomainPrefix, comparisonType: StringComparison.OrdinalIgnoreCase);
+    internal static bool IsApplicationNamespace(string namespaceName) =>
+        namespaceName.StartsWith(value: Markers.ApplicationNamespace, comparisonType: StringComparison.OrdinalIgnoreCase)
+        || namespaceName.Contains(value: Markers.ApplicationPrefix, comparisonType: StringComparison.OrdinalIgnoreCase);
+    internal static bool IsDomainOrApplicationNamespace(string namespaceName) =>
+        IsDomainNamespace(namespaceName) || IsApplicationNamespace(namespaceName);
     internal static bool IsObservabilitySurface(ISymbol symbol, string namespaceName) =>
         namespaceName.Split(separator: '.').Any(part =>
             Markers.ObservabilityParts.Any(marker => string.Equals(part, marker, StringComparison.Ordinal)))

@@ -119,12 +119,35 @@ When invariants live in service classes rather than the entity itself, every con
 
 [ANTI-PATTERN]: Single function handling all cases via a giant switch that violates OCP.
 [CORRECT]: Polymorphic dispatch via `sealed abstract record` DU + `Fold` catamorphism or trait-based `K<F,A>` abstraction.
-Litmus test: adding a new case requires modifying existing function bodies. A DU with a `Fold` method turns each new case into a variant -- existing fold arguments remain untouched. See `composition.md [5]`.
+Litmus test: adding a new case requires modifying existing function bodies. A DU with a `Fold` method turns each new case into a variant -- existing fold arguments remain untouched. See `composition.md` [5] `Expr.Fold` catamorphism for a full inline example of DU + recursive fold replacing interpreter classes.
 
 **HELPER_SPAM**
 
 [ANTI-PATTERN]: `private static Fin<T> ValidateHelper(T value)` called from a single site.
 [CORRECT]: Inline the logic at the call site, or if used from 2+ modules, promote to a domain-specific function on the owning type.
+
+**PHANTOM_BYPASS**
+
+[ANTI-PATTERN]: Public constructor on phantom-parameterized type allows skipping the `Fin<T>` validation factory.
+```csharp
+// [ANTI-PATTERN] -- positional syntax exposes public constructor
+public readonly record struct UserId<TState>(Guid Value);
+UserId<Validated> fake = new(Value: Guid.Empty); // compiles, skips Validate()
+```
+[CORRECT]: Private constructor + `internal static UnsafeWrap` factory. All external construction routes through the `Fin<T>` validation pipeline.
+```csharp
+// [CORRECT] -- private ctor + internal factory gated by Validate()
+public readonly record struct UserId<TState> {
+    public Guid Value { get; }
+    private UserId(Guid value) => Value = value;
+    internal static UserId<TState> UnsafeWrap(Guid value) => new(value);
+}
+```
+
+**DUAL_CANONICAL_SHAPE**
+
+[ANTI-PATTERN]: Two encoding strategies (`Newtype<Tag,T>` and `[ValueObject<T>]`) for the same domain concept in the same bounded context.
+[CORRECT]: Choose one per concept. `[ValueObject<T>]` when JSON/EF/ModelBinding integration is needed and `ValidateFactoryArguments` suffices. `Newtype<TTag,TRepr>` when zero-alloc is critical and no boundary serialization is required. `readonly record struct` + `Fin<T>` factory when custom multi-step validation logic is needed. Never mix encodings for the same primitive within a bounded context.
 
 **DENSITY_OVER_VOLUME**
 
@@ -155,3 +178,5 @@ Litmus test: adding a new case requires modifying existing function bodies. A DU
 |  [16]   | GOD_FUNCTION             | Giant switch violating OCP             | `sealed abstract record` DU + `Fold` / `K<F,A>`              |
 |  [17]   | HELPER_SPAM              | `private` function, single call site   | Inline at call site or promote to owning type                |
 |  [18]   | DENSITY_OVER_VOLUME      | Repetitive arms, brute-force inline    | Fold algebra / `K<F,A>` generic pipeline                     |
+|  [19]   | PHANTOM_BYPASS           | Public ctor on phantom-parameterized   | Private ctor + `internal UnsafeWrap` factory                 |
+|  [20]   | DUAL_CANONICAL_SHAPE     | Two encodings for same domain concept  | One encoding per concept per bounded context                 |

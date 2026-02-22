@@ -95,21 +95,21 @@ These checks apply ONLY to code annotated as hot-path or residing in performance
 
 Concrete search patterns an agent can apply to any `.cs` file:
 
-| [INDEX] | [SEARCH_FOR]                                             | [INDICATES]                    | [SEVERITY] |  [COVERAGE]  |
-| :-----: | :------------------------------------------------------- | :----------------------------- | :--------: | :----------: |
-|   [1]   | **`var ` in domain namespace declarations**              | VAR_INFERENCE                  |    High    | editorconfig |
-|   [2]   | **`catch` or `throw` in `Domain.*` namespace**           | EXCEPTION_CONTROL_FLOW         |    High    |   CSP0001    |
-|   [3]   | **`if (` or `else` in method bodies (not attributes)**   | IMPERATIVE_BRANCH              |    High    |   CSP0001    |
-|   [4]   | **`.Match(` not at final return position**               | PREMATURE_MATCH_COLLAPSE       |   Medium   |   CSP0002    |
-|   [5]   | **`{ get; set; }` on entity without smart constructor**  | ANEMIC_DOMAIN                  |    High    |  [ROADMAP]   |
-|   [6]   | **`interface I` + single implementing class in project** | INTERFACE_POLLUTION            |   Medium   |   CSP0005    |
-|   [7]   | **`== null` or `!= null` in domain logic**               | NULL_ARCHITECTURE              |   Medium   |  [ROADMAP]   |
-|   [8]   | **3+ methods with shared name prefix in same type**      | ARITY_SPAM / SURFACE_INFLATION |   Medium   |   CSP0005    |
-|   [9]   | **`private` method with single call site**               | HELPER_SPAM                    |    Low     |   CSP0005    |
-|  [10]   | **Non-`static` lambda in `*.Performance.*` namespace**   | CLOSURE_CAPTURE_HOT_PATH       |    High    |  [ROADMAP]   |
-|  [11]   | **`foreach` or `for (` in domain namespace**             | MUTABLE_ACCUMULATOR            |    High    |   CSP0001    |
-|  [12]   | **Positional arguments (no `:` before value) at call**   | POSITIONAL_ARGS                |   Medium   |  [ROADMAP]   |
-|  [13]   | **`new Regex(` in smart constructor or domain code**     | RUNTIME_REGEX_COMPILATION      |    High    |  SYSLIB1040  |
+| [INDEX] | [SEARCH_FOR]                                             | [INDICATES]                    | [SEVERITY] |         [COVERAGE]         |
+| :-----: | :------------------------------------------------------- | :----------------------------- | :--------: | :------------------------: |
+|   [1]   | **`var` in domain namespace declarations**               | VAR_INFERENCE                  |    High    |        editorconfig        |
+|   [2]   | **`catch` or `throw` in `Domain.*` namespace**           | EXCEPTION_CONTROL_FLOW         |    High    |          CSP0001           |
+|   [3]   | **`if (` or `else` in method bodies (not attributes)**   | IMPERATIVE_BRANCH              |    High    |          CSP0001           |
+|   [4]   | **`.Match(` not at final return position**               | PREMATURE_MATCH_COLLAPSE       |   Medium   |          CSP0002           |
+|   [5]   | **`{ get; set; }` on entity without smart constructor**  | ANEMIC_DOMAIN                  |    High    |          CSP0715           |
+|   [6]   | **`interface I` + single implementing class in project** | INTERFACE_POLLUTION            |   Medium   |          CSP0501           |
+|   [7]   | **`== null` or `!= null` in domain logic**               | NULL_ARCHITECTURE              |   Medium   |      CSP0104/CSP0709       |
+|   [8]   | **3+ methods with shared name prefix in same type**      | ARITY_SPAM / SURFACE_INFLATION |   Medium   |          CSP0005           |
+|   [9]   | **`private` method with single call site**               | HELPER_SPAM                    |    Low     |          CSP0503           |
+|  [10]   | **Non-`static` lambda in `*.Performance.*` namespace**   | CLOSURE_CAPTURE_HOT_PATH       |    High    |      CSP0017/CSP0602       |
+|  [11]   | **`foreach` or `for (` in domain namespace**             | MUTABLE_ACCUMULATOR            |    High    |          CSP0001           |
+|  [12]   | **Positional arguments (no `:` before value) at call**   | POSITIONAL_ARGS                |   Medium   |          CSP0502           |
+|  [13]   | **`new Regex(` in smart constructor or domain code**     | RUNTIME_REGEX_COMPILATION      |    High    | CSP0704/CSP0606/SYSLIB1040 |
 
 ---
 ## [10][QUICK_REFERENCE]
@@ -134,4 +134,4 @@ Concrete search patterns an agent can apply to any `.cs` file:
 
 - [ ] FluentValidation async rules (`MustAsync`, `CustomAsync`) execute via `ValidateAsync` only -- never `Validate` when async rules exist
 - [ ] RuleSets are boundary contracts (`IncludeRuleSets`) and map to `Validation<Error,T>` before entering domain pipelines
-- [ ] Bridge converts `ValidationResult` to `Validation<Error,T>` at boundary -- see `effect-module.template.md` for canonical implementation
+- [ ] Bridge converts `ValidationResult` to `Validation<Error,T>` at boundary -- see `effect-module.template.md` [BOUNDARY_BRIDGE] for the canonical `ValidationResult → Validation<Error,T>` implementation before entering domain pipelines

@@ -10,23 +10,23 @@ import { Effect, Match, Ref, Schema as S } from 'effect';
 
 // Why: recursive key-sorting produces deterministic JSON for cryptographic hashing across process restarts.
 // Effect Hash.structure is non-cryptographic (32-bit) and Data.struct does not guarantee serialization order — neither replaces SHA-256.
-const _canonicalState = (input: unknown): unknown =>
+const _canonicalStateForHash = (input: unknown): unknown =>
     Match.value(input).pipe(
-        Match.when(Match.instanceOf(Array), (values) => values.map(_canonicalState)),
+        Match.when(Match.instanceOf(Array), (values) => values.map(_canonicalStateForHash)),
         Match.when(
             (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null,
             (value) =>
                 Object.fromEntries(
                     Object.entries(value)
                         .toSorted(([left], [right]) => left.localeCompare(right))
-                        .map(([key, nested]) => [key, _canonicalState(nested)]),
+                        .map(([key, nested]) => [key, _canonicalStateForHash(nested)]),
                 ),
         ),
         Match.orElse((value) => value),
     );
-const _stateHash = (state: unknown) =>
+const hashCanonicalState = (state: unknown) =>
     createHash('sha256')
-        .update(JSON.stringify(_canonicalState(state)))
+        .update(JSON.stringify(_canonicalStateForHash(state)))
         .digest('hex');
 const _appendTo = <K extends 'artifacts' | 'events'>(
     store: Ref.Ref<{
@@ -75,7 +75,7 @@ class PersistenceTrace extends Effect.Service<PersistenceTrace>()('kargadan/Pers
                     createdAt:    new Date(),
                     runId:        input.runId,
                     sequence:     input.sequence,
-                    snapshotHash: _stateHash(input.state),
+                    snapshotHash: hashCanonicalState(input.state),
                     state:        input.state,
                 }).pipe(
                     Effect.flatMap((decoded) =>
@@ -98,7 +98,7 @@ class PersistenceTrace extends Effect.Service<PersistenceTrace>()('kargadan/Pers
                             payload:   event.payload,
                             sequence:  event.sequence,
                         }));
-                        const stateHash = _stateHash(reconstructedState);
+                        const stateHash = hashCanonicalState(reconstructedState);
                         const snapshotHash = current.snapshots
                             .filter((snap) => snap.runId === input.runId)
                             .toSorted((left, right) => right.sequence - left.sequence)
@@ -107,13 +107,7 @@ class PersistenceTrace extends Effect.Service<PersistenceTrace>()('kargadan/Pers
                         return {
                             events,
                             expectedHash,
-                            matchesExpected: Match.value(expectedHash).pipe(
-                                Match.when(
-                                    (candidate): candidate is undefined => candidate === undefined,
-                                    () => true,
-                                ),
-                                Match.orElse((candidate) => candidate === stateHash),
-                            ),
+                            matchesExpected: expectedHash === undefined || expectedHash === stateHash,
                             snapshotHash,
                             stateHash,
                         } satisfies PersistenceTrace.ReplayResult;
@@ -148,3 +142,4 @@ namespace PersistenceTrace {
 // --- [EXPORT] ----------------------------------------------------------------
 
 export { PersistenceTrace };
+export { hashCanonicalState };

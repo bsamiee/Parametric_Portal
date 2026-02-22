@@ -48,6 +48,20 @@ internal static class Signals {
         "domain.validation.failures", "failures", "Validation failures by operation.");
     internal static readonly Counter<long> Retries = ServiceMeter.CreateCounter<long>(
         "domain.retries.total", "retries", "Retry attempts by operation and error code.");
+    // ObservableGauge: callback-based instrument for point-in-time system metrics.
+    // The callback executes on each scrape interval -- no manual recording needed.
+    // Thread pool pending count is a USE-method saturation signal for diagnosing
+    // thread starvation under high concurrency (see concurrency.md).
+    internal static readonly ObservableGauge<int> ThreadPoolPending =
+        ServiceMeter.CreateObservableGauge<int>(
+            "runtime.threadpool.pending",
+            static () => ThreadPool.PendingWorkItemCount,
+            "items", "Thread pool pending work items.");
+    internal static readonly ObservableGauge<int> ThreadPoolThreadCount =
+        ServiceMeter.CreateObservableGauge<int>(
+            "runtime.threadpool.count",
+            static () => ThreadPool.ThreadCount,
+            "threads", "Thread pool active thread count.");
 }
 
 // --- [LOG] -------------------------------------------------------------------
@@ -82,6 +96,31 @@ public static class TagPolicy {
             tags: new ActivityTagsCollection {
                 ["error.code"] = error.Code, ["error.message"] = error.Message
             }));
+    }
+    // Span-level filterable dimensions via Activity.SetTag.
+    // OTel .NET distinguishes metric TagList (value-type, stack-allocated)
+    // from trace Activity.SetTag (per-span attributes visible to samplers).
+    // Provide tags at StartActivity time via ActivityTagsCollection for
+    // sampler visibility; gate expensive computation behind IsAllDataRequested.
+    public static void AnnotateSpan(Activity? activity, TagList dimensions) {
+        foreach (KeyValuePair<string, object?> tag in dimensions)
+            activity?.SetTag(tag.Key, tag.Value);
+    }
+    // Enriched span start: pass initial tags to StartActivity so head-based
+    // samplers can inspect dimensions before recording the full span.
+    public static Activity? StartAnnotatedActivity(
+        string operation, ActivityKind kind, TagList dimensions) {
+        ActivityTagsCollection initialTags = new();
+        foreach (KeyValuePair<string, object?> tag in dimensions)
+            initialTags[tag.Key] = tag.Value;
+        return Signals.Source.StartActivity(operation, kind, default, initialTags);
+    }
+    // Conditional enrichment: check IsAllDataRequested before computing
+    // expensive tag values to avoid overhead on unsampled spans.
+    public static void AnnotateSpanWhenRecording(
+        Activity? activity, Func<TagList> computeDimensions) {
+        if (activity is { IsAllDataRequested: true })
+            AnnotateSpan(activity, computeDimensions());
     }
     public static TagList Merge(TagList seed, TagList dimensions) =>
         toSeq(dimensions).Fold(seed,
@@ -140,22 +179,22 @@ public static class Observe {
     private static Fin<T> Emit<T>(
         Fin<T> result, ILogger logger, ObserveSpec spec,
         TimeSpan elapsed, Activity? activity) =>
-        result.Match(
-            Succ: (T value) => {
-                TagList tags = TagPolicy.Outcome(spec, "success", None);
-                Signals.Requests.Add(1, tags);
-                Signals.Duration.Record(elapsed.TotalSeconds, tags);
-                activity?.SetStatus(ActivityStatusCode.Ok);
-                Log.Succeeded(logger, spec.Operation, elapsed.TotalMilliseconds);
-                return Fin.Succ(value);
-            },
+        result.BiMap(
             Fail: (Error error) => {
                 TagList tags = TagPolicy.Outcome(spec, "failure", Some(error.Code));
                 Signals.Requests.Add(1, tags);
                 Signals.Duration.Record(elapsed.TotalSeconds, tags);
                 TagPolicy.AnnotateFailure(activity, error);
                 Log.Failed(logger, spec.Operation, error.Code, error.Message);
-                return Fin.Fail<T>(error);
+                return error;
+            },
+            Succ: (T value) => {
+                TagList tags = TagPolicy.Outcome(spec, "success", None);
+                Signals.Requests.Add(1, tags);
+                Signals.Duration.Record(elapsed.TotalSeconds, tags);
+                activity?.SetStatus(ActivityStatusCode.Ok);
+                Log.Succeeded(logger, spec.Operation, elapsed.TotalMilliseconds);
+                return value;
             });
 }
 ```
@@ -164,22 +203,24 @@ public static class Observe {
 ## [2][OBSERVABILITY_CANON]
 >**Dictum:** *Observability constraints are architecture contracts, not optional style.*
 
-| [INDEX] | [CONSTRAINT]               | [MANDATE]                                        | [SURFACE]              |
-| :-----: | :------------------------- | ------------------------------------------------ | ---------------------- |
-|   [1]   | **`LOGGING_PATH`**         | structured logs via `[LoggerMessage]` only       | CA1848, CA2254         |
-|   [2]   | **`TRACE_LIFECYCLE`**      | span lifecycle bracket-owned, never leaked       | Pipeline bracket       |
-|   [3]   | **`METRIC_DIMENSIONS`**    | tags include `operation` + `outcome` taxonomy    | TagPolicy.Outcome      |
-|   [4]   | **`ERROR_CODE_STABILITY`** | numeric `Error.Code` as canonical failure dim    | span/metric/log fields |
-|   [5]   | **`NO_SPLIT_PIPELINES`**   | no parallel telemetry branches in logic          | fused BiMap projection |
-|   [6]   | **`BOUNDARY_ONLY_MATCH`**  | no mid-pipeline `.Match()` for observability     | Fin/Eff/Val BiMap      |
-|   [7]   | **`SINGLETON_IDS`**        | ActivitySource/Meter match OTel registration     | Signals statics        |
-|   [8]   | **`AMBIENT_SCOPE`**        | contextual props boundary-scoped via ambient ctx | LogContext             |
-|   [9]   | **`RETRY_TELEMETRY`**      | every retry emits count + error code             | RetryProjection        |
-|  [10]   | **`VALIDATION_TELEMETRY`** | validation fail emits accumulation-aware metric  | Observe.Validation     |
-|  [11]   | **`EXPRESSION_GATING`**    | dynamic Serilog filters compile-validated        | TryCompile gate        |
-|  [12]   | **`DB_CORRELATION`**       | DB instrumentation mandatory for e2e traces      | Npgsql.OpenTelemetry   |
-|  [13]   | **`ANTI_PATTERN`**         | no ad-hoc ILogger.Log* or inline ActivitySource  | centralized surfaces   |
-|  [14]   | **`COMPILED_EXTRACTORS`**  | entity-to-tag via pre-compiled expressions       | TagPolicy.FromEntity   |
+| [INDEX] | [CONSTRAINT]               | [MANDATE]                                                                        | [SURFACE]                           |
+| :-----: | :------------------------- | -------------------------------------------------------------------------------- | ----------------------------------- |
+|   [1]   | **`LOGGING_PATH`**         | structured logs via `[LoggerMessage]` only                                       | CA1848, CA2254                      |
+|   [2]   | **`TRACE_LIFECYCLE`**      | span lifecycle bracket-owned, never leaked                                       | Pipeline bracket                    |
+|   [3]   | **`METRIC_DIMENSIONS`**    | tags include `operation` + `outcome` taxonomy                                    | TagPolicy.Outcome                   |
+|   [4]   | **`ERROR_CODE_STABILITY`** | numeric `Error.Code` as canonical failure dim                                    | span/metric/log fields              |
+|   [5]   | **`NO_SPLIT_PIPELINES`**   | no parallel telemetry branches in logic                                          | fused BiMap projection              |
+|   [6]   | **`BOUNDARY_ONLY_MATCH`**  | no mid-pipeline `.Match()` for observability                                     | Fin/Eff/Val BiMap                   |
+|   [7]   | **`SINGLETON_IDS`**        | ActivitySource/Meter match OTel registration                                     | Signals statics                     |
+|   [8]   | **`AMBIENT_SCOPE`**        | contextual props boundary-scoped via ambient ctx                                 | LogContext                          |
+|   [9]   | **`RETRY_TELEMETRY`**      | every retry emits count + error code                                             | RetryProjection                     |
+|  [10]   | **`VALIDATION_TELEMETRY`** | validation fail emits accumulation-aware metric                                  | Observe.Validation                  |
+|  [11]   | **`EXPRESSION_GATING`**    | dynamic Serilog filters compile-validated                                        | TryCompile gate                     |
+|  [12]   | **`DB_CORRELATION`**       | DB instrumentation mandatory for e2e traces                                      | Npgsql.OpenTelemetry                |
+|  [13]   | **`ANTI_PATTERN`**         | no ad-hoc ILogger.Log* or inline ActivitySource                                  | centralized surfaces                |
+|  [14]   | **`COMPILED_EXTRACTORS`**  | entity-to-tag via pre-compiled expressions                                       | TagPolicy.FromEntity                |
+|  [15]   | **`TRACE_DIMENSIONS`**     | span attributes via SetTag; initial tags at StartActivity for sampler visibility | TagPolicy.AnnotateSpan              |
+|  [16]   | **`RECORDING_GATE`**       | gate expensive tag computation behind IsAllDataRequested                         | TagPolicy.AnnotateSpanWhenRecording |
 
 ---
 
@@ -280,12 +321,19 @@ public static class TelemetryBootstrap {
             .WithMetrics(static m => m.AddMeter("Domain.Service")
                 .AddAspNetCoreInstrumentation().AddHttpClientInstrumentation()
                 .AddRuntimeInstrumentation().AddOtlpExporter());
+        // ResilienceContext property setup: typed key for logger propagation.
+        // Callers must set the logger on every ResilienceContext before pipeline
+        // execution -- without this, OnRetry delegates receive null from GetValue.
+        // Usage: ResilienceContextSetup.Attach(context, logger) before Execute().
         // RetryProjection + Polly composition
         builder.Services.Scan(scan => scan
             .FromAssembliesOf(typeof(Signals), typeof(Observe))
             .AddClasses(classes => classes.InNamespaces("Domain.Observability"))
             .UsingRegistrationStrategy(RegistrationStrategy.Throw)
             .AsSelfWithInterfaces()
+            // Singleton: ActivitySource and Meter are process-global identities
+            // registered once with the OTel SDK. Creating per-request instances
+            // would orphan metric streams and trace sources from exporters.
             .WithSingletonLifetime());
         builder.Services.AddHttpClient("upstream")
             .AddStandardResilienceHandler(options => {
@@ -300,7 +348,7 @@ public static class TelemetryBootstrap {
                             args.Outcome.Result?.ReasonPhrase ?? "upstream");
                     Observe.RetryProjection(
                         error,
-                        args.Context.Properties.GetValue<ILogger>("logger")!,
+                        args.Context.Properties.GetValue(ResilienceContextSetup.LoggerKey, default!)!,
                         "upstream.request", args.AttemptNumber);
                     return ValueTask.CompletedTask;
                 };
@@ -309,6 +357,17 @@ public static class TelemetryBootstrap {
     }
     public static bool ValidateSerilogExpression(string expression) =>
         SerilogExpression.TryCompile(expression, out _, out _);
+}
+
+// --- [RESILIENCE_CONTEXT] ----------------------------------------------------
+
+// Typed property key for Polly ResilienceContext logger propagation.
+// Callers must invoke Attach() on every ResilienceContext before executing
+// the resilience pipeline -- without this, OnRetry delegates receive null.
+public static class ResilienceContextSetup {
+    public static readonly ResiliencePropertyKey<ILogger> LoggerKey = new("logger");
+    public static void Attach(ResilienceContext context, ILogger logger) =>
+        context.Properties.Set(LoggerKey, logger);
 }
 ```
 
@@ -326,3 +385,4 @@ public static class TelemetryBootstrap {
 - [NEVER] Collapse context early via mid-pipeline `.Match()` just for logging.
 - [NEVER] Instantiate telemetry identities inside handlers/services.
 - [NEVER] Hardcode exporter endpoints in domain modules.
+- [ALWAYS] Register observability surfaces as singleton (ActivitySource/Meter are process-global identities); register domain services as scoped (hold per-request state and DI dependencies).

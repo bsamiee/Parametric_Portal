@@ -38,7 +38,7 @@ internal static class RuleCatalog {
 
     internal static readonly DiagnosticDescriptor CSP0101 = Err("CSP0101", "BoundaryImperativeMissingExemption", "Boundary construct '{0}' requires [BoundaryImperativeExemption] metadata", "FunctionalDiscipline");
     internal static readonly DiagnosticDescriptor CSP0102 = Err("CSP0102", "BoundaryImperativeInvalidReason", "Boundary exemption reason '{0}' is invalid for construct '{1}'", "FunctionalDiscipline");
-    internal static readonly DiagnosticDescriptor CSP0103 = Err("CSP0103", "BoundaryImperativeExpiredExemption", "Boundary exemption for '{0}' expired at '{1}'", "FunctionalDiscipline");
+    internal static readonly DiagnosticDescriptor CSP0103 = Err("CSP0103", "BoundaryImperativeExpiredExemption", "Boundary exemption for '{0}' expired at '{1}' (ticket: '{2}')", "FunctionalDiscipline");
     internal static readonly DiagnosticDescriptor CSP0104 = Err("CSP0104", "NullSentinel", "Null sentinel comparison in domain/application flow is forbidden; use Option<T>/Fin<T>", "FunctionalDiscipline");
 
     // --- [SHAPE_RULES] --------------------------------------------------------
@@ -61,12 +61,16 @@ internal static class RuleCatalog {
     internal static readonly DiagnosticDescriptor CSP0403 = Err("CSP0403", "FluentValidationValidateSync", "Synchronous Validate() detected; use ValidateAsync() for FluentValidation boundary flow", "ResourceManagement");
     internal static readonly DiagnosticDescriptor CSP0404 = Err("CSP0404", "ChannelUnboundedTopology", "Channel.CreateUnbounded is forbidden in domain/application flow; use bounded channel topology", "ResourceManagement");
     internal static readonly DiagnosticDescriptor CSP0405 = Err("CSP0405", "ChannelFullModeRequired", "Channel.CreateBounded must use BoundedChannelOptions with explicit FullMode", "ResourceManagement");
+    internal static readonly DiagnosticDescriptor CSP0406 = Err("CSP0406", "ScrutorScanRegistrationStrategy", "Scrutor .Scan(...) in boundary/composition-root flow must include .UsingRegistrationStrategy(...)", "ResourceManagement");
 
     // --- [SURFACE_RULES] ------------------------------------------------------
 
     internal static readonly DiagnosticDescriptor CSP0501 = Err("CSP0501", "InterfacePollution", "Interface '{0}' has a single implementation '{1}'; remove interface indirection", "SurfaceArea");
     internal static readonly DiagnosticDescriptor CSP0502 = Err("CSP0502", "PositionalDomainArguments", "Positional argument at domain/application call site is forbidden; use named arguments", "SurfaceArea");
     internal static readonly DiagnosticDescriptor CSP0503 = Err("CSP0503", "SingleUsePrivateHelper", "Private method '{0}' has a single call site; inline it into caller", "SurfaceArea");
+    internal static readonly DiagnosticDescriptor CSP0504 = Err("CSP0504", "EffectReturnPolicy", "Method '{0}' returns '{1}' in domain/application flow; use Fin<T>, Validation<Error,T>, Eff<RT,T>, K<F,T>, or IO<A>", "FunctionalDiscipline");
+    internal static readonly DiagnosticDescriptor CSP0505 = Err("CSP0505", "TypeClassStaticAbstractPolicy", "Type-class interface '{0}' must declare at least one static abstract member", "TypeDiscipline");
+    internal static readonly DiagnosticDescriptor CSP0506 = Err("CSP0506", "ExtensionProjectionRequired", "Static projection method '{0}' over receiver '{1}' must be an extension method", "SurfaceArea");
 
     // --- [PERFORMANCE_RULES] --------------------------------------------------
 
@@ -105,14 +109,12 @@ internal static class RuleCatalog {
     // --- [GAP_ANALYSIS_STUBS] -------------------------------------------------
 
     internal static readonly DiagnosticDescriptor CSP0015 = Err("CSP0015", "VarInference", "Explicit 'var' usage in domain/application code is forbidden; declare explicit type for '{0}'", "TypeDiscipline");
-    // CSP0016 retired -- replaced by CSP0715 (AnemicEntityDetection) with full implementation
-    internal static readonly DiagnosticDescriptor CSP0016 = Err("CSP0016", "AnemicDomainRetired", "Retired: use CSP0715 (AnemicEntityDetection) instead", "TypeDiscipline");
     internal static readonly DiagnosticDescriptor CSP0017 = Err("CSP0017", "NonStaticHotPathClosure", "Non-static lambda capturing '{0}' in performance namespace is forbidden; use static lambda and tuple threading", "PerformanceDiscipline");
 
     // --- [GOVERNANCE_RULES] ---------------------------------------------------
 
-    internal static readonly DiagnosticDescriptor CSP0901 = Err("CSP0901", "ExemptionMetadataInvalid", "BoundaryImperativeExemption metadata is invalid for symbol '{0}'", "Governance");
-    internal static readonly DiagnosticDescriptor CSP0902 = Err("CSP0902", "ExemptionMetadataExpired", "BoundaryImperativeExemption expired for symbol '{0}' at '{1}'", "Governance");
+    internal static readonly DiagnosticDescriptor CSP0901 = Err("CSP0901", "ExemptionMetadataInvalid", "BoundaryImperativeExemption metadata is invalid for symbol '{0}' (ticket: '{1}')", "Governance");
+    internal static readonly DiagnosticDescriptor CSP0902 = Err("CSP0902", "ExemptionMetadataExpired", "BoundaryImperativeExemption expired for symbol '{0}' at '{1}' (ticket: '{2}')", "Governance");
 
     // --- [ENTRY_POINT] --------------------------------------------------------
 
@@ -122,8 +124,8 @@ internal static class RuleCatalog {
         CSP0101, CSP0102, CSP0103, CSP0104,
         CSP0201, CSP0202, CSP0203, CSP0204,
         CSP0301, CSP0302, CSP0303,
-        CSP0401, CSP0402, CSP0403, CSP0404, CSP0405,
-        CSP0501, CSP0502, CSP0503,
+        CSP0401, CSP0402, CSP0403, CSP0404, CSP0405, CSP0406,
+        CSP0501, CSP0502, CSP0503, CSP0504, CSP0505, CSP0506,
         CSP0601, CSP0602, CSP0603, CSP0604, CSP0605, CSP0606, CSP0607, CSP0608,
         CSP0701, CSP0702, CSP0703, CSP0704, CSP0705, CSP0706, CSP0707, CSP0708, CSP0709,
         CSP0710, CSP0711, CSP0712, CSP0713, CSP0714, CSP0715, CSP0716, CSP0717, CSP0718, CSP0719, CSP0720,

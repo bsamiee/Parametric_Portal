@@ -3,64 +3,15 @@
 
 <br>
 
-Verified baseline (2026-02-21): `Scrutor` `7.0.0` with targets `net462`, `netstandard2.0`, `net8.0`, `net10.0`.<br>
-Scrutor extends the built-in Microsoft container; it does not replace it.
-
-**Imports**
-- `using Microsoft.Extensions.DependencyInjection;` (`Scan`, `Decorate`, `TryDecorate`, keyed resolution APIs)
-- `using Scrutor;` (`RegistrationStrategy`, `ReplacementBehavior`, `DecoratedService<T>`, `ServiceDescriptorAttribute`)
-- `using Microsoft.Extensions.DependencyModel;` (`DependencyContext` selectors)
+Verified baseline: `Scrutor` `7.0.0` targeting `net462`, `netstandard2.0`, `net8.0` (`net8.0` is the highest published target; newer runtimes consume it via forward compatibility). Extends the built-in Microsoft container via `Scan` + `Decorate`/`TryDecorate` on `IServiceCollection`. v6.0+ `AddClasses()` scans only public non-abstract classes by default; pass `publicOnly: false` to include internal types. Imports: `using Scrutor;` (`RegistrationStrategy`, `ReplacementBehavior`, `DecoratedService<T>`, `ServiceDescriptorAttribute`).
 
 ---
-## [1][CAPABILITY_SURFACE]
->**Dictum:** *Use the full API deliberately; defaults are convenient but not deterministic at scale.*
+## [1][BOUNDED_DISCOVERY]
+>**Dictum:** *Assembly predicates and type filters are the first defense against registration drift.*
 
 <br>
 
-| [INDEX] | [AREA]                    | [SURFACE]                                                                                                                                                                    |
-| :-----: | :------------------------ | :--------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-|   [1]   | Assembly source selectors | `FromEntryAssembly`, `FromApplicationDependencies`, `FromAssemblyDependencies`, `FromDependencyContext`, `FromAssemblyOf<T>`, `FromAssembliesOf(...)`, `FromAssemblies(...)` |
-|   [2]   | Type selection            | `AddClasses()`, `AddClasses(bool)`, `AddClasses(Action<IImplementationTypeFilter>)`, `AddClasses(Action<IImplementationTypeFilter>, bool)`                                   |
-|   [3]   | Type filters              | `AssignableTo`, `AssignableToAny`, `WithAttribute`, `WithoutAttribute`, `InNamespaces`, `NotInNamespaces`, `Where`                                                           |
-|   [4]   | Service mapping           | `AsSelf`, `As<T>`, `As(types)`, `AsImplementedInterfaces`, `AsSelfWithInterfaces`, `AsMatchingInterface`, `As(selector)`                                                     |
-|   [5]   | Lifetime + key policy     | `WithSingletonLifetime`, `WithScopedLifetime`, `WithTransientLifetime`, `WithLifetime(...)`, `WithServiceKey(...)`                                                           |
-|   [6]   | Registration strategy     | `RegistrationStrategy.Skip / Append / Throw / Replace(...)`, `ReplacementBehavior.ServiceType / ImplementationType / All`                                                    |
-|   [7]   | Attribute registration    | `UsingAttributes`, `ServiceDescriptorAttribute`, `ServiceDescriptorAttribute<TService>`                                                                                      |
-|   [8]   | Decoration                | `Decorate`/`TryDecorate` (generic/type/factory/strategy overloads), closed + open generics                                                                                   |
-|   [9]   | Decorated handles         | `Decorate(..., out DecoratedService<T>)`, `GetRequiredDecoratedService`, `GetDecoratedServices`                                                                              |
-
-```csharp
-namespace App.Bootstrap;
-
-using System;
-using Microsoft.Extensions.DependencyInjection;
-using Scrutor;
-
-public static class CompositionGraph {
-    public static IServiceCollection AddApplicationGraph(IServiceCollection services) =>
-        services.Scan(scan => scan
-            .FromAssembliesOf(typeof(CompositionGraph), typeof(IQueryHandler<,>))
-            .AddClasses(classes => classes
-                .AssignableToAny(typeof(ICommandHandler<>), typeof(IQueryHandler<,>))
-                .NotInNamespaces("ParametricPortal.Experimental"))
-            .UsingRegistrationStrategy(RegistrationStrategy.Replace(ReplacementBehavior.ServiceType))
-            .AsImplementedInterfaces()
-            .WithLifetime(static (Type type) =>
-                type.Name.EndsWith("Cache", StringComparison.Ordinal)
-                    ? ServiceLifetime.Singleton
-                    : ServiceLifetime.Scoped));
-}
-```
-
----
-## [2][DETERMINISTIC_DISCOVERY]
->**Dictum:** *Assembly predicates, keyed descriptors, and attributes are one surface for deterministic registration.*
-
-<br>
-
-`FromApplicationDependencies()` can fall back to entry-assembly dependency walking when `DependencyContext.Default` is unavailable. For strict graphs, prefer explicit `FromDependencyContext(...)` predicates.
-
-`UsingAttributes()` reads `ServiceDescriptorAttribute` metadata, enforces assignability for explicit service types, and rejects duplicate `(ServiceType, ServiceKey)` tuples. `WithServiceKey(...)` and keyed resolution APIs should remain deterministic (stable key literals or collision-free selectors). By default, `AddClasses` excludes compiler-generated types; include them only via explicit attribute filters when that behavior is intentional.
+`FromDependencyContext(context, predicate)` is the strict path -- explicit context, no silent fallback. `FromApplicationDependencies()` falls back to entry-assembly dependency walking when `DependencyContext.Default` is unavailable, silently narrowing the scan and swallowing assembly load failures. Filter methods chain intersectively (AND semantics); use `AssignableToAny(...)` for union semantics. `WithLifetime(Func<Type, ServiceLifetime>)` enables per-type lifetime resolution without multiple scan blocks.
 
 ```csharp
 namespace App.Bootstrap;
@@ -71,125 +22,247 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyModel;
 using Scrutor;
 
-[ServiceDescriptor(typeof(IReadStore), ServiceLifetime.Scoped, serviceKey: "read-store")]
-public sealed class PostgresReadStore : IReadStore;
+public static class ModuleDiscovery {
+    public static IServiceCollection AddBoundedModules(
+        IServiceCollection services, DependencyContext context) =>
+        services.Scan(scan => scan
+            .FromDependencyContext(
+                context,
+                static (Assembly assembly) =>
+                    assembly.GetName().Name?.StartsWith(
+                        "ParametricPortal.", StringComparison.Ordinal) == true)
+            .AddClasses(classes => classes
+                .AssignableToAny(typeof(ICommandHandler<>), typeof(IQueryHandler<,>))
+                .NotInNamespaces("ParametricPortal.Experimental"))
+            .UsingRegistrationStrategy(RegistrationStrategy.Throw)
+            .AsImplementedInterfaces()
+            .WithLifetime(static (Type type) =>
+                type.Name.EndsWith("Cache", StringComparison.Ordinal)
+                    ? ServiceLifetime.Singleton
+                    : ServiceLifetime.Scoped));
+}
+```
 
-[ServiceDescriptor(typeof(IWriteStore), ServiceLifetime.Singleton)]
-public sealed class WriteStore : IWriteStore;
+[CRITICAL]: `AssignableTo<T>().AssignableTo<U>()` yields types implementing BOTH (intersective `IntersectWith`). Use `AssignableToAny(typeof(T), typeof(U))` for types implementing EITHER. `InNamespaces` uses prefix matching (hierarchical); `InExactNamespaces` uses exact matching only.
 
-public static class DeterministicDiscovery {
-    public static IServiceCollection AddModules(IServiceCollection services, DependencyContext context) =>
-        services
-            .Scan(scan => scan
-                .FromDependencyContext(
-                    context,
-                    static (Assembly assembly) =>
-                        assembly.GetName().Name?.StartsWith("ParametricPortal.", StringComparison.Ordinal) == true)
-                .AddClasses(classes => classes
-                    .AssignableToAny(typeof(ICommandPipeline<>), typeof(IQueryPipeline<,>)))
-                    .UsingRegistrationStrategy(RegistrationStrategy.Throw)
-                    .AsImplementedInterfaces()
-                    .WithServiceKey(static (Type type) => type.FullName ?? type.Name)
-                    .WithScopedLifetime())
-            .Scan(scan => scan
-                .FromDependencyContext(
-                    context,
-                    static (Assembly assembly) =>
-                        assembly.GetName().Name?.StartsWith("ParametricPortal.", StringComparison.Ordinal) == true)
-                .AddClasses(classes => classes.WithAttribute<ServiceDescriptorAttribute>())
-                    .UsingRegistrationStrategy(RegistrationStrategy.Throw)
-                    .UsingAttributes());
+---
+## [2][REGISTRATION_STRATEGY]
+>**Dictum:** *Default append is drift-prone; explicit strategy is the only deterministic path.*
 
-    public static IReadStore ResolveReadStore(IServiceProvider provider) =>
-        provider.GetRequiredKeyedService<IReadStore>("read-store");
+<br>
+
+| [INDEX] | [STRATEGY]     | [MECHANISM]                          | [WHEN]                                              |
+| :-----: | :------------- | :----------------------------------- | :-------------------------------------------------- |
+|   [1]   | `Append`       | `services.Add`                       | Multiple implementations of same interface          |
+|   [2]   | `Skip`         | `services.TryAdd`                    | Plugin systems; first-wins (ServiceType check only) |
+|   [3]   | `Throw`        | `DuplicateTypeRegistrationException` | Strict modules -- duplicates indicate config bugs   |
+|   [4]   | `Replace(...)` | Remove matching, then add            | Explicit override of default implementations        |
+
+`ReplacementBehavior` is a `[Flags]` enum: `ServiceType` (1) matches by registered service type, `ImplementationType` (2) matches by concrete type, `All` (3) matches either. `Replace()` with no argument defaults to `ServiceType`. `Skip` checks ServiceType only -- silently drops a second implementation of the same interface even when the concrete type differs.
+
+```csharp
+namespace App.Bootstrap;
+
+using Microsoft.Extensions.DependencyInjection;
+using Scrutor;
+
+public static class StrategyExamples {
+    // Strict: duplicates throw at startup
+    public static IServiceCollection AddStrictModule(IServiceCollection services) =>
+        services.Scan(scan => scan
+            .FromAssemblyOf<StrategyExamples>()
+            .AddClasses(classes => classes.AssignableTo<IDomainService>())
+            .UsingRegistrationStrategy(RegistrationStrategy.Throw)
+            .AsImplementedInterfaces()
+            .WithScopedLifetime());
+    // Override: replace implementation but preserve sibling registrations
+    public static IServiceCollection OverrideDefaults(IServiceCollection services) =>
+        services.Scan(scan => scan
+            .FromAssemblyOf<StrategyExamples>()
+            .AddClasses(classes => classes.AssignableTo<IOverride>())
+            .UsingRegistrationStrategy(
+                RegistrationStrategy.Replace(ReplacementBehavior.ImplementationType))
+            .AsImplementedInterfaces()
+            .WithScopedLifetime());
 }
 ```
 
 ---
 ## [3][DECORATOR_TOPOLOGY]
->**Dictum:** *Decoration order is architecture; optional decoration must surface as data, not exceptions.*
+>**Dictum:** *Decoration order is architecture; the last Decorate call wraps outermost.*
 
 <br>
 
-For open generic decoration, Scrutor decorates closed registrations compatible with the open definition; it does not decorate the open definition itself. `Decorate(...)` throws when no matching registration exists; `TryDecorate(...)` returns `false` for optional modules. Use `DecoratedService<T>` handles when topology must be verified.
+Decoration reads bottom-up: the final `Decorate` call produces the outermost wrapper. `Decorate` throws `DecorationException` when no matching registration exists; `TryDecorate` returns `false` for optional modules. Capture `DecoratedService<T>` via `out` parameter to verify topology at runtime -- internally backed by .NET 8+ keyed services with `+Decorated` suffix keys. `GetRequiredDecoratedService` resolves the pre-decoration inner; `GetDecoratedServices` yields all layers.
 
 ```csharp
 namespace App.Bootstrap;
 
-using System.Collections.Generic;
-using System.Linq;
 using Microsoft.Extensions.DependencyInjection;
 using Scrutor;
 
-public static class DecoratorTopology {
-    public static IServiceProvider BuildProvider(IServiceCollection services) {
-        DecoratedService<ICommandBus> decoratedBus;
-        DecoratedService<object> decoratedQueryHandlers;
+// --- [CLOSED_GENERIC] --------------------------------------------------------
+
+public static class ClosedDecoration {
+    public static IServiceCollection AddDecoratedBus(IServiceCollection services) {
+        DecoratedService<ICommandBus> busHandle;
         services.AddScoped<ICommandBus, CommandBus>();
+        services.Decorate<ICommandBus, RetryCommandBus>();
+        services.Decorate<ICommandBus, TracingCommandBus>(out busHandle);
+        // Resolution order: TracingCommandBus -> RetryCommandBus -> CommandBus
+        return services;
+    }
+}
+
+// --- [OPEN_GENERIC] ----------------------------------------------------------
+
+public static class OpenGenericDecoration {
+    public static IServiceCollection AddDecoratedHandlers(IServiceCollection services) {
         services.AddScoped(typeof(IQueryHandler<,>), typeof(QueryHandler<,>));
-        services.Decorate<ICommandBus, MetricsCommandBus>(out decoratedBus);
-        bool queryCachingApplied = services.TryDecorate(
+        bool cachingApplied = services.TryDecorate(
             serviceType: typeof(IQueryHandler<,>),
             decoratorType: typeof(CachingQueryHandler<,>));
         services.Decorate(
             serviceType: typeof(IQueryHandler<,>),
-            decoratorType: typeof(TracingQueryHandler<,>),
-            out decoratedQueryHandlers);
-        IServiceProvider provider = services.BuildServiceProvider(new ServiceProviderOptions {
-            ValidateOnBuild = true,
-            ValidateScopes = true
-        });
-        ICommandBus underlyingBus = provider.GetRequiredDecoratedService(decoratedBus);
-        IEnumerable<object> queryLayers = provider.GetDecoratedServices(decoratedQueryHandlers).ToArray();
-        _ = (queryCachingApplied, underlyingBus, queryLayers);
-        return provider;
+            decoratorType: typeof(TracingQueryHandler<,>));
+        return services;
     }
 }
 ```
 
+[IMPORTANT]: Open generic decoration targets closed registrations compatible with the open definition. Decorators with type constraints (e.g., `where TCmd : IAccessRestricted`) silently skip non-matching closed types via `MakeGenericType` catch -- correct since v4.0.0 but allocates `ArgumentException` per mismatch at startup. Factory-based decoration bypasses `ValidateOnBuild` -- prefer type-based decoration where container validation matters.
+
 ---
-## [4][COMPOSITION_ROOT_GATE]
->**Dictum:** *Registration belongs in composition roots; domain pipelines stay runtime-agnostic.*
+## [4][EFF_DECORATOR]
+>**Dictum:** *Eff-wrapping decorators compose within the effect pipeline -- never collapse via Match and re-lift.*
 
 <br>
+
+When domain services return `Eff<RT,T>` (CSP0504), decorators must compose via `Map`/`MapFail`/`Bind` within the pipeline. The runtime-record pattern threads dependencies via `Eff<RT, T>.Asks` -- no `Has<RT>` interfaces. `Retry` uses algebraic `Schedule` combinators per `effects.md` [8].
+
+```csharp
+namespace App.Bootstrap;
+
+using System.Diagnostics;
+using Microsoft.Extensions.DependencyInjection;
+
+// --- [CONTRACTS] -------------------------------------------------------------
+
+public interface IOrderPipeline {
+    Eff<OrderRuntime, OrderConfirmation> Execute(OrderRequest request);
+}
+public sealed record OrderRuntime(
+    IOrderPipeline Orders, ActivitySource Tracing);
+
+// --- [TRACING_DECORATOR] -----------------------------------------------------
+
+public sealed class TracingOrderDecorator : IOrderPipeline {
+    private readonly IOrderPipeline _inner;
+    public TracingOrderDecorator(IOrderPipeline inner) => _inner = inner;
+    public Eff<OrderRuntime, OrderConfirmation> Execute(OrderRequest request) =>
+        from tracing in Eff<OrderRuntime, ActivitySource>.Asks(
+            static (OrderRuntime rt) => rt.Tracing)
+        let activity = tracing.StartActivity(name: "order.execute")
+        from result in _inner.Execute(request: request)
+            .Map((OrderConfirmation confirmation) => {
+                activity?.SetTag("order.id", confirmation.OrderId);
+                return confirmation;
+            })
+            .MapFail((Error error) => {
+                activity?.SetStatus(ActivityStatusCode.Error, error.Message);
+                return error;
+            })
+        select result;
+}
+
+// --- [RETRY_DECORATOR] -------------------------------------------------------
+
+public sealed class RetryOrderDecorator : IOrderPipeline {
+    private readonly IOrderPipeline _inner;
+    public RetryOrderDecorator(IOrderPipeline inner) => _inner = inner;
+    public Eff<OrderRuntime, OrderConfirmation> Execute(OrderRequest request) =>
+        _inner.Execute(request: request)
+            .Retry(schedule: Schedule.exponential(baseDelay: 100 * ms)
+                | Schedule.recurs(times: 3)
+                | Schedule.jitter(factor: 0.1));
+}
+
+// --- [REGISTRATION] ----------------------------------------------------------
+
+public static class EffDecoratorGraph {
+    public static IServiceCollection AddOrderPipeline(IServiceCollection services) {
+        services.AddScoped<IOrderPipeline, OrderPipeline>();
+        services.Decorate<IOrderPipeline, RetryOrderDecorator>();
+        services.Decorate<IOrderPipeline, TracingOrderDecorator>();
+        return services;
+    }
+}
+```
+
+[CRITICAL]: Decoration order: `OrderPipeline` -> `RetryOrderDecorator` -> `TracingOrderDecorator` (outermost observes retried result). Decorators compose within `Eff` via `Map`/`MapFail` -- collapsing via `Match` and re-lifting destroys monadic context and violates PREMATURE_MATCH_COLLAPSE (see `patterns.md`).
+
+---
+## [5][KEYED_REGISTRATION]
+>**Dictum:** *Service keys encode variant routing structurally; keyed decoration requires explicit key matching.*
+
+<br>
+
+`ServiceDescriptorAttribute<TService>` enables attribute-driven keyed registration with compile-time service type validation. `UsingAttributes()` reads metadata, validates assignability, and rejects duplicate `(ServiceType, ServiceKey)` tuples. `AsSelfWithInterfaces()` registers the concrete type as itself AND forwards all interface resolutions to the same instance -- true singleton behavior across multiple interface resolves (unlike `AsImplementedInterfaces()` which creates independent registrations). Non-keyed decorators do NOT affect keyed services -- `CanDecorate` checks `ServiceKey` equality.
 
 ```csharp
 namespace App.Bootstrap;
 
 using System;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.DependencyModel;
+using Scrutor;
 
-public static class RuntimeProvider {
-    public static IServiceProvider Build(Action<IServiceCollection> externalModules) {
-        IServiceCollection services = new ServiceCollection();
-        externalModules(services);
-        CompositionGraph.AddApplicationGraph(services);
-        DeterministicDiscovery.AddModules(
-            services,
-            context: DependencyContext.Default
-                ?? throw new InvalidOperationException("DependencyContext.Default unavailable."));
-        return DecoratorTopology.BuildProvider(services);
-    }
+// --- [ATTRIBUTE_DRIVEN] ------------------------------------------------------
+
+[ServiceDescriptor<IReadStore>(ServiceLifetime.Scoped, serviceKey: "read-store")]
+public sealed class PostgresReadStore : IReadStore;
+[ServiceDescriptor<IWriteStore>(ServiceLifetime.Singleton)]
+public sealed class WriteStore : IWriteStore;
+
+// --- [VARIANT_ROUTING] -------------------------------------------------------
+
+public static class KeyedDiscovery {
+    public static IServiceCollection AddAttributeModules(IServiceCollection services) =>
+        services.Scan(scan => scan
+            .FromAssemblyOf<KeyedDiscovery>()
+            .AddClasses(classes => classes.WithAttribute<ServiceDescriptorAttribute>())
+            .UsingRegistrationStrategy(RegistrationStrategy.Throw)
+            .UsingAttributes());
+    public static IServiceCollection AddVariantProcessors(IServiceCollection services) =>
+        services.Scan(scan => scan
+            .FromAssemblyOf<KeyedDiscovery>()
+            .AddClasses(classes => classes.AssignableTo<IPaymentProcessor>())
+            .UsingRegistrationStrategy(RegistrationStrategy.Throw)
+            .AsImplementedInterfaces()
+            .WithServiceKey(static (Type type) => type.Name)
+            .WithScopedLifetime());
+    public static IReadStore ResolveReadStore(IServiceProvider provider) =>
+        provider.GetRequiredKeyedService<IReadStore>("read-store");
 }
 ```
 
+[IMPORTANT]: `WithServiceKey` returns `ILifetimeSelector` -- chain key BEFORE lifetime: `.AsImplementedInterfaces().WithServiceKey("key").WithScopedLifetime()`. Key selectors returning `null` produce non-keyed registrations, enabling conditional keying within a single scan block.
+
 ---
-## [5][RULES]
+## [6][RULES]
 >**Dictum:** *Scrutor quality is determinism under change.*
 
 <br>
 
-- [ALWAYS] Bound scanning to explicit assemblies/namespaces.
-- [ALWAYS] Choose `RegistrationStrategy` explicitly; default append behavior is drift-prone.
-- [ALWAYS] Prefer `RegistrationStrategy.Throw` for strict modules and `Replace(...)` only with explicit replacement intent.
-- [ALWAYS] Remember `Replace()` defaults to `ReplacementBehavior.ServiceType`; use `ImplementationType` only when preserving sibling implementations is intentional.
-- [ALWAYS] Use deterministic key selectors or stable literals with `WithServiceKey(...)`.
-- [ALWAYS] Validate provider build via `ValidateOnBuild` + `ValidateScopes`.
-- [ALWAYS] Capture `DecoratedService<T>` when decorator order or underlying instances matter.
-- [ALWAYS] Use `Decorate` for required decorator topology and `TryDecorate` only for genuinely optional modules.
+- [ALWAYS] Bound scanning to explicit assemblies/namespaces via `FromDependencyContext` with predicates.
+- [ALWAYS] Choose `RegistrationStrategy` explicitly per `Scan` block -- CSP0406 enforces `UsingRegistrationStrategy` on every `Scan` call in composition-root and boundary scopes.
+- [ALWAYS] Prefer `RegistrationStrategy.Throw` for strict modules; `Replace(...)` only with explicit override intent.
+- [ALWAYS] Validate provider build via `ValidateOnBuild = true` + `ValidateScopes = true`.
+- [ALWAYS] Capture `DecoratedService<T>` via `out` parameter when decorator order or underlying instances matter at runtime.
+- [ALWAYS] Use `Decorate` for required topology; `TryDecorate` only for genuinely optional modules.
 - [ALWAYS] Keep Scrutor usage in composition roots/boundary adapters; never in domain transforms.
-- [NEVER] Pull compiler-generated types into scans unless an explicit attribute filter documents that intent.
-- [NEVER] Use `FromApplicationDependencies()` without a predicate in large solutions.
+- [ALWAYS] Use deterministic key selectors or stable literals with `WithServiceKey(...)`.
+- [NEVER] Use `FromApplicationDependencies()` without a predicate -- falls back silently, swallows load failures.
+- [NEVER] Pull compiler-generated types into scans unless `WithAttribute<CompilerGeneratedAttribute>()` explicitly documents that intent.
 - [NEVER] Mix broad scan blocks with ad-hoc manual overrides without explicit strategy boundaries.
 - [NEVER] Encode service-variant routing with imperative branching when keyed registration resolves it structurally.
+- [NEVER] Use factory-based decoration when type-based decoration suffices -- factories bypass `ValidateOnBuild`.

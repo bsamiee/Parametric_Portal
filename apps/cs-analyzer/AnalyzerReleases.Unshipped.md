@@ -20,7 +20,6 @@ CSP0012 | TypeDiscipline        | Error    | MutableAutoProperty
 CSP0013 | PerformanceDiscipline | Error    | ClosureCapture
 CSP0014 | AsyncDiscipline       | Error    | TaskRunFanOut
 CSP0015 | TypeDiscipline        | Error    | VarInference
-CSP0016 | TypeDiscipline        | Error    | AnemicDomain
 CSP0017 | PerformanceDiscipline | Error    | NonStaticHotPathClosure
 CSP0101 | FunctionalDiscipline  | Error    | BoundaryImperativeMissingExemption
 CSP0102 | FunctionalDiscipline  | Error    | BoundaryImperativeInvalidReason
@@ -38,9 +37,13 @@ CSP0402 | ResourceManagement    | Error    | FluentValidationInDomain
 CSP0403 | ResourceManagement    | Error    | FluentValidationValidateSync
 CSP0404 | ResourceManagement    | Error    | ChannelUnboundedTopology
 CSP0405 | ResourceManagement    | Error    | ChannelFullModeRequired
+CSP0406 | ResourceManagement    | Error    | ScrutorScanRegistrationStrategy
 CSP0501 | SurfaceArea           | Error    | InterfacePollution
 CSP0502 | SurfaceArea           | Error    | PositionalDomainArguments
 CSP0503 | SurfaceArea           | Error    | SingleUsePrivateHelper
+CSP0504 | FunctionalDiscipline  | Error    | EffectReturnPolicy
+CSP0505 | TypeDiscipline        | Error    | TypeClassStaticAbstractPolicy
+CSP0506 | SurfaceArea           | Error    | ExtensionProjectionRequired
 CSP0601 | PerformanceDiscipline | Error    | HotPathLinq
 CSP0602 | PerformanceDiscipline | Error    | HotPathNonStaticLambda
 CSP0603 | PerformanceDiscipline | Error    | LibraryImportRequired

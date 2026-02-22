@@ -11,15 +11,12 @@ namespace ParametricPortal.Kargadan.Plugin.src.contracts;
 
 internal static class Require {
     // --- [SCALAR_RULES] -------------------------------------------------------
-
     internal static ValidationError? NonEmptyGuid(Guid value, string typeName) =>
         (value == Guid.Empty) switch {
             true => new ValidationError($"{typeName} must not be empty."),
             false => null
         };
-
     // --- [STRING_RULES] -------------------------------------------------------
-
     internal static ValidationError? TrimmedNonEmpty(ref string value, string typeName) {
         value = value.Trim();
         return value.Length switch {
@@ -27,7 +24,6 @@ internal static class Require {
             _ => null
         };
     }
-
     internal static ValidationError? TrimmedMatching(ref string value, string typeName, CharSetPattern pattern) {
         value = value.Trim();
         ReadOnlySpan<char> candidate = value.AsSpan();
@@ -42,17 +38,13 @@ internal static class Require {
             _ => new ValidationError($"{typeName} has invalid format.")
         };
     }
-
     // --- [NUMERIC_RULES] ------------------------------------------------------
-
     internal static Validation<Error, int> NonNegative(int value, string field) =>
         (value >= 0) switch {
             true => Success<Error, int>(value),
             false => Fail<Error, int>(Error.New(message: $"{field} must be non-negative."))
         };
-
     // --- [PATTERNS] -----------------------------------------------------------
-
     internal static class Patterns {
         internal static readonly CharSetPattern TelemetryHex = new(
             AllowedChars: SearchValues.Create("0123456789abcdefABCDEF".AsSpan()),

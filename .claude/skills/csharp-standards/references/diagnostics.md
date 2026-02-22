@@ -112,7 +112,7 @@ public static class Probe {
 
 <br>
 
-LanguageExt `Error` is a recursive tree where `Inner` is `Option<Error>` -- errors from nested `@catch` handlers and composed `Eff` pipelines accumulate as chains that must be explicitly traversed via `.AsIterable()` + `.Inner.Match()` to surface root causes; there is no implicit flattening on `.Message` or `.Code`. `Validation<Error,T>` in v5 has no `BiMap` overload -- the `Error` `Monoid` instance changed the type parameter contract, so `.Match()` with both arms returning the same output type is the only projection path available. Materializing the flat `Seq<Error>` once in `Flatten` then reusing it for both `.Count` and `.Map(e => e.Message)` in `Summary` keeps the traversal O(n) -- calling `Flatten` separately per consumer would re-traverse the full chain for each projection site, producing O(n²) work in error reporting paths.
+LanguageExt `Error` is a recursive tree where `Inner` is `Option<Error>` -- errors from nested `@catch` handlers and composed `Eff` pipelines accumulate as chains that must be explicitly traversed via `.AsIterable()` + `.Inner.Match()` to surface root causes; there is no implicit flattening on `.Message` or `.Code`. `Validation<Error,T>` in v5 declares `BiMap` as an abstract method -- `Validation.Fail` and `Validation.Success` both override it, and `Bifunctor.Extensions` provides additional `K<F,L,A>` overloads. Use `validation.BiMap(Succ: ..., Fail: ...)` for dual-channel projection without collapsing context; reserve `.Match()` for terminal boundary projections that produce a single output type. Materializing the flat `Seq<Error>` once in `Flatten` then reusing it for both `.Count` and `.Map(e => e.Message)` in `Summary` keeps the traversal O(n) -- calling `Flatten` separately per consumer would re-traverse the full chain for each projection site, producing O(n²) work in error reporting paths.
 
 ```csharp
 // --- [FAILURE_INTELLIGENCE] --------------------------------------------------
@@ -137,7 +137,8 @@ file static class ErrorExtensions {
             error.Flatten()
                 .Map(static (Error e) => $"[{e.Code}] {e.Message}"));
 }
-// Validation<Error,T>.Match — no BiMap on Validation in v5
+// Validation<Error,T>.BiMap(Succ:, Fail:) projects both channels —
+// use for dual-channel observation without collapsing context.
 file static class ValidationExtensions {
     public static string Summary<T>(
         this Validation<Error, T> validation,
@@ -173,6 +174,120 @@ file static class ValidationExtensions {
 |   [9]   | `SYSLIB1042` | Invalid pattern in `[GeneratedRegex]`    | fix regex; validated at build time |
 
 ---
+## [2A][EFF_STACK_TRACE_NAVIGATION]
+>**Dictum:** *Read Eff failure traces by ignoring runtime plumbing and following domain annotations.*
+
+<br>
+
+When an `Eff<RT,T>` pipeline fails, the .NET stack trace interleaves LanguageExt runtime frames with domain code. Without triage rules, developers chase internal machinery instead of root causes. Three techniques reconstruct the logical failure path: frame filtering, `MapFail` annotation chains, and `Probe.Span` Activity correlation.
+
+**LanguageExt internal frames to ignore** -- these are runtime plumbing; skip past them to reach domain code:
+
+| [INDEX] | [FRAME_PREFIX]                           | [WHY_IGNORE]                   |
+| :-----: | ---------------------------------------- | ------------------------------ |
+|   [1]   | `LanguageExt.Eff<RT,A>.Run*`             | Effect interpreter entry point |
+|   [2]   | `LanguageExt.Eff<RT,A>.Bind*`            | Monadic bind dispatch          |
+|   [3]   | `LanguageExt.Eff<RT,A>.Map*`             | Functor map dispatch           |
+|   [4]   | `LanguageExt.IO<A>.*`                    | IO thunk evaluation            |
+|   [5]   | `LanguageExt.Eff.Invoke*`                | Internal invocation machinery  |
+|   [6]   | `LanguageExt.Effects.Eff.*`              | Effect module static helpers   |
+|   [7]   | `System.Runtime.CompilerServices.Async*` | Async state machine plumbing   |
+|   [8]   | `System.Threading.Tasks.Task.*`          | TPL infrastructure             |
+
+```csharp
+// --- [EFF_STACK_TRACE_EXAMPLE] -----------------------------------------------
+//
+// Raw stack trace from Eff<RT,T> failure:
+//
+//   LanguageExt.Common.Errors+ExpectedException: [ACCT-002] Insufficient funds
+//     at Domain.Accounts.AccountService.Withdraw(...)          <-- [ROOT CAUSE]
+//     at LanguageExt.Eff`2.Bind[B](Func`2 f)                  <-- skip
+//     at Domain.Accounts.TransferService.Execute(...)           <-- [CALLER]
+//     at LanguageExt.Eff`2.MapFail(Func`2 f)                  <-- skip (but NOTE annotation)
+//     at Domain.Transfers.TransferPipeline.Run(...)             <-- [ORCHESTRATOR]
+//     at LanguageExt.Eff`2.Run(RT env, EnvIO envIO)           <-- skip
+//     at Boundary.Api.TransferEndpoint.Handle(...)              <-- [BOUNDARY]
+//
+// Reading order: Boundary -> Orchestrator -> Caller -> Root Cause
+// Skip all LanguageExt.Eff, LanguageExt.IO, System.Runtime frames.
+```
+
+**MapFail annotation chains** -- `MapFail` transforms the error channel without collapsing the pipeline. Each `MapFail` in the chain adds a domain-level annotation that reconstructs the logical call path when the pipeline fails:
+
+```csharp
+// --- [MAPFAIL_ANNOTATION] ----------------------------------------------------
+
+namespace Domain.Diagnostics;
+
+using LanguageExt;
+using LanguageExt.Common;
+using static LanguageExt.Prelude;
+
+file static class EffDiagnostics {
+    // Each MapFail layer annotates the error with its domain context.
+    // On failure, Error.Inner chains form a domain-level call stack:
+    //   [XFER-001] Transfer failed
+    //     -> [ACCT-002] Insufficient funds
+    //         -> [BAL-003] Balance below minimum
+    public static Eff<RT, TransferResult> AnnotatedPipeline<RT>(
+        TransferRequest request) =>
+        from account in LoadAccount<RT>(request.AccountId)
+            .MapFail((Error error) =>
+                Error.New(code: 1002, message: "Account load failed", inner: error))
+        from result in Withdraw<RT>(account, request.Amount)
+            .MapFail((Error error) =>
+                Error.New(code: 1001, message: "Transfer failed", inner: error))
+        select result;
+
+    // Flatten the MapFail chain for structured logging at boundary:
+    public static string DiagnoseFailure(Error error) =>
+        error.ToChain(separator: "\n  -> ");
+    //  Output:
+    //    [1001] Transfer failed
+    //      -> [1002] Account load failed
+    //        -> [1003] Balance below minimum
+}
+```
+
+**Probe.Span Activity correlation** -- when `Probe.Span` wraps Eff pipeline stages, each span is an `Activity` with a unique `TraceId` + `SpanId`. On failure, `Activity.SetStatus(Error, message)` annotates the span. Distributed tracing backends (Jaeger, Zipkin, Grafana Tempo) reconstruct the logical flow as a span tree -- each `Probe.Span` becomes a child span under its caller:
+
+```csharp
+// --- [SPAN_CORRELATION] ------------------------------------------------------
+
+namespace Domain.Diagnostics;
+
+using System.Diagnostics;
+using LanguageExt;
+using LanguageExt.Common;
+using static LanguageExt.Prelude;
+
+file static class SpanCorrelation {
+    // Each Probe.Span creates an Activity child span.
+    // Trace backend reconstructs:
+    //   [transfer.execute]  TraceId=abc SpanId=001 Status=ERROR
+    //     [account.load]    TraceId=abc SpanId=002 Status=OK
+    //     [account.withdraw] TraceId=abc SpanId=003 Status=ERROR "Insufficient funds"
+    public static Eff<RT, TransferResult> TracedPipeline<RT>(
+        TransferRequest request) =>
+        Probe.Span<RT, TransferResult>(
+            pipeline: from account in Probe.Span<RT, Account>(
+                          pipeline: LoadAccount<RT>(request.AccountId),
+                          spanName: "account.load")
+                      from result in Probe.Span<RT, TransferResult>(
+                          pipeline: Withdraw<RT>(account, request.Amount),
+                          spanName: "account.withdraw")
+                      select result,
+            spanName: "transfer.execute");
+    // Extract correlation IDs from current Activity for structured logging:
+    public static (string TraceId, string SpanId) CurrentCorrelation() =>
+        Activity.Current switch {
+            Activity activity => (activity.TraceId.ToString(), activity.SpanId.ToString()),
+            null => ("none", "none")
+        };
+}
+```
+
+---
 ## [3][PERF_DIAGNOSTICS]
 >**Dictum:** *Profile from runtime signals first; prove minimal-capture hot paths.*
 
@@ -189,6 +304,20 @@ dotnet-trace collect --process-id <PID> \
 # Monitor runtime + custom meter counters
 dotnet-counters monitor --process-id <PID> \
   --counters System.Runtime,Domain.Service
+# Capture heap dump for Atom<HashMap<K,V>> growth diagnosis
+dotnet-dump collect --process-id <PID> \
+  --output heap.dmp
+# Analyze retained objects (sorted by size descending)
+dotnet-dump analyze heap.dmp <<'EOF'
+dumpheap -stat
+dumpheap -type HashMap
+gcroot <addr>
+EOF
+# Capture GC root snapshot (lighter than full dump)
+dotnet-gcdump collect --process-id <PID> \
+  --output gc-roots.gcdump
+# Open in dotnet-gcdump report or PerfView:
+# dotnet-gcdump report gc-roots.gcdump
 ```
 
 ```csharp
@@ -219,15 +348,17 @@ public static class ClosureDiagnostics {
 
 <br>
 
-| [INDEX] | [CONSTRAINT]                  | [MANDATE]                                                    | [ENFORCEMENT_SURFACE]          |
-| :-----: | ----------------------------- | ------------------------------------------------------------ | ------------------------------ |
-|   [1]   | **`CENTRALIZED_RUNTIME`**     | one module owns `ActivitySource`, `Meter`, `LoggerFactory`   | single identity surface        |
-|   [2]   | **`IDENTITY_PROBES`**         | probes are taps (`Map`/`Match`), never terminal mid-pipeline | algebraic composition law      |
-|   [3]   | **`NO_INLINE_RUN`**           | no `.Run()` execution inside transformations                 | referential transparency       |
-|   [4]   | **`ERROR_CHAIN_SINGLE_PASS`** | flatten and summarize errors once per projection             | `O(n)` traversal guarantee     |
-|   [5]   | **`DEBUG_GATING`**            | debug enrichment only in `#if DEBUG` branches                | zero release overhead          |
-|   [6]   | **`LOGGER_SOURCE_GEN`**       | diagnostics logs use `[LoggerMessage]`                       | `CA1848`, `CA2254`             |
-|   [7]   | **`OS_PORTABLE_CLI`**         | profiling commands avoid platform-specific assumptions       | cross-platform runbooks        |
-|   [8]   | **`HOT_PATH_PROOF`**          | static lambda enforcement for closure diagnostics            | `IDE0320`, `CS8820`            |
-|   [9]   | **`TRACE_LIFECYCLE`**         | spans are bracket-disposed on all channels                   | `CA2000` deterministic cleanup |
-|  [10]   | **`BOUNDARY_MATCH_ONLY`**     | final pattern matching occurs only at API/program edge       | no premature context collapse  |
+| [INDEX] | [CONSTRAINT]                  | [MANDATE]                                                                    | [ENFORCEMENT_SURFACE]          |
+| :-----: | ----------------------------- | ---------------------------------------------------------------------------- | ------------------------------ |
+|   [1]   | **`CENTRALIZED_RUNTIME`**     | one module owns `ActivitySource`, `Meter`, `LoggerFactory`                   | single identity surface        |
+|   [2]   | **`IDENTITY_PROBES`**         | probes are taps (`Map`/`Match`), never terminal mid-pipeline                 | algebraic composition law      |
+|   [3]   | **`NO_INLINE_RUN`**           | no `.Run()` execution inside transformations                                 | referential transparency       |
+|   [4]   | **`ERROR_CHAIN_SINGLE_PASS`** | flatten and summarize errors once per projection                             | `O(n)` traversal guarantee     |
+|   [5]   | **`DEBUG_GATING`**            | debug enrichment only in `#if DEBUG` branches                                | zero release overhead          |
+|   [6]   | **`LOGGER_SOURCE_GEN`**       | diagnostics logs use `[LoggerMessage]`                                       | `CA1848`, `CA2254`             |
+|   [7]   | **`OS_PORTABLE_CLI`**         | profiling commands avoid platform-specific assumptions                       | cross-platform runbooks        |
+|   [8]   | **`HOT_PATH_PROOF`**          | static lambda enforcement for closure diagnostics                            | `IDE0320`, `CS8820`            |
+|   [9]   | **`TRACE_LIFECYCLE`**         | spans are bracket-disposed on all channels                                   | `CA2000` deterministic cleanup |
+|  [10]   | **`BOUNDARY_MATCH_ONLY`**     | final pattern matching occurs only at API/program edge                       | no premature context collapse  |
+|  [11]   | **`EFF_TRACE_TRIAGE`**        | skip LanguageExt/IO/TPL frames; follow `MapFail` annotation chains           | domain-level failure path      |
+|  [12]   | **`HEAP_DIAG_TOOLCHAIN`**     | use `dotnet-dump` for retained objects, `dotnet-gcdump` for GC root analysis | `Atom<HashMap>` growth         |

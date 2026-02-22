@@ -11,6 +11,7 @@ public enum BoundaryImperativeReason {
 public static class BoundaryImperativeReasonFacts {
     public static bool TryParse(object? raw, out BoundaryImperativeReason reason) {
         (bool valid, BoundaryImperativeReason parsed) = raw switch {
+            BoundaryImperativeReason parsedReason when Enum.IsDefined(enumType: typeof(BoundaryImperativeReason), value: parsedReason) => (true, parsedReason),
             int value when Enum.IsDefined(enumType: typeof(BoundaryImperativeReason), value: value) => (true, (BoundaryImperativeReason)value),
             _ => (false, BoundaryImperativeReason.ProtocolRequired),
         };

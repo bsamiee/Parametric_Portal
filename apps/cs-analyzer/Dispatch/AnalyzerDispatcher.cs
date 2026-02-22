@@ -19,6 +19,8 @@ internal static class AnalyzerDispatcher {
             case (_, IMethodSymbol method):
                 state.TrackPrivateMethod(method: method);
                 ShapeRules.CheckSignatures(context, scope, method);
+                ShapeRules.CheckEffectReturnPolicy(context, scope, method);
+                ShapeRules.CheckExtensionProjectionPolicy(context, scope, method);
                 FlowRules.CheckAsyncVoid(context, scope, method);
                 RuntimeRules.CheckLibraryImport(context, scope, method);
                 RuntimeRules.CheckGeneratedRegexCharsetValidation(context, scope, method);
@@ -36,6 +38,7 @@ internal static class AnalyzerDispatcher {
                 ShapeRules.CheckApiSurfaceInflationByPrefix(context, scope, namedType);
                 ShapeRules.CheckMutableFields(context, scope, namedType);
                 ShapeRules.CheckPublicCtorOnValidatedPrimitive(context, scope, namedType);
+                ShapeRules.CheckTypeClassStaticAbstractPolicy(context, scope, namedType);
                 TypeShapeRules.CheckDomainPrimitiveShape(context, scope, namedType);
                 TypeShapeRules.CheckCreateFactoryReturnType(context, scope, namedType);
                 TypeShapeRules.CheckDiscriminatedUnionShape(context, scope, namedType);
@@ -72,6 +75,7 @@ internal static class AnalyzerDispatcher {
                 ShapeRules.CheckPositionalArguments(context, scope, invocation);
                 RuntimeRules.CheckHotPathLinq(context, scope, invocation);
                 RuntimeRules.CheckFluentValidation(context, scope, invocation);
+                RuntimeRules.CheckScrutorScanRegistrationStrategy(context, scope, invocation);
                 RuntimeRules.CheckChannelTopology(context, scope, invocation);
                 RuntimeRules.CheckRegexStaticMethod(context, scope, invocation);
                 RuntimeRules.CheckUnsafeNumericConversion(context, scope, invocation);

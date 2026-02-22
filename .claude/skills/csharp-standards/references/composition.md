@@ -11,7 +11,7 @@ Collapses method families into polymorphic abstractions via higher-kinded encodi
 
 <br>
 
-`Eff<RT,A>` composition: (a) sequential via LINQ `from`/`select`, (b) independent via applicative tuple, (c) `Fin<A>` lifting via `.ToEff()`, (d) error recovery via `@catch` | alternation.
+`Eff<RT,A>` composition: (a) sequential via LINQ `from`/`select`, (b) independent via applicative tuple, (c) `Fin<A>` lifting via `.ToEff()`, (d) error recovery via `@catch` | alternation. See `effects.md` [3] for the full `@catch` overload list (`CatchM<Error, M, A>`).
 
 ```csharp
 namespace Domain.Composition;
@@ -85,7 +85,7 @@ public static class Flow {
 
 <br>
 
-`params ReadOnlySpan<T>` collapses all arities into a single stack-allocated call via `IAlgebraicMonoid<TSelf>`.
+`params ReadOnlySpan<T>` collapses all arities into a single stack-allocated call via `IAlgebraicMonoid<TSelf>`. For Generic Math interfaces (`IAdditionOperators`, `INumber<T>`) on domain types, see `types.md` [6] -- same foundation, type-specific operator constraints.
 
 ```csharp
 namespace Domain.Composition;
@@ -139,6 +139,7 @@ public readonly record struct Digit(int Value) {
 }
 public static class Parsing {
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    // Monad<F> implies Applicative<F>; Traverse requires Applicative<F> for sequencing.
     public static K<F, int> ParseInt<F>(string text)
         where F : Fallible<F>, Monad<F> =>
         toSeq(text)
@@ -166,6 +167,17 @@ public static T Sum<F, T>(K<F, T> structure)
     where F : Foldable<F> where T : INumber<T> =>
     Foldable.fold(f: static (T acc, T item) => acc + item, initialState: T.Zero, ta: structure);
 ```
+
+`Fallible<F>` -- HKT-level error recovery via `@catch` on any fallible functor:
+
+```csharp
+// K<F,A>-level recovery: works for Fin, Eff, Option, Validation, etc.
+public static K<F, T> WithDefault<F, T>(K<F, T> primary, K<F, T> fallback)
+    where F : Fallible<F>, Applicative<F> =>
+    primary | @catch(static (Error _) => fallback);
+```
+
+`algorithms.md` [6] provides concrete `Fin<T>` Kleisli composition (`ComposeK`/`PipeK`) -- same pattern specialized to synchronous fallible arrows.
 
 ---
 ## [5][ALGEBRAIC_COMPRESSION]
@@ -227,7 +239,6 @@ public static class RuntimeAccess {
 }
 // TestRuntime: same property shape with stub implementations -- zero mocks
 // Services constrain on runtime capability shape, never concrete infrastructure types
-
 // Composition root: wire runtime seams via Scrutor, not repetitive AddScoped chains.
 services.Scan(scan => scan
     .FromAssemblyOf<AppRuntime>()

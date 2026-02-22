@@ -16,6 +16,8 @@ class SocketRequestTimeoutError extends Data.TaggedError('SocketRequestTimeout')
 // --- [SCHEMA] ----------------------------------------------------------------
 
 const _decodeInbound = S.decodeUnknown(S.parseJson(Kargadan.InboundEnvelopeSchema));
+const _encodeOutbound = S.encode(S.parseJson(Kargadan.OutboundEnvelopeSchema));
+const _inboundDecoder = new TextDecoder();
 
 // --- [SERVICES] --------------------------------------------------------------
 
@@ -25,6 +27,8 @@ class KargadanSocketClient extends Effect.Service<KargadanSocketClient>()('karga
         const writer = yield* socket.writer;
         const pending = yield* Ref.make(HashMap.empty<string, Deferred.Deferred<Kargadan.InboundEnvelope>>());
         const events = yield* Queue.unbounded<Kargadan.EventEnvelope>();
+        const _writeEnvelope = (envelope: Kargadan.OutboundEnvelope) =>
+            _encodeOutbound(envelope).pipe(Effect.flatMap((json) => writer(json)),);
         const request = Effect.fn('kargadan.socket.request')((envelope: Kargadan.OutboundEnvelope) =>
             Effect.gen(function* () {
                 const timeoutMs = yield* HarnessConfig.commandDeadlineMs;
@@ -32,7 +36,7 @@ class KargadanSocketClient extends Effect.Service<KargadanSocketClient>()('karga
                 const requestId = envelope.identity.requestId;
                 const clearPending = Ref.update(pending, (entries) => HashMap.remove(entries, requestId));
                 yield* Ref.update(pending, (entries) => HashMap.set(entries, requestId, deferred));
-                return yield* writer(JSON.stringify(envelope)).pipe(
+                return yield* _writeEnvelope(envelope).pipe(
                     Effect.zipRight(
                         Deferred.await(deferred).pipe(
                             Effect.timeoutFail({
@@ -45,9 +49,7 @@ class KargadanSocketClient extends Effect.Service<KargadanSocketClient>()('karga
                 );
             }),
         );
-        const send = Effect.fn('kargadan.socket.send')((envelope: Kargadan.OutboundEnvelope) =>
-            writer(JSON.stringify(envelope)),
-        );
+        const send = Effect.fn('kargadan.socket.send')((envelope: Kargadan.OutboundEnvelope) => _writeEnvelope(envelope),);
         const _resolvePending = (value: Kargadan.InboundEnvelope) =>
             Ref.modify(
                 pending,
@@ -65,7 +67,7 @@ class KargadanSocketClient extends Effect.Service<KargadanSocketClient>()('karga
                 ),
             );
         const _dispatchChunk = (chunk: Uint8Array) =>
-            _decodeInbound(new TextDecoder().decode(chunk)).pipe(
+            _decodeInbound(_inboundDecoder.decode(chunk)).pipe(
                 Effect.flatMap((envelope) =>
                     Match.value(envelope).pipe(
                         Match.when({ _tag: 'event' }, (eventEnvelope) => Queue.offer(events, eventEnvelope)),
@@ -79,9 +81,9 @@ class KargadanSocketClient extends Effect.Service<KargadanSocketClient>()('karga
         const start = Effect.fn('kargadan.socket.start')(() => socket.run(_dispatchChunk));
         const takeEvent = Effect.fn('kargadan.socket.takeEvent')(() => Queue.take(events));
         return {
-            lifecycle: { start },
-            read: { takeEvent },
-            write: { request, send },
+            lifecycle: { start         },
+            read:      { takeEvent     },
+            write:     { request, send },
         } as const;
     }),
 }) {}

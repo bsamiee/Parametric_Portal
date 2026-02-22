@@ -17,6 +17,15 @@ const SessionState = {
         sessionId:   undefined,
     } satisfies SessionState.Type,
 } as const;
+const _terminalState = (
+    phase: 'closed' | 'reaped' | 'rejected' | 'timed_out',
+    reason: string | undefined,
+) => ({
+    heartbeatAt: undefined,
+    phase,
+    reason,
+    sessionId: undefined,
+} as const);
 
 // --- [NAMESPACE] -------------------------------------------------------------
 
@@ -63,11 +72,11 @@ class SessionSupervisor extends Effect.Service<SessionSupervisor>()('kargadan/Se
                     Activate:     ({ at }) => ({ heartbeatAt: at, phase: 'active' as const,        reason: undefined }),
                     Authenticate: ({ at }) => ({ heartbeatAt: at, phase: 'authenticated' as const, reason: undefined }),
                     Beat:         ({ at }) => ({ heartbeatAt: at }),
-                    Close:        ({ reason }) =>    ({ heartbeatAt: undefined,      phase: 'closed' as const,    reason, sessionId: undefined }),
-                    Connect:      ({ sessionId }) => ({ phase: 'connected' as const, reason: undefined,           sessionId                    }),
-                    Reap:         ({ reason }) =>    ({ heartbeatAt: undefined,      phase: 'reaped' as const,    reason, sessionId: undefined }),
-                    Reject:       ({ reason }) =>    ({ heartbeatAt: undefined,      phase: 'rejected' as const,  reason, sessionId: undefined }),
-                    Timeout:      ({ reason }) =>    ({ heartbeatAt: undefined,      phase: 'timed_out' as const, reason, sessionId: undefined }),
+                    Close:        ({ reason }) => _terminalState('closed', reason),
+                    Connect:      ({ sessionId }) => ({ phase: 'connected' as const, reason: undefined, sessionId }),
+                    Reap:         ({ reason }) => _terminalState('reaped', reason),
+                    Reject:       ({ reason }) => _terminalState('rejected', reason),
+                    Timeout:      ({ reason }) => _terminalState('timed_out', reason),
                 }),
             })),
         );

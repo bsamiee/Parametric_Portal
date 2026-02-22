@@ -96,16 +96,33 @@ jobs:
         if: steps.auto-fix.outputs.has-changes != 'true'
         run: pnpm exec nx affected -t lint,typecheck,build --parallel=4
 
+      - name: C# Helper Naming Guard
+        if: steps.auto-fix.outputs.has-changes != 'true'
+        run: |
+          set -euo pipefail
+          violations="$(find . -type f \
+            \( -name '*Helper.cs' -o -name '*Helpers.cs' -o -name '*Util.cs' -o -name '*Utils.cs' \) \
+            -not -path './.git/*' \
+            -not -path './node_modules/*' \
+            -not -path '*/bin/*' \
+            -not -path '*/obj/*' | sort)"
+          if [ -n "$violations" ]; then
+            echo "[ERROR] Disallowed C# helper naming found:"
+            echo "$violations"
+            exit 1
+          fi
+          echo "[INFO] C# helper naming guard passed."
+
       - name: .NET Quality Gates (Restore, Build)
         if: steps.auto-fix.outputs.has-changes != 'true'
         run: |
           set -euo pipefail
-          cs_projects="$(pnpm exec nx show projects --withTarget=build:cs --json)"
-          if [ "$cs_projects" = "[]" ]; then
-            echo "[INFO] No .NET projects with build:cs target found."
+          cs_projects="$(pnpm -s exec nx show projects --withTarget=build:release 2>/dev/null | rg --no-config --no-line-number --color=never '^[[:alnum:]@._/-]+$' || true)"
+          if [ -z "$cs_projects" ]; then
+            echo "[INFO] No .NET projects with build:release target found."
             exit 0
           fi
-          pnpm exec nx affected -t restore:cs,build:cs --parallel=2
+          pnpm exec nx affected -t restore,build:release --parallel=2
 
       - name: Get Playwright version
         if: steps.auto-fix.outputs.has-changes != 'true'
@@ -132,16 +149,33 @@ jobs:
         if: steps.auto-fix.outputs.has-changes != 'true'
         run: pnpm exec nx affected -t test -- --coverage
 
-      - name: .NET Test
+      - name: .NET Release Sanity Tests
         if: steps.auto-fix.outputs.has-changes != 'true'
         run: |
           set -euo pipefail
-          cs_projects="$(pnpm exec nx show projects --withTarget=test:cs --json)"
-          if [ "$cs_projects" = "[]" ]; then
-            echo "[INFO] No .NET projects with test:cs target found."
+          mapfile -t csproj_files < <(find apps packages -type f -name '*.csproj' -not -path '*/bin/*' -not -path '*/obj/*' | sort)
+          if [ "${#csproj_files[@]}" -eq 0 ]; then
+            echo "[INFO] No .NET project files found."
             exit 0
           fi
-          pnpm exec nx affected -t test:cs --parallel=2
+
+          test_projects=()
+          for project in "${csproj_files[@]}"; do
+            is_test_project="$(dotnet msbuild "$project" -nologo -getProperty:IsTestProject | tr -d '\r' | tail -n 1)"
+            if [ "$is_test_project" = "true" ]; then
+              test_projects+=("$project")
+            fi
+          done
+
+          if [ "${#test_projects[@]}" -eq 0 ]; then
+            echo "[INFO] No .NET test projects detected; skipping release sanity tests."
+            exit 0
+          fi
+
+          for project in "${test_projects[@]}"; do
+            echo "[INFO] Running dotnet test (Release) for $project"
+            dotnet test "$project" --configuration Release --nologo --verbosity minimal
+          done
 
       - name: Biome SARIF Report
         if: steps.auto-fix.outputs.has-changes != 'true'

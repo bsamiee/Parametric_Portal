@@ -31,13 +31,19 @@ public static class DomainGenerators {
             select DomainIdentity.Create(candidate: guid)
                 .Match(Succ: (DomainIdentity identity) => identity,
                        Fail: (Error _) => throw new UnreachableException()));
-
     public static Arbitrary<TransactionAmount> TransactionAmountArb() =>
         Arb.From(
-            from raw in Gen.Choose(1, 1_000_000)
-            select TransactionAmount.Create(candidate: raw / 100.0m)
-                .Match(Succ: (TransactionAmount amount) => amount,
-                       Fail: (Error _) => throw new UnreachableException()));
+            Gen.OneOf(
+                Gen.Choose(1, 1_000_000).Select((int raw) =>
+                    TransactionAmount.Create(candidate: raw / 100.0m)
+                        .Match(Succ: (TransactionAmount amount) => amount,
+                               Fail: (Error _) => throw new UnreachableException())),
+                Gen.Constant(TransactionAmount.Create(candidate: 0.01m)
+                    .Match(Succ: (TransactionAmount amount) => amount,
+                           Fail: (Error _) => throw new UnreachableException())),
+                Gen.Constant(TransactionAmount.Create(candidate: 0.0001m)
+                    .Match(Succ: (TransactionAmount amount) => amount,
+                           Fail: (Error _) => throw new UnreachableException()))));
 }
 
 // --- [LAWS] ------------------------------------------------------------------
@@ -49,17 +55,29 @@ public sealed class DomainIdentityLaws {
         DomainIdentity.Create(candidate: candidate)
             .Map((DomainIdentity identity) => identity)
             .Equals(DomainIdentity.Create(candidate: candidate));
-
     [Property]
     public bool Closure_rejects_empty() =>
         DomainIdentity.Create(candidate: Guid.Empty).IsFail;
-
     [Property]
     public bool Roundtrip_preserves_value(DomainIdentity identity) =>
         DomainIdentity.Create(candidate: identity.Value)
             .Map((DomainIdentity recreated) => recreated.Value)
             .Match(Succ: (Guid value) => value == identity.Value,
                    Fail: (Error _) => false);
+    // Monad law: Bind associativity -- (m >>= f) >>= g ≡ m >>= (x => f(x) >>= g)
+    // Instantiated over Fin<DomainIdentity> with f = g = Create ∘ extract.
+    [Property]
+    public bool Bind_is_associative(DomainIdentity identity) {
+        Fin<DomainIdentity> m = DomainIdentity.Create(candidate: identity.Value);
+        Fin<DomainIdentity> left = m
+            .Bind((DomainIdentity x) => DomainIdentity.Create(candidate: x.Value))
+            .Bind((DomainIdentity x) => DomainIdentity.Create(candidate: x.Value));
+        Fin<DomainIdentity> right = m
+            .Bind((DomainIdentity x) =>
+                DomainIdentity.Create(candidate: x.Value)
+                    .Bind((DomainIdentity y) => DomainIdentity.Create(candidate: y.Value)));
+        return left.Equals(right);
+    }
 }
 
 [Properties(Arbitrary = new[] { typeof(DomainGenerators) })]
@@ -67,14 +85,92 @@ public sealed class TransactionAmountLaws {
     [Property]
     public bool Positive_amounts_succeed(PositiveInt raw) =>
         TransactionAmount.Create(candidate: (decimal)raw.Get / 100.0m).IsSucc;
-
     [Property]
     public bool Zero_and_negative_fail(NegativeInt raw) =>
         TransactionAmount.Create(candidate: (decimal)raw.Get).IsFail;
 }
+
+// --- [DU_TRANSITION_GENERATORS] ----------------------------------------------
+// Gen.OneOf gives each variant equal probability; FsCheck shrinking targets
+// the minimal counterexample within the chosen arm.
+
+public static class TransitionGenerators {
+    public static Arbitrary<TransactionState> TransactionStateArb() =>
+        Arb.From(Gen.OneOf(
+            from id in Arb.Generate<DomainIdentity>()
+            from amt in Arb.Generate<TransactionAmount>()
+            select (TransactionState)new TransactionState.Pending(
+                Id: id, Amount: amt, InitiatedAt: SystemClock.Instance.GetCurrentInstant()),
+            from id in Arb.Generate<DomainIdentity>()
+            select (TransactionState)new TransactionState.Authorized(
+                Id: id, AuthorizationToken: "tok-" + id.Value),
+            from id in Arb.Generate<DomainIdentity>()
+            select (TransactionState)new TransactionState.Settled(
+                Id: id, ReceiptHash: "rcpt-" + id.Value),
+            from id in Arb.Generate<DomainIdentity>()
+            select (TransactionState)new TransactionState.Faulted(
+                Id: id, Reason: Error.New(message: "test-fault"))));
+    public static Arbitrary<UserId<Unvalidated>> UnvalidatedUserIdArb() =>
+        Arb.From(
+            from guid in Arb.Generate<Guid>()
+            select UserIdOps.FromRaw(raw: guid));
+}
+
+// --- [DU_TRANSITION_LAWS] ----------------------------------------------------
+// Laws encode algebraic properties of sealed DU state machines (types.md [4])
+// and phantom-parameterized types (types.md [5]).
+
+[Properties(Arbitrary = new[] { typeof(DomainGenerators), typeof(TransitionGenerators) })]
+public sealed class TransactionTransitionLaws {
+    // Law: terminal state absorption -- Authorize on Settled/Faulted always fails;
+    // terminal states are absorbing under all transition attempts.
+    [Property]
+    public bool Terminal_absorbs_authorize(TransactionState state) =>
+        state.IsTerminal switch {
+            false => true, // non-terminal states are unconstrained -- skip
+            true => state.Authorize(token: "any-token")
+                .Match(Succ: (TransactionState _) => false,
+                       Fail: (Error _) => true)
+        };
+    // Law: transition monotonicity -- once a state is terminal, IsTerminal
+    // is stable across any reachable transition sequence. Applying Authorize
+    // to a terminal state cannot produce a non-terminal successor.
+    [Property]
+    public bool Terminal_is_monotonic(TransactionState state) =>
+        state.IsTerminal switch {
+            false => true,
+            true => state.Authorize(token: "probe")
+                .Match(Succ: (TransactionState next) => next.IsTerminal,
+                       Fail: (Error _) => true) // Fail is acceptable -- still terminal
+        };
+    // Law: idempotent authorization -- authorizing an already-authorized state
+    // yields a structurally equal authorized value (equivalent under re-application).
+    [Property]
+    public bool Authorized_is_idempotent(TransactionState state) =>
+        state switch {
+            TransactionState.Authorized auth =>
+                auth.Authorize(token: "ignored")
+                    .Match(Succ: (TransactionState next) => next == auth,
+                           Fail: (Error _) => false),
+            _ => true // law applies only to Authorized variant
+        };
+}
+[Properties(Arbitrary = new[] { typeof(TransitionGenerators) })]
+public sealed class PhantomRoundtripLaws {
+    // Law: phantom validation round-trip -- a validated UserId survives
+    // Extract → Create cycle. The Fin<T> factory is the sole construction
+    // path; round-tripping through it must preserve the value.
+    [Property]
+    public bool Validated_phantom_survives_roundtrip(UserId<Unvalidated> raw) =>
+        UserIdOps.Validate(raw: raw)
+            .Bind((UserId<Validated> validated) =>
+                UserIdOps.Validate(raw: UserIdOps.FromRaw(raw: validated.Value)))
+            .Match(Succ: (UserId<Validated> revalidated) => revalidated.Value == raw.Value,
+                   Fail: (Error _) => raw.Value == Guid.Empty); // Empty fails both times -- consistent
+}
 ```
 
-[IMPORTANT]: Generators call production `Fin<T>` factories -- no parallel construction paths. `Match` in generators is acceptable infrastructure (not domain logic). `[Properties(Arbitrary = ...)]` registers custom arbitraries at the class level. Every smart constructor requires identity, closure, and roundtrip laws at minimum.
+[IMPORTANT]: Generators call production `Fin<T>` factories -- no parallel construction paths. `Match` in generators is acceptable infrastructure (not domain logic). `[Properties(Arbitrary = ...)]` registers custom arbitraries at the class level. Every smart constructor requires identity, closure, and roundtrip laws at minimum. DU transition laws encode absorption and monotonicity over sealed hierarchies -- these are algebraic invariants of the state machine, not implementation details. Phantom round-trip laws verify that the `Fin<T>` factory is the stable fixpoint of the validation boundary.
 
 ---
 ## [2][INTEGRATION_BOUNDARIES]
@@ -100,10 +196,8 @@ public sealed class PostgresFixture : IAsyncLifetime {
         .WithUsername(username: "testuser")
         .WithPassword(password: "testpass")
         .Build();
-
     private Respawner _respawner = default!;
     public string ConnectionString => _container.GetConnectionString();
-
     public async Task InitializeAsync() {
         await _container.StartAsync();
         await using NpgsqlConnection connection = new(_container.GetConnectionString());
@@ -112,15 +206,20 @@ public sealed class PostgresFixture : IAsyncLifetime {
             new RespawnerOptions { DbAdapter = DbAdapter.Postgres,
                                    SchemasToInclude = new[] { "public" } });
     }
-
     public async Task ResetAsync() {
         await using NpgsqlConnection connection = new(ConnectionString);
         await connection.OpenAsync();
         await _respawner.ResetAsync(connection: connection);
     }
-
     public async Task DisposeAsync() => await _container.DisposeAsync();
 }
+
+// --- [COLLECTION] ------------------------------------------------------------
+// Required by xUnit to share PostgresFixture across test classes. Without this
+// declaration each [Collection("Postgres")] class gets an isolated container.
+
+[CollectionDefinition("Postgres")]
+public sealed class PostgresCollection : ICollectionFixture<PostgresFixture>;
 
 // --- [TESTS] -----------------------------------------------------------------
 
@@ -155,6 +254,73 @@ public sealed class TransactionRepositoryTests : IAsyncLifetime {
 ```
 
 [IMPORTANT]: Each test class resets via `_fixture.ResetAsync()` in `InitializeAsync`. Respawn truncates all checkpoint tables without schema recreation. Testcontainers handles port allocation, image pulling, and cleanup automatically. `[Collection("Postgres")]` serializes test classes sharing the same container to prevent port conflicts.
+
+---
+## [2A][EFF_PIPELINES]
+>**Dictum:** *Test runtime records are plain stubs; Fin-returning properties replace interface mocks.*
+
+<br>
+
+`Eff<RT,T>` pipelines require a test runtime record with stub property implementations. Construct the record inline; `Run()` collapses the effect to `Fin<T>` for assertion. `@catch` recovery paths require a second run with a stub that returns the trigger error.
+
+```csharp
+namespace Domain.Tests.Effects;
+
+using LanguageExt;
+using static LanguageExt.Prelude;
+
+// --- [RUNTIME] ---------------------------------------------------------------
+
+public sealed record TestRuntime(
+    IGatewayProvider Gateway,
+    IClock Clock,
+    CancellationToken CancellationToken = default);
+
+// Test stub that always succeeds
+public sealed class StubGateway : IGatewayProvider {
+    public Fin<TransactionState> Authorize(DomainIdentity id, string token) =>
+        Fin.Succ<TransactionState>(new TransactionState.Authorized(Id: id, AuthorizationToken: token));
+}
+
+// Test stub that always fails with a specific error
+public sealed class FaultingGateway : IGatewayProvider {
+    public Fin<TransactionState> Authorize(DomainIdentity id, string token) =>
+        Fin.Fail<TransactionState>(Error.New(message: "gateway-timeout"));
+}
+
+// --- [TESTS] -----------------------------------------------------------------
+
+public sealed class AuthorizationPipelineTests {
+    private static TestRuntime MakeRuntime(IGatewayProvider gateway) =>
+        new(Gateway: gateway, Clock: SystemClock.Instance);
+
+    [Fact]
+    public void Success_path_returns_authorized_state() {
+        Fin<TransactionState> result = AuthorizationPipeline
+            .Authorize<TestRuntime>(id: SomeIdentity(), token: "tok-001")
+            .Run(runtime: MakeRuntime(gateway: new StubGateway()));
+        Assert.True(result.IsSucc);
+    }
+
+    // @catch recovery: stub triggers the error; pipeline must return fallback.
+    [Fact]
+    public void Gateway_timeout_falls_back_to_faulted_state() {
+        Fin<TransactionState> result = AuthorizationPipeline
+            .AuthorizeWithFallback<TestRuntime>(id: SomeIdentity(), token: "tok-001")
+            .Run(runtime: MakeRuntime(gateway: new FaultingGateway()));
+        result.Match(
+            Succ: (TransactionState state) => Assert.IsType<TransactionState.Faulted>(state),
+            Fail: (Error _) => throw new UnreachableException());
+    }
+
+    private static DomainIdentity SomeIdentity() =>
+        DomainIdentity.Create(candidate: Guid.NewGuid())
+            .Match(Succ: (DomainIdentity id) => id,
+                   Fail: (Error _) => throw new UnreachableException());
+}
+```
+
+[IMPORTANT]: Runtime records are plain `sealed record` -- no interfaces. `Run()` at test boundary is the only `Match`-adjacent operation. `@catch` recovery is verified by injecting the error-producing stub and asserting the fallback shape, not by inspecting the error channel.
 
 ---
 ## [3][QUALITY_GATES]
@@ -240,12 +406,11 @@ using VerifyXunit;
 
 public static class VerifyConfiguration {
     [ModuleInitializer]
-    public static Unit Initialize() {
+    public static void Initialize() {
         VerifierSettings.ScrubMembersWithType<Instant>();
         VerifierSettings.ScrubMembersWithType<Guid>();
         VerifierSettings.DontScrubDateTimes();
         VerifierSettings.UseStrictJson();
-        return unit;
     }
 }
 
@@ -260,13 +425,11 @@ public sealed class TransactionSnapshotTests {
             candidate: Guid.Parse("550e8400-e29b-41d4-a716-446655440000"));
         Fin<TransactionAmount> amount = TransactionAmount.Create(candidate: 250.50m);
         IClock clock = SystemClock.Instance;
-
         Fin<TransactionState.Pending> pending =
             from id in identity
             from amt in amount
             select new TransactionState.Pending(
                 Id: id, Amount: amt, InitiatedAt: clock.GetCurrentInstant());
-
         return pending.Match(
             Succ: (TransactionState.Pending state) => Verify(target: state),
             Fail: (Error error) => Verify(target: error));
@@ -282,7 +445,9 @@ public sealed class TransactionSnapshotTests {
 
 <br>
 
-- [ALWAYS] Property laws for every smart constructor -- identity, closure, and roundtrip laws at minimum.
+- [ALWAYS] Property laws for every smart constructor -- identity, closure, roundtrip, and Bind associativity at minimum.
+- [ALWAYS] DU variant generators use `Gen.OneOf` covering all arms -- never bypass private constructors.
+- [ALWAYS] `Eff<RT,T>` pipelines use plain `sealed record` runtimes with stub properties -- no interface mocks, no `IHasCancel` hierarchy.
 - [ALWAYS] FsCheck generators call production `Fin<T>` factories -- no parallel construction paths.
 - [ALWAYS] Benchmark gates in CI with allocation regression thresholds -- `[MemoryDiagnoser]` on every benchmark class.
 - [ALWAYS] Real infrastructure via Testcontainers over mocks -- Respawn for deterministic state reset.
@@ -307,3 +472,5 @@ public sealed class TransactionSnapshotTests {
 |   [6]   | **Stryker.NET config**     | Mutation testing threshold enforcement  | `break: 50` / `low: 60` / `high: 80` in stryker-config     |
 |   [7]   | **Verify snapshot**        | Serialized structure approval           | `Verify(target)` + `.verified.txt` in source control       |
 |   [8]   | **Scrubber configuration** | Non-deterministic value replacement     | `ScrubMembersWithType<Instant>()` in `[ModuleInitializer]` |
+|   [9]   | **Eff test runtime**       | Testing `Eff<RT,T>` pipelines           | Plain `sealed record` runtime + stub `Fin<T>` properties   |
+|  [10]   | **DU variant generator**   | Exhaustive PBT over sealed hierarchies  | `Gen.OneOf` with one arm per DU case                       |

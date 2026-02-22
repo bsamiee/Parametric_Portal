@@ -4,10 +4,9 @@
  */
 import { Effect, Layer } from 'effect';
 import { HarnessConfig } from './config';
-import type { LoopState } from './loop-types';
 import { CommandDispatch } from './protocol/dispatch';
 import { SessionSupervisor } from './protocol/supervisor';
-import { AgentLoop } from './runtime/agent-loop';
+import { AgentLoop, type LoopState } from './runtime/agent-loop';
 import { PersistenceTrace } from './runtime/persistence-trace';
 import { KargadanSocketClientLive } from './socket';
 
@@ -21,11 +20,13 @@ const main = Effect.fn('kargadan.harness.main')(() =>
             HarnessConfig.protocolVersion,
             HarnessConfig.sessionToken,
         ]);
+        const traceId = crypto.randomUUID().replaceAll('-', '');
         const identityBase = {
             appId:     '00000000-0000-0000-0000-000000000001',
             protocolVersion,
             runId:     '00000000-0000-0000-0000-000000000003',
             sessionId: '00000000-0000-0000-0000-000000000004',
+            traceId,
         } as const satisfies LoopState.IdentityBase;
         yield* Effect.forkScoped(dispatch.transport.start());
         const outcome = yield* loop.handle({ identityBase, token });

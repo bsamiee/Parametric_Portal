@@ -64,9 +64,42 @@ public static class Para {
             };
     }
 }
+// K<F,A>-polymorphic variants -- generalize to Fin, Eff, Validation, any Monad<F>
+// Coalgebra returns K<F, Option<(TValue, TSeed)>> for effectful seed expansion
+// See composition.md [4] for the K<F,A> encoding mandate
+public static class UnfoldK {
+    public static K<F, Seq<TValue>> Execute<F, TSeed, TValue>(
+        TSeed seed,
+        Func<TSeed, K<F, Option<(TValue Value, TSeed Next)>>> coalgebra)
+        where F : Monad<F> =>
+        Monad.bind(coalgebra(seed), (Option<(TValue Value, TSeed Next)> step) =>
+            step.Match(
+                Some: ((TValue Value, TSeed Next) pair) =>
+                    Monad.map(
+                        Execute<F, TSeed, TValue>(seed: pair.Next, coalgebra: coalgebra),
+                        (Seq<TValue> tail) => pair.Value.Cons(tail)),
+                None: () => Monad.pure<F, Seq<TValue>>(Seq<TValue>.Empty)));
+}
+public static class HyloK {
+    public static K<F, TResult> Execute<F, TSeed, TIntermediate, TResult>(
+        TSeed seed,
+        Func<TSeed, K<F, Option<(TIntermediate Value, TSeed Next)>>> coalgebra,
+        TResult identity,
+        Func<TResult, TIntermediate, TResult> algebra)
+        where F : Monad<F> =>
+        Monad.bind(coalgebra(seed), (Option<(TIntermediate Value, TSeed Next)> step) =>
+            step.Match(
+                Some: ((TIntermediate Value, TSeed Next) pair) =>
+                    Monad.map(
+                        Execute<F, TSeed, TIntermediate, TResult>(
+                            seed: pair.Next, coalgebra: coalgebra,
+                            identity: identity, algebra: algebra),
+                        (TResult accumulated) => algebra(arg1: accumulated, arg2: pair.Value)),
+                None: () => Monad.pure<F, TResult>(identity)));
+}
 ```
 
-[CRITICAL]: `Unfold.Execute` and `Hylo.Execute` are NOT tail-recursive -- `Cons` / `algebra` wrap the recursive call, preventing TCO. Keep depth bounded by coalgebra termination; for deep sequences prefer iterative `Seq.Unfold`. All three use `Option<(TValue, TSeed)>` as termination signal -- total coalgebra, composable with `Bind`/`Map`.
+[CRITICAL]: None of these schemes are tail-recursive. `Unfold`/`Hylo`: `Cons`/`algebra` wrap the recursive call, preventing TCO. `Para.FoldWithTail`: `span.Slice(start: 1)` holds previous `ReadOnlySpan<T>` on each stack frame -- for large spans (>1000 elements), prefer iterative `Seq.Fold` or a `while` loop with `[BoundaryImperativeExemption]` (see `performance.md` [2]). `UnfoldK`/`HyloK` inherit the same caveat. Keep depth bounded by coalgebra termination; for deep sequences prefer iterative `Seq.Unfold`. All use `Option<(TValue, TSeed)>` as termination signal. Use `.As()` to downcast HKT results: `UnfoldK.Execute<Fin, ...>(...).As()` yields `Fin<Seq<TValue>>`.
 
 ---
 ## [2][SINGLE_PASS_TRANSFORMS]
@@ -280,14 +313,14 @@ public static class Kleisli {
 }
 ```
 
-[IMPORTANT]: `ComposeK` lifts composition to the effectful level -- `ComposeK(validate, persist)` short-circuits on first `Fin.Fail`. Generalizing to `K<F, B>` requires `Monad<F>` -- see `composition.md` [4].
+[IMPORTANT]: `ComposeK` lifts composition to the effectful level -- `ComposeK(validate, persist)` short-circuits on first `Fin.Fail`. Generalizing to `K<F, B>` requires `Monad<F>` -- see `composition.md` [4], which generalizes Kleisli to `K<F,A>` with `Monad<F>` constraint.
 
 ---
 ## [7][CROSS_REFERENCES]
 Patterns fully covered in sibling files -- consult directly:
 - **Algebraic compression** -- `composition.md` [5] for DU + Fold catamorphism.
-- **Span algorithms** -- `performance.md` [8] for `BinarySearch`, `Sort`, Either-splitting `SeparateEither`.
-- **SIMD / TensorPrimitives** -- `performance.md` [1],[3] for `Vector512` and numeric aggregation.
+- **Span algorithms** -- `performance.md` [7] for `BinarySearch`, `Sort`, Either-splitting `SeparateEither` (note: `SeparateEither` uses `.Cons` + `.Rev()` for O(1) prepend in fold accumulators -- never `.Add`).
+- **SIMD / TensorPrimitives** -- `performance.md` [1],[2] for Vector SIMD (including Vector512 gating) and numeric aggregation.
 
 ---
 ## [8][RULES]
@@ -304,20 +337,19 @@ Patterns fully covered in sibling files -- consult directly:
 - [ALWAYS] Branching nested switch for scoped let-bindings -- each arm seals its own variables.
 - [NEVER] Bespoke recursive functions when a recursion scheme (`Unfold`, `Hylo`, `Para`) suffices.
 - [NEVER] `.Filter(...).Map(...)` chains on `Seq<T>` -- use `Choose` for fused single-pass.
+- [NEVER] `Seq<T>.Add` inside fold accumulators -- `.Add` is O(N) array-double-and-copy. Use `.Cons` (O(1) prepend) + `.Rev()` at fold boundary. See `performance.md` [7] `SeparateEither` for corrected pattern.
 
 ---
 ## [9][QUICK_REFERENCE]
 
-| [INDEX] | [PATTERN]                | [WHEN]                                          | [KEY_TRAIT]                              |
-| :-----: | ------------------------ | ----------------------------------------------- | ---------------------------------------- |
-|   [1]   | Anamorphism (Unfold)     | Generate structure from seed                    | `Option<(V, TSeed)>` coalgebra           |
-|   [2]   | Hylomorphism             | Fused unfold+fold, zero intermediate allocation | Deforestation; single descent            |
-|   [3]   | Paramorphism             | Fold needing lookahead into remaining structure | `FoldWithTail` on `ReadOnlySpan<T>`      |
-|   [4]   | FoldWhile                | Early-exit aggregation on ordered data          | Predicate-gated tail recursion           |
-|   [5]   | Choose                   | Single-pass map+filter                          | `Seq.Choose` with `Option<T>` selector   |
-|   [6]   | Compile-time dispatch    | Strategy/factory without runtime polymorphism   | Static abstract + JIT monomorph          |
-|   [7]   | SafeConvert              | Overflow-safe numeric narrowing                 | `INumberBase.TryCreate`                  |
-|   [8]   | ISpanParsable            | Generic allocation-free parsing                 | `T.TryParse(ReadOnlySpan<char>, ...)`    |
-|   [9]   | Algebraic+numeric bridge | Monoid that participates in generic math        | `IAlgebraicMonoid` + `IAdditiveIdentity` |
-|  [10]   | Branching scope          | Different bindings per switch arm               | Nested switch + tuple deconstruction     |
-|  [11]   | Kleisli composition      | Chain effectful `A -> Fin<B>` functions         | `ComposeK` + `Bind` short-circuit        |
+| [INDEX] | [PATTERN]                | [WHEN]                                          | [KEY_TRAIT]                                |
+| :-----: | ------------------------ | ----------------------------------------------- | ------------------------------------------ |
+|   [1]   | Recursion schemes        | Unfold/Hylo/Para + HKT variants (UnfoldK/HyloK) | `Option<(V, TSeed)>` coalgebra; `Monad<F>` |
+|   [2]   | FoldWhile                | Early-exit aggregation on ordered data          | Predicate-gated tail recursion             |
+|   [3]   | Choose                   | Single-pass map+filter                          | `Seq.Choose` with `Option<T>` selector     |
+|   [4]   | Compile-time dispatch    | Strategy/factory without runtime polymorphism   | Static abstract + JIT monomorph            |
+|   [5]   | SafeConvert              | Overflow-safe numeric narrowing                 | `INumberBase.TryCreate`                    |
+|   [6]   | ISpanParsable            | Generic allocation-free parsing                 | `T.TryParse(ReadOnlySpan<char>, ...)`      |
+|   [7]   | Algebraic+numeric bridge | Monoid that participates in generic math        | `IAlgebraicMonoid` + `IAdditiveIdentity`   |
+|   [8]   | Branching scope          | Different bindings per switch arm               | Nested switch + tuple deconstruction       |
+|   [9]   | Kleisli composition      | Chain effectful `A -> Fin<B>` functions         | `ComposeK` + `Bind` short-circuit          |

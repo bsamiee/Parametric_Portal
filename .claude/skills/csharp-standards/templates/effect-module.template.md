@@ -19,18 +19,16 @@ Produces one effectful service module: domain primitives replacing raw DTOs with
 |   [2]   | `${ServiceName}`         | `OrderPipeline`                             |
 |   [3]   | `${TraitInterface}`      | `IGatewayProvider`                          |
 |   [4]   | `${TraitProperty}`       | `GatewayProvider`                           |
-|   [5]   | `${HasConstraint}`       | `HasGatewayProvider`                        |
+|   [5]   | `${RuntimeName}`         | `OrderPipelineRuntime`                      |
 |   [6]   | `${TraitMethod}`         | `TransmitPayload`                           |
 |   [7]   | `${RequestType}`         | `InitializationRequest`                     |
 |   [8]   | `${ValidatedCommand}`    | `ValidatedInitialization`                   |
 |   [9]   | `${ResponseType}`        | `OrderConfirmation`                         |
 |  [10]   | `${PrimitiveA}`          | `DomainIdentity`                            |
 |  [11]   | `${PrimitiveB}`          | `TransactionAmount`                         |
-|  [12]   | `${GuardPredicate}`      | `command.Items.Count > 0`                   |
-|  [13]   | `${GuardMessage}`        | `"Order must have items"`                   |
-|  [14]   | `${SchedulePolicy}`      | `Schedule.exponential(baseDelay: 100 * ms)` |
-|  [15]   | `${StateType}`           | `ServiceMetrics`                            |
-|  [16]   | `${DiagnosticNamespace}` | `Domain.Diagnostics`                        |
+|  [12]   | `${SchedulePolicy}`      | `Schedule.exponential(baseDelay: 100 * ms)` |
+|  [13]   | `${StateType}`           | `ServiceMetrics`                            |
+|  [14]   | `${DiagnosticNamespace}` | `Domain.Diagnostics`                        |
 
 ---
 ```csharp
@@ -81,9 +79,10 @@ public interface ${TraitInterface} {
     Eff<string> ${TraitMethod}(${ValidatedCommand} command);
     Eff<Option<string>> LookupOptional(${PrimitiveA} id);
 }
-public interface ${HasConstraint}<RT> where RT : ${HasConstraint}<RT> {
-    ${TraitInterface} ${TraitProperty} { get; }
-}
+// v5 runtime record: plain sealed record; no Has<RT, Trait> interfaces.
+// effects.md [2]:45 -- "No Has<RT, Trait> interfaces; v5 uses direct property access."
+// Access via Eff<${RuntimeName}, T>.Asks(static (${RuntimeName} rt) => rt.${TraitProperty}).
+public sealed record ${RuntimeName}(${TraitInterface} ${TraitProperty}, IClock Clock);
 
 // --- [FUNCTIONS] -------------------------------------------------------------
 
@@ -115,17 +114,17 @@ public static class ${ServiceName} {
     // Main pipeline: LINQ comprehension with guard, @catch composed via |.
     // Guards operate on the validated command, not the raw DTO.
     // Wrap with Probe.Span for debug Activity or ObserveEff.Pipeline for prod telemetry.
-    public static Eff<RT, ${ResponseType}> Execute<RT>(
-        ${RequestType} request) where RT : ${HasConstraint}<RT> =>
+    public static Eff<${RuntimeName}, ${ResponseType}> Execute(
+        ${RequestType} request) =>
         from command  in Validate(request: request)
             .ToFin()
             .MapFail((Error error) =>
                 Error.New(message: "${ServiceName} validation failed.", inner: error))
             .ToEff()
         from _        in guard(
-            ${GuardPredicate},
-            Error.New(message: ${GuardMessage}))
-        from token    in CallWithRecovery<RT>(command: command)
+            command.Amount > ${PrimitiveB}.Zero,
+            ${ServiceName}Errors.NotFound)
+        from token    in CallWithRecovery(command: command)
         select new ${ResponseType}(
             ConfirmedId: command.Id,
             Token: token);
@@ -133,9 +132,10 @@ public static class ${ServiceName} {
     // RequireResource ordering: Option<T> → Fin<T> → Eff<T>.
     // Convert absence to typed error BEFORE Eff lift. Direct Option → Eff
     // produces BottomError; .ToFin(Error) preserves domain error identity.
-    public static Eff<RT, string> RequireResource<RT>(
-        ${PrimitiveA} id) where RT : ${HasConstraint}<RT> =>
-        from trait in Eff<RT, ${TraitInterface}>.Asks(static (RT runtime) => runtime.${TraitProperty})
+    public static Eff<${RuntimeName}, string> RequireResource(
+        ${PrimitiveA} id) =>
+        from trait in Eff<${RuntimeName}, ${TraitInterface}>.Asks(
+            static (${RuntimeName} runtime) => runtime.${TraitProperty})
         from optionalResult in trait.LookupOptional(id: id)
         from resolved in optionalResult
             .ToFin(${ServiceName}Errors.NotFound)
@@ -143,27 +143,28 @@ public static class ${ServiceName} {
         select resolved;
     // --- [DEPENDENCY_ACCESS] -------------------------------------------------
     // Shared dependency accessor -- called from Execute AND RetryDependency.
-    private static Eff<RT, string> CallDependency<RT>(
-        ${ValidatedCommand} command) where RT : ${HasConstraint}<RT> =>
-        from trait in Eff<RT, ${TraitInterface}>.Asks(static (RT runtime) => runtime.${TraitProperty})
+    private static Eff<${RuntimeName}, string> CallDependency(
+        ${ValidatedCommand} command) =>
+        from trait in Eff<${RuntimeName}, ${TraitInterface}>.Asks(
+            static (${RuntimeName} runtime) => runtime.${TraitProperty})
         from response in trait.${TraitMethod}(command: command)
         select response;
     // Named recovery method: extracts @catch + | composition from the LINQ
     // comprehension for cleaner pipeline hygiene.
-    private static Eff<RT, string> CallWithRecovery<RT>(
-        ${ValidatedCommand} command) where RT : ${HasConstraint}<RT> =>
-        CallDependency<RT>(command: command)
+    private static Eff<${RuntimeName}, string> CallWithRecovery(
+        ${ValidatedCommand} command) =>
+        CallDependency(command: command)
         | @catch(${ServiceName}Errors.TimedOut,
-            (Error _) => RetryDependency<RT>(command: command));
+            (Error _) => RetryDependency(command: command));
     // --- [RETRY] -------------------------------------------------------------
     // Schedule composition:
     //   | = union: continues until ALL sub-schedules complete (longer overall).
     //   & = intersection: stops when ANY sub-schedule completes (shorter overall).
     // Below: jitter | recurs(5) | maxDelay(30s) unions into one schedule;
     //        & upto(60s) hard-caps total elapsed time.
-    private static Eff<RT, string> RetryDependency<RT>(
-        ${ValidatedCommand} command) where RT : ${HasConstraint}<RT> =>
-        CallDependency<RT>(command: command)
+    private static Eff<${RuntimeName}, string> RetryDependency(
+        ${ValidatedCommand} command) =>
+        CallDependency(command: command)
             .Retry(schedule:
                 (${SchedulePolicy}
                 | Schedule.jitter(factor: 0.1)
@@ -207,6 +208,10 @@ public static class ${ServiceName}Composition {
             .AddClasses(classes => classes.InNamespaces("${Namespace}"))
             .UsingRegistrationStrategy(RegistrationStrategy.Throw)
             .AsSelfWithInterfaces()
+            // Scoped: domain services hold per-request state and DI dependencies
+            // (e.g., DbContext, ILogger<T>). Singleton would share mutable request
+            // context across concurrent requests. Contrast with observability
+            // surfaces (singleton) where ActivitySource/Meter are process-global.
             .WithScopedLifetime());
 }
 
@@ -214,15 +219,34 @@ public static class ${ServiceName}Boundary {
     // Double-Run: .Run(runtime) resolves ReaderT<RT, IO, A> to IO<A>;
     // .Run() executes the IO effect. Match at boundary only.
     // MapFail at boundary annotates errors for the caller -- inline, not a separate method.
-    public static Fin<${ResponseType}> RunAtBoundary<RT>(
+    public static Fin<${ResponseType}> RunAtBoundary(
         ${RequestType} request,
-        RT runtime) where RT : ${HasConstraint}<RT> =>
-        ${ServiceName}.Execute<RT>(request: request)
+        ${RuntimeName} runtime) =>
+        ${ServiceName}.Execute(request: request)
             .MapFail((Error error) =>
                 Error.New(message: "${ServiceName} terminal failure.", inner: error))
             .Run(runtime)
             .Run();
     // IO<A> comprehension: see effects.md [5]
+}
+
+// --- [BOUNDARY_BRIDGE] -------------------------------------------------------
+
+// [BOUNDARY ONLY] CSP0402 blocks FluentValidation in Domain namespaces.
+// CSP0403 enforces ValidateAsync -- never Validate when async rules exist.
+// This bridge lives in application service boundary code (HTTP/API layer),
+// never in domain modules. See validation.md [11] for the enforcement checklist.
+public static class FluentValidationBridge {
+    public static Validation<Error, T> FromResult<T>(
+        FluentValidation.Results.ValidationResult result, T value) =>
+        result.IsValid switch {
+            true  => Success<Error, T>(value),
+            false => Fail<Error, T>(
+                toSeq(result.Errors)
+                    .Map(static (FluentValidation.Results.ValidationFailure failure) =>
+                        Error.New(message: failure.ErrorMessage))
+                    .Fold(Error.Empty, static (Error acc, Error error) => acc + error))
+        };
 }
 
 // --- [EXPORT] ----------------------------------------------------------------
@@ -238,11 +262,11 @@ public static class ${ServiceName}Boundary {
 
 **Guidance: Eff Pipeline and Error Recovery**
 
-The `from..in..select` LINQ syntax desugars to `.Bind(x => ...)`. `guard`/`guardnot` short-circuit with typed errors for business invariants; `Validation` with `.Apply()` handles user-input accumulation. Error recovery is extracted into `CallWithRecovery` as a named method composing `@catch` + `|` outside the LINQ comprehension -- cleaner than inlining parenthesized recovery. `Validation -> Fin -> MapFail -> Eff` is the canonical v5 conversion path (`.ToFin()` is direct; avoid the `.ToEither().MapLeft().ToEff()` detour). See `effects.md` [2][3] for pipeline and recovery patterns. For development-time inspection, wrap `Execute<RT>` with `Probe.Span` (`diagnostics.md` [3]) or `ObserveEff.Pipeline` (`observability.md` [4]) at the boundary -- never inside the LINQ comprehension. `MapFail` for error annotation belongs inline at the call site (see `${ServiceName}Boundary.RunAtBoundary`) -- not as a separate wrapper method.
+The `from..in..select` LINQ syntax desugars to `.Bind(x => ...)`. `guard`/`guardnot` short-circuit with typed errors for business invariants; `Validation` with `.Apply()` handles user-input accumulation. Error recovery is extracted into `CallWithRecovery` as a named method composing `@catch` + `|` outside the LINQ comprehension -- cleaner than inlining parenthesized recovery. `Validation -> Fin -> MapFail -> Eff` is the canonical v5 conversion path (`.ToFin()` is direct; avoid the `.ToEither().MapLeft().ToEff()` detour). See `effects.md` [2][3] for pipeline and recovery patterns. For development-time inspection, wrap `Execute` with `Probe.Span` (`diagnostics.md` [3]) or `ObserveEff.Pipeline` (`observability.md` [4]) at the boundary -- never inside the LINQ comprehension. `MapFail` for error annotation belongs inline at the call site (see `${ServiceName}Boundary.RunAtBoundary`) -- not as a separate wrapper method.
 
 **Guidance: Boundary and Concurrent State**
 
-Double-Run resolves `ReaderT<RT, IO, A>`: first `.Run(runtime)` strips the Reader layer to `IO<A>`, second `.Run()` interprets the IO. `Atom<T>` provides lock-free state with optional validator; for multi-value transactions use `Ref<T>` + `atomic()`. On hot paths, mark lambdas `static` and thread state via `ValueTuple` per `performance.md` [7] -- see `RecordProcessed` for the canonical pattern. Schedule combinators compose algebraically: `|` unions sub-schedules (continues until ALL complete -- longer overall), `&` intersects (stops when ANY completes -- shorter overall). See `effects.md` [7][8] for STM and retry. At the boundary, wrap `RunAtBoundary` result with `Observe.Outcome` (`observability.md` [4]) for unified prod telemetry, or `result.PrettyPrint(...)` (`diagnostics.md` [2]) for debug display.
+Double-Run resolves `ReaderT<${RuntimeName}, IO, A>`: first `.Run(runtime)` strips the Reader layer to `IO<A>`, second `.Run()` interprets the IO. `Atom<T>` provides lock-free state with optional validator; for multi-value transactions use `Ref<T>` + `atomic()`. On hot paths, mark lambdas `static` and thread state via `ValueTuple` per `performance.md` [7] -- see `RecordProcessed` for the canonical pattern. Schedule combinators compose algebraically: `|` unions sub-schedules (continues until ALL complete -- longer overall), `&` intersects (stops when ANY completes -- shorter overall). See `effects.md` [7][8] for STM and retry. At the boundary, wrap `RunAtBoundary` result with `Observe.Outcome` (`observability.md` [4]) for unified prod telemetry, or `result.PrettyPrint(...)` (`diagnostics.md` [2]) for debug display.
 
 ---
 ## [POST_SCAFFOLD]

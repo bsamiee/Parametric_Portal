@@ -54,6 +54,15 @@ public static class ContextConfiguration {
         IO.liftAsync(async () => { await database.Database.MigrateAsync(); return unit; });
     public static ModelBuilder RegisterPostgresExtensions(ModelBuilder modelBuilder) =>
         modelBuilder.HasPostgresExtension(name: "uuid-ossp").HasPostgresExtension(name: "pg_trgm");
+    // Named query filters (EF Core 10): selective disable without removing the global filter.
+    // HasQueryFilter(name, lambda) associates a filter name; IgnoreQueryFilters(name) disables it
+    // at query scope. Use for soft-delete and tenant-scoping filters in multi-tenant contexts.
+    public static void ConfigureNamedFilters(ModelBuilder modelBuilder) {
+        modelBuilder.Entity<OrderEntity>()
+            .HasQueryFilter(name: "active", filter: static (OrderEntity o) => o.DeletedAt == null)
+            .HasQueryFilter(name: "tenant", filter: (OrderEntity o) => o.TenantId == TenantContext.CurrentId);
+    }
+    // Usage: dbContext.Orders.IgnoreQueryFilters(name: "active").Where(...) -- bypasses soft-delete only.
 }
 
 // --- [PIPELINE] --------------------------------------------------------------
@@ -114,7 +123,6 @@ public static class KeysetPagination {
 // --- [READ_PROJECTIONS] ------------------------------------------------------
 public readonly record struct OrderSummaryDto(
     Guid Id, string CustomerName, decimal TotalAmount, string Status, Instant CreatedAt);
-
 public static class OrderProjections {
     public static IQueryable<OrderSummaryDto> ProjectToSummary(IQueryable<OrderEntity> source) =>
         source.Select(static (OrderEntity order) => new OrderSummaryDto(
@@ -132,6 +140,18 @@ public static class OrderProjections {
                     .OrderByDescending(static (OrderEntity order) => order.CreatedAt).Take(limit))
                 .ToListAsync(token))))
         select summaries;
+}
+
+// --- [EF_CORE_10_JOINS] ------------------------------------------------------
+// LeftJoin/RightJoin: EF Core 10 LINQ operators replace GroupJoin/SelectMany chains.
+// Tenant-scoped cross-table read without requiring related entities to exist.
+public static class JoinQueries {
+    public static IQueryable<(OrderEntity Order, CustomerEntity? Customer)>
+        LeftJoinCustomers(IQueryable<OrderEntity> orders, IQueryable<CustomerEntity> customers) =>
+        orders.LeftJoin(customers,
+            outerKeySelector: static (OrderEntity order) => order.CustomerId,
+            innerKeySelector: static (CustomerEntity customer) => customer.Id,
+            resultSelector: static (OrderEntity order, CustomerEntity? customer) => (order, customer));
 }
 
 // --- [MATERIALIZED_REFRESH] --------------------------------------------------
@@ -201,13 +221,26 @@ public sealed class TransactionStatusConverter : ValueConverter<TransactionState
         TransactionState.Settled => "settled", TransactionState.Faulted => "faulted",
         _ => throw new UnreachableException()
     };
+    // [LOSSY]: Discriminator-only reconstitution produces default-valued domain fields.
+    // Use when the entity stores DU fields in sibling columns (Id, Amount, Token, etc.)
+    // and the converter maps only the status discriminator. The reconstituted DU variant
+    // carries default field values; EF Core populates the actual fields from separate columns.
+    // For full-fidelity single-column round-trip, use JsonColumnConverter<T> instead.
     private static TransactionState FromDiscriminator(string discriminator) => discriminator switch {
-        "pending" => new TransactionState.Pending(),
-        "authorized" => new TransactionState.Authorized(),
-        "settled" => new TransactionState.Settled(), "faulted" => new TransactionState.Faulted(),
+        "pending" => new TransactionState.Pending(
+            Id: default, Amount: default, InitiatedAt: default),
+        "authorized" => new TransactionState.Authorized(
+            Id: default, AuthorizationToken: string.Empty),
+        "settled" => new TransactionState.Settled(
+            Id: default, ReceiptHash: string.Empty),
+        "faulted" => new TransactionState.Faulted(
+            Id: default, Reason: Error.New(message: "reconstituted")),
         _ => throw new UnreachableException()
     };
 }
+// Full-fidelity alternative: store DU as JSON column.
+// .HasConversion<JsonColumnConverter<TransactionState>>().HasColumnType("jsonb")
+// Preserves all variant fields (Id, Amount, AuthorizationToken, etc.) across round-trips.
 
 // --- [JSON_COLUMN_CONVERTER] -------------------------------------------------
 public sealed class JsonColumnConverter<T> : ValueConverter<T, string> where T : class {
@@ -292,7 +325,8 @@ public abstract record RepoQuery<TKey, TEntity, TResult> where TEntity : class {
 <br>
 
 - [ALWAYS] Wrap DbContext access in `Eff<RT,T>` via runtime record -- database operations are effects.
-- [ALWAYS] Compose queries as `IQueryable<T>` expression trees -- materialize to `Seq<T>` at boundaries only.
+- [ALWAYS] Validate all inbound DTOs via the FluentValidation boundary bridge before any persistence pipeline; see `validation.md` [11] for the `ValidationResult → Validation<Error,T>` contract.
+- [ALWAYS] Compose queries as `IQueryable<T>` expression trees -- materialize to `Seq<T>` at boundaries via `toSeq(await query.ToListAsync(ct))`.
 - [ALWAYS] Use `ValueConverter<TModel, TProvider>` for domain primitive and DU column mapping.
 - [ALWAYS] Map value objects via `OwnsOne`/`OwnsMany` -- no identity, no `DbSet<T>`.
 - [ALWAYS] Encode repository operations as sealed DU query algebra with `Fold` catamorphism.

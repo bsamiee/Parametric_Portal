@@ -3,7 +3,7 @@
  * Parses protocol version, socket URL, capability sets, and loop operations; decodes operations against CommandOperationSchema at boundary.
  */
 import { Kargadan } from '@parametric-portal/types/kargadan';
-import { Config, Effect, Schema as S } from 'effect';
+import { Config, Effect, Match, Schema as S } from 'effect';
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
@@ -15,6 +15,7 @@ const _retryMaxAttempts =        Config.integer('KARGADAN_RETRY_MAX_ATTEMPTS').p
 const _correctionCycles =        Config.integer('KARGADAN_CORRECTION_MAX_CYCLES').pipe(Config.withDefault(1));
 const _loopOperations =          Config.string('KARGADAN_LOOP_OPERATIONS').pipe(Config.withDefault('read.object.metadata,write.object.update'),);
 const _sessionToken =            Config.string('KARGADAN_SESSION_TOKEN').pipe(Config.withDefault('kargadan-local-token'));
+const _heartbeatIntervalMs =     Config.integer('KARGADAN_HEARTBEAT_INTERVAL_MS').pipe(Config.withDefault(5_000));
 const _simulatedPluginRevision = Config.string('KARGADAN_SIMULATED_PLUGIN_REVISION').pipe(Config.withDefault('harness-simulated'),);
 const _capabilityRequired =      Config.string('KARGADAN_CAP_REQUIRED').pipe(Config.withDefault('read.scene.summary,write.object.create'),);
 const _capabilityOptional =      Config.string('KARGADAN_CAP_OPTIONAL').pipe(Config.withDefault('view.capture'));
@@ -30,6 +31,10 @@ const _parseCsv = (csv: string): ReadonlyArray<string> =>
         .split(',')
         .map((entry) => entry.trim())
         .filter((entry) => entry.length > 0);
+const _socketCandidate = (host: string, port: number) =>
+    host.includes('://')
+        ? host
+        : `ws://${host}:${port}`;
 const _resolveProtocolVersion = _protocolVersion.pipe(Effect.flatMap(S.decodeUnknown(S.transform(
     S.String.pipe(S.pattern(/^\d+\.\d+$/)),
     Kargadan.ProtocolVersionSchema,
@@ -43,7 +48,27 @@ const _resolveProtocolVersion = _protocolVersion.pipe(Effect.flatMap(S.decodeUnk
     },
 ))));
 const _resolveSocketUrl = Effect.all([_pluginHost, _pluginPort]).pipe(
-    Effect.map(([host, port]) => `ws://${host}:${port}` as const),
+    Effect.flatMap(([host, port]) =>
+        Effect.try(() => new URL(_socketCandidate(host, port))).pipe(
+            Effect.map((parsed) => {
+                const protocol = Match.value(parsed.protocol).pipe(
+                    Match.when('https:', () => 'wss:'),
+                    Match.when('http:', () => 'ws:'),
+                    Match.orElse((p) => p),
+                );
+                const normalized = new URL(parsed.toString());
+                normalized.protocol = protocol;
+                normalized.port = normalized.port.length === 0
+                    ? String(port)
+                    : normalized.port;
+                const pathname = normalized.pathname === '/'
+                    ? ''
+                    : normalized.pathname;
+                return `${normalized.protocol}//${normalized.host}${pathname}${normalized.search}${normalized.hash}`;
+            }),
+            Effect.orElseSucceed(() => `ws://${host}:${port}`),
+        ),
+    ),
 );
 const _resolveCapabilities = Effect.all([_capabilityRequired, _capabilityOptional]).pipe(
     Effect.map(([required, optional]) => ({
@@ -58,6 +83,7 @@ const _resolveLoopOperations = _loopOperations.pipe(
 const HarnessConfig = {
     commandDeadlineMs:       _commandDeadlineMs,
     correctionCycles:        _correctionCycles,
+    heartbeatIntervalMs:     _heartbeatIntervalMs,
     protocolVersion:         _resolveProtocolVersion,
     resolveCapabilities:     _resolveCapabilities,
     resolveLoopOperations:   _resolveLoopOperations,
@@ -66,7 +92,18 @@ const HarnessConfig = {
     sessionToken:            _sessionToken,
     simulatedPluginRevision: _simulatedPluginRevision,
 } as const;
+const createTelemetryContext = (input: {
+    readonly attempt: number;
+    readonly operationTag: string;
+    readonly requestId: string;
+    readonly traceId: string;
+}): Kargadan.TelemetryContext => ({
+    attempt: input.attempt,
+    operationTag: input.operationTag,
+    spanId: input.requestId.replaceAll('-', ''),
+    traceId: input.traceId,
+});
 
 // --- [EXPORT] ----------------------------------------------------------------
 
-export { HarnessConfig };
+export { createTelemetryContext, HarnessConfig };

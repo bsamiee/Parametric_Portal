@@ -10,10 +10,6 @@ namespace ParametricPortal.CSharp.Analyzers.Rules;
 // --- [TYPE_SHAPE_RULES] ------------------------------------------------------
 
 internal static class TypeShapeRules {
-    // --- [CONSTANTS] ----------------------------------------------------------
-
-    private static readonly HashSet<string> DateTimeMetaNames = new(["DateTime", "DateTimeOffset"], StringComparer.Ordinal);
-
     // --- [PRIMITIVE_SHAPE] ----------------------------------------------------
 
     internal static void CheckDomainPrimitiveShape(SymbolAnalysisContext context, ScopeInfo scope, INamedTypeSymbol namedType) {
@@ -84,15 +80,15 @@ internal static class TypeShapeRules {
         IEnumerable<Diagnostic> diagnostics = scope.IsDomainOrApplication switch {
             true => namedType.GetMembers()
                 .Where(member => member switch {
-                    IFieldSymbol field => DateTimeMetaNames.Contains(UnwrapNullable(field.Type).OriginalDefinition.MetadataName),
-                    IPropertySymbol property => DateTimeMetaNames.Contains(UnwrapNullable(property.Type).OriginalDefinition.MetadataName),
+                    IFieldSymbol field => SymbolFacts.IsDateTimeType(UnwrapNullable(field.Type).OriginalDefinition),
+                    IPropertySymbol property => SymbolFacts.IsDateTimeType(UnwrapNullable(property.Type).OriginalDefinition),
                     _ => false,
                 })
                 .Where(member => member.Locations.Length > 0)
                 .Select(member => Diagnostic.Create(RuleCatalog.CSP0714, member.Locations[0], member.Name))
                 .Concat(namedType.GetMembers().OfType<IMethodSymbol>()
                     .SelectMany(method => method.Parameters)
-                    .Where(parameter => DateTimeMetaNames.Contains(UnwrapNullable(parameter.Type).OriginalDefinition.MetadataName))
+                    .Where(parameter => SymbolFacts.IsDateTimeType(UnwrapNullable(parameter.Type).OriginalDefinition))
                     .Where(parameter => parameter.Locations.Length > 0)
                     .Select(parameter => Diagnostic.Create(RuleCatalog.CSP0714, parameter.Locations[0], parameter.Name))),
             _ => [],

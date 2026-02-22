@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using System.Text.RegularExpressions;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
@@ -21,26 +22,21 @@ internal static class RuntimeRules {
     // --- [LAMBDA_RULES] -------------------------------------------------------
 
     internal static void CheckClosureCapture(OperationAnalysisContext context, ScopeInfo scope, IAnonymousFunctionOperation anonymousFunction) {
-        IMethodSymbol lambdaSymbol = anonymousFunction.Symbol;
-        AnalyzerState.Report(context.ReportDiagnostic, (scope.IsDomainOrApplication, IsStaticLambda(anonymousFunction)) switch {
-            (true, false) => anonymousFunction.Body.DescendantsAndSelf().Any(operation =>
-                operation switch {
-                    ILocalReferenceOperation localReference => !SymbolEqualityComparer.Default.Equals(localReference.Local.ContainingSymbol, lambdaSymbol),
-                    IParameterReferenceOperation parameterReference => !SymbolEqualityComparer.Default.Equals(parameterReference.Parameter.ContainingSymbol, lambdaSymbol),
-                    IInstanceReferenceOperation { ReferenceKind: InstanceReferenceKind.ContainingTypeInstance } => true,
-                    _ => false,
-                }) switch {
-                    true => Diagnostic.Create(RuleCatalog.CSP0013, context.Operation.Syntax.GetLocation()),
-                    false => null,
-                },
+        ImmutableArray<string> capturedSymbols = CapturedOuterSymbols(anonymousFunction);
+        AnalyzerState.Report(context.ReportDiagnostic, (scope.IsDomainOrApplication, IsStaticLambda(anonymousFunction), capturedSymbols.Length > 0) switch {
+            (true, false, true) => Diagnostic.Create(RuleCatalog.CSP0013, context.Operation.Syntax.GetLocation()),
             _ => null,
         });
     }
-    internal static void CheckHotPathNonStaticLambda(OperationAnalysisContext context, ScopeInfo scope, IAnonymousFunctionOperation anonymousFunction) =>
-        AnalyzerState.Report(context.ReportDiagnostic, (scope.IsHotPath, IsStaticLambda(anonymousFunction)) switch {
-            (true, false) => Diagnostic.Create(RuleCatalog.CSP0602, context.Operation.Syntax.GetLocation()),
+    internal static void CheckHotPathNonStaticLambda(OperationAnalysisContext context, ScopeInfo scope, IAnonymousFunctionOperation anonymousFunction) {
+        ImmutableArray<string> capturedSymbols = CapturedOuterSymbols(anonymousFunction);
+        string captureList = string.Join(separator: ", ", values: capturedSymbols);
+        AnalyzerState.Report(context.ReportDiagnostic, (scope.IsHotPath, IsStaticLambda(anonymousFunction), capturedSymbols.Length > 0) switch {
+            (true, false, true) => Diagnostic.Create(RuleCatalog.CSP0017, context.Operation.Syntax.GetLocation(), captureList),
+            (true, false, false) => Diagnostic.Create(RuleCatalog.CSP0602, context.Operation.Syntax.GetLocation()),
             _ => null,
         });
+    }
 
     // --- [RESOURCE_RULES] -----------------------------------------------------
 
@@ -50,8 +46,7 @@ internal static class RuntimeRules {
             _ => null,
         });
     internal static void CheckWallClock(OperationAnalysisContext context, ScopeInfo scope, IPropertyReferenceOperation propertyReference) {
-        string typeDisplay = propertyReference.Property.ContainingType.OriginalDefinition.ToDisplayString();
-        bool wallClock = (typeDisplay is "System.DateTime" or "System.DateTimeOffset")
+        bool wallClock = SymbolFacts.IsDateTimeType(propertyReference.Property.ContainingType.OriginalDefinition)
             && (propertyReference.Property.Name is "Now" or "UtcNow" or "Today");
         AnalyzerState.Report(context.ReportDiagnostic, (scope.IsDomainOrApplication, wallClock) switch {
             (true, true) => Diagnostic.Create(RuleCatalog.CSP0007, context.Operation.Syntax.GetLocation(), $"{propertyReference.Property.ContainingType.Name}.{propertyReference.Property.Name}"),
@@ -147,6 +142,16 @@ internal static class RuntimeRules {
             _ => null,
         });
     }
+    internal static void CheckScrutorScanRegistrationStrategy(OperationAnalysisContext context, ScopeInfo scope, IInvocationOperation invocation) {
+        bool compositionRootOrBoundary = scope.IsBoundary || IsCompositionRootScope(scope);
+        bool scanCall = invocation.TargetMethod.Name == "Scan" && invocation.TargetMethod.Parameters.Any(IsScrutorTypeSourceSelectorParameter);
+        bool hasRegistrationStrategy = invocation.Arguments.Select(argument => argument.Value)
+            .Any(value => value.DescendantsAndSelf().OfType<IInvocationOperation>().Any(inner => inner.TargetMethod.Name == "UsingRegistrationStrategy"));
+        AnalyzerState.Report(context.ReportDiagnostic, (compositionRootOrBoundary, scanCall, hasRegistrationStrategy) switch {
+            (true, true, false) => Diagnostic.Create(RuleCatalog.CSP0406, context.Operation.Syntax.GetLocation()),
+            _ => null,
+        });
+    }
 
     // --- [P_INVOKE_RULES] -----------------------------------------------------
 
@@ -187,28 +192,33 @@ internal static class RuntimeRules {
     internal static void CheckChannelTopology(OperationAnalysisContext context, ScopeInfo scope, IInvocationOperation invocation) {
         bool unbounded = IsChannelFactoryCall(invocation, methodName: "CreateUnbounded");
         bool bounded = IsChannelFactoryCall(invocation, methodName: "CreateBounded");
-        bool boundedCapacityOverload = invocation.Arguments.Length switch {
-            > 0 => invocation.Arguments[0].Parameter?.Type.SpecialType == SpecialType.System_Int32,
+        IOperation? channelOptionsArgument = invocation.Arguments.Length switch {
+            > 0 => invocation.Arguments[0].Value,
+            _ => null,
+        };
+        bool boundedCapacityOverload = channelOptionsArgument switch {
+            _ when invocation.Arguments.Length == 0 => false,
+            _ => invocation.Arguments[0].Parameter?.Type.SpecialType == SpecialType.System_Int32,
+        };
+        IObjectCreationOperation? boundedOptionsCreation = channelOptionsArgument as IObjectCreationOperation;
+        bool boundedOptionsObjectCreation = boundedOptionsCreation switch {
+            {
+                Type: INamedTypeSymbol { Name: "BoundedChannelOptions" },
+            } => true,
             _ => false,
         };
-        bool boundedHasFullMode = invocation.Arguments.Length switch {
-            > 0 => invocation.Arguments[0].Value switch {
-                IObjectCreationOperation {
-                    Type: INamedTypeSymbol { Name: "BoundedChannelOptions" },
-                    Initializer: IObjectOrCollectionInitializerOperation initializer,
-                } => initializer.Initializers.Any(init => init is ISimpleAssignmentOperation { Target: IPropertyReferenceOperation { Property.Name: "FullMode" } }),
-                _ => false,
-            },
+        bool boundedHasFullMode = boundedOptionsCreation switch {
+            {
+                Type: INamedTypeSymbol { Name: "BoundedChannelOptions" },
+                Initializer: IObjectOrCollectionInitializerOperation initializer,
+            } => initializer.Initializers.Any(init => init is ISimpleAssignmentOperation { Target: IPropertyReferenceOperation { Property.Name: "FullMode" } }),
             _ => false,
         };
-        bool boundedPositiveCapacity = invocation.Arguments.Length switch {
-            > 0 => invocation.Arguments[0].Value switch {
-                IObjectCreationOperation {
-                    Type: INamedTypeSymbol { Name: "BoundedChannelOptions" },
-                    Arguments: { Length: > 0 } ctorArgs,
-                } => ctorArgs[0].Value.ConstantValue is { HasValue: true, Value: int capacity } && capacity <= 0,
-                _ => false,
-            },
+        bool boundedNonPositiveCapacity = boundedOptionsCreation switch {
+            {
+                Type: INamedTypeSymbol { Name: "BoundedChannelOptions" },
+                Arguments: { Length: > 0 } ctorArgs,
+            } => ctorArgs[0].Value.ConstantValue is { HasValue: true, Value: int capacity } && capacity <= 0,
             _ => false,
         };
         AnalyzerState.Report(context.ReportDiagnostic, (scope.IsDomainOrApplication, unbounded) switch {
@@ -216,9 +226,9 @@ internal static class RuntimeRules {
             _ => null,
         });
         bool shouldReportBounded = bounded && (
-            boundedPositiveCapacity
+            boundedNonPositiveCapacity
             || boundedCapacityOverload
-            || !boundedHasFullMode);
+            || (boundedOptionsObjectCreation && !boundedHasFullMode));
         AnalyzerState.Report(context.ReportDiagnostic, (scope.IsDomainOrApplication, shouldReportBounded) switch {
             (true, true) => Diagnostic.Create(RuleCatalog.CSP0405, context.Operation.Syntax.GetLocation()),
             _ => null,
@@ -232,6 +242,27 @@ internal static class RuntimeRules {
             LambdaExpressionSyntax { Modifiers: { } modifiers } => modifiers.Any(modifier => modifier.IsKind(SyntaxKind.StaticKeyword)),
             _ => false,
         };
+    private static ImmutableArray<string> CapturedOuterSymbols(IAnonymousFunctionOperation anonymousFunction) {
+        IMethodSymbol lambdaSymbol = anonymousFunction.Symbol;
+        IEnumerable<string> captured = anonymousFunction.Body.DescendantsAndSelf().SelectMany(operation =>
+            operation switch {
+                ILocalReferenceOperation localReference when !SymbolEqualityComparer.Default.Equals(localReference.Local.ContainingSymbol, lambdaSymbol)
+                    => [localReference.Local.Name],
+                IParameterReferenceOperation parameterReference when !SymbolEqualityComparer.Default.Equals(parameterReference.Parameter.ContainingSymbol, lambdaSymbol)
+                    => [parameterReference.Parameter.Name],
+                IInstanceReferenceOperation { ReferenceKind: InstanceReferenceKind.ContainingTypeInstance } => ["this"],
+                _ => Array.Empty<string>(),
+            });
+        return [.. captured.Where(name => !string.IsNullOrWhiteSpace(name)).Distinct(StringComparer.Ordinal)];
+    }
+    private static bool IsScrutorTypeSourceSelectorParameter(IParameterSymbol parameter) =>
+        parameter.Type is INamedTypeSymbol { OriginalDefinition.MetadataName: "Action`1", TypeArguments.Length: 1 } actionType
+        && actionType.TypeArguments[0] is INamedTypeSymbol { Name: "ITypeSourceSelector" };
+    private static bool IsCompositionRootScope(ScopeInfo scope) =>
+        scope.NamespaceName.Contains(value: ".Bootstrap", comparisonType: StringComparison.Ordinal)
+        || scope.NamespaceName.Contains(value: ".Composition", comparisonType: StringComparison.OrdinalIgnoreCase)
+        || scope.NamespaceName.Contains(value: ".DependencyInjection", comparisonType: StringComparison.OrdinalIgnoreCase)
+        || scope.FilePath.Contains(value: "Composition", comparisonType: StringComparison.OrdinalIgnoreCase);
     private static bool IsChannelFactoryCall(IInvocationOperation invocation, string methodName) =>
         (invocation.TargetMethod.Name, invocation.TargetMethod.ContainingType.ToDisplayString()) switch {
             (string name, "System.Threading.Channels.Channel") when string.Equals(name, methodName, StringComparison.Ordinal) => true,

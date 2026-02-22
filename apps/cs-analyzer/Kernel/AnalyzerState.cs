@@ -61,32 +61,36 @@ internal sealed class AnalyzerState {
         _exemptionCache.GetOrAdd(key: symbol, valueFactory: static targetSymbol =>
             [
                 .. SymbolFacts.AllAttributes(targetSymbol)
-                    .Where(attribute => attribute.AttributeClass?.Name is "BoundaryImperativeExemptionAttribute" or "BoundaryImperativeExemption")
+                    .Where(attribute => attribute.AttributeClass?.Name is nameof(BoundaryImperativeExemptionAttribute) or "BoundaryImperativeExemption")
                     .Select(BoundaryExemptionInfo.Parse),
             ]);
-    internal BoundaryExemptionStatus ExemptionStatus(ISymbol symbol, string ruleId, BoundaryImperativeReason expectedReason) {
-        (bool hasAny, bool hasValid, bool hasExpired, bool hasInvalid) result =
+    internal (BoundaryExemptionStatus Status, BoundaryExemptionInfo? MatchingExemption) ExemptionStatus(ISymbol symbol, DiagnosticDescriptor domainRule, BoundaryImperativeReason expectedReason) {
+        string ruleId = domainRule.Id;
+        (bool hasAny, bool hasValid, bool hasExpired, bool hasInvalid, BoundaryExemptionInfo? matchingExemption) result =
             ExemptionsFor(symbol)
                 .Where(exemption => string.Equals(exemption.RuleId, ruleId, StringComparison.Ordinal))
                 .Aggregate(
-                    seed: (hasAny: false, hasValid: false, hasExpired: false, hasInvalid: false),
+                    seed: (hasAny: false, hasValid: false, hasExpired: false, hasInvalid: false, matchingExemption: (BoundaryExemptionInfo?)null),
                     func: (acc, exemption) => {
                         bool reasonMatch = exemption.Reason == expectedReason;
                         bool validUnexpired = exemption.IsMetadataValid && reasonMatch && !exemption.IsExpired(AnalysisUtcNow);
                         bool expired = exemption.IsMetadataValid && reasonMatch && exemption.IsExpired(AnalysisUtcNow);
                         bool invalid = !exemption.IsMetadataValid || !reasonMatch;
+                        BoundaryExemptionInfo? matchingExemption = acc.matchingExemption is null && reasonMatch ? exemption : acc.matchingExemption;
                         return (
                             hasAny: true,
                             hasValid: acc.hasValid || validUnexpired,
                             hasExpired: acc.hasExpired || expired,
-                            hasInvalid: acc.hasInvalid || invalid);
+                            hasInvalid: acc.hasInvalid || invalid,
+                            matchingExemption);
                     });
-        return result switch {
-            (false, _, _, _) => BoundaryExemptionStatus.Missing,
-            (_, true, _, _) => BoundaryExemptionStatus.Valid,
-            (_, false, true, _) => BoundaryExemptionStatus.Expired,
+        BoundaryExemptionStatus status = result switch {
+            (false, _, _, _, _) => BoundaryExemptionStatus.Missing,
+            (_, true, _, _, _) => BoundaryExemptionStatus.Valid,
+            (_, false, true, _, _) => BoundaryExemptionStatus.Expired,
             _ => BoundaryExemptionStatus.Invalid,
         };
+        return (status, result.matchingExemption);
     }
 
     // --- [TRACKING] -----------------------------------------------------------
@@ -108,7 +112,7 @@ internal sealed class AnalyzerState {
     internal void TrackInterfaceImplementations(INamedTypeSymbol namedType) {
         // Roslyn API enumeration -- not domain code
         foreach (INamedTypeSymbol interfaceSymbol in (namedType.TypeKind, namedType.IsAbstract, namedType.IsStatic) switch {
-            (TypeKind.Class, false, false) or (TypeKind.Struct, false, _) => namedType.Interfaces,
+            (TypeKind.Class, false, false) or (TypeKind.Struct, false, _) => namedType.AllInterfaces,
             _ => [],
         }) {
             _ = _interfaceImplementations.AddOrUpdate(

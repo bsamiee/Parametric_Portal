@@ -10,7 +10,7 @@ description: >-
   (2) implementing domain services, boundary adapters, ASP.NET endpoints,
   gRPC stubs, or Thinktecture value objects;
   (3) configuring Directory.Build.props, .editorconfig, .csproj files, NuGet
-  packages, or Roslyn analyzers (CSP0001-CSP0008);
+  packages, or Roslyn analyzers (CSP0001-CSP0902);
   (4) working with Serilog, OpenTelemetry, Polly resilience, NodaTime,
   FluentValidation, Npgsql, Scrutor, or any .NET library in this monorepo;
   (5) writing or editing FsCheck property tests, xUnit test projects,
@@ -109,7 +109,7 @@ result.Match(
 // Alternatively: @catch to intercept specific errors in Eff pipelines
 ```
 - **Time acquisition is injected** (`NodaTime.IClock` or `System.TimeProvider` bridge), never direct `DateTime*` calls.
-- **Custom policy enforcement** via analyzers `CSP0001`-`CSP0008`.
+- **Custom policy enforcement** via analyzers `CSP0001`-`CSP0902` (69 rules across 10 categories: Foundation, Boundary, Shape, Async, Resource, Surface, Performance, Model, Governance; 68 error severity, 1 warning).
 
 **Boundary adapter exemptions** -- modules interfacing with external protocols (HTTP handlers, DB clients, message consumers, gRPC stubs).
 - **Exempt flow** -- annotate each site with `[BOUNDARY ADAPTER -- reason]`:
@@ -183,7 +183,9 @@ Core + foundation references are always loaded per [1]. The routing table select
 |   [2]   | **Domain primitive**            | `readonly record struct` + `Fin<T>`    | `{ get; }` only; normalize in factory |
 |   [3]   | **Source-gen payload DU**       | `[Union]` + `abstract partial record`  | Generated `Switch`/`Map` exhaustive   |
 |   [4]   | **Sealed DU hierarchy**         | `sealed abstract record` + cases       | Switch expression arms                |
-|   [5]   | **Zero-alloc wrapper**          | `Newtype<TTag, TRepr>`                 | `[ValueObject<T>]` for public API     |
+|  [5a]   | **Boundary-integrated wrapper** | `[ValueObject<T>]`                     | JSON/EF/ModelBinding via source-gen   |
+|  [5b]   | **Zero-alloc internal alias**   | `Newtype<TTag, TRepr>`                 | No boundary serialization needed      |
+|  [5c]   | **Multi-step validated scalar** | `readonly record struct` + `Fin<T>`    | Custom validation beyond single check |
 |   [6]   | **Compile-time state tracking** | `UserId<TState>` phantom parameter     | Empty `readonly struct` markers       |
 |   [7]   | **Inline property validation**  | `field` keyword setter (non-validated) | Auto-rounding; NOT for `Fin<T>` types |
 
@@ -292,7 +294,7 @@ Fin<int> x = Parse(input).Map((int value) => value + 1);
 - **Prefer LanguageExt collections** -- `Seq<T>` (array-backed, faster iteration/indexing than `Lst<T>`; trait-integrated via `K<Seq, A>`), `HashMap<K,V>` (CHAMP), `HashSet<T>`. BCL `ImmutableDictionary` does not implement `K<F,A>` traits.
 - **`Validation<Error,T>`** standardized -- `Error` implements `Monoid` in v5, so `Validation<Error,T>` is valid. Use this form over `Validation<Seq<Error>,T>`.
 - **Memoization boundary** -- `Atom<HashMap<K,V>>` for lock-free memoize combinators with CAS semantics: `Atom(HashMap<CacheKey, Result>.Empty)`. `ConcurrentDictionary` is an infrastructure escape hatch in boundary adapters only.
-- **Streaming/IO updates** -- treat `SourceT` (`|` merge with fallible propagation, `Monad.Recur` internals) and `awaitAny` cancellation defaults as canonical in async-effect guidance.
+- **Streaming/IO updates** -- `BoundedChannel<Fin<T>>` is the primary documented pattern for reactive streams (see `observable-module.template.md`); `SourceT` is available as an alternative when its `|` merge semantics and `Monad.Recur` internals suit a specific use case.
 
 ---
 ## [8][THINKTECTURE_V10_CONVENTIONS]

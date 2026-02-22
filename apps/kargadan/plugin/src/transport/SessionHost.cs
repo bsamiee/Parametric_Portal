@@ -1,9 +1,9 @@
 // Lock-gated mutable session state machine tracking lifecycle phase from Connected through Active to terminal states.
 // Mutability is confined here — all transitions return Fin<SessionSnapshot> and are serialized under _gate; no state escapes the lock.
-using System.Diagnostics;
 using LanguageExt;
 using LanguageExt.Common;
 using NodaTime;
+using ParametricPortal.CSharp.Analyzers.Contracts;
 using ParametricPortal.Kargadan.Plugin.src.contracts;
 using ParametricPortal.Kargadan.Plugin.src.protocol;
 using Thinktecture;
@@ -20,22 +20,7 @@ public sealed record SessionSnapshot(
     Instant OpenedAt,
     Instant LastHeartbeatAt,
     Duration HeartbeatInterval,
-    Duration HeartbeatTimeout) {
-    public SessionLifecycleState State => Phase switch {
-        SessionPhase.Connected => SessionLifecycleState.Connected,
-        SessionPhase.Active => SessionLifecycleState.Active,
-        SessionPhase.Terminal terminal => terminal.StateTag,
-        _ => throw new UnreachableException(),
-    };
-    public Option<HandshakeEnvelope.Ack> Handshake => Phase switch {
-        SessionPhase.Active active => Some(active.Ack),
-        _ => None,
-    };
-    public Option<FailureReason> FailureReason => Phase switch {
-        SessionPhase.Terminal terminal => terminal.Failure,
-        _ => None,
-    };
-}
+    Duration HeartbeatTimeout);
 [Union]
 public abstract partial record SessionPhase {
     private SessionPhase() { }
@@ -46,6 +31,7 @@ public abstract partial record SessionPhase {
 
 // --- [ADAPTER] ---------------------------------------------------------------
 
+[BoundaryAdapter]
 public sealed class SessionHost {
     // --- [CONSTANTS] ---------------------------------------------------------
     private static readonly Error SessionNotOpen = Error.New(message: "Session is not open.");
@@ -83,8 +69,6 @@ public sealed class SessionHost {
                             Failure: None),
                         operation: "close"),
                 missingError: Error.New(message: $"Session close failed: {reason}")));
-    public Fin<Option<SessionSnapshot>> Current() =>
-        WithinGate(() => Fin.Succ(_current));
     public Fin<SessionSnapshot> Open(
         EnvelopeIdentity identity,
         Duration heartbeatInterval,
@@ -115,18 +99,6 @@ public sealed class SessionHost {
                             Failure: Some(reason)),
                         operation: "reject"),
                 missingError: FailureMapping.ToError(reason)));
-    public Fin<SessionSnapshot> Reap(Instant now) =>
-        WithinGate(() =>
-            UpdateCurrent(
-                transition: snapshot =>
-                    TransitionFromMutablePhase(
-                        snapshot: snapshot,
-                        now: now,
-                        nextPhase: new SessionPhase.Terminal(
-                            StateTag: SessionLifecycleState.Reaped,
-                            Failure: None),
-                        operation: "reap"),
-                missingError: Error.New(message: "Session reap requested while no session is active.")));
     public Fin<SessionSnapshot> Timeout(Instant now) =>
         WithinGate(() =>
             BindCurrent(
@@ -160,8 +132,7 @@ public sealed class SessionHost {
             SessionPhase.Connected or SessionPhase.Active => ApplyHeartbeatTransition(snapshot: snapshot, now: now, nextPhase: nextPhase),
             SessionPhase.Terminal terminal => Fin.Fail<SessionSnapshot>(
                 Error.New(message: $"Cannot {operation}; session is already terminal in state '{terminal.StateTag.Key}'.")),
-            _ => Fin.Fail<SessionSnapshot>(
-                Error.New(message: $"Unsupported session phase while attempting {operation}.")),
+            _ => Fin.Fail<SessionSnapshot>(UnexpectedSessionPhase(operation: operation, phase: snapshot.Phase)),
         };
     private Fin<SessionSnapshot> UpdateActiveHeartbeat(SessionSnapshot snapshot, Instant now) =>
         snapshot.Phase switch {
@@ -170,13 +141,13 @@ public sealed class SessionHost {
                 Error.New(message: "Cannot process heartbeat before handshake activation.")),
             SessionPhase.Terminal terminal => Fin.Fail<SessionSnapshot>(
                 Error.New(message: $"Cannot process heartbeat for terminal state '{terminal.StateTag.Key}'.")),
-            _ => Fin.Fail<SessionSnapshot>(Error.New(message: "Unsupported session phase.")),
+            _ => Fin.Fail<SessionSnapshot>(UnexpectedSessionPhase(operation: "process heartbeat", phase: snapshot.Phase)),
         };
     private Fin<SessionSnapshot> TimeoutIfNeeded(SessionSnapshot snapshot, Instant now) =>
         snapshot.Phase switch {
             SessionPhase.Terminal => Fin.Succ(snapshot),
             SessionPhase.Connected or SessionPhase.Active => EvaluateTimeout(snapshot: snapshot, now: now),
-            _ => Fin.Fail<SessionSnapshot>(Error.New(message: "Unsupported session phase.")),
+            _ => Fin.Fail<SessionSnapshot>(UnexpectedSessionPhase(operation: "evaluate timeout", phase: snapshot.Phase)),
         };
     private Fin<SessionSnapshot> EvaluateTimeout(SessionSnapshot snapshot, Instant now) =>
         Heartbeat.IsTimedOut(
@@ -203,4 +174,6 @@ public sealed class SessionHost {
             LastHeartbeatAt = now,
             Phase = nextPhase,
         });
+    private static Error UnexpectedSessionPhase(string operation, SessionPhase phase) =>
+        Error.New(message: $"Unexpected session phase '{phase.GetType().FullName}' during '{operation}'.");
 }

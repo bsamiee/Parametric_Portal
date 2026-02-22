@@ -23,7 +23,7 @@ internal static class FlowRules {
                     (_, true) => BoundaryImperativeReason.AsyncIteratorYieldGate,
                     _ => BoundaryImperativeReason.ProtocolRequired,
                 },
-                ruleId: "CSP0001"),
+                domainRule: RuleCatalog.CSP0001),
             _ => null,
         });
     internal static void CheckImperativeLoop(OperationAnalysisContext context, AnalyzerState state, ScopeInfo scope, ILoopOperation loopOperation) =>
@@ -34,21 +34,21 @@ internal static class FlowRules {
                 reason: loopOperation.Syntax is ForEachStatementSyntax { AwaitKeyword.RawKind: > 0 }
                     ? BoundaryImperativeReason.AsyncIteratorYieldGate
                     : BoundaryImperativeReason.ProtocolRequired,
-                ruleId: "CSP0001"),
+                domainRule: RuleCatalog.CSP0001),
             _ => null,
         });
     internal static void CheckExceptionTry(OperationAnalysisContext context, AnalyzerState state, ScopeInfo scope, ITryOperation tryOperation) =>
         AnalyzerState.Report(context.ReportDiagnostic, (scope.IsDomainOrApplication, scope.IsBoundary, tryOperation.Catches.Length > 0, tryOperation.Catches.Length == 0 && tryOperation.Finally is not null) switch {
             (true, _, true, _) => Diagnostic.Create(RuleCatalog.CSP0009, context.Operation.Syntax.GetLocation(), "try/catch"),
-            (_, true, true, _) => BoundaryDiagnostic(context, state, construct: "try/catch", reason: BoundaryImperativeReason.ProtocolRequired, ruleId: "CSP0009"),
-            (_, true, _, true) => BoundaryDiagnostic(context, state, construct: "try/finally", reason: BoundaryImperativeReason.CleanupFinally, ruleId: "CSP0009"),
+            (_, true, true, _) => BoundaryDiagnostic(context, state, construct: "try/catch", reason: BoundaryImperativeReason.ProtocolRequired, domainRule: RuleCatalog.CSP0009),
+            (_, true, _, true) => BoundaryDiagnostic(context, state, construct: "try/finally", reason: BoundaryImperativeReason.CleanupFinally, domainRule: RuleCatalog.CSP0009),
             _ => null,
         });
     internal static void CheckExceptionThrow(OperationAnalysisContext context, AnalyzerState state, ScopeInfo scope, IThrowOperation throwOperation) =>
         AnalyzerState.Report(context.ReportDiagnostic, (scope.IsDomainOrApplication, scope.IsBoundary, SymbolFacts.IsUnreachableThrow(throwOperation)) switch {
             (_, _, true) => null,
             (true, _, false) => Diagnostic.Create(RuleCatalog.CSP0009, context.Operation.Syntax.GetLocation(), "throw"),
-            (_, true, false) => BoundaryDiagnostic(context, state, construct: "throw", reason: BoundaryImperativeReason.ProtocolRequired, ruleId: "CSP0009"),
+            (_, true, false) => BoundaryDiagnostic(context, state, construct: "throw", reason: BoundaryImperativeReason.ProtocolRequired, domainRule: RuleCatalog.CSP0009),
             _ => null,
         });
 
@@ -108,9 +108,9 @@ internal static class FlowRules {
     internal static void CheckExemptionMetadata(SymbolAnalysisContext context, AnalyzerState state, ISymbol symbol) {
         ImmutableArray<AnalyzerState.BoundaryExemptionInfo> exemptions = state.ExemptionsFor(symbol);
         IEnumerable<Diagnostic> diagnostics = exemptions.SelectMany(exemption =>
-            (exemption.IsMetadataValid, exemption.IsExpired(state.AnalysisUtcNow), symbol.Locations.Length) switch {
-                (false, _, > 0) => [Diagnostic.Create(RuleCatalog.CSP0901, symbol.Locations[0], symbol.Name)],
-                (true, true, > 0) => [Diagnostic.Create(RuleCatalog.CSP0902, symbol.Locations[0], symbol.Name, exemption.ExpiresOnUtc)],
+            (exemption.IsMetadataValid, exemption.IsExpired(state.AnalysisUtcNow), symbol.Locations.Length, FormatTicket(exemption.Ticket)) switch {
+                (false, _, > 0, string ticket) => [Diagnostic.Create(RuleCatalog.CSP0901, symbol.Locations[0], symbol.Name, ticket)],
+                (true, true, > 0, string ticket) => [Diagnostic.Create(RuleCatalog.CSP0902, symbol.Locations[0], symbol.Name, exemption.ExpiresOnUtc, ticket)],
                 _ => Array.Empty<Diagnostic>(),
             });
         AnalyzerState.ReportEach(context.ReportDiagnostic, diagnostics);
@@ -190,18 +190,21 @@ internal static class FlowRules {
 
     // --- [PRIVATE_FUNCTIONS] --------------------------------------------------
 
-    private static Diagnostic? BoundaryDiagnostic(OperationAnalysisContext context, AnalyzerState state, string construct, BoundaryImperativeReason reason, string ruleId) {
-        BoundaryExemptionStatus status = state.ExemptionStatus(symbol: context.ContainingSymbol, ruleId: ruleId, expectedReason: reason);
+    private static Diagnostic? BoundaryDiagnostic(OperationAnalysisContext context, AnalyzerState state, string construct, BoundaryImperativeReason reason, DiagnosticDescriptor domainRule) {
+        (BoundaryExemptionStatus status, AnalyzerState.BoundaryExemptionInfo? matchingExemption) = state.ExemptionStatus(symbol: context.ContainingSymbol, domainRule: domainRule, expectedReason: reason);
         string expectedReason = reason.ToString();
-        string expiry = state.ExemptionsFor(context.ContainingSymbol)
-            .Where(exemption => string.Equals(exemption.RuleId, ruleId, StringComparison.Ordinal) && exemption.Reason == reason)
-            .Select(exemption => exemption.ExpiresOnUtc)
-            .FirstOrDefault() ?? "unknown";
+        string expiry = matchingExemption?.ExpiresOnUtc ?? "unknown";
+        string ticket = FormatTicket(matchingExemption?.Ticket ?? string.Empty);
         return status switch {
             BoundaryExemptionStatus.Missing => Diagnostic.Create(RuleCatalog.CSP0101, context.Operation.Syntax.GetLocation(), construct),
             BoundaryExemptionStatus.Invalid => Diagnostic.Create(RuleCatalog.CSP0102, context.Operation.Syntax.GetLocation(), expectedReason, construct),
-            BoundaryExemptionStatus.Expired => Diagnostic.Create(RuleCatalog.CSP0103, context.Operation.Syntax.GetLocation(), construct, expiry),
+            BoundaryExemptionStatus.Expired => Diagnostic.Create(RuleCatalog.CSP0103, context.Operation.Syntax.GetLocation(), construct, expiry, ticket),
             _ => null,
         };
     }
+    private static string FormatTicket(string ticket) =>
+        string.IsNullOrWhiteSpace(ticket) switch {
+            true => "missing-ticket",
+            _ => ticket,
+        };
 }

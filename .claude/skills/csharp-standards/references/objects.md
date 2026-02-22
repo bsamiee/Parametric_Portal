@@ -97,9 +97,7 @@ Callers needing `Validation<Error,T>` compose via `.ToValidation()` -- no separa
 ```csharp
 namespace Domain.Objects;
 
-using LanguageExt;
-using LanguageExt.Common;
-using Thinktecture;
+using LanguageExt; using LanguageExt.Common; using Thinktecture;
 using static LanguageExt.Prelude;
 
 public static class DomainBridge {
@@ -137,13 +135,10 @@ Prefer context overloads + `static` lambdas on hot paths to avoid closure alloca
 ```csharp
 namespace Domain.Objects;
 
-using LanguageExt;
-using LanguageExt.Common;
-using Thinktecture;
+using LanguageExt; using LanguageExt.Common; using Thinktecture;
 using static LanguageExt.Prelude;
 
 // --- [ENUM] ------------------------------------------------------------------
-
 [SmartEnum<string>]
 public sealed partial class OrderState {
     public static readonly OrderState Draft = new("DRAFT");
@@ -167,7 +162,7 @@ public static class OrderStateRole {
             state.Switch(state,
                 draft: static current => Fin.Succ(current),
                 confirmed: static current => Fin.Succ(current),
-                cancelled: static _ => Fin.Fail<OrderState>(Error.New("Cancelled state is terminal."));
+                cancelled: static _ => Fin.Fail<OrderState>(Error.New("Cancelled state is terminal.")));
     }
 }
 ```
@@ -188,13 +183,10 @@ Generated `Switch`/`Map` methods enforce exhaustiveness at compile time.
 ```csharp
 namespace Domain.Objects;
 
-using LanguageExt;
-using LanguageExt.Common;
-using Thinktecture;
+using LanguageExt; using LanguageExt.Common; using Thinktecture;
 using static LanguageExt.Prelude;
 
 // --- [UNION] -----------------------------------------------------------------
-
 // [Union] source-generates private constructor -- external derivation is prevented by codegen.
 [Union]
 public abstract partial record PaymentResult {
@@ -222,9 +214,58 @@ public static class PaymentResultRole {
 }
 ```
 
+Thinktecture `Switch`/`Map` returns `Fin<T>` -- compose directly into LanguageExt `Bind`/`Map` chains or `Eff` pipelines.<br>
+Every case branch **must** return the same `Fin<T>` instantiation (identical `T` type parameter) so the overall expression unifies to a single `Fin<T>`.<br>
+Mixing return types across branches (e.g., `Fin<string>` in one arm and `Fin<Unit>` in another) prevents composition and produces compilation errors.
+
+```csharp
+// --- [COMPOSITION_BRIDGE] -- Thinktecture dispatch into Eff pipeline ---------
+
+public sealed record PaymentRuntime(IPaymentGateway Gateway, IAuditLog Audit);
+
+public static class PaymentWorkflow {
+    public static Eff<PaymentRuntime, ReceiptId> ProcessPayment(PaymentResult result) =>
+        result.RequireAuthorizationCode()                          // Fin<string> via Switch
+            .ToEff<PaymentRuntime>()                               // lift into Eff<RT, string>
+            .Bind((string code) =>
+                Eff<PaymentRuntime, IPaymentGateway>.Asks(static (PaymentRuntime rt) => rt.Gateway)
+                    .Bind((IPaymentGateway gw) => gw.Issue(authorizationCode: code)))
+            .Bind((ReceiptId receipt) =>
+                Eff<PaymentRuntime, IAuditLog>.Asks(static (PaymentRuntime rt) => rt.Audit)
+                    .Bind((IAuditLog log) => log.Record(receiptId: receipt))
+                    .Map((_) => receipt));
+}
+```
+
+Ad-hoc `Union<T1,...>` models boundary adapter DTOs where variant payloads arrive as raw JSON.
+Use `[ObjectFactory<T>]` to project external representations into the union.
+
+```csharp
+// --- [AD_HOC_UNION] -- boundary adapter with ObjectFactory projection --------
+
+[Union<PaymentResult.Authorized, PaymentResult.Declined, PaymentResult.ProviderFailure>]
+[ObjectFactory<string>(UseForSerialization = SerializationFrameworks.SystemTextJson)]
+public readonly partial struct PaymentOutcome {
+    // generated: Value property, Switch/Map exhaustive dispatch, implicit conversions
+    // ObjectFactory<string> generates JsonConverter for boundary serialization
+}
+
+// --- [BOUNDARY_ADAPTER] -- ad-hoc union projects into domain union -----------
+
+public static class PaymentAdapter {
+    public static PaymentResult ToDomain(PaymentOutcome outcome) =>
+        outcome.Map(
+            authorized: static (PaymentResult.Authorized a) => (PaymentResult)a,
+            declined: static (PaymentResult.Declined d) => (PaymentResult)d,
+            providerFailure: static (PaymentResult.ProviderFailure f) => (PaymentResult)f);
+}
+```
+
 [IMPORTANT]:
 - In v10, nested union case type names were simplified; bind to generated case names, not hand-authored aliases.
 - Regular unions are best serialized with polymorphic metadata (`JsonDerivedType`); ad-hoc unions use `[ObjectFactory<T>]` projection.
+- `Fin<T>.ToEff<RT>()` lifts Thinktecture dispatch results into effectful pipelines; `Bind`/`Map` compose downstream.
+- Ad-hoc `Union<T1,...>` is for boundary adapter scenarios; regular `[Union]` is for domain variant hierarchies.
 
 ---
 ## [6][AGGREGATE_OBJECT_SHAPE]
@@ -236,8 +277,7 @@ No external mutation channels; no primitive re-validation in downstream code.
 ```csharp
 namespace Domain.Objects;
 
-using LanguageExt;
-using LanguageExt.Common;
+using LanguageExt; using LanguageExt.Common;
 using static LanguageExt.Prelude;
 
 public sealed record PurchaseOrder(
@@ -278,8 +318,7 @@ Full span-based parsing patterns live in `performance.md`.
 ```csharp
 namespace Domain.Objects;
 
-using LanguageExt;
-using static LanguageExt.Prelude;
+using LanguageExt; using static LanguageExt.Prelude;
 
 public readonly ref struct Utf8Window(ReadOnlySpan<byte> source) {
     public ReadOnlySpan<byte> Source { get; } = source;
@@ -291,8 +330,6 @@ public readonly ref struct Utf8Window(ReadOnlySpan<byte> source) {
         };
 }
 ```
-
-[REF]: Utf8-to-domain parsing bridges and span workflow patterns are canonicalized in `performance.md`.
 
 ---
 ## [8][RULES]
@@ -306,8 +343,6 @@ public readonly ref struct Utf8Window(ReadOnlySpan<byte> source) {
 - Context overloads + `static` lambdas are default on hot paths.
 - `ref struct` remains infrastructure-local.
 - `with`-expressions are the sole mechanism for record state transitions.
-
-[REF]: Boundary adapter mapping (DTO to domain command) via applicative validation is canonicalized in `validation.md`. Import pattern from there; do not redefine in object modules.
 
 ---
 ## [9][QUICK_REFERENCE]

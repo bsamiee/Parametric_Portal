@@ -24,7 +24,11 @@ import { FeatureService } from './domain/features.ts';
 
 const _CONFIG = {
     cors: {
-        allowedHeaders: ['content-type', 'authorization', 'x-api-key', Context.Request.Headers.appId, Context.Request.Headers.idempotencyKey, Context.Request.Headers.requestId, Context.Request.Headers.requestedWith, ...Context.Request.Headers.trace],
+        allowedHeaders: [
+            'content-type', 'authorization', 'x-api-key', Context.Request.Headers.appId, Context.Request.Headers.idempotencyKey,
+            Context.Request.Headers.kargadan.traceId, Context.Request.Headers.kargadan.spanId, Context.Request.Headers.kargadan.operationTag, Context.Request.Headers.kargadan.attempt,
+            Context.Request.Headers.requestId, Context.Request.Headers.requestedWith, ...Context.Request.Headers.trace,
+        ],
         allowedMethods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS', 'HEAD'],
         allowedOrigins: ['*'],
         credentials:    false,
@@ -73,14 +77,15 @@ class TenantResolution extends Data.TaggedError('TenantResolution')<{ readonly d
 // --- [GLOBAL_MIDDLEWARE] -----------------------------------------------------
 
 const _trace = HttpMiddleware.make((app) => HttpServerRequest.HttpServerRequest.pipe(
-    Effect.flatMap((req) => {
-        const [urlPath, urlQuery] = req.url.split('?', 2) as [string, string | undefined];
+    Effect.flatMap((request) => {
+        const traceHeaders = Context.Request.withTraceParentFromKargadan(request.headers);
+        const [urlPath, urlQuery] = request.url.split('?', 2) as [string, string | undefined];
         const queryAttrs = urlQuery === undefined ? {} : { 'url.query.length': String(urlQuery.length), 'url.query.present': true };
         return pipe(
-            Telemetry.span(app, `HTTP ${req.method}`, { 'http.request.method': req.method, 'url.path': urlPath, 'url.scheme': Option.getOrElse(Headers.get(req.headers, Context.Request.Headers.forwardedProto), () => 'http'), kind: 'server', metrics: false, ...queryAttrs }),
+            Telemetry.span(app, `HTTP ${request.method}`, { 'http.request.method': request.method, 'url.path': urlPath, 'url.scheme': Option.getOrElse(Headers.get(traceHeaders, Context.Request.Headers.forwardedProto), () => 'http'), kind: 'server', metrics: false, ...queryAttrs }),
             Effect.tap((res) => Effect.annotateCurrentSpan('http.response.status_code', res.status)),
             Effect.flatMap((response) => Effect.map(Effect.optionFromOptional(Effect.currentSpan), (span) => ({ response, span }))),
-            (traced) => Option.match(HttpTraceContext.fromHeaders(req.headers), { onNone: () => traced, onSome: (parent) => Effect.withParentSpan(traced, parent) }),
+            (traced) => Option.match(HttpTraceContext.fromHeaders(traceHeaders), { onNone: () => traced, onSome: (parent) => Effect.withParentSpan(traced, parent) }),
         );
     }),
     Effect.map(({ response, span }) => Option.match(span, { onNone: () => response, onSome: (s) => HttpServerResponse.setHeaders(response, HttpTraceContext.toHeaders(s)) })),
@@ -120,6 +125,7 @@ const _makeRequestContext = (database: { readonly apps: { readonly byNamespace: 
         });
         const namespaceOpt = Headers.get(req.headers, Context.Request.Headers.appId);
         const path = req.url.split('?', 2)[0] ?? '/';
+        const kargadanTelemetry = Context.Request.kargadanTelemetryFromHeaders(req.headers);
         const tenant = yield* pipe(
             Option.match<string, ReturnType<typeof database.apps.byNamespace>>(namespaceOpt, {
                 onNone: constant(Effect.if(A.some(_CONFIG.tenantExemptPrefixes, (prefix) => path === prefix || path.startsWith(`${prefix}/`)), { onTrue: constant(Effect.succeed(Option.some({ id: Context.Request.Id.system, namespace: '', status: 'active' as const }))), onFalse: constant(Effect.fail(new TenantResolution({ details: 'X-App-Id header is required', error: 'MissingTenantHeader', status: 400 }))) })),
@@ -141,10 +147,8 @@ const _makeRequestContext = (database: { readonly apps: { readonly byNamespace: 
             tenantId,
             Effect.all([Effect.provideService(app, HttpServerRequest.HttpServerRequest, req), Context.Request.current]).pipe(
                 Effect.map(([response, requestContext]) => ({ circuit: requestContext.circuit, response })),
-                Effect.annotateSpans('tenant.id', tenantId),
-                Effect.annotateSpans('request.id', requestId),
             ),
-            { appNamespace: namespaceOpt, circuit: Option.none(), cluster: Option.none(), ipAddress: req.remoteAddress, rateLimit: Option.none(), requestId, session: Option.none(), tenantId, userAgent: Headers.get(req.headers, 'user-agent') },
+            { appNamespace: namespaceOpt, circuit: Option.none(), cluster: Option.none(), ipAddress: req.remoteAddress, kargadanTelemetry, rateLimit: Option.none(), requestId, session: Option.none(), tenantId, userAgent: Headers.get(req.headers, 'user-agent') },
         );
         const outcome = yield* FiberRef.get(_idempotencyOutcome);
         return HttpServerResponse.setHeaders(response, { [Context.Request.Headers.requestId]: requestId, ...pipe(circuit, Option.map((c) => ({ [Context.Request.Headers.circuitState]: c.state })), Option.getOrElse(constant({}))), ...pipe(outcome, Option.map((value) => ({ [Context.Request.Headers.idempotencyOutcome]: value })), Option.getOrElse(constant({}))) });

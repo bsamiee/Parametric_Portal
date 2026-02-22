@@ -25,7 +25,7 @@ const EnvelopeIdentitySchema = S.Struct({
     sessionId:       S.UUID,
 });
 const FailureClassSchema = S.Literal('retryable', 'correctable', 'compensatable', 'fatal');
-const IdempotencySchema = S.Struct({
+const IdempotencySchema =  S.Struct({
     idempotencyKey: S.String.pipe(S.pattern(/^[A-Za-z0-9:_-]{8,128}$/)),
     payloadHash:    S.String.pipe(S.pattern(/^[a-f0-9]{64}$/)),
 });
@@ -144,8 +144,7 @@ const RetrievalArtifactSchema = S.Struct({
 // --- [UNIONS] ----------------------------------------------------------------
 
 const InboundEnvelopeSchema = S.Union(
-    HandshakeEnvelopeSchema, HeartbeatEnvelopeSchema, EventEnvelopeSchema,
-    ResultEnvelopeSchema,
+    HandshakeEnvelopeSchema, HeartbeatEnvelopeSchema, EventEnvelopeSchema, ResultEnvelopeSchema,
 );
 const OutboundEnvelopeSchema = S.Union(
     HandshakeEnvelopeSchema, HeartbeatEnvelopeSchema, CommandEnvelopeSchema,

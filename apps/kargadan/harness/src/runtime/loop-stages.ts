@@ -2,29 +2,35 @@
  * Pure stage functions for PLAN command construction, DECIDE branching, and result verification in the agent loop.
  * Generates deterministic idempotency keys and SHA-256 payload hashes; no Effects — all IO delegated to AgentLoop.
  */
-import { createHash } from 'node:crypto';
 import type { Kargadan } from '@parametric-portal/types/kargadan';
-import { Effect, Match, Option, pipe } from 'effect';
-import { type LoopState, Verification } from '../loop-types';
+import { Data, Effect, Match, Option, pipe } from 'effect';
+import { createTelemetryContext } from '../config';
+import { type LoopState } from './agent-loop';
 import { CommandDispatchError } from '../protocol/dispatch';
-import type { PersistenceTrace } from './persistence-trace';
+import { hashCanonicalState, type PersistenceTrace } from './persistence-trace';
+
+// --- [ALGEBRAS] --------------------------------------------------------------
+
+// biome-ignore lint/correctness/noUnusedVariables: const+namespace merge pattern
+const Verification = Data.taggedEnum<Verification.Type>();
+namespace Verification {
+    export type Type = Data.TaggedEnum<{
+        // biome-ignore lint/complexity/noBannedTypes: Data.TaggedEnum empty variant requires {} — Record<string, never> breaks the _tag constraint
+        Verified: {};
+        Failed:   { readonly error: Kargadan.FailureReason & { readonly details?: unknown }; };
+    }>;
+}
 
 // --- [FUNCTIONS] -------------------------------------------------------------
 
-const sortKeysDeep = (value: unknown): unknown =>
-    Match.value(value).pipe(
-        Match.when(Array.isArray, (arr) => arr.map(sortKeysDeep)),
-        Match.when(
-            (v: unknown): v is Record<string, unknown> => v !== null && typeof v === 'object',
-            (obj) =>
-                Object.fromEntries(
-                    Object.entries(obj)
-                        .sort(([a], [b]) => a.localeCompare(b))
-                        .map(([k, v]) => [k, sortKeysDeep(v)] as const),
-                ),
-        ),
-        Match.orElse((v) => v),
-    );
+const _writeOperations: ReadonlySet<Kargadan.CommandOperation> = new Set([
+    'write.object.create',
+    'write.object.update',
+    'write.object.delete',
+    'write.layer.update',
+    'write.viewport.update',
+    'write.annotation.update',
+]);
 const planCommand = (input: { readonly deadline: number; readonly state: LoopState.Type }) =>
     pipe(
         Option.fromNullable(input.state.command),
@@ -47,13 +53,13 @@ const planCommand = (input: { readonly deadline: number; readonly state: LoopSta
                         runId:     input.state.identityBase.runId,
                         sessionId: input.state.identityBase.sessionId,
                     } as const satisfies Kargadan.EnvelopeIdentity;
-                    const telemetryContext = {
+                    const telemetryContext = createTelemetryContext({
                         attempt: input.state.attempt,
                         operationTag: 'PLAN',
-                        spanId:  crypto.randomUUID().replaceAll('-', ''),
-                        traceId: crypto.randomUUID().replaceAll('-', ''),
-                    } as const satisfies Kargadan.TelemetryContext;
-                    const isWrite = operation.startsWith('write.');
+                        requestId: identity.requestId,
+                        traceId: input.state.identityBase.traceId,
+                    });
+                    const isWrite = _writeOperations.has(operation);
                     const payload = isWrite
                         ? ({
                             operationId: `${input.state.identityBase.runId}:${input.state.sequence}`,
@@ -66,9 +72,7 @@ const planCommand = (input: { readonly deadline: number; readonly state: LoopSta
                         idempotency: isWrite
                             ? {
                                 idempotencyKey: `run:${input.state.identityBase.runId.slice(0, 8)}:seq:${String(input.state.sequence).padStart(4, '0')}`,
-                                payloadHash: createHash('sha256')
-                                    .update(JSON.stringify(sortKeysDeep(payload)))
-                                    .digest('hex'),
+                                payloadHash: hashCanonicalState(payload),
                             }
                             : undefined,
                         identity,
@@ -113,28 +117,32 @@ const handleDecision = (input: {
                 identity: { ...input.command.identity, issuedAt: new Date() },
                 telemetryContext: { ...input.command.telemetryContext, attempt: input.state.attempt + 1 },
             } satisfies Kargadan.CommandEnvelope;
+            const decisionTelemetryContext = createTelemetryContext({
+                attempt: input.state.attempt,
+                operationTag: 'DECIDE',
+                requestId: input.command.identity.requestId,
+                traceId: input.state.identityBase.traceId,
+            });
+            const decisionTransitionBase = {
+                appId:       input.state.identityBase.appId,
+                createdAt:   new Date(),
+                eventId:     crypto.randomUUID(),
+                requestId:   input.command.identity.requestId,
+                runId:       input.state.identityBase.runId,
+                sequence:    input.state.sequence + 1,
+                sessionId:   input.state.identityBase.sessionId,
+                telemetryContext: decisionTelemetryContext,
+                ...(input.command.idempotency === undefined
+                    ? {}
+                    : { idempotency: input.command.idempotency }),
+            } as const;
             return Match.value(error.failureClass).pipe(
                 Match.when('compensatable', () =>
                     input.context.trace
                         .appendTransition({
-                            appId:       input.state.identityBase.appId,
-                            createdAt:   new Date(),
-                            eventId:     crypto.randomUUID(),
+                            ...decisionTransitionBase,
                             eventType:   'command.compensate',
                             payload: { code: error.code, compensation: 'required' },
-                            requestId:   input.command.identity.requestId,
-                            runId:       input.state.identityBase.runId,
-                            sequence:    input.state.sequence + 1,
-                            sessionId:   input.state.identityBase.sessionId,
-                            telemetryContext: {
-                                attempt: input.state.attempt,
-                                operationTag: 'DECIDE',
-                                spanId:  crypto.randomUUID().replaceAll('-', ''),
-                                traceId: crypto.randomUUID().replaceAll('-', ''),
-                            },
-                            ...(input.command.idempotency === undefined
-                                ? {}
-                                : { idempotency: input.command.idempotency }),
                         })
                         .pipe(Effect.as(failedState)),
                 ),
@@ -222,4 +230,4 @@ const verifyResult = (result: Kargadan.ResultEnvelope): Verification.Type =>
 
 // --- [EXPORT] ----------------------------------------------------------------
 
-export { handleDecision, planCommand, verifyResult };
+export { handleDecision, planCommand, Verification, verifyResult };

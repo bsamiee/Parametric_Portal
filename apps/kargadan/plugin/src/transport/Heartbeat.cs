@@ -8,7 +8,7 @@ namespace ParametricPortal.Kargadan.Plugin.src.transport;
 // --- [FUNCTIONS] -------------------------------------------------------------
 
 internal static class Heartbeat {
-    internal static bool IsTimedOut(Instant now, Instant lastHeartbeatAt, Duration timeout) =>
+    internal static bool IsTimedOut(Instant now, Instant lastHeartbeatAt, NodaTime.Duration timeout) =>
         (now - lastHeartbeatAt) > timeout;
     internal static HeartbeatEnvelope Ping(
         EnvelopeIdentity identity,

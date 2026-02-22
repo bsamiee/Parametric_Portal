@@ -51,7 +51,6 @@ public sealed partial class SessionLifecycleState {
     public static readonly SessionLifecycleState Closing = new("closing");
     public static readonly SessionLifecycleState Closed = new("closed");
     public static readonly SessionLifecycleState TimedOut = new("timed_out");
-    public static readonly SessionLifecycleState Reaped = new("reaped");
     public static readonly SessionLifecycleState Rejected = new("rejected");
 }
 [SmartEnum<string>]
@@ -68,9 +67,6 @@ public sealed partial class CommandOperation {
     public static readonly CommandOperation LayerUpdate = new("write.layer.update");
     public static readonly CommandOperation ViewportUpdate = new("write.viewport.update");
     public static readonly CommandOperation AnnotationUpdate = new("write.annotation.update");
-    public bool IsRead =>
-        Key.StartsWith(value: "read.", comparisonType: StringComparison.Ordinal);
-    public bool IsWrite => !IsRead;
 
     // --- [CAPABILITIES] -------------------------------------------------------
 
@@ -108,6 +104,11 @@ public sealed partial class DedupeDecision {
     public static readonly DedupeDecision Executed = new("executed");
     public static readonly DedupeDecision Duplicate = new("duplicate");
     public static readonly DedupeDecision Rejected = new("rejected");
+}
+[SmartEnum<string>]
+public sealed partial class CommandResultStatus {
+    public static readonly CommandResultStatus Ok = new("ok");
+    public static readonly CommandResultStatus Error = new("error");
 }
 [SmartEnum<string>]
 public sealed partial class EventType {

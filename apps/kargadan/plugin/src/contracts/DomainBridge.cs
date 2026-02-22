@@ -8,7 +8,6 @@ namespace ParametricPortal.Kargadan.Plugin.src.contracts;
 
 public static class DomainBridge {
     // --- [VALUE_OBJECTS] ------------------------------------------------------
-
     public static Fin<T> ParseValueObject<T, TKey>(TKey candidate)
         where T : IObjectFactory<T, TKey, ValidationError>
         where TKey : notnull =>
@@ -23,9 +22,7 @@ public static class DomainBridge {
             true => ParseValueObject<T, Guid>(parsed),
             _ => Fin.Fail<T>(Error.New(message: failureMessage)),
         };
-
     // --- [SMART_ENUMS] --------------------------------------------------------
-
     public static Fin<T> ParseSmartEnum<T, TKey>(TKey candidate)
         where T : class, ISmartEnum<TKey, T, ValidationError>
         where TKey : notnull =>

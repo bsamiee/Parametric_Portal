@@ -5,34 +5,34 @@
 
 Produces one self-contained domain module: domain primitives via `readonly record struct` + `K<F,A>`-polymorphic factory, `Newtype<TTag,TRepr>` for value-type semantic wrappers, sealed DU hierarchies with `Fold` catamorphism, applicative aggregate construction, `Fin<T>` pipeline composition via `Bind`/`Map`, `Choose` for single-pass map+filter, `with`-expression state transitions, and C# 14 extension members.
 
-**Density:** ~400 LOC signals a refactoring opportunity. No file proliferation; helpers are always a code smell.
-**References:** `effects.md` ([1][4] Fin, Validation), `composition.md` ([1][2][3][4] Pipe, arity collapse, extensions, HKT encoding), `objects.md` ([1][7] topology, boundary adapters), `algorithms.md` ([6] Kleisli), `types.md` ([1][2][7] domain primitives, Newtype, collections), `validation.md` (compliance checklist), `diagnostics.md` ([2] error chain navigation, [3] Fin pipeline probes).
-**Anti-Pattern Awareness:** See `patterns.md` [1] for VAR_INFERENCE, ANEMIC_DOMAIN, PREMATURE_MATCH_COLLAPSE, POSITIONAL_ARGS, HELPER_SPAM.
+**Density:** ~400 LOC signals a refactoring opportunity. No file proliferation; helpers are always a code smell.<br>
+**References:** `effects.md` ([1][4] Fin, Validation), `composition.md` ([1][2][3][4] Pipe, arity collapse, extensions, HKT encoding), `objects.md` ([1][7] topology, boundary adapters), `algorithms.md` ([6] Kleisli), `types.md` ([1][2][7] domain primitives, Newtype, collections), `validation.md` (compliance checklist), `diagnostics.md` ([2] error chain navigation, [3] Fin pipeline probes).<br>
+**Anti-Pattern Awareness:** See `patterns.md` [1] for VAR_INFERENCE, ANEMIC_DOMAIN, PREMATURE_MATCH_COLLAPSE, POSITIONAL_ARGS, HELPER_SPAM.<br>
 **Workflow:** Fill placeholders, remove guidance blocks, verify compilation.
 
 ---
 **Placeholders**
 
-| [INDEX] | [PLACEHOLDER]            | [EXAMPLE]                                           |
-| :-----: | ------------------------ | --------------------------------------------------- |
-|   [1]   | `${Namespace}`           | `Domain.Payments`                                   |
-|   [2]   | `${PrimitiveName}`       | `TransactionAmount`                                 |
-|   [3]   | `${ReprType}`            | `decimal`                                           |
-|   [4]   | `${NormalizeExpr}`       | `decimal.Round(d: candidate, decimals: 4)`          |
-|   [5]   | `${ValidationPredicate}` | `candidate > 0.0m`                                  |
-|   [6]   | `${ValidationMessage}`   | `"Amount must be strictly positive."`               |
-|   [7]   | `${NewtypeTag}`          | `CorrelationIdTag`                                  |
-|   [8]   | `${NewtypeRepr}`         | `Guid`                                              |
-|   [9]   | `${DUName}`              | `TransactionState`                                  |
-|  [10]   | `${VariantA}`            | `Pending(DomainIdentity Id, TransactionAmount Amt)` |
-|  [11]   | `${VariantB}`            | `Authorized(DomainIdentity Id, string Token)`       |
-|  [12]   | `${VariantC}`            | `Settled(DomainIdentity Id, string ReceiptHash)`    |
-|  [13]   | `${VariantD}`            | `Faulted(DomainIdentity Id, Error Reason)`          |
-|  [14]   | `${ExtensionClass}`      | `TransactionLifecycleRole`                          |
-|  [15]   | `${ExtensionProperty}`   | `IsTerminal`                                        |
-|  [16]   | `${TransitionMethod}`    | `Authorize(string token)`                           |
-|  [17]   | `${AggregateRecord}`     | `TransactionRequest`                                |
-|  [18]   | `${DiagnosticNamespace}` | `Domain.Diagnostics`                                |
+| [INDEX] | [PLACEHOLDER]            | [EXAMPLE]                                        |
+| :-----: | ------------------------ | ------------------------------------------------ |
+|   [1]   | `${Namespace}`           | `Domain.Payments`                                |
+|   [2]   | `${PrimitiveName}`       | `TransactionAmount`                              |
+|   [3]   | `${ReprType}`            | `decimal`                                        |
+|   [4]   | `${NormalizeExpr}`       | `decimal.Round(d: candidate, decimals: 4)`       |
+|   [5]   | `${ValidationPredicate}` | `candidate > 0.0m`                               |
+|   [6]   | `${ValidationMessage}`   | `"Amount must be strictly positive."`            |
+|   [7]   | `${NewtypeTag}`          | `CorrelationIdTag`                               |
+|   [8]   | `${NewtypeRepr}`         | `Guid`                                           |
+|   [9]   | `${DUName}`              | `TransactionState`                               |
+|  [10]   | `${VariantA}`            | `Pending`                                        |
+|  [11]   | `${VariantB}`            | `Authorized(DomainIdentity Id, string Token)`    |
+|  [12]   | `${VariantC}`            | `Settled(DomainIdentity Id, string ReceiptHash)` |
+|  [13]   | `${VariantD}`            | `Faulted(DomainIdentity Id, Error Reason)`       |
+|  [14]   | `${ExtensionClass}`      | `TransactionLifecycleRole`                       |
+|  [15]   | `${ExtensionProperty}`   | `IsTerminal`                                     |
+|  [16]   | `${TransitionMethod}`    | `Activate`                                       |
+|  [17]   | `${AggregateRecord}`     | `TransactionRequest`                             |
+|  [18]   | `${DiagnosticNamespace}` | `Domain.Diagnostics`                             |
 
 ---
 ```csharp
@@ -78,21 +78,29 @@ public readonly record struct ${PrimitiveName} {
 // Newtype: value-type semantic wrapper via sealed tag class + using alias.
 // Stack-allocated when unboxed; boxing occurs at interface/object boundaries.
 // Use when the primitive needs no custom validation beyond type distinction.
+// NOTE: Newtype<TTag, TRepr> lives in the shared infrastructure assembly.
+// Import, do not redeclare -- multiple scaffolded modules in the same project
+// will produce CS0101 duplicate type errors if each declares its own copy.
+// Reference: using Newtype = SharedInfrastructure.Newtype<,>;
 public sealed class ${NewtypeTag};
-public readonly record struct Newtype<TTag, TRepr>(TRepr Value)
-    where TRepr : notnull {
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public override string ToString() => Value.ToString() ?? string.Empty;
-}
 // Consumers reference the alias, never Newtype<TTag,TRepr> directly:
 // using ${NewtypeTag}Id = ${Namespace}.Newtype<${Namespace}.${NewtypeTag}, ${NewtypeRepr}>;
 
 // --- [UNIONS] ----------------------------------------------------------------
+// Status enum: plain enum lives alongside the DU it describes.
+// Variants map 1:1 to valid lifecycle states -- no "Unknown" escape hatch.
+public enum ${DUName}Status { Inactive, Active }
 
 // Closed hierarchy: private protected ctor prevents external subclassing (CA1852 N/A for abstract record).
 public abstract record ${DUName} {
     private protected ${DUName}() { }
-    public sealed record ${VariantA} : ${DUName};
+    // ${VariantA} carries Status + ActivatedAt so with-expression transitions
+    // can set them without phantom field errors. IClock injected at call site;
+    // CSP0007 prohibits SystemClock.Instance / DateTime.Now in domain code.
+    public sealed record ${VariantA}(
+        ${PrimitiveName} Id,
+        ${DUName}Status Status,
+        Instant? ActivatedAt) : ${DUName};
     public sealed record ${VariantB} : ${DUName};
     public sealed record ${VariantC} : ${DUName};
     public sealed record ${VariantD} : ${DUName};
@@ -183,14 +191,15 @@ public static class ${ExtensionClass} {
                 on${VariantD}: static (${DUName}.${VariantD} _) => true);
         // State transition via Fold: valid transitions produce Fin.Succ;
         // invalid transitions produce Fin.Fail with typed error.
+        // IClock injected -- CSP0007 prohibits SystemClock.Instance in domain code.
         // Routes through Fold for compile-time exhaustiveness on all variants.
-        public Fin<${DUName}> ${TransitionMethod} =>
+        public Fin<${DUName}> ${TransitionMethod}(IClock clock) =>
             state.Fold<Fin<${DUName}>>(
                 on${VariantA}: (${DUName}.${VariantA} pending) =>
                     Fin.Succ<${DUName}>(
                         pending with {
                             Status = ${DUName}Status.Active,
-                            ActivatedAt = SystemClock.Instance.GetCurrentInstant()
+                            ActivatedAt = clock.GetCurrentInstant()
                         }),
                 on${VariantB}: static (${DUName}.${VariantB} _) =>
                     Fin.Fail<${DUName}>(${PrimitiveName}Errors.InvalidTransition),
@@ -228,10 +237,8 @@ public static class ${ExtensionClass} {
 ---
 **Guidance**
 
-*Domain Primitive + K<F,A> Polymorphism* -- `CreateK<F>` returns `K<F, ${PrimitiveName}>` with `Fallible<F>, Applicative<F>` constraints, making the factory generic over computation context. `Create` is the monomorphic convenience delegating to `CreateK<Fin>(...).As()`. Consumers wanting `Validation` use `CreateK<Validation<Error>>(...).As()`; consumers wanting `Option` use `CreateK<Option>(...).As()` with an explicit cast to `Option<T>` to make the downcast visible and type-safe at compile time. The property uses `{ get; }` only -- no `init` accessor -- because `init` enables `with`-expression bypass of factory validation (CSP0720). Normalization runs inside the factory before the validation predicate. See `composition.md` [4] for HKT encoding and `.As()` downcast.
-
-*Applicative Validation + Fold Catamorphism* -- `CreateAggregate<F>` is polymorphic: `Validation<Error>` accumulates all errors, `Fin` short-circuits. The `Fold` method on the sealed DU is a catamorphism -- each interpretation is a new set of fold arguments, no new interpreter types. Extension members route through `Fold` for exhaustive queries and state transitions alike; direct `switch` is confined to the Fold implementation only (defensive `_` arm with `UnreachableException` until C# ships native DU exhaustiveness). See `effects.md` [4], `composition.md` [5].
-
+*Domain Primitive + K<F,A> Polymorphism* -- `CreateK<F>` returns `K<F, ${PrimitiveName}>` with `Fallible<F>, Applicative<F>` constraints, making the factory generic over computation context. `Create` is the monomorphic convenience delegating to `CreateK<Fin>(...).As()`. Consumers wanting `Validation` use `CreateK<Validation<Error>>(...).As()`; consumers wanting `Option` use `CreateK<Option>(...).As()` with an explicit cast to `Option<T>` to make the downcast visible and type-safe at compile time. The property uses `{ get; }` only -- no `init` accessor -- because `init` enables `with`-expression bypass of factory validation (CSP0720). Normalization runs inside the factory before the validation predicate. See `composition.md` [4] for HKT encoding and `.As()` downcast.<br>
+*Applicative Validation + Fold Catamorphism* -- `CreateAggregate<F>` is polymorphic: `Validation<Error>` accumulates all errors, `Fin` short-circuits. The `Fold` method on the sealed DU is a catamorphism -- each interpretation is a new set of fold arguments, no new interpreter types. Extension members route through `Fold` for exhaustive queries and state transitions alike; direct `switch` is confined to the Fold implementation only (defensive `_` arm with `UnreachableException` until C# ships native DU exhaustiveness). See `effects.md` [4], `composition.md` [5].<br>
 *Collections and Pipeline Composition* -- `Seq<T>` over `List<T>`/`IEnumerable<T>`; `HashMap<K,V>` over `Dictionary`/`ImmutableDictionary` -- both implement LanguageExt traits. `Choose` fuses map+filter in a single pass. `Bind`/`Map` chain `Fin<T>` pipelines; reserve `Match` for boundaries only (PREMATURE_MATCH_COLLAPSE). For chaining `A -> Fin<B>` arrows, use `ComposeK` per `algorithms.md` [6]. When a pipeline step fails unexpectedly, insert `Probe.Trace` at the boundary step to surface the dual-channel log without collapsing context (`diagnostics.md` [3]). See `types.md` [7], `composition.md` [1][3].
 
 ---

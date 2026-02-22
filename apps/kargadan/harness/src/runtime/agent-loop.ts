@@ -3,12 +3,65 @@
  * Handles retry, correction, and compensation transitions; delegates pure stage logic to loop-stages and state types to loop-contracts.
  */
 import type { Kargadan } from '@parametric-portal/types/kargadan';
-import { Effect, Function as F, Match } from 'effect';
-import { HarnessConfig } from '../config';
-import { LoopCommand, type LoopState } from '../loop-types';
+import { Data, Duration, Effect, Fiber, Function as F, Match } from 'effect';
+import { createTelemetryContext, HarnessConfig } from '../config';
 import { CommandDispatch, CommandDispatchError } from '../protocol/dispatch';
-import { handleDecision, planCommand, verifyResult } from './loop-stages';
+import { handleDecision, planCommand, type Verification, verifyResult } from './loop-stages';
 import { PersistenceTrace } from './persistence-trace';
+
+// --- [ALGEBRAS] --------------------------------------------------------------
+
+// biome-ignore lint/correctness/noUnusedVariables: const+namespace merge pattern
+const LoopState = {} as const;
+namespace LoopState {
+    export type Type = {
+        readonly attempt:          number;
+        readonly command:          Kargadan.CommandEnvelope | undefined;
+        readonly correctionCycles: number;
+        readonly identityBase: {
+            readonly appId:           string;
+            readonly protocolVersion: Kargadan.ProtocolVersion;
+            readonly runId:           string;
+            readonly sessionId:       string;
+            readonly traceId:         string;
+        };
+        readonly operations: ReadonlyArray<Kargadan.CommandOperation>;
+        readonly sequence:   number;
+        readonly status:     typeof Kargadan.RunStatusSchema.Type;
+    };
+    export type IdentityBase = Type['identityBase'];
+}
+
+// biome-ignore lint/correctness/noUnusedVariables: const+namespace merge pattern
+const LoopCommand = Data.taggedEnum<LoopCommand.Type>();
+namespace LoopCommand {
+    export type Type = Data.TaggedEnum<{
+        PLAN: {
+            readonly state:   LoopState.Type;
+        };
+        EXECUTE: {
+            readonly state:   LoopState.Type;
+            readonly command: Kargadan.CommandEnvelope;
+        };
+        VERIFY: {
+            readonly state:   LoopState.Type;
+            readonly command: Kargadan.CommandEnvelope;
+            readonly result:  Kargadan.ResultEnvelope;
+        };
+        PERSIST: {
+            readonly state:        LoopState.Type;
+            readonly command:      Kargadan.CommandEnvelope;
+            readonly result:       Kargadan.ResultEnvelope;
+            readonly verification: Verification.Type;
+        };
+        DECIDE: {
+            readonly state:        LoopState.Type;
+            readonly command:      Kargadan.CommandEnvelope;
+            readonly result:       Kargadan.ResultEnvelope;
+            readonly verification: Verification.Type;
+        };
+    }>;
+}
 
 // --- [SERVICES] --------------------------------------------------------------
 
@@ -62,12 +115,12 @@ class AgentLoop extends Effect.Service<AgentLoop>()('kargadan/AgentLoop', {
                                 identity: command.identity,
                                 result: {},
                                 status: 'error',
-                                telemetryContext: {
+                                telemetryContext: createTelemetryContext({
                                     attempt: command.telemetryContext.attempt,
                                     operationTag: 'EXECUTE',
-                                    spanId:  crypto.randomUUID().replaceAll('-', ''),
-                                    traceId: crypto.randomUUID().replaceAll('-', ''),
-                                },
+                                    requestId: command.identity.requestId,
+                                    traceId: state.identityBase.traceId,
+                                }),
                             } satisfies Kargadan.ResultEnvelope);
                         }),
                         Effect.flatMap((result) => run(LoopCommand.VERIFY({ command, result, state }))),
@@ -88,12 +141,12 @@ class AgentLoop extends Effect.Service<AgentLoop>()('kargadan/AgentLoop', {
                             runId:     state.identityBase.runId,
                             sequence:  state.sequence + 1,
                             sessionId: state.identityBase.sessionId,
-                            telemetryContext: {
+                            telemetryContext: createTelemetryContext({
                                 attempt: state.attempt,
                                 operationTag: 'PERSIST',
-                                spanId:  crypto.randomUUID().replaceAll('-', ''),
-                                traceId: crypto.randomUUID().replaceAll('-', ''),
-                            },
+                                requestId: command.identity.requestId,
+                                traceId: state.identityBase.traceId,
+                            }),
                             ...(command.idempotency === undefined ? {} : { idempotency: command.idempotency }),
                         })
                         .pipe(
@@ -137,12 +190,12 @@ class AgentLoop extends Effect.Service<AgentLoop>()('kargadan/AgentLoop', {
                             runId:     state.identityBase.runId,
                             sequence:  state.sequence + 1,
                             sessionId: state.identityBase.sessionId,
-                            telemetryContext: {
+                            telemetryContext: createTelemetryContext({
                                 attempt: state.attempt,
                                 operationTag: 'PLAN',
-                                spanId:  crypto.randomUUID().replaceAll('-', ''),
-                                traceId: crypto.randomUUID().replaceAll('-', ''),
-                            },
+                                requestId: command.identity.requestId,
+                                traceId: state.identityBase.traceId,
+                            }),
                             ...(command.idempotency === undefined ? {} : { idempotency: command.idempotency }),
                         });
                         return yield* run(LoopCommand.EXECUTE({ command, state }));
@@ -170,6 +223,7 @@ class AgentLoop extends Effect.Service<AgentLoop>()('kargadan/AgentLoop', {
                             sessionId:       input.identityBase.sessionId,
                         },
                         token: input.token,
+                        traceId: input.identityBase.traceId,
                     });
                     const initialState: LoopState.Type = {
                         attempt: 1,
@@ -180,15 +234,63 @@ class AgentLoop extends Effect.Service<AgentLoop>()('kargadan/AgentLoop', {
                             protocolVersion: connected.identity.protocolVersion,
                             runId:           connected.identity.runId,
                             sessionId:       connected.identity.sessionId,
+                            traceId:         input.identityBase.traceId,
                         },
                         operations,
                         sequence: 0,
                         status: 'Planning',
                     };
+                    const heartbeatLoop = dispatch.protocol.heartbeat(connected.identity, input.identityBase.traceId).pipe(
+                        Effect.tap((heartbeat) =>
+                            Effect.logDebug('kargadan.harness.heartbeat', {
+                                mode: heartbeat.mode,
+                                requestId: heartbeat.identity.requestId,
+                                runId: heartbeat.identity.runId,
+                            }),
+                        ),
+                        Effect.catchAll((error) =>
+                            Effect.logWarning('kargadan.harness.heartbeat.failed', {
+                                error: String(error),
+                                runId: connected.identity.runId,
+                            }),
+                        ),
+                        Effect.zipRight(
+                            HarnessConfig.heartbeatIntervalMs.pipe(Effect.flatMap((ms) => Effect.sleep(Duration.millis(ms))),),
+                        ),
+                        Effect.forever,
+                    );
+                    const inboundEventLoop = dispatch.transport.takeEvent().pipe(
+                        Effect.tap((eventEnvelope) =>
+                            Effect.logDebug('kargadan.harness.transport.event', {
+                                eventId: eventEnvelope.eventId,
+                                eventType: eventEnvelope.eventType,
+                                requestId: eventEnvelope.identity.requestId,
+                                runId: eventEnvelope.identity.runId,
+                            }),
+                        ),
+                        Effect.catchAll((error) =>
+                            Effect.logWarning('kargadan.harness.transport.event.failed', {
+                                error: String(error),
+                                runId: connected.identity.runId,
+                            }),
+                        ),
+                        Effect.forever,
+                    );
+                    const runtimeFibers = yield* Effect.all([
+                        Effect.fork(inboundEventLoop),
+                        Effect.fork(heartbeatLoop),
+                    ]);
+                    const stopRuntimeFibers = Effect.forEach(
+                        runtimeFibers,
+                        (fiber) => Fiber.interrupt(fiber),
+                        { discard: true },
+                    );
                     const finalState = yield* Effect.iterate(initialState, {
                         body:  (state) => run(LoopCommand.PLAN({ state })),
                         while: (state) => state.status !== 'Completed' && state.status !== 'Failed',
-                    });
+                    }).pipe(
+                        Effect.ensuring(stopRuntimeFibers),
+                    );
                     const replay = yield* trace.replay({ runId: finalState.identityBase.runId });
                     return { replay, state: finalState } as const;
                 }),
@@ -199,4 +301,4 @@ class AgentLoop extends Effect.Service<AgentLoop>()('kargadan/AgentLoop', {
 
 // --- [EXPORT] ----------------------------------------------------------------
 
-export { AgentLoop };
+export { AgentLoop, LoopCommand, LoopState };
