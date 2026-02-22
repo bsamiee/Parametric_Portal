@@ -10,7 +10,7 @@ Requirements for initial release. Each maps to roadmap phases.
 ### Transport
 
 - [ ] **TRAN-01**: Plugin opens a WebSocket/TCP listener on localhost inside Rhino on a configurable port, accepting connections from the CLI harness
-- [ ] **TRAN-02**: Plugin targets net9.0 for Rhino 9 WIP and net8.0 for Rhino 8 via multi-target build (`<TargetFrameworks>net8.0;net9.0</TargetFrameworks>`)
+- [ ] **TRAN-02**: Plugin targets net9.0 single-target for Rhino 9 only — no Rhino 8, no multi-target build (user decision: Phase 1 CONTEXT.md override)
 - [ ] **TRAN-03**: Plugin marshals all incoming WebSocket commands to Rhino's UI thread via `RhinoApp.InvokeOnUiThread` before executing any RhinoDoc operation
 - [ ] **TRAN-04**: Harness detects plugin disconnection (Rhino quit/crash) and reconnects automatically when the plugin becomes available again
 - [ ] **TRAN-05**: Session state survives plugin disconnection — harness restores context from PostgreSQL checkpoint on reconnection without losing conversation history
