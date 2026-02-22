@@ -53,7 +53,6 @@ public sealed class KargadanPlugin : PlugIn {
                 init: init,
                 supportedMajor: 1,
                 supportedMinor: 0,
-                supportedCapabilities: CommandOperation.SupportedCapabilities,
                 server: new ServerInfo(
                     RhinoVersion: VersionString.Create(RhinoApp.Version.ToString()),
                     PluginRevision: VersionString.Create(Version.ToString())),
@@ -65,70 +64,58 @@ public sealed class KargadanPlugin : PlugIn {
                     ack: ack => state.SessionHost.Activate(ack, now).Map(_ => negotiated),
                     reject: reject => state.SessionHost.Reject(reject.Reason, now).Map(_ => negotiated)));
         });
-    public static Fin<CommandResultEnvelope> RouteCommand(
-        JsonElement envelope,
-        EnvelopeIdentity sessionIdentity,
-        Func<CommandEnvelope, Fin<CommandResultEnvelope>> onCommand) =>
-        CommandRouter.Route(
-            envelope: envelope,
-            sessionIdentity: sessionIdentity,
-            onCommand: onCommand);
     public Fin<CommandResultEnvelope> HandleCommand(
         JsonElement envelope,
         EnvelopeIdentity sessionIdentity,
         Func<CommandEnvelope, Fin<CommandResultEnvelope>> onCommand) =>
         ReadState().Bind(state =>
-            RouteCommand(
+            CommandRouter.Decode(
                 envelope: envelope,
-                sessionIdentity: sessionIdentity,
-                onCommand: onCommand).Bind(result => {
+                sessionIdentity: sessionIdentity).Bind(onCommand).Bind(result => {
                     Instant publishedAt = Instant.FromDateTimeOffset(_timeProvider.GetUtcNow());
-                    Fin<CommandResultEnvelope> PublishSessionLifecycleEvent(
-                        EnvelopeIdentity identity,
-                        int sourceRevision,
-                        TelemetryContext resultTelemetryContext,
-                        JsonElement delta) =>
-                        DomainBridge.ParseValueObject<EventId, Guid>(Guid.NewGuid()).Bind(eventId =>
-                            EventEnvelope.Create(
-                                eventId: eventId,
-                                eventType: EventType.SessionLifecycle,
-                                identity: identity,
-                                sourceRevision: sourceRevision,
-                                causationRequestId: Some(identity.RequestId),
-                                delta: delta,
-                                telemetryContext: resultTelemetryContext)).Bind(eventEnvelope =>
-                            state.EventPublisher.Publish(eventEnvelope, publishedAt).Map(_ => result));
-                    return result.Switch(
-                        success: success =>
-                            PublishSessionLifecycleEvent(
-                                identity: success.Identity,
-                                sourceRevision: success.Execution.SourceRevision,
-                                resultTelemetryContext: success.TelemetryContext,
-                                delta: JsonSerializer.SerializeToElement(new {
-                                    dedupeDecision = success.Dedupe.Decision.Key,
-                                    status = CommandResultStatus.Ok.Key,
-                                })),
-                        failure: failure =>
-                            PublishSessionLifecycleEvent(
-                                identity: failure.Identity,
-                                sourceRevision: failure.Execution.SourceRevision,
-                                resultTelemetryContext: failure.TelemetryContext,
-                                delta: JsonSerializer.SerializeToElement(new {
-                                    errorCode = failure.Error.Reason.Code.Key,
-                                    failureClass = failure.Error.Reason.FailureClass.Key,
-                                    status = CommandResultStatus.Error.Key,
-                                })));
+                    Fin<EventId> eventId = DomainBridge.ParseValueObject<EventId, Guid>(Guid.NewGuid());
+                    return eventId.Bind(lifecycleEventId =>
+                        result.Switch(
+                            success: success =>
+                                EventEnvelope.Create(
+                                    eventId: lifecycleEventId,
+                                    eventType: EventType.SessionLifecycle,
+                                    identity: success.Identity,
+                                    sourceRevision: success.Execution.SourceRevision,
+                                    causationRequestId: Some(success.Identity.RequestId),
+                                    delta: JsonSerializer.SerializeToElement(new {
+                                        dedupeDecision = success.Dedupe.Decision.Key,
+                                        status = CommandResultStatus.Ok.Key,
+                                    }),
+                                    telemetryContext: success.TelemetryContext),
+                            failure: failure =>
+                                EventEnvelope.Create(
+                                    eventId: lifecycleEventId,
+                                    eventType: EventType.SessionLifecycle,
+                                    identity: failure.Identity,
+                                    sourceRevision: failure.Execution.SourceRevision,
+                                    causationRequestId: Some(failure.Identity.RequestId),
+                                    delta: JsonSerializer.SerializeToElement(new {
+                                        errorCode = failure.Error.Reason.Code.Key,
+                                        failureClass = failure.Error.Reason.FailureClass.Key,
+                                        status = CommandResultStatus.Error.Key,
+                                    }),
+                                    telemetryContext: failure.TelemetryContext)).Bind(eventEnvelope => {
+                                        _ = state.EventPublisher.Publish(eventEnvelope, publishedAt);
+                                        return Fin.Succ(result);
+                                    }));
                 }));
     public Fin<HeartbeatEnvelope> HandleHeartbeat(HeartbeatEnvelope heartbeat) =>
         ReadState().Bind(state => {
             Instant now = Instant.FromDateTimeOffset(_timeProvider.GetUtcNow());
             return state.SessionHost.Timeout(now).Bind(_ =>
-                state.SessionHost.Beat(heartbeat).Bind(_ =>
+                state.SessionHost.Beat(now).Bind(_ =>
                     heartbeat.Mode.Map(
-                        ping: Fin.Succ(Heartbeat.Pong(
-                            ping: heartbeat,
-                            telemetryContext: heartbeat.TelemetryContext,
-                            now: now)),
+                        ping: Fin.Succ(new HeartbeatEnvelope(
+                            Identity: heartbeat.Identity,
+                            Mode: HeartbeatMode.Pong,
+                            ServerTime: now,
+                            TelemetryContext: heartbeat.TelemetryContext)),
                         pong: Fin.Succ(heartbeat))));
         });
     // --- [INTERNAL] ----------------------------------------------------------

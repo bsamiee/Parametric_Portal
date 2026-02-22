@@ -19,10 +19,10 @@ public sealed class EventPublisher {
     // --- [STATE] -------------------------------------------------------------
     private readonly Ref<Seq<PublishedEvent>> _queue = Ref(Seq<PublishedEvent>());
     // --- [INTERFACE] ---------------------------------------------------------
-    public Fin<Unit> Publish(EventEnvelope envelope, Instant publishedAt) {
+    public Unit Publish(EventEnvelope envelope, Instant publishedAt) {
         _ = _queue.Swap(queue => queue.Add(
             new PublishedEvent(Envelope: envelope, PublishedAt: publishedAt)));
-        return Fin.Succ(unit);
+        return unit;
     }
     public Seq<PublishedEvent> Drain() =>
         atomic(() => {

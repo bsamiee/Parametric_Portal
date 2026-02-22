@@ -26,7 +26,6 @@ const _CONFIG = {
     cors: {
         allowedHeaders: [
             'content-type', 'authorization', 'x-api-key', Context.Request.Headers.appId, Context.Request.Headers.idempotencyKey,
-            Context.Request.Headers.kargadan.traceId, Context.Request.Headers.kargadan.spanId, Context.Request.Headers.kargadan.operationTag, Context.Request.Headers.kargadan.attempt,
             Context.Request.Headers.requestId, Context.Request.Headers.requestedWith, ...Context.Request.Headers.trace,
         ],
         allowedMethods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS', 'HEAD'],
@@ -50,8 +49,6 @@ const _CONFIG = {
         base: {'cache-control': 'no-store', 'content-security-policy': "default-src 'none'; frame-ancestors 'none'", 'cross-origin-opener-policy': 'same-origin', 'cross-origin-resource-policy': 'same-origin', 'permissions-policy': 'accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()', 'referrer-policy': 'strict-origin-when-cross-origin', 'x-content-type-options': 'nosniff', 'x-frame-options': 'DENY'} satisfies Record<string, string>,
         hsts: { includeSubDomains: true, maxAge: 31536000 }
     },
-    tenantAsyncContextPrefixes: ['/api/v1/admin/events', '/api/v1/jobs/subscribe', '/api/v1/users/me/notifications/subscribe', '/api/v1/ws'] as ReadonlyArray<string>,
-    tenantExemptPrefixes:       ['/api/health', '/api/v1/traces', '/api/v1/metrics', '/api/v1/logs', '/docs'] as ReadonlyArray<string>,
 } as const;
 const _IDEMPOTENCY = {
     completedTtl: Duration.hours(24),
@@ -78,7 +75,7 @@ class TenantResolution extends Data.TaggedError('TenantResolution')<{ readonly d
 
 const _trace = HttpMiddleware.make((app) => HttpServerRequest.HttpServerRequest.pipe(
     Effect.flatMap((request) => {
-        const traceHeaders = Context.Request.withTraceParentFromKargadan(request.headers);
+        const traceHeaders = request.headers;
         const [urlPath, urlQuery] = request.url.split('?', 2) as [string, string | undefined];
         const queryAttrs = urlQuery === undefined ? {} : { 'url.query.length': String(urlQuery.length), 'url.query.present': true };
         return pipe(
@@ -96,7 +93,13 @@ const _security = (hsts: typeof _CONFIG.security.hsts | false = _CONFIG.security
             ? { ..._CONFIG.security.base, 'strict-transport-security': `max-age=${hsts.maxAge}${hsts.includeSubDomains ? '; includeSubDomains' : ''}` }
             : _CONFIG.security.base))));
 // --- [CONTEXT_MIDDLEWARE] ----------------------------------------------------
-const _makeRequestContext = (database: { readonly apps: { readonly byNamespace: (namespace: string) => Effect.Effect<Option.Option<{ readonly id: string; readonly namespace: string; readonly status: 'active' | 'suspended' | 'archived' | 'purging' }>, unknown> } }) =>
+const _makeRequestContext = (
+    database: { readonly apps: { readonly byNamespace: (namespace: string) => Effect.Effect<Option.Option<{ readonly id: string; readonly namespace: string; readonly status: 'active' | 'suspended' | 'archived' | 'purging' }>, unknown> } },
+    options: {
+        readonly tenantAsyncContextPrefixes: ReadonlyArray<string>;
+        readonly tenantExemptPrefixes: ReadonlyArray<string>;
+    },
+) =>
     HttpMiddleware.make((app) => pipe(Effect.gen(function* () {
         const request = yield* HttpServerRequest.HttpServerRequest;
         const env = yield* Env.Service;
@@ -125,10 +128,9 @@ const _makeRequestContext = (database: { readonly apps: { readonly byNamespace: 
         });
         const namespaceOpt = Headers.get(req.headers, Context.Request.Headers.appId);
         const path = req.url.split('?', 2)[0] ?? '/';
-        const kargadanTelemetry = Context.Request.kargadanTelemetryFromHeaders(req.headers);
         const tenant = yield* pipe(
             Option.match<string, ReturnType<typeof database.apps.byNamespace>>(namespaceOpt, {
-                onNone: constant(Effect.if(A.some(_CONFIG.tenantExemptPrefixes, (prefix) => path === prefix || path.startsWith(`${prefix}/`)), { onTrue: constant(Effect.succeed(Option.some({ id: Context.Request.Id.system, namespace: '', status: 'active' as const }))), onFalse: constant(Effect.fail(new TenantResolution({ details: 'X-App-Id header is required', error: 'MissingTenantHeader', status: 400 }))) })),
+                onNone: constant(Effect.if(A.some(options.tenantExemptPrefixes, (prefix) => path === prefix || path.startsWith(`${prefix}/`)), { onTrue: constant(Effect.succeed(Option.some({ id: Context.Request.Id.system, namespace: '', status: 'active' as const }))), onFalse: constant(Effect.fail(new TenantResolution({ details: 'X-App-Id header is required', error: 'MissingTenantHeader', status: 400 }))) })),
                 onSome: (namespace) => database.apps.byNamespace(namespace),
             }),
             Effect.flatMap(Option.match({
@@ -143,12 +145,12 @@ const _makeRequestContext = (database: { readonly apps: { readonly byNamespace: 
             Match.when('purging', () => Effect.fail(new TenantResolution({ details: 'Tenant is being purged', error: 'TenantPurging', status: 503, tenantId: tenant.id }))),
             Match.exhaustive,
         );
-        const { circuit, response } = yield* (A.some(_CONFIG.tenantAsyncContextPrefixes, (prefix) => path === prefix || path.startsWith(`${prefix}/`)) ? Context.Request.within : Context.Request.withinSync)(
+        const { circuit, response } = yield* (A.some(options.tenantAsyncContextPrefixes, (prefix) => path === prefix || path.startsWith(`${prefix}/`)) ? Context.Request.within : Context.Request.withinSync)(
             tenantId,
             Effect.all([Effect.provideService(app, HttpServerRequest.HttpServerRequest, req), Context.Request.current]).pipe(
                 Effect.map(([response, requestContext]) => ({ circuit: requestContext.circuit, response })),
             ),
-            { appNamespace: namespaceOpt, circuit: Option.none(), cluster: Option.none(), ipAddress: req.remoteAddress, kargadanTelemetry, rateLimit: Option.none(), requestId, session: Option.none(), tenantId, userAgent: Headers.get(req.headers, 'user-agent') },
+            { appNamespace: namespaceOpt, circuit: Option.none(), cluster: Option.none(), ipAddress: req.remoteAddress, rateLimit: Option.none(), requestId, session: Option.none(), tenantId, userAgent: Headers.get(req.headers, 'user-agent') },
         );
         const outcome = yield* FiberRef.get(_idempotencyOutcome);
         return HttpServerResponse.setHeaders(response, { [Context.Request.Headers.requestId]: requestId, ...pipe(circuit, Option.map((c) => ({ [Context.Request.Headers.circuitState]: c.state })), Option.getOrElse(constant({}))), ...pipe(outcome, Option.map((value) => ({ [Context.Request.Headers.idempotencyOutcome]: value })), Option.getOrElse(constant({}))) });
@@ -281,10 +283,20 @@ class Middleware extends HttpApiMiddleware.Tag<Middleware>()('server/Middleware'
             options?: { readonly mapTo?: string; readonly span?: string },
         ) => Middleware.guarded(resource, action, effect, { ...options, preset: 'realtime' }),
     } as const);
-    static readonly pipeline = (database: Parameters<typeof _makeRequestContext>[0], options?: { readonly hsts?: Parameters<typeof _security>[0] }) =>
+    static readonly pipeline = (
+        database: Parameters<typeof _makeRequestContext>[0],
+        options?: {
+            readonly hsts?: Parameters<typeof _security>[0];
+            readonly tenantAsyncContextPrefixes?: ReadonlyArray<string>;
+            readonly tenantExemptPrefixes?: ReadonlyArray<string>;
+        },
+    ) =>
         (app: HttpApp.Default) => app.pipe(
             _trace,
-            _makeRequestContext(database),
+            _makeRequestContext(database, {
+                tenantAsyncContextPrefixes: options?.tenantAsyncContextPrefixes ?? [],
+                tenantExemptPrefixes: options?.tenantExemptPrefixes ?? [],
+            }),
             _security(options?.hsts),
             HttpMiddleware.make((app) => Effect.timed(app).pipe(Effect.map(([duration, response]) => HttpServerResponse.setHeader(response, 'server-timing', `total;dur=${Duration.toMillis(duration)}`)))),
             MetricsService.middleware,

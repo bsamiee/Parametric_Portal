@@ -14,7 +14,6 @@ internal static class Handshake {
         HandshakeEnvelope.Init init,
         int supportedMajor,
         int supportedMinor,
-        Seq<string> supportedCapabilities,
         ServerInfo server,
         Instant now) {
         bool tokenExpired = init.Auth.ExpiresAt <= now;
@@ -32,56 +31,35 @@ internal static class Handshake {
                 .Distinct()
                 .Filter(static capability => CommandOperation.SupportsCapability(capability));
         return (tokenExpired, majorCompatible, minorCompatible, missingCapabilities.IsEmpty) switch {
-            (true, _, _, _) => Reject(
-                identity: init.Identity,
-                reason: FailureMapping.FromCode(
+            (true, _, _, _) => new HandshakeEnvelope.Reject(
+                Identity: init.Identity,
+                Reason: FailureMapping.FromCode(
                     code: ErrorCode.TokenExpired,
                     message: "Handshake token is expired."),
-                telemetryContext: init.TelemetryContext),
-            (false, false, _, _) => Reject(
-                identity: init.Identity,
-                reason: FailureMapping.FromCode(
+                TelemetryContext: init.TelemetryContext),
+            (false, false, _, _) => new HandshakeEnvelope.Reject(
+                Identity: init.Identity,
+                Reason: FailureMapping.FromCode(
                     code: ErrorCode.ProtocolIncompatible,
                     message: "Protocol major version mismatch."),
-                telemetryContext: init.TelemetryContext),
-            (false, true, false, _) => Reject(
-                identity: init.Identity,
-                reason: FailureMapping.FromCode(
+                TelemetryContext: init.TelemetryContext),
+            (false, true, false, _) => new HandshakeEnvelope.Reject(
+                Identity: init.Identity,
+                Reason: FailureMapping.FromCode(
                     code: ErrorCode.ProtocolIncompatible,
                     message: $"Protocol minor version {init.Identity.ProtocolVersion.Minor} exceeds supported {supportedMinor}."),
-                telemetryContext: init.TelemetryContext),
-            (false, true, true, false) => Reject(
-                identity: init.Identity,
-                reason: FailureMapping.FromCode(
+                TelemetryContext: init.TelemetryContext),
+            (false, true, true, false) => new HandshakeEnvelope.Reject(
+                Identity: init.Identity,
+                Reason: FailureMapping.FromCode(
                     code: ErrorCode.CapabilityUnsupported,
                     message: $"Missing required capabilities: {string.Join(',', missingCapabilities)}"),
-                telemetryContext: init.TelemetryContext),
-            (false, true, true, true) => Ack(
-                identity: init.Identity,
-                acceptedCapabilities: acceptedCapabilities,
-                server: server,
-                telemetryContext: init.TelemetryContext),
+                TelemetryContext: init.TelemetryContext),
+            (false, true, true, true) => new HandshakeEnvelope.Ack(
+                Identity: init.Identity,
+                AcceptedCapabilities: acceptedCapabilities,
+                Server: server,
+                TelemetryContext: init.TelemetryContext),
         };
     }
-
-    // --- [INTERNAL] ----------------------------------------------------------
-
-    internal static HandshakeEnvelope.Ack Ack(
-        EnvelopeIdentity identity,
-        Seq<string> acceptedCapabilities,
-        ServerInfo server,
-        TelemetryContext telemetryContext) =>
-        new(
-            Identity: identity,
-            AcceptedCapabilities: acceptedCapabilities,
-            Server: server,
-            TelemetryContext: telemetryContext);
-    internal static HandshakeEnvelope.Reject Reject(
-        EnvelopeIdentity identity,
-        FailureReason reason,
-        TelemetryContext telemetryContext) =>
-        new(
-            Identity: identity,
-            Reason: reason,
-            TelemetryContext: telemetryContext);
 }

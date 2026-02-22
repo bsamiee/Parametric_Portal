@@ -4,8 +4,7 @@
  */
 import type { Kargadan } from '@parametric-portal/types/kargadan';
 import { Data, Effect, Match, Option, pipe } from 'effect';
-import { createTelemetryContext } from '../config';
-import { type LoopState } from './agent-loop';
+import type { LoopState } from './agent-loop';
 import { CommandDispatchError } from '../protocol/dispatch';
 import { hashCanonicalState, type PersistenceTrace } from './persistence-trace';
 
@@ -23,14 +22,6 @@ namespace Verification {
 
 // --- [FUNCTIONS] -------------------------------------------------------------
 
-const _writeOperations: ReadonlySet<Kargadan.CommandOperation> = new Set([
-    'write.object.create',
-    'write.object.update',
-    'write.object.delete',
-    'write.layer.update',
-    'write.viewport.update',
-    'write.annotation.update',
-]);
 const planCommand = (input: { readonly deadline: number; readonly state: LoopState.Type }) =>
     pipe(
         Option.fromNullable(input.state.command),
@@ -53,13 +44,13 @@ const planCommand = (input: { readonly deadline: number; readonly state: LoopSta
                         runId:     input.state.identityBase.runId,
                         sessionId: input.state.identityBase.sessionId,
                     } as const satisfies Kargadan.EnvelopeIdentity;
-                    const telemetryContext = createTelemetryContext({
+                    const telemetryContext = {
                         attempt: input.state.attempt,
                         operationTag: 'PLAN',
-                        requestId: identity.requestId,
+                        spanId: identity.requestId.replaceAll('-', ''),
                         traceId: input.state.identityBase.traceId,
-                    });
-                    const isWrite = _writeOperations.has(operation);
+                    } as const satisfies Kargadan.TelemetryContext;
+                    const isWrite = operation.startsWith('write.');
                     const payload = isWrite
                         ? ({
                             operationId: `${input.state.identityBase.runId}:${input.state.sequence}`,
@@ -117,12 +108,6 @@ const handleDecision = (input: {
                 identity: { ...input.command.identity, issuedAt: new Date() },
                 telemetryContext: { ...input.command.telemetryContext, attempt: input.state.attempt + 1 },
             } satisfies Kargadan.CommandEnvelope;
-            const decisionTelemetryContext = createTelemetryContext({
-                attempt: input.state.attempt,
-                operationTag: 'DECIDE',
-                requestId: input.command.identity.requestId,
-                traceId: input.state.identityBase.traceId,
-            });
             const decisionTransitionBase = {
                 appId:       input.state.identityBase.appId,
                 createdAt:   new Date(),
@@ -131,7 +116,7 @@ const handleDecision = (input: {
                 runId:       input.state.identityBase.runId,
                 sequence:    input.state.sequence + 1,
                 sessionId:   input.state.identityBase.sessionId,
-                telemetryContext: decisionTelemetryContext,
+                telemetryContext: { ...input.command.telemetryContext, attempt: input.state.attempt, operationTag: 'DECIDE' },
                 ...(input.command.idempotency === undefined
                     ? {}
                     : { idempotency: input.command.idempotency }),

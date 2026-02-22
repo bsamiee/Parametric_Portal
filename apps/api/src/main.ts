@@ -142,7 +142,10 @@ const ServerLayer = Layer.unwrapEffect(Effect.gen(function* () {
         cors: corsOrigins,
         sessionLookup: (hash) => auth.session.lookup(hash),
     });
-    return HttpApiBuilder.serve((application) => Middleware.pipeline(database)(application).pipe(
+    return HttpApiBuilder.serve((application) => Middleware.pipeline(database, {
+        tenantAsyncContextPrefixes: ['/api/v1/admin/events', '/api/v1/jobs/subscribe', '/api/v1/users/me/notifications/subscribe', '/api/v1/ws'],
+        tenantExemptPrefixes: ['/api/health', '/api/v1/traces', '/api/v1/metrics', '/api/v1/logs', '/docs'],
+    })(application).pipe(
         CacheService.headers,
         HttpMiddleware.logger,
         Effect.catchAllDefect((defect) => Effect.logError('Unhandled request defect', { defect: String(defect) }).pipe(

@@ -22,19 +22,6 @@ const _capabilityOptional =      Config.string('KARGADAN_CAP_OPTIONAL').pipe(Con
 
 // --- [SCHEMA] ----------------------------------------------------------------
 
-const _decodeOperations = S.decodeUnknown(S.Array(Kargadan.CommandOperationSchema));
-
-// --- [FUNCTIONS] -------------------------------------------------------------
-
-const _parseCsv = (csv: string): ReadonlyArray<string> =>
-    csv
-        .split(',')
-        .map((entry) => entry.trim())
-        .filter((entry) => entry.length > 0);
-const _socketCandidate = (host: string, port: number) =>
-    host.includes('://')
-        ? host
-        : `ws://${host}:${port}`;
 const _resolveProtocolVersion = _protocolVersion.pipe(Effect.flatMap(S.decodeUnknown(S.transform(
     S.String.pipe(S.pattern(/^\d+\.\d+$/)),
     Kargadan.ProtocolVersionSchema,
@@ -49,7 +36,7 @@ const _resolveProtocolVersion = _protocolVersion.pipe(Effect.flatMap(S.decodeUnk
 ))));
 const _resolveSocketUrl = Effect.all([_pluginHost, _pluginPort]).pipe(
     Effect.flatMap(([host, port]) =>
-        Effect.try(() => new URL(_socketCandidate(host, port))).pipe(
+        Effect.try(() => new URL(host.includes('://') ? host : `ws://${host}:${port}`)).pipe(
             Effect.map((parsed) => {
                 const protocol = Match.value(parsed.protocol).pipe(
                     Match.when('https:', () => 'wss:'),
@@ -72,13 +59,24 @@ const _resolveSocketUrl = Effect.all([_pluginHost, _pluginPort]).pipe(
 );
 const _resolveCapabilities = Effect.all([_capabilityRequired, _capabilityOptional]).pipe(
     Effect.map(([required, optional]) => ({
-        optional: _parseCsv(optional),
-        required: _parseCsv(required),
+        optional: optional
+            .split(',')
+            .map((entry) => entry.trim())
+            .filter((entry) => entry.length > 0),
+        required: required
+            .split(',')
+            .map((entry) => entry.trim())
+            .filter((entry) => entry.length > 0),
     })),
 );
 const _resolveLoopOperations = _loopOperations.pipe(
-    Effect.map(_parseCsv),
-    Effect.flatMap((operations) => _decodeOperations(operations)),
+    Effect.map((csv) =>
+        csv
+            .split(',')
+            .map((entry) => entry.trim())
+            .filter((entry) => entry.length > 0),
+    ),
+    Effect.flatMap((operations) => S.decodeUnknown(S.Array(Kargadan.CommandOperationSchema))(operations)),
 );
 const HarnessConfig = {
     commandDeadlineMs:       _commandDeadlineMs,
@@ -92,18 +90,7 @@ const HarnessConfig = {
     sessionToken:            _sessionToken,
     simulatedPluginRevision: _simulatedPluginRevision,
 } as const;
-const createTelemetryContext = (input: {
-    readonly attempt: number;
-    readonly operationTag: string;
-    readonly requestId: string;
-    readonly traceId: string;
-}): Kargadan.TelemetryContext => ({
-    attempt: input.attempt,
-    operationTag: input.operationTag,
-    spanId: input.requestId.replaceAll('-', ''),
-    traceId: input.traceId,
-});
 
 // --- [EXPORT] ----------------------------------------------------------------
 
-export { createTelemetryContext, HarnessConfig };
+export { HarnessConfig };

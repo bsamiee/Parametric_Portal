@@ -1,6 +1,6 @@
 /**
  * Bootstraps the Kargadan phase-3 agent harness: composes ServicesLayer, forks transport, and drives AgentLoop.handle to completion.
- * Entry point for local integration runs; identityBase UUIDs are fixed test fixtures — replace with dynamic resolution for production use.
+ * Entry point for local integration runs with runtime-generated identity envelopes.
  */
 import { Effect, Layer } from 'effect';
 import { HarnessConfig } from './config';
@@ -22,10 +22,10 @@ const main = Effect.fn('kargadan.harness.main')(() =>
         ]);
         const traceId = crypto.randomUUID().replaceAll('-', '');
         const identityBase = {
-            appId:     '00000000-0000-0000-0000-000000000001',
+            appId:     crypto.randomUUID(),
             protocolVersion,
-            runId:     '00000000-0000-0000-0000-000000000003',
-            sessionId: '00000000-0000-0000-0000-000000000004',
+            runId:     crypto.randomUUID(),
+            sessionId: crypto.randomUUID(),
             traceId,
         } as const satisfies LoopState.IdentityBase;
         yield* Effect.forkScoped(dispatch.transport.start());

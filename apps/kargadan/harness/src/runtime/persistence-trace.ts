@@ -28,25 +28,6 @@ const hashCanonicalState = (state: unknown) =>
     createHash('sha256')
         .update(JSON.stringify(_canonicalStateForHash(state)))
         .digest('hex');
-const _appendTo = <K extends 'artifacts' | 'events'>(
-    store: Ref.Ref<{
-        readonly artifacts: ReadonlyArray<Kargadan.RetrievalArtifact>;
-        readonly events:    ReadonlyArray<Kargadan.RunEvent>;
-        readonly snapshots: ReadonlyArray<Kargadan.RunSnapshot>;
-    }>,
-    field: K,
-    schema: S.Schema<K extends 'artifacts' ? Kargadan.RetrievalArtifact : K extends 'events' ? Kargadan.RunEvent : never>,
-) =>
-    Effect.fn(`kargadan.trace.append.${field}`)((input: unknown) =>
-        S.decodeUnknown(schema)(input).pipe(
-            Effect.flatMap((decoded) =>
-                Ref.update(store, (current) => ({
-                    ...current,
-                    [field]: [...current[field], decoded],
-                })),
-            ),
-        ),
-    );
 
 // --- [SERVICES] --------------------------------------------------------------
 
@@ -61,8 +42,26 @@ class PersistenceTrace extends Effect.Service<PersistenceTrace>()('kargadan/Pers
             events:    [],
             snapshots: [],
         });
-        const appendArtifact =   _appendTo(store, 'artifacts', Kargadan.RetrievalArtifactSchema);
-        const appendTransition = _appendTo(store, 'events',    Kargadan.RunEventSchema);
+        const appendArtifact = Effect.fn('kargadan.trace.append.artifacts')((input: unknown) =>
+            S.decodeUnknown(Kargadan.RetrievalArtifactSchema)(input).pipe(
+                Effect.flatMap((decoded) =>
+                    Ref.update(store, (current) => ({
+                        ...current,
+                        artifacts: [...current.artifacts, decoded],
+                    })),
+                ),
+            ),
+        );
+        const appendTransition = Effect.fn('kargadan.trace.append.events')((input: unknown) =>
+            S.decodeUnknown(Kargadan.RunEventSchema)(input).pipe(
+                Effect.flatMap((decoded) =>
+                    Ref.update(store, (current) => ({
+                        ...current,
+                        events: [...current.events, decoded],
+                    })),
+                ),
+            ),
+        );
         const snapshot = Effect.fn('kargadan.trace.snapshot')(
             (input: {
                 readonly appId:    string;

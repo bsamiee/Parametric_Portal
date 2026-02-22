@@ -27,8 +27,7 @@ class KargadanSocketClient extends Effect.Service<KargadanSocketClient>()('karga
         const writer = yield* socket.writer;
         const pending = yield* Ref.make(HashMap.empty<string, Deferred.Deferred<Kargadan.InboundEnvelope>>());
         const events = yield* Queue.unbounded<Kargadan.EventEnvelope>();
-        const _writeEnvelope = (envelope: Kargadan.OutboundEnvelope) =>
-            _encodeOutbound(envelope).pipe(Effect.flatMap((json) => writer(json)),);
+        const _writeEnvelope = (envelope: Kargadan.OutboundEnvelope) => _encodeOutbound(envelope).pipe(Effect.flatMap((json) => writer(json)),);
         const request = Effect.fn('kargadan.socket.request')((envelope: Kargadan.OutboundEnvelope) =>
             Effect.gen(function* () {
                 const timeoutMs = yield* HarnessConfig.commandDeadlineMs;
@@ -49,7 +48,6 @@ class KargadanSocketClient extends Effect.Service<KargadanSocketClient>()('karga
                 );
             }),
         );
-        const send = Effect.fn('kargadan.socket.send')((envelope: Kargadan.OutboundEnvelope) => _writeEnvelope(envelope),);
         const _resolvePending = (value: Kargadan.InboundEnvelope) =>
             Ref.modify(
                 pending,
@@ -83,7 +81,7 @@ class KargadanSocketClient extends Effect.Service<KargadanSocketClient>()('karga
         return {
             lifecycle: { start         },
             read:      { takeEvent     },
-            write:     { request, send },
+            write:     { request       },
         } as const;
     }),
 }) {}
@@ -91,13 +89,12 @@ class KargadanSocketClient extends Effect.Service<KargadanSocketClient>()('karga
 // --- [LAYERS] ----------------------------------------------------------------
 
 const KargadanSocketClientLive = Layer.unwrapEffect(
-    Effect.gen(function* () {
-        const socketUrl = yield* HarnessConfig.resolveSocketUrl;
-        return Layer.provide(
+    HarnessConfig.resolveSocketUrl.pipe(
+        Effect.map((socketUrl) => Layer.provide(
             KargadanSocketClient.Default,
             Layer.mergeAll(Socket.layerWebSocketConstructorGlobal, Socket.layerWebSocket(socketUrl)),
-        );
-    }),
+        )),
+    ),
 );
 
 // --- [EXPORT] ----------------------------------------------------------------

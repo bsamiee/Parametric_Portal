@@ -4,7 +4,7 @@
  */
 import type { Kargadan } from '@parametric-portal/types/kargadan';
 import { Data, Duration, Effect, Fiber, Function as F, Match } from 'effect';
-import { createTelemetryContext, HarnessConfig } from '../config';
+import { HarnessConfig } from '../config';
 import { CommandDispatch, CommandDispatchError } from '../protocol/dispatch';
 import { handleDecision, planCommand, type Verification, verifyResult } from './loop-stages';
 import { PersistenceTrace } from './persistence-trace';
@@ -115,12 +115,7 @@ class AgentLoop extends Effect.Service<AgentLoop>()('kargadan/AgentLoop', {
                                 identity: command.identity,
                                 result: {},
                                 status: 'error',
-                                telemetryContext: createTelemetryContext({
-                                    attempt: command.telemetryContext.attempt,
-                                    operationTag: 'EXECUTE',
-                                    requestId: command.identity.requestId,
-                                    traceId: state.identityBase.traceId,
-                                }),
+                                telemetryContext: { ...command.telemetryContext, operationTag: 'EXECUTE' },
                             } satisfies Kargadan.ResultEnvelope);
                         }),
                         Effect.flatMap((result) => run(LoopCommand.VERIFY({ command, result, state }))),
@@ -141,12 +136,7 @@ class AgentLoop extends Effect.Service<AgentLoop>()('kargadan/AgentLoop', {
                             runId:     state.identityBase.runId,
                             sequence:  state.sequence + 1,
                             sessionId: state.identityBase.sessionId,
-                            telemetryContext: createTelemetryContext({
-                                attempt: state.attempt,
-                                operationTag: 'PERSIST',
-                                requestId: command.identity.requestId,
-                                traceId: state.identityBase.traceId,
-                            }),
+                            telemetryContext: { ...command.telemetryContext, attempt: state.attempt, operationTag: 'PERSIST' },
                             ...(command.idempotency === undefined ? {} : { idempotency: command.idempotency }),
                         })
                         .pipe(
@@ -190,12 +180,7 @@ class AgentLoop extends Effect.Service<AgentLoop>()('kargadan/AgentLoop', {
                             runId:     state.identityBase.runId,
                             sequence:  state.sequence + 1,
                             sessionId: state.identityBase.sessionId,
-                            telemetryContext: createTelemetryContext({
-                                attempt: state.attempt,
-                                operationTag: 'PLAN',
-                                requestId: command.identity.requestId,
-                                traceId: state.identityBase.traceId,
-                            }),
+                            telemetryContext: command.telemetryContext,
                             ...(command.idempotency === undefined ? {} : { idempotency: command.idempotency }),
                         });
                         return yield* run(LoopCommand.EXECUTE({ command, state }));

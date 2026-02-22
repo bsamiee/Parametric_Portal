@@ -4,7 +4,7 @@
  */
 import type { Kargadan } from '@parametric-portal/types/kargadan';
 import { Data, Duration, Effect, Match } from 'effect';
-import { createTelemetryContext, HarnessConfig } from '../config';
+import { HarnessConfig } from '../config';
 import { SessionSupervisor, SessionTransition } from './supervisor';
 import { KargadanSocketClient } from '../socket';
 
@@ -46,12 +46,12 @@ class CommandDispatch extends Effect.Service<CommandDispatch>()('kargadan/Comman
                         },
                         capabilities,
                         identity: input.identity,
-                        telemetryContext: createTelemetryContext({
+                        telemetryContext: {
                             attempt: 1,
                             operationTag: 'handshake',
-                            requestId: input.identity.requestId,
+                            spanId: input.identity.requestId.replaceAll('-', ''),
                             traceId: input.traceId,
-                        }),
+                        },
                     } satisfies Kargadan.HandshakeEnvelope;
                     const response = yield* socket.write.request(envelope);
                     return yield* Match.value(response).pipe(
@@ -77,9 +77,9 @@ class CommandDispatch extends Effect.Service<CommandDispatch>()('kargadan/Comman
                 }),
         );
         const execute = Effect.fn('CommandDispatch.execute')((command: Kargadan.CommandEnvelope) =>
-            Effect.gen(function* () {
-                const response = yield* socket.write.request(command);
-                return yield* Match.value(response).pipe(
+            socket.write.request(command).pipe(
+                Effect.flatMap((response) =>
+                    Match.value(response).pipe(
                     Match.when({ _tag: 'result' }, (result) => Effect.succeed(result)),
                     Match.when({ _tag: 'handshake.reject' }, (reject) =>
                         Effect.fail(CommandDispatchError.of('rejected', reject.reason, reject.reason.failureClass)),
@@ -87,8 +87,9 @@ class CommandDispatch extends Effect.Service<CommandDispatch>()('kargadan/Comman
                     Match.orElse((other) =>
                         Effect.fail(CommandDispatchError.of('protocol', { expected: 'result', received: other._tag })),
                     ),
-                );
-            }),
+                    ),
+                ),
+            ),
         );
         const heartbeat = Effect.fn('CommandDispatch.heartbeat')((identity: Kargadan.EnvelopeIdentity, traceId: string, attempt = 1) => {
             const requestId = crypto.randomUUID();
@@ -97,12 +98,7 @@ class CommandDispatch extends Effect.Service<CommandDispatch>()('kargadan/Comman
                 identity: { ...identity, issuedAt: new Date(), requestId },
                 mode: 'ping',
                 serverTime: new Date(),
-                telemetryContext: createTelemetryContext({
-                    attempt,
-                    operationTag: 'heartbeat',
-                    requestId,
-                    traceId,
-                }),
+                telemetryContext: { attempt, operationTag: 'heartbeat', spanId: requestId.replaceAll('-', ''), traceId },
             };
             return socket.write.request(envelope).pipe(
                 Effect.flatMap((response) =>

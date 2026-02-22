@@ -3,7 +3,7 @@
  * FiberRef+Effect.Tag composition, cookie handling, cluster state propagation.
  */
 import { Entity, type ShardId } from '@effect/cluster';
-import { Headers, HttpServerRequest, HttpServerResponse } from '@effect/platform';
+import { HttpServerRequest, HttpServerResponse } from '@effect/platform';
 import type { Cookie } from '@effect/platform/Cookies';
 import type { SqlClient } from '@effect/sql';
 import type { SqlError } from '@effect/sql/SqlError';
@@ -16,25 +16,16 @@ import { constant, dual } from 'effect/Function';
 // --- [CONSTANTS] -------------------------------------------------------------
 
 const _ID = {default: '00000000-0000-7000-8000-000000000001', job: '00000000-0000-7000-8000-000000000002', ...Client.tenant.Id,} as const;
-const _TRACE_ID_PATTERN = /^[a-f0-9]{32}$/i;
-const _SPAN_ID_PATTERN = /^[a-f0-9]{16}$/i;
 
 // --- [SCHEMA] ----------------------------------------------------------------
 
 const _RunnerId =       S.NonEmptyTrimmedString;
 const _ShardIdString =  S.String.pipe(S.pattern(/^[a-zA-Z0-9_-]+:\d+$/), S.brand('ShardIdString'));
-const _KargadanTelemetry = S.Struct({
-    attempt:      S.Int.pipe(S.greaterThanOrEqualTo(1)),
-    operationTag: S.NonEmptyTrimmedString,
-    spanId:       S.String.pipe(S.pattern(_SPAN_ID_PATTERN)),
-    traceId:      S.String.pipe(S.pattern(_TRACE_ID_PATTERN)),
-});
 const _RequestData = S.Struct({
     appNamespace:   S.OptionFromSelf(S.String),
     circuit:        S.OptionFromSelf(S.Struct({ name: S.String, state: S.String })),
     cluster:        S.OptionFromSelf(S.Struct({entityId: S.NullOr(S.String), entityType: S.NullOr(S.String), isLeader: S.Boolean, runnerId: S.NullOr(_RunnerId), shardId: S.NullOr(S.declare<ShardId.ShardId>((input): input is ShardId.ShardId => input !== null && typeof input === 'object' && 'toString' in input)),})),
     ipAddress:      S.OptionFromSelf(S.String),
-    kargadanTelemetry: S.OptionFromSelf(_KargadanTelemetry),
     rateLimit:      S.OptionFromSelf(S.Struct({delay: S.DurationFromSelf, limit: S.Number, remaining: S.Number, resetAfter: S.DurationFromSelf,})),
     requestId:      S.String,
     session:        S.OptionFromSelf(S.Struct({appId: S.String, id: S.String, kind: S.Literal('apiKey', 'session'), mfaEnabled: S.Boolean, userId: S.String, verifiedAt: S.OptionFromSelf(S.DateFromSelf),})),
@@ -73,12 +64,6 @@ class Request extends Effect.Tag('server/RequestContext')<Request, S.Schema.Type
         forwardedProto:     'x-forwarded-proto',
         idempotencyKey:     'idempotency-key',
         idempotencyOutcome: 'idempotency-outcome',
-        kargadan: {
-            attempt:      'x-kargadan-attempt',
-            operationTag: 'x-kargadan-operation',
-            spanId:       'x-kargadan-span-id',
-            traceId:      'x-kargadan-trace-id',
-        },
         rateLimit: {
             limit:          'x-ratelimit-limit',
             remaining:      'x-ratelimit-remaining',
@@ -90,53 +75,11 @@ class Request extends Effect.Tag('server/RequestContext')<Request, S.Schema.Type
         requestId:          'x-request-id',
         trace: [            'traceparent', 'tracestate', 'baggage'] as const,
     } as const;
-    static readonly system = (requestId = crypto.randomUUID(), tenantId: (typeof _ID)[keyof typeof _ID] = _ID.system): S.Schema.Type<typeof _RequestData> => ({ appNamespace: Option.none(), circuit: Option.none(), cluster: Option.none(), ipAddress: Option.none(), kargadanTelemetry: Option.none(), rateLimit: Option.none(), requestId, session: Option.none(), tenantId, userAgent: Option.none() });
+    static readonly system = (requestId = crypto.randomUUID(), tenantId: (typeof _ID)[keyof typeof _ID] = _ID.system): S.Schema.Type<typeof _RequestData> => ({ appNamespace: Option.none(), circuit: Option.none(), cluster: Option.none(), ipAddress: Option.none(), rateLimit: Option.none(), requestId, session: Option.none(), tenantId, userAgent: Option.none() });
     private static readonly _ref = FiberRef.unsafeMake<S.Schema.Type<typeof _RequestData>>(Request.system(_ID.default, _ID.unspecified));
     static readonly current = FiberRef.get(Request._ref);
     static readonly currentTenantId = Request.current.pipe(Effect.map((ctx) => ctx.tenantId));
     static readonly sessionOrFail = Request.current.pipe(Effect.flatMap((ctx) => Option.match(ctx.session, { onNone: () => Effect.fail(HttpError.Auth.of('Missing session')), onSome: Effect.succeed })));
-    static readonly kargadanTelemetryFromHeaders = (headers: Headers.Headers): Option.Option<S.Schema.Type<typeof _KargadanTelemetry>> =>
-        pipe(
-            Option.all({
-                attemptRaw:      Headers.get(headers, Request.Headers.kargadan.attempt),
-                operationTagRaw: Headers.get(headers, Request.Headers.kargadan.operationTag),
-                spanIdRaw:       Headers.get(headers, Request.Headers.kargadan.spanId),
-                traceIdRaw:      Headers.get(headers, Request.Headers.kargadan.traceId),
-            }),
-            Option.flatMap(({ attemptRaw, operationTagRaw, spanIdRaw, traceIdRaw }) => {
-                const attempt = Number.parseInt(attemptRaw, 10);
-                return Number.isInteger(attempt) && attempt > 0
-                    ? Option.some({
-                        attempt,
-                        operationTag: operationTagRaw.trim(),
-                        spanId:       spanIdRaw.trim().toLowerCase(),
-                        traceId:      traceIdRaw.trim().toLowerCase(),
-                    })
-                    : Option.none<{ attempt: number; operationTag: string; spanId: string; traceId: string }>();
-            }),
-            Option.filter((telemetry) =>
-                telemetry.operationTag.length > 0
-                && _TRACE_ID_PATTERN.test(telemetry.traceId)
-                && _SPAN_ID_PATTERN.test(telemetry.spanId),
-            ),
-        );
-    static readonly withTraceParentFromKargadan = (headers: Headers.Headers): Headers.Headers =>
-        Headers.get(headers, Request.Headers.trace[0]).pipe(
-            Option.match({
-                onNone: () =>
-                    Request.kargadanTelemetryFromHeaders(headers).pipe(
-                        Option.map((telemetry) =>
-                            Headers.set(
-                                headers,
-                                Request.Headers.trace[0],
-                                `00-${telemetry.traceId}-${telemetry.spanId}-01`,
-                            ),
-                        ),
-                        Option.getOrElse(() => headers),
-                    ),
-                onSome: () => headers,
-            }),
-        );
     static readonly toAttrs = (ctx: S.Schema.Type<typeof _RequestData>, fiberId: FiberId.FiberId): Record.ReadonlyRecord<string, string> =>
         Record.getSomes({
             'app.namespace':       ctx.appNamespace,
@@ -145,10 +88,6 @@ class Request extends Effect.Tag('server/RequestContext')<Request, S.Schema.Type
             'cluster.is_leader':   Option.map(ctx.cluster,   (cluster) => String(cluster.isLeader)), 'cluster.runner_id': Option.flatMapNullable(ctx.cluster, (cluster) => cluster.runnerId),
             'cluster.shard_id': pipe(ctx.cluster, Option.flatMapNullable((cluster) => cluster.shardId), Option.map((shard) => shard.toString())),
             'http.request.header.x-request-id': Option.some(ctx.requestId),
-            'kargadan.attempt': Option.map(ctx.kargadanTelemetry, (telemetry) => String(telemetry.attempt)),
-            'kargadan.operation': Option.map(ctx.kargadanTelemetry, (telemetry) => telemetry.operationTag),
-            'kargadan.span_id': Option.map(ctx.kargadanTelemetry, (telemetry) => telemetry.spanId),
-            'kargadan.trace_id': Option.map(ctx.kargadanTelemetry, (telemetry) => telemetry.traceId),
             'ratelimit.delay_ms':  Option.map(ctx.rateLimit, (rateLimit) => String(Duration.toMillis(rateLimit.delay))), 'ratelimit.limit': Option.map(ctx.rateLimit, (rateLimit) => String(rateLimit.limit)),
             'ratelimit.remaining': Option.map(ctx.rateLimit, (rateLimit) => String(rateLimit.remaining)), 'ratelimit.reset_after_ms': Option.map(ctx.rateLimit, (rateLimit) => String(Duration.toMillis(rateLimit.resetAfter))),'request.id': Option.some(ctx.requestId),
             'session.kind':        Option.map(ctx.session,   (session) => session.kind), 'session.mfa': Option.map(ctx.session, (session) => String(session.mfaEnabled)),'tenant.id': Option.some(ctx.tenantId), 'thread.name': Option.some(FiberId.threadName(fiberId)),
@@ -171,7 +110,6 @@ class Request extends Effect.Tag('server/RequestContext')<Request, S.Schema.Type
         circuit:      partial.circuit      ?? ctx.circuit,
         cluster:      partial.cluster      ?? ctx.cluster,
         ipAddress:    partial.ipAddress    ?? ctx.ipAddress,
-        kargadanTelemetry: partial.kargadanTelemetry ?? ctx.kargadanTelemetry,
         rateLimit:    partial.rateLimit    ?? ctx.rateLimit,
         requestId:    partial.requestId    ?? ctx.requestId,
         session:      partial.session      ?? ctx.session,

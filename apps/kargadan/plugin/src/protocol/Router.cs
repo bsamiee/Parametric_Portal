@@ -1,5 +1,6 @@
 // Decodes raw JsonElement into CommandEnvelope via Fin<T> combinators; routes decoded envelope to caller-supplied handler.
 // All field extraction returns Fin<T> — decode failure surfaces as a Correctable protocol error, not an exception.
+using System;
 using System.Text.Json;
 using LanguageExt;
 using LanguageExt.Common;
@@ -11,7 +12,7 @@ namespace ParametricPortal.Kargadan.Plugin.src.protocol;
 // --- [FUNCTIONS] -------------------------------------------------------------
 
 public static class CommandRouter {
-    private static readonly JsonElement EmptyJsonElement = CreateEmptyJsonElement();
+    private static readonly JsonElement EmptyJsonElement = JsonSerializer.SerializeToElement(new { });
     private const int DefaultDeadlineMs = 5_000;
     private const int MinimumDeadlineMs = 1;
 
@@ -35,21 +36,6 @@ public static class CommandRouter {
         internal const string TraceId = "traceId";
     }
 
-    private static class JsonTags {
-        internal const string Command = "command";
-    }
-
-    private static JsonElement CreateEmptyJsonElement() {
-        using JsonDocument document = JsonDocument.Parse("{}");
-        return document.RootElement.Clone();
-    }
-    public static Fin<CommandResultEnvelope> Route(
-        JsonElement envelope,
-        EnvelopeIdentity sessionIdentity,
-        Func<CommandEnvelope, Fin<CommandResultEnvelope>> onCommand) =>
-        Decode(
-            envelope: envelope,
-            sessionIdentity: sessionIdentity).Bind(onCommand);
     public static Fin<CommandEnvelope> Decode(
         JsonElement envelope,
         EnvelopeIdentity sessionIdentity) {
@@ -83,7 +69,7 @@ public static class CommandRouter {
                 false => EmptyJsonElement,
             };
             return observedTag switch {
-                JsonTags.Command =>
+                "command" =>
                     from operationKeyValue in operationKey
                     from deadlineMsValue in deadlineMs
                     from operationTag in DomainBridge.ParseSmartEnum<CommandOperation, string>(operationKeyValue)
@@ -101,7 +87,7 @@ public static class CommandRouter {
                         TelemetryContext: telemetryContext,
                         DeadlineMs: deadlineMsValue),
                 _ => Fin.Fail<CommandEnvelope>(
-                    Error.New(message: $"Envelope {JsonFields.Tag} must be '{JsonTags.Command}'; observed '{observedTag}'.")),
+                    Error.New(message: $"Envelope {JsonFields.Tag} must be 'command'; observed '{observedTag}'.")),
             };
         }
     }
@@ -185,7 +171,11 @@ public static class CommandRouter {
                     parent: element,
                     propertyName: JsonFields.SourceRevision,
                     errorMessage: "objectRefs entries require sourceRevision as an integer.")
-                from objectId in ParseObjectId(objectIdRaw)
+                from objectIdGuid in Guid.TryParse(objectIdRaw, out Guid parsedObjectId) switch {
+                    true => Fin.Succ(parsedObjectId),
+                    _ => Fin.Fail<Guid>(Error.New(message: "objectId must be a valid GUID.")),
+                }
+                from objectId in DomainBridge.ParseValueObject<ObjectId, Guid>(candidate: objectIdGuid)
                 from typeTag in DomainBridge.ParseSmartEnum<SceneObjectType, string>(candidate: typeTagRaw)
                 from sceneObjectRef in SceneObjectRef.Create(
                     objectId: objectId,
@@ -220,8 +210,4 @@ public static class CommandRouter {
             true when propertyElement.TryGetInt32(out int propertyValue) => Fin.Succ(propertyValue),
             _ => Fin.Fail<int>(Error.New(message: errorMessage)),
         };
-    private static Fin<ObjectId> ParseObjectId(string raw) =>
-        DomainBridge.TryCreateValueObjectFromGuidString<ObjectId>(
-            raw: raw,
-            failureMessage: "objectId must be a valid GUID.");
 }

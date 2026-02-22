@@ -16,12 +16,6 @@ public static class DomainBridge {
             { Message: { } message } => Fin.Fail<T>(Error.New(message)),
             _ => Fin.Fail<T>(Error.New($"{typeof(T).Name} validation failed for '{candidate}'."))
         };
-    public static Fin<T> TryCreateValueObjectFromGuidString<T>(string raw, string failureMessage)
-        where T : IObjectFactory<T, Guid, ValidationError> =>
-        Guid.TryParse(raw, out Guid parsed) switch {
-            true => ParseValueObject<T, Guid>(parsed),
-            _ => Fin.Fail<T>(Error.New(message: failureMessage)),
-        };
     // --- [SMART_ENUMS] --------------------------------------------------------
     public static Fin<T> ParseSmartEnum<T, TKey>(TKey candidate)
         where T : class, ISmartEnum<TKey, T, ValidationError>
