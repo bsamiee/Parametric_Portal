@@ -29,15 +29,15 @@ Decimal phases appear between their surrounding integers in numeric order.
 **Requirements**: TRAN-01, TRAN-02, TRAN-03, TRAN-04, TRAN-05, TRAN-06
 **Success Criteria** (what must be TRUE):
   1. Harness connects to the plugin's WebSocket endpoint on localhost and completes the protocol handshake
-  2. Plugin loads in Rhino 9 WIP without TypeLoadException (net9.0 target) and in Rhino 8 (net8.0 target)
+  2. Plugin loads in Rhino 9 WIP without TypeLoadException (net9.0 target)
   3. All incoming WebSocket commands are marshaled to the UI thread before touching RhinoDoc — no NSException on macOS
   4. Harness detects plugin disconnection (Rhino quit/crash) and reconnects automatically when the plugin returns
   5. Session context survives plugin disconnection — conversation history and loop state restored from checkpoint on reconnection
-**Plans**: TBD
+**Plans**: 2 plans
 
 Plans:
-- [ ] 01-01: TBD
-- [ ] 01-02: TBD
+- [ ] 01-01-PLAN.md — C# plugin WebSocket server (TcpListener + HTTP upgrade), port file discovery, UI thread marshaling, net9.0 target
+- [ ] 01-02-PLAN.md — TS harness reconnection supervisor with exponential backoff, port file reader, PostgreSQL checkpoint persistence
 
 ### Phase 2: RhinoDoc Execution and Events
 **Goal**: The agent can execute arbitrary Rhino commands and direct API calls, receive document change events, and undo any AI action atomically
@@ -162,7 +162,7 @@ Note: Phases 6, 7, and 8 all depend on Phase 5 but not on each other. They can b
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Plugin Transport Foundation | 0/2 | Not started | - |
+| 1. Plugin Transport Foundation | 0/2 | Planned | - |
 | 2. RhinoDoc Execution and Events | 0/2 | Not started | - |
 | 3. Schema Redesign and Topology | 0/2 | Not started | - |
 | 4. Session Persistence and Knowledge Base | 0/2 | Not started | - |
