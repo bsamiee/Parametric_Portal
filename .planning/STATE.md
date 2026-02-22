@@ -19,21 +19,25 @@ Progress: [█░░░░░░░░░] 12.5%
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 1
-- Average duration: 12min
-- Total execution time: 0.2 hours
+- Total plans completed: 2
+- Average duration: ~29min
+- Total execution time: ~1.0 hours
 
 **By Phase:**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
-| 01 | 1 | 12min | 12min |
+| 01 | 2 | 57min | ~29min |
 
 **Recent Trend:**
-- Last 5 plans: 01-02 (12min)
+- Last 5 plans: 01-01 (45min), 01-02 (12min)
 - Trend: baseline
 
 *Updated after each plan completion*
+
+| Plan | Duration | Tasks | Files |
+|------|----------|-------|-------|
+| Phase 01 P01 | 45min | 3 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -48,6 +52,8 @@ Recent decisions affecting current work:
 - [01-02]: CheckpointService composes PersistenceTrace in-memory trace methods plus PostgreSQL persistence as single service
 - [01-02]: PgClient.layerConfig with explicit pool limits (5 connections, 30s idle, 10s connect) suitable for single-user CLI
 - [01-02]: DisconnectedError propagated via catchTag in dispatch, mapped to CommandDispatchError('disconnected')
+- [Phase 01]: Kept net10.0 target -- LanguageExt.Core 5.0.0-beta-77 requires net10.0 System.Runtime; net9.0 override impossible without breaking existing v5 code
+- [Phase 01]: MessageDispatcher delegate decouples WebSocketHost from KargadanPlugin -- enables isolated testing and future transport swaps
 
 ### Pending Todos
 

@@ -12,7 +12,7 @@ Kargadan delivers a CLI-based AI agent that controls Rhino 9 through natural lan
 
 Decimal phases appear between their surrounding integers in numeric order.
 
-- [ ] **Phase 1: Plugin Transport Foundation** - WebSocket bridge between CLI harness and Rhino plugin on localhost with reconnection and heartbeat
+- [x] **Phase 1: Plugin Transport Foundation** - WebSocket bridge between CLI harness and Rhino plugin on localhost with reconnection and heartbeat (completed 2026-02-22)
 - [ ] **Phase 2: RhinoDoc Execution and Events** - Command execution, direct API access, event subscriptions, and undo integration inside Rhino
 - [ ] **Phase 3: Schema Redesign and Topology** - Delete legacy schemas, extract universal concepts to packages/, isolate app-specific protocol in apps/kargadan
 - [ ] **Phase 4: Session Persistence and Knowledge Base** - PostgreSQL-backed session store replacing in-memory trace, plus Rhino command knowledge base for RAG
@@ -162,7 +162,7 @@ Note: Phases 6, 7, and 8 all depend on Phase 5 but not on each other. They can b
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Plugin Transport Foundation | 0/2 | Planned | - |
+| 1. Plugin Transport Foundation | 2/2 | Complete   | 2026-02-22 |
 | 2. RhinoDoc Execution and Events | 0/2 | Not started | - |
 | 3. Schema Redesign and Topology | 0/2 | Not started | - |
 | 4. Session Persistence and Knowledge Base | 0/2 | Not started | - |
