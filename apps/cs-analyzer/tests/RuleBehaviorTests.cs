@@ -53,6 +53,22 @@ public sealed class RuleBehaviorTests {
                     }
                     """),
             Case(
+                ruleId: "CSP0009",
+                filePath: "/workspace/src/Domain/Services/TryFinallyUsage.cs",
+                source: """
+                    namespace Domain.Services;
+
+                    public sealed class TryFinallyUsage {
+                        public int Compute() {
+                            try {
+                                return 1;
+                            } finally {
+                                _ = "cleanup".Length;
+                            }
+                        }
+                    }
+                    """),
+            Case(
                 ruleId: "CSP0901",
                 filePath: "/workspace/src/Integration/InvalidBoundaryExemption.cs",
                 source: """

@@ -19,11 +19,6 @@ namespace ParametricPortal.Kargadan.Plugin.src.boundary;
 // --- [ADAPTER] ---------------------------------------------------------------
 
 [BoundaryAdapter]
-[BoundaryImperativeExemption(
-    ruleId: "CSP0009",
-    reason: BoundaryImperativeReason.ProtocolRequired,
-    ticket: "KARG-BOUNDARY-001",
-    expiresOnUtc: "2099-12-31T00:00:00Z")]
 public sealed class KargadanPlugin : PlugIn {
     // --- [TYPES] -------------------------------------------------------------
     private readonly record struct BoundaryState(EventPublisher EventPublisher, SessionHost SessionHost);

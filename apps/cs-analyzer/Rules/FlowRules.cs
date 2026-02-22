@@ -38,10 +38,11 @@ internal static class FlowRules {
             _ => null,
         });
     internal static void CheckExceptionTry(OperationAnalysisContext context, AnalyzerState state, ScopeInfo scope, ITryOperation tryOperation) =>
-        AnalyzerState.Report(context.ReportDiagnostic, (scope.IsDomainOrApplication, scope.IsBoundary, tryOperation.Catches.Length > 0, tryOperation.Catches.Length == 0 && tryOperation.Finally is not null) switch {
+        AnalyzerState.Report(context.ReportDiagnostic, (scope.IsDomainOrApplication, scope.IsBoundary, tryOperation.Catches.Length > 0, tryOperation.Finally is not null) switch {
             (true, _, true, _) => Diagnostic.Create(RuleCatalog.CSP0009, context.Operation.Syntax.GetLocation(), "try/catch"),
+            (true, _, false, true) => Diagnostic.Create(RuleCatalog.CSP0009, context.Operation.Syntax.GetLocation(), "try/finally"),
             (_, true, true, _) => BoundaryDiagnostic(context, state, construct: "try/catch", reason: BoundaryImperativeReason.ProtocolRequired, domainRule: RuleCatalog.CSP0009),
-            (_, true, _, true) => BoundaryDiagnostic(context, state, construct: "try/finally", reason: BoundaryImperativeReason.CleanupFinally, domainRule: RuleCatalog.CSP0009),
+            (_, true, false, true) => BoundaryDiagnostic(context, state, construct: "try/finally", reason: BoundaryImperativeReason.CleanupFinally, domainRule: RuleCatalog.CSP0009),
             _ => null,
         });
     internal static void CheckExceptionThrow(OperationAnalysisContext context, AnalyzerState state, ScopeInfo scope, IThrowOperation throwOperation) =>
