@@ -1,6 +1,7 @@
 # Phase 2: RhinoDoc Execution and Events - Context
 
 **Gathered:** 2026-02-22
+**Refined:** 2026-02-22 (post-research — undo bifurcation, timeout semantics, error mechanics)
 **Status:** Ready for planning
 
 <domain>
@@ -14,10 +15,12 @@ The agent can execute arbitrary Rhino commands and direct RhinoCommon API calls 
 ## Implementation Decisions
 
 ### Undo boundaries
-- One tool call = one undo record — each discrete tool call (create, set material, move) gets its own `BeginUndoRecord`/`EndUndoRecord` pair
-- Cmd+Z steps back through individual tool calls, not entire user instructions
-- Agent state snapshots stored via `AddCustomUndoEvent` so undo/redo keeps agent's internal model consistent with the document
-- When user presses Cmd+Z, plugin notifies the harness AND the agent updates its internal model to reflect the reversal
+- One tool call = one undo record — Cmd+Z steps back through individual tool calls, not entire user instructions
+- **Bifurcated undo strategy** (research constraint):
+  - Direct API calls: wrapped in `BeginUndoRecord`/`EndUndoRecord` pair with `AddCustomUndoEvent` for agent state snapshots
+  - RunScript calls: RunScript creates its own undo record internally — do NOT wrap in `BeginUndoRecord`/`EndUndoRecord` (McNeel confirms they conflict). Agent state snapshots for RunScript operations need an alternative mechanism (e.g., harness-side tracking keyed to undo serial number)
+- `AddCustomUndoEvent` callback must re-register itself for redo support, and must NEVER modify RhinoDoc — only private plugin data
+- When user presses Cmd+Z, plugin detects via `Command.UndoRedo` event and notifies the harness — agent updates its internal model to reflect the reversal
 - Agent acknowledges undone actions proactively in its next response ("I see you undid the box creation")
 
 ### Event delivery
@@ -34,17 +37,18 @@ The agent can execute arbitrary Rhino commands and direct RhinoCommon API calls 
 - One command per WebSocket message — no batch sequences; aligns with per-tool-call undo boundaries
 
 ### Error feedback
-- Pass through raw Rhino error output — whatever Rhino reports (exception messages, command-line output) goes to the harness as-is
-- All-or-nothing execution: if any sub-operation in a command fails, roll back everything and report failure — no partial success
-- Configurable timeout: plugin enforces a timeout on command execution (default configurable) and cancels if exceeded
+- **Typed error passthrough** (research refinement): RunScript returns only a boolean (did Rhino attempt to run) — actual success/failure detected via `Command.EndCommand` event's `CommandResult` enum (Success, Cancel, Failure). Direct API calls return typed values (Guid.Empty, false, null). Harness receives the richest error signal each path provides.
+- All-or-nothing execution: if any sub-operation in a command fails, roll back everything and report failure — no partial success. For direct API calls, rollback via `doc.Undo()` within the undo record. For RunScript, Rhino handles failure atomically.
+- **Timeout = harness gives up, not command cancellation** (research constraint): McNeel confirmed no programmatic command cancellation exists. Timeout wraps `WaitAsync()` on the calling side — harness receives a timeout error, but the Rhino command may still be running. `SendKeystrokes` (Escape) is unreliable best-effort only.
 - Two-phase response: "command started" acknowledgment sent immediately, then final result (success or failure) when execution completes
 
 ### Claude's Discretion
-- Whether read-only tool calls create undo records (or only writes)
-- Concurrency model for user changes during agent mid-operation (interrupt vs queue)
-- Default timeout value and cancellation mechanism based on Rhino's capabilities
+- Whether read-only tool calls create undo records (or only writes) — research recommends: no undo records for reads
+- Concurrency model for user changes during agent mid-operation — research notes: Rhino's UI thread naturally serializes access, so user ops wait until agent's current tool call completes
+- Default timeout values per command category (research suggests: reads 5s, writes 30s, geometric ops 120s)
 - Event debounce window tuning (200ms baseline from requirements)
 - Exact event summary format and drill-down protocol
+- Agent state snapshot mechanism for RunScript-based operations (since AddCustomUndoEvent requires BeginUndoRecord, which RunScript can't use)
 
 </decisions>
 
