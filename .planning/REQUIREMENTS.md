@@ -47,10 +47,10 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### Persistence
 
-- [ ] **PERS-01**: Conversation history, run events, snapshots, and tool call results persist to PostgreSQL — replacing the in-memory PersistenceTrace
-- [ ] **PERS-02**: Session resumption restores from the last PostgreSQL checkpoint — rebuilds loop state, Chat history, and active context without data loss
-- [ ] **PERS-03**: Every tool call is logged with parameters, result, duration, and failure status for audit and replay
-- [ ] **PERS-04**: Past agent sessions are queryable and replayable from the audit trail
+- [x] **PERS-01**: Conversation history, run events, snapshots, and tool call results persist to PostgreSQL — replacing the in-memory PersistenceTrace
+- [x] **PERS-02**: Session resumption restores from the last PostgreSQL checkpoint — rebuilds loop state, Chat history, and active context without data loss
+- [x] **PERS-03**: Every tool call is logged with parameters, result, duration, and failure status for audit and replay
+- [x] **PERS-04**: Past agent sessions are queryable and replayable from the audit trail
 - [ ] **PERS-05**: Rhino command knowledge base is seeded with command descriptions, parameters, examples, and alias enrichment for accurate RAG retrieval
 
 ### Scene
@@ -154,10 +154,10 @@ Which phases cover which requirements. Updated during roadmap creation.
 | PROV-02 | Phase 5 | Pending |
 | PROV-03 | Phase 5 | Pending |
 | PROV-04 | Phase 5 | Pending |
-| PERS-01 | Phase 4 | Pending |
-| PERS-02 | Phase 4 | Pending |
-| PERS-03 | Phase 4 | Pending |
-| PERS-04 | Phase 4 | Pending |
+| PERS-01 | Phase 4 | Complete |
+| PERS-02 | Phase 4 | Complete |
+| PERS-03 | Phase 4 | Complete |
+| PERS-04 | Phase 4 | Complete |
 | PERS-05 | Phase 4 | Pending |
 | SCEN-01 | Phase 6 | Pending |
 | SCEN-02 | Phase 6 | Pending |

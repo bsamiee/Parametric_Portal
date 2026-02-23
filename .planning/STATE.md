@@ -5,23 +5,23 @@
 See: .planning/PROJECT.md (updated 2026-02-22)
 
 **Core value:** The agent can execute any operation a human can perform in Rhino 9 through natural language, with reliable state persistence and verification — without hardcoding individual commands.
-**Current focus:** Phase 3 - Schema Redesign and Topology
+**Current focus:** Phase 4 - Session Persistence and Knowledge Base
 
 ## Current Position
 
-Phase: 3 of 8 (Schema Redesign and Topology)
-Plan: 2 of 2 in current phase
-Status: Phase 03 complete; Phase 04 next
-Last activity: 2026-02-23 -- Completed consumer rewiring and typecheck gate
+Phase: 4 of 8 (Session Persistence and Knowledge Base)
+Plan: 1 of 2 in current phase
+Status: Plan 04-01 complete; Plan 04-02 next
+Last activity: 2026-02-23 -- Replaced CheckpointService with PersistenceService, added migrator and session lifecycle
 
-Progress: [████░░░░░░] 37.5%
+Progress: [████▓░░░░░] 43.8%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 6
-- Average duration: ~15min
-- Total execution time: ~1.5 hours
+- Total plans completed: 7
+- Average duration: ~13min
+- Total execution time: ~1.6 hours
 
 **By Phase:**
 
@@ -30,9 +30,10 @@ Progress: [████░░░░░░] 37.5%
 | 01 | 2 | 57min | ~29min |
 | 02 | 2 | 19min | ~10min |
 | 03 | 2 | 13min | ~7min |
+| 04 | 1 (of 2) | 5min | ~5min |
 
 **Recent Trend:**
-- Last 5 plans: 02-01 (8min), 02-02 (11min), 03-01 (4min), 03-02 (9min)
+- Last 5 plans: 02-02 (11min), 03-01 (4min), 03-02 (9min), 04-01 (5min)
 - Trend: accelerating
 
 *Updated after each plan completion*
@@ -44,6 +45,7 @@ Progress: [████░░░░░░] 37.5%
 | Phase 02 P02 | 11min | 2 tasks | 4 files |
 | Phase 03 P01 | 4min | 2 tasks | 4 files |
 | Phase 03 P02 | 9min | 2 tasks | 6 files |
+| Phase 04 P01 | 5min | 2 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -75,6 +77,10 @@ Recent decisions affecting current work:
 - [03-02]: Extracted 12 protocol schemas into protocol/schemas.ts -- biome noImportCycles detected bidirectional cycles between dispatch.ts <-> config.ts and dispatch.ts <-> socket.ts
 - [03-02]: Narrowed _request parameter type via Extract -- CommandAckSchema lacks identity field, accessing envelope.identity was unsound on full union
 - [03-02]: Inline EventBatchSummarySchema at decode site and RunStatus literal union in LoopState -- no module-level schema consts needed for single-use types
+- [04-01]: PersistenceService replaces CheckpointService with atomic SqlClient.withTransaction for tool call + checkpoint writes
+- [04-01]: KargadanMigratorLive uses separate kargadan_migrations table to avoid collision with platform migrations
+- [04-01]: KargadanToolCall.createdAt uses Model.Generated (DB DEFAULT now()) not DateTimeInsertFromDate -- excludes from insert variant
+- [04-01]: chatJson is empty string placeholder until Phase 5 wires Chat.exportJson
 
 ### Pending Todos
 
@@ -88,5 +94,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-02-23
-Stopped at: Completed 03-02-PLAN.md (Phase 03 complete)
-Resume file: .planning/phases/04-persistence-and-state-machine/04-01-PLAN.md
+Stopped at: Completed 04-01-PLAN.md
+Resume file: .planning/phases/04-session-persistence-and-knowledge-base/04-02-PLAN.md

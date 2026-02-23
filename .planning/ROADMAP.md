@@ -73,8 +73,8 @@ Completion status (2026-02-23):
 **Plans**: 2 plans
 
 Plans:
-- [ ] 03-01-PLAN.md -- Delete legacy kargadan-schemas.ts and infrastructure wiring, define 2 root schema groups (protocol in dispatch.ts, persistence in checkpoint.ts)
-- [ ] 03-02-PLAN.md -- Rewire all 5 consumer files to use colocated schemas, typecheck gate, LOC reduction verification
+- [x] 03-01-PLAN.md -- Delete legacy kargadan-schemas.ts and infrastructure wiring, define 2 root schema groups (protocol in dispatch.ts, persistence in checkpoint.ts)
+- [x] 03-02-PLAN.md -- Rewire all 5 consumer files to use colocated schemas, typecheck gate, LOC reduction verification
 
 ### Phase 4: Session Persistence and Knowledge Base
 **Goal**: Agent sessions are durable across harness restarts, and the Rhino command catalog is searchable via semantic similarity
@@ -89,7 +89,7 @@ Plans:
 **Plans**: 2 plans
 
 Plans:
-- [ ] 04-01-PLAN.md -- Model.Class definitions, PostgreSQL migration, PersistenceService with atomic checkpoint+tool-call writes, session listing/replay, migrator layer, harness rewire
+- [x] 04-01-PLAN.md -- Model.Class definitions, PostgreSQL migration, PersistenceService with atomic checkpoint+tool-call writes, session listing/replay, migrator layer, harness rewire
 - [ ] 04-02-PLAN.md -- Rhino command manifest schema with sample data, KB seeder service with pgvector embeddings via existing search infrastructure
 
 ### Phase 5: Agent Core and Provider Abstraction
@@ -169,8 +169,8 @@ Note: Phases 6, 7, and 8 all depend on Phase 5 but not on each other. They can b
 |-------|----------------|--------|-----------|
 | 1. Plugin Transport Foundation | 2/2 | Complete   | 2026-02-22 |
 | 2. RhinoDoc Execution and Events | 2/2 | Complete | 2026-02-23 |
-| 3. Schema Redesign and Topology | 0/2 | Ready | - |
-| 4. Session Persistence and Knowledge Base | 0/2 | Ready | - |
+| 3. Schema Redesign and Topology | 2/2 | Complete | 2026-02-23 |
+| 4. Session Persistence and Knowledge Base | 1/2 | In Progress | - |
 | 5. Agent Core and Provider Abstraction | 0/3 | Not started | - |
 | 6. Scene Representation and Context Management | 0/2 | Not started | - |
 | 7. Verification, Workflows, and Grasshopper | 0/3 | Not started | - |
