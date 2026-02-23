@@ -47,11 +47,8 @@ internal sealed class WebSocketHost : IDisposable {
     private bool _disposed;
 
     // --- [LIFECYCLE] ---------------------------------------------------------
-    internal WebSocketHost(MessageDispatcher dispatcher) =>
-        _dispatcher = dispatcher;
-
+    internal WebSocketHost(MessageDispatcher dispatcher) => _dispatcher = dispatcher;
     internal int Port { get; private set; }
-
     internal void Start() {
         int port = ReserveLoopbackPort();
         _listener = new HttpListener();
@@ -62,7 +59,6 @@ internal sealed class WebSocketHost : IDisposable {
         RhinoApp.WriteLine($"[Kargadan] WebSocket server listening on 127.0.0.1:{Port}");
         _ = Task.Run(() => AcceptLoopAsync(cancellationToken: _cts.Token));
     }
-
     internal void Stop() {
         _cts.Cancel();
         PortFile.DeletePortFile();
@@ -70,27 +66,23 @@ internal sealed class WebSocketHost : IDisposable {
         _listener?.Close();
         RhinoApp.WriteLine("[Kargadan] WebSocket server stopped.");
     }
-
     public void Dispose() {
         _ = _disposed switch {
             true => unit,
             false => DisposeCore(),
         };
     }
-
     private Unit DisposeCore() {
         _disposed = true;
         Stop();
         _cts.Dispose();
         return unit;
     }
-
     private static int ReserveLoopbackPort() {
         using TcpListener listener = new(localaddr: IPAddress.Loopback, port: 0);
         listener.Start();
         return ((IPEndPoint)listener.LocalEndpoint).Port;
     }
-
     // --- [ACCEPT_LOOP] -------------------------------------------------------
     private async Task AcceptLoopAsync(CancellationToken cancellationToken) {
         while (!cancellationToken.IsCancellationRequested) {
@@ -103,7 +95,6 @@ internal sealed class WebSocketHost : IDisposable {
             }).ConfigureAwait(false);
         }
     }
-
     private async Task RunConnectionScopeAsync(
         HttpListenerContext context,
         CancellationToken cancellationToken) {
@@ -114,7 +105,6 @@ internal sealed class WebSocketHost : IDisposable {
             _activeWebSocket = null;
         }
     }
-
     private async Task<HttpListenerContext?> TryGetContextAsync(CancellationToken cancellationToken) {
         switch (_listener) {
             case null:
@@ -135,7 +125,6 @@ internal sealed class WebSocketHost : IDisposable {
                 }
         }
     }
-
     private static async Task RejectContextAsync(
         HttpListenerContext context,
         CancellationToken cancellationToken) {
@@ -147,10 +136,8 @@ internal sealed class WebSocketHost : IDisposable {
         } catch (IOException) {
             // why: peer may disconnect before 503 body write completes
         }
-
         context.Response.Close();
     }
-
     // --- [CONNECTION] --------------------------------------------------------
     private Task RunConnectionAsync(
         HttpListenerContext context,
@@ -159,13 +146,11 @@ internal sealed class WebSocketHost : IDisposable {
             false => RejectNonWebSocketAsync(context: context),
             true => AcceptConnectionAsync(context: context, cancellationToken: cancellationToken),
         };
-
     private static Task RejectNonWebSocketAsync(HttpListenerContext context) {
         context.Response.StatusCode = 400;
         context.Response.Close();
         return Task.CompletedTask;
     }
-
     private async Task AcceptConnectionAsync(
         HttpListenerContext context,
         CancellationToken cancellationToken) {
@@ -180,7 +165,6 @@ internal sealed class WebSocketHost : IDisposable {
             context.Response.Close();
             return;
         }
-
         using WebSocket webSocket = wsContext.WebSocket;
         _activeWebSocket = webSocket;
         RhinoApp.WriteLine("[Kargadan] Client connected.");
@@ -188,7 +172,6 @@ internal sealed class WebSocketHost : IDisposable {
         await CloseWebSocketSafelyAsync(webSocket: webSocket).ConfigureAwait(false);
         RhinoApp.WriteLine("[Kargadan] Client disconnected.");
     }
-
     private static async Task CloseWebSocketSafelyAsync(WebSocket webSocket) {
         switch (webSocket.State) {
             case WebSocketState.Open:
@@ -206,7 +189,6 @@ internal sealed class WebSocketHost : IDisposable {
                 break;
         }
     }
-
     // --- [RECEIVE] -----------------------------------------------------------
     private async Task ReceiveLoopAsync(WebSocket webSocket, CancellationToken cancellationToken) {
         byte[] frameBuffer = new byte[ReceiveBufferSize];
@@ -241,7 +223,6 @@ internal sealed class WebSocketHost : IDisposable {
             }
         }
     }
-
     private static async Task<ValueWebSocketReceiveResult?> TryReceiveAsync(
         WebSocket webSocket,
         Memory<byte> buffer,
@@ -254,7 +235,6 @@ internal sealed class WebSocketHost : IDisposable {
             return null;
         }
     }
-
     private static async Task<byte[]?> ReadTextMessageAsync(
         WebSocket webSocket,
         ValueWebSocketReceiveResult firstFrame,
@@ -277,10 +257,8 @@ internal sealed class WebSocketHost : IDisposable {
                     return null;
             }
         }
-
         return messageBuffer.WrittenMemory.ToArray();
     }
-
     // --- [DISPATCH] ----------------------------------------------------------
     private async Task ProcessMessageAsync(
         WebSocket webSocket,
@@ -296,7 +274,6 @@ internal sealed class WebSocketHost : IDisposable {
             endOfMessage: true,
             cancellationToken: cancellationToken).ConfigureAwait(false);
     }
-
     private async Task<Fin<JsonElement>> BuildResponseAsync(
         ReadOnlyMemory<byte> messageBytes,
         CancellationToken cancellationToken) {
@@ -308,7 +285,6 @@ internal sealed class WebSocketHost : IDisposable {
             return Fin.Fail<JsonElement>(Error.New(message: exception.Message));
         }
     }
-
     private Task<Fin<JsonElement>> DispatchByTagAsync(
         JsonElement message,
         CancellationToken cancellationToken) =>
@@ -318,7 +294,6 @@ internal sealed class WebSocketHost : IDisposable {
                 message: message,
                 cancellationToken: cancellationToken),
             Fail: static error => Task.FromResult(Fin.Fail<JsonElement>(error)));
-
     private static byte[] SerializeResponse(Fin<JsonElement> responseResult) =>
         responseResult.Match(
             Succ: responseElement => JsonSerializer.SerializeToUtf8Bytes(
@@ -328,7 +303,6 @@ internal sealed class WebSocketHost : IDisposable {
                 _tag = TransportMessageTag.Error.Key,
                 message = error.Message,
             }, options: JsonOptions));
-
     private static Fin<TransportMessageTag> ParseTransportTag(JsonElement message) =>
         message.TryGetProperty("_tag", out JsonElement tagElement) switch {
             true when tagElement.ValueKind == JsonValueKind.String =>
