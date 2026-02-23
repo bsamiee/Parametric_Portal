@@ -13,7 +13,7 @@ Kargadan delivers a CLI-based AI agent that controls Rhino 9 through natural lan
 Decimal phases appear between their surrounding integers in numeric order.
 
 - [x] **Phase 1: Plugin Transport Foundation** - WebSocket bridge between CLI harness and Rhino plugin on localhost with reconnection and heartbeat (completed 2026-02-22)
-- [ ] **Phase 2: RhinoDoc Execution and Events** - Command execution, direct API access, event subscriptions, and undo integration inside Rhino (in progress; post-cutover re-verification active)
+- [x] **Phase 2: RhinoDoc Execution and Events** - Command execution, direct API access, event subscriptions, and undo integration inside Rhino (completed 2026-02-23)
 - [ ] **Phase 3: Schema Redesign and Topology** - Delete legacy schemas, extract universal concepts to packages/, isolate app-specific protocol in apps/kargadan
 - [ ] **Phase 4: Session Persistence and Knowledge Base** - PostgreSQL-backed session store replacing in-memory trace, plus Rhino command knowledge base for RAG
 - [ ] **Phase 5: Agent Core and Provider Abstraction** - Generic agent loop in packages/ai with tool orchestration, RAG discovery, multi-provider support, and fallback chains
@@ -36,8 +36,8 @@ Decimal phases appear between their surrounding integers in numeric order.
 **Plans**: 2 plans
 
 Plans:
-- [ ] 01-01-PLAN.md — C# plugin WebSocket server (TcpListener + HTTP upgrade), port file discovery, UI thread marshaling, net9.0 target
-- [ ] 01-02-PLAN.md — TS harness reconnection supervisor with exponential backoff, port file reader, PostgreSQL checkpoint persistence
+- [x] 01-01-PLAN.md — C# plugin WebSocket server (TcpListener + HTTP upgrade), port file discovery, UI thread marshaling, net9.0 target
+- [x] 01-02-PLAN.md — TS harness reconnection supervisor with exponential backoff, port file reader, PostgreSQL checkpoint persistence
 
 ### Phase 2: RhinoDoc Execution and Events
 **Goal**: The agent can execute arbitrary Rhino commands and direct API calls, receive document change events, and undo any AI action atomically
@@ -52,13 +52,13 @@ Plans:
 **Plans**: 2 plans
 
 Plans:
-- [ ] 02-01-PLAN.md -- Protocol contracts extension + CommandExecutor with bifurcated undo strategy (direct API undo wrapping, RunScript result tracking, RhinoCommon facades)
-- [ ] 02-02-PLAN.md -- ObservationPipeline (15 events + undo detection + batched flush), WebSocketHost two-phase ack, KargadanPlugin execution/observation wiring, TS schema sync
+- [x] 02-01-PLAN.md -- Protocol contracts extension + CommandExecutor with bifurcated undo strategy (direct API undo wrapping, RunScript result tracking, RhinoCommon facades)
+- [x] 02-02-PLAN.md -- ObservationPipeline (15 events + undo detection + batched flush), WebSocketHost two-phase ack, KargadanPlugin execution/observation wiring, TS schema sync
 
-Verification status (2026-02-23 root reconciliation):
-- Prior stub paths removed (`OnBatchFlushed`/`PublishUndoEvent`/`not yet implemented` markers no longer present in plugin source).
+Completion status (2026-02-23):
 - Direct API write routing for object create/update/delete is implemented through `CommandExecutor`.
-- Remaining Phase 2 status is "re-verification in progress" until runtime/manual scenarios and harness-observed event flow are re-confirmed and the verification report is refreshed.
+- Event batches and undo envelopes are published by the plugin boundary and delivered by WebSocket as `_tag: "event"` frames.
+- Harness ingestion persists inbound transport events and decodes `stream.compacted` batch deltas.
 
 ### Phase 3: Schema Redesign and Topology
 **Goal**: Monorepo topology is clean — universal concepts live in packages/, app-specific protocol lives in apps/kargadan, and public API surface is minimal
@@ -75,6 +75,7 @@ Verification status (2026-02-23 root reconciliation):
 Plans:
 - [ ] 03-01: TBD
 - [ ] 03-02: TBD
+- [ ] 03-03: TBD
 
 ### Phase 4: Session Persistence and Knowledge Base
 **Goal**: Agent sessions are durable across harness restarts, and the Rhino command catalog is searchable via semantic similarity
@@ -91,6 +92,7 @@ Plans:
 Plans:
 - [ ] 04-01: TBD
 - [ ] 04-02: TBD
+- [ ] 04-03: TBD
 
 ### Phase 5: Agent Core and Provider Abstraction
 **Goal**: The agent accepts natural language input, discovers relevant Rhino commands via RAG, generates and executes tool calls through the bridge, and works across multiple AI providers
@@ -168,7 +170,7 @@ Note: Phases 6, 7, and 8 all depend on Phase 5 but not on each other. They can b
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Plugin Transport Foundation | 2/2 | Complete   | 2026-02-22 |
-| 2. RhinoDoc Execution and Events | 2/2 | In progress (post-cutover re-verification) | - |
+| 2. RhinoDoc Execution and Events | 2/2 | Complete | 2026-02-23 |
 | 3. Schema Redesign and Topology | 0/2 | Not started | - |
 | 4. Session Persistence and Knowledge Base | 0/2 | Not started | - |
 | 5. Agent Core and Provider Abstraction | 0/3 | Not started | - |

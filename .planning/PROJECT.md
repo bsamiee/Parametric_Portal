@@ -32,10 +32,10 @@ The agent can execute any operation a human can perform in Rhino 9 through natur
 - [ ] Generic agent loop in packages/ai: tool-calling orchestration, planning, conversation management, context compaction — consumable by any app
 - [ ] Dynamic command discovery: RAG-backed Rhino command knowledge base (pgvector) with Anthropic Tool Search Tool integration
 - [ ] Persistent agent sessions: PostgreSQL-backed conversation history, run events, snapshots, tool call audit log — replacing in-memory PersistenceTrace
-- [ ] Plugin WebSocket server: TCP/WebSocket listener inside Rhino plugin on localhost, background thread with InvokeOnUiThread marshaling
-- [ ] RhinoDoc command executor: RhinoApp.RunScript wrapper for arbitrary command execution + direct RhinoCommon API calls for precise operations (Phase 2 cutover implemented; runtime re-verification in progress)
-- [ ] RhinoDoc event subscriptions: AddRhinoObject, DeleteRhinoObject, ModifyObjectAttributes, LayerTableEvent, UndoRedo — debounced at 200ms (Phase 2 cutover implemented; end-to-end harness event delivery re-verification in progress)
-- [ ] Undo integration: BeginUndoRecord/EndUndoRecord wrapping each logical AI action, AddCustomUndoEvent for agent state snapshots (Phase 2 cutover implemented; end-to-end undo notification re-verification in progress)
+- [x] Plugin WebSocket server: TCP/WebSocket listener inside Rhino plugin on localhost, background thread with InvokeOnUiThread marshaling
+- [x] RhinoDoc command executor: RhinoApp.RunScript wrapper for arbitrary command execution + direct RhinoCommon API calls for precise operations
+- [x] RhinoDoc event subscriptions: AddRhinoObject, DeleteRhinoObject, ModifyObjectAttributes, LayerTableEvent, UndoRedo — debounced at 200ms
+- [x] Undo integration: BeginUndoRecord/EndUndoRecord wrapping each logical AI action, AddCustomUndoEvent for agent state snapshots
 - [ ] CLI interface: terminal-based interaction with streaming progress, tool call visibility, plan-before-execute mode
 - [ ] Layered scene representation: Layer 0 compact summary (~500 tokens always present), Layers 1-3 on-demand via read tools
 - [ ] Plugin .NET target correction: net9.0 for Rhino 9 WIP (current net10.0 is unsupported), net8.0 for Rhino 8 compatibility
@@ -82,7 +82,7 @@ The agent can execute any operation a human can perform in Rhino 9 through natur
 - **packages/database**: PostgreSQL repo factory with pgvector, tenant scoping, OCC, event sourcing patterns
 - **packages/server**: Full platform services — cache, metrics, resilience, telemetry, cluster, policy, context propagation
 - **apps/kargadan/harness**: TypeScript agent loop (PLAN/EXECUTE/VERIFY/PERSIST/DECIDE) with WebSocket client, session supervisor, persistence trace
-- **apps/kargadan/plugin**: C# Rhino plugin with protocol contracts, session state machine, transport, execution, and observation pipeline — Phase 2 runtime re-verification in progress
+- **apps/kargadan/plugin**: C# Rhino plugin with protocol contracts, session state machine, transport, execution, and observation pipeline
 - **apps/cs-analyzer**: Custom Roslyn analyzer (58 rules) enforcing C# coding standards
 
 ### Research Foundation
@@ -134,4 +134,4 @@ Two research documents (`Rhino-Research1.md`, `Rhino-Research2.md`) provide deta
 | Grasshopper 1 only (no GH2) | GH2 is alpha with unstable API; GH1 has stable C# SDK for programmatic access | -- Pending |
 
 ---
-*Last updated: 2026-02-23 after Phase 2 cutover status reconciliation*
+*Last updated: 2026-02-23 after Phase 2 completion reconciliation*

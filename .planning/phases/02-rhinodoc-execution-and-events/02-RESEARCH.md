@@ -1,7 +1,7 @@
 # Phase 2: RhinoDoc Execution and Events - Research
 
 **Researched:** 2026-02-22
-**Updated:** 2026-02-22 (re-research -- verified all claims against official docs, corrected UndoActive/RedoActive sourcing, refined RunScript undo strategy, added ObjectTable API coverage, verified codebase state post-Phase 1, confirmed plans 02-01 and 02-02 are unexecuted)
+**Updated:** 2026-02-23 (execution completed and planning references synchronized)
 **Domain:** RhinoCommon SDK -- command execution, undo system, document events, direct API access
 **Confidence:** MEDIUM-HIGH
 
@@ -17,7 +17,7 @@ There is **no programmatic way to cancel a running Rhino command**. McNeel has e
 
 ## Codebase State (Post-Phase 1)
 
-Phase 1 produced the transport foundation. Phase 2 plans (02-01-PLAN.md, 02-02-PLAN.md) exist but have NOT been executed -- no files exist in `execution/` or `observation/` directories.
+Phase 1 produced the transport foundation. Phase 2 plans (02-01-PLAN.md, 02-02-PLAN.md) are executed and integrated in the active plugin and harness code paths.
 
 ### Existing C# Plugin Files (15 files)
 
@@ -41,11 +41,11 @@ Phase 1 produced the transport foundation. Phase 2 plans (02-01-PLAN.md, 02-02-P
 
 ### Key Integration Points
 
-1. **MessageDispatcher delegate** (WebSocketHost.cs line 23): Currently `Task<Fin<JsonElement>> (TransportMessageTag, JsonElement, CancellationToken)`. Plan 02-02 adds `Func<RequestId, Task> sendAckAsync` parameter for two-phase response.
+1. **MessageDispatcher delegate** (WebSocketHost.cs): Uses `Task<Fin<JsonElement>> (TransportMessageTag, JsonElement, Func<JsonElement, Task> sendAckAsync, CancellationToken)` for two-phase response behavior.
 
-2. **DispatchCommandAsync** (KargadanPlugin.cs line 180): Currently returns `Fin.Fail("Command execution not yet implemented.")`. Plan 02-01 replaces this with actual execution routing to CommandExecutor.
+2. **DispatchCommandAsync** (KargadanPlugin.cs): Executes command envelopes through `CommandExecutor` with immediate ack and deadline-based cancellation tokens.
 
-3. **BoundaryState** (KargadanPlugin.cs line 26): Currently holds `EventPublisher`, `SessionHost`, `WebSocketHost`. Plan 02-02 adds `ObservationLifecycle` field.
+3. **BoundaryState** (KargadanPlugin.cs): Holds `EventPublisher`, `SessionHost`, `WebSocketHost`, and `ObservationPipeline`.
 
 4. **EventPublisher.Publish** (EventPublisher.cs line 22): Generic `Publish(EventEnvelope, Instant)`. Phase 2 uses this unchanged -- the flush callback in ObservationLifecycle wraps EventBatchSummary into EventEnvelope.
 
@@ -57,14 +57,14 @@ Phase 1 produced the transport foundation. Phase 2 plans (02-01-PLAN.md, 02-02-P
 | `transport/port-discovery.ts` | Port file reader with PID validation | NO CHANGE |
 | `persistence/checkpoint.ts` | PostgreSQL checkpoint service | NO CHANGE |
 | `persistence/schema.ts` | Checkpoint table schema | NO CHANGE |
-| `config.ts` | Config resolution | NO CHANGE (Phase 2 is plugin-side only) |
-| `socket.ts` | WebSocket client | NO CHANGE |
+| `config.ts` | Config resolution | MODIFY: write object reference resolution/validation for write command objectRefs |
+| `socket.ts` | WebSocket client | MODIFY: event envelope ingestion remains `_tag === 'event'` routing into queue |
 | `protocol/dispatch.ts` | Command dispatch with Deferred correlation | NO CHANGE |
 | `protocol/supervisor.ts` | Session state machine | NO CHANGE |
-| `runtime/agent-loop.ts` | Agent loop (PLAN/EXECUTE/VERIFY/PERSIST/DECIDE) | NO CHANGE |
+| `runtime/agent-loop.ts` | Agent loop (PLAN/EXECUTE/VERIFY/PERSIST/DECIDE) | MODIFY: inbound event persistence and `stream.compacted` batch summary decode |
 | `runtime/loop-stages.ts` | Pure stage functions | NO CHANGE |
 
-**Phase 2 is entirely C# plugin-side.** No TypeScript harness changes are needed. The harness already sends CommandEnvelopes and receives CommandResultEnvelopes -- Phase 2 makes the plugin actually execute those commands instead of returning "not yet implemented."
+**Phase 2 spans plugin and harness integration.** The plugin executes and publishes events; the harness ingests websocket event frames, decodes stream batch deltas, and persists transport events.
 
 <user_constraints>
 ## User Constraints (from CONTEXT.md)
@@ -715,19 +715,19 @@ Drill-down: harness sends a `read.events.detail` command with category filter to
 
 ## Implementation Sequencing
 
-The existing plans (02-01-PLAN.md, 02-02-PLAN.md) define a clean two-wave implementation:
+The existing plans (02-01-PLAN.md, 02-02-PLAN.md) were executed in two waves:
 
 **Plan 02-01 (Wave 1):** Protocol contracts extension + command execution engine
 - Extends ProtocolEnums, ProtocolModels, ProtocolValueObjects with execution-specific types
 - Creates CommandExecutor (undo-wrapped direct API), ScriptRunner (RunScript + EndCommand), DocumentApi (typed facades)
 - Requirements covered: EXEC-01, EXEC-02, EXEC-04, EXEC-05
 
-**Plan 02-02 (Wave 2):** Event observation pipeline + dispatch wiring
-- Creates EventSubscriber (15 RhinoDoc events), EventAggregator (Channel + Timer), UndoObserver (Command.UndoRedo)
-- Creates ObservationLifecycle to keep KargadanPlugin under 225-line cap
+**Plan 02-02 (Wave 2):** Event observation pipeline + dispatch wiring + harness event ingestion
+- Creates event observation and aggregation with debounce batching and undo detection
 - Wires execution dispatch into KargadanPlugin with two-phase ack and per-command timeout
-- Updates WebSocketHost MessageDispatcher delegate for sendAckAsync
-- Requirements covered: EXEC-03
+- Updates WebSocketHost MessageDispatcher delegate for sendAckAsync and websocket event pumping
+- Extends harness ingestion for `stream.compacted` delta decoding and write object reference stability
+- Requirements covered: EXEC-03, EXEC-05
 
 **Dependencies:** Plan 02-02 depends on Plan 02-01 (needs execution types and CommandExecutor for dispatch routing).
 
