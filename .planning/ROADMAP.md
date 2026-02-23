@@ -70,12 +70,11 @@ Completion status (2026-02-23):
   3. apps/kargadan imports packages/ai for all LLM interaction — no app-specific AI orchestration logic duplicated in the app
   4. Each entity has one canonical schema with derived variants via pick/omit/partial — no proliferated struct/type definitions
   5. Field names and parameter signatures are consistent across the TS harness and C# plugin boundary — mapping isolated at boundary adapters only
-**Plans**: TBD
+**Plans**: 2 plans
 
 Plans:
-- [ ] 03-01: TBD
-- [ ] 03-02: TBD
-- [ ] 03-03: TBD
+- [ ] 03-01-PLAN.md -- Delete legacy kargadan-schemas.ts and infrastructure wiring, define 2 root schema groups (protocol in dispatch.ts, persistence in checkpoint.ts)
+- [ ] 03-02-PLAN.md -- Rewire all 5 consumer files to use colocated schemas, typecheck gate, LOC reduction verification
 
 ### Phase 4: Session Persistence and Knowledge Base
 **Goal**: Agent sessions are durable across harness restarts, and the Rhino command catalog is searchable via semantic similarity
@@ -171,7 +170,7 @@ Note: Phases 6, 7, and 8 all depend on Phase 5 but not on each other. They can b
 |-------|----------------|--------|-----------|
 | 1. Plugin Transport Foundation | 2/2 | Complete   | 2026-02-22 |
 | 2. RhinoDoc Execution and Events | 2/2 | Complete | 2026-02-23 |
-| 3. Schema Redesign and Topology | 0/2 | Not started | - |
+| 3. Schema Redesign and Topology | 0/2 | Ready | - |
 | 4. Session Persistence and Knowledge Base | 0/2 | Not started | - |
 | 5. Agent Core and Provider Abstraction | 0/3 | Not started | - |
 | 6. Scene Representation and Context Management | 0/2 | Not started | - |
