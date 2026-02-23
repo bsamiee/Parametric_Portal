@@ -4,7 +4,7 @@
  */
 import { createHash } from 'node:crypto';
 import * as SqlClient from '@effect/sql/SqlClient';
-import { Kargadan } from '@parametric-portal/types/kargadan';
+import { TelemetryContextSchema } from '../protocol/dispatch';
 import { Effect, Match, Option, Ref, Schema as S } from 'effect';
 
 // --- [CONSTANTS] -------------------------------------------------------------
@@ -22,6 +22,42 @@ const _rowSchema = S.Struct({
     sessionId:           S.String,
     stateHash:           S.String,
     updatedAt:           S.DateFromString,
+});
+const RunEventSchema = S.Struct({
+    appId:            S.UUID,
+    createdAt:        S.DateFromSelf,
+    eventId:          S.UUID,
+    eventType:        S.NonEmptyTrimmedString,
+    idempotency:      S.optional(S.Struct({
+        idempotencyKey: S.String.pipe(S.pattern(/^[A-Za-z0-9:_-]{8,128}$/)),
+        payloadHash:    S.String.pipe(S.pattern(/^[a-f0-9]{64}$/)),
+    })),
+    payload:          S.Unknown,
+    requestId:        S.UUID,
+    runId:            S.UUID,
+    sequence:         S.Int.pipe(S.greaterThanOrEqualTo(1)),
+    sessionId:        S.UUID,
+    telemetryContext: TelemetryContextSchema,
+});
+const RunSnapshotSchema = S.Struct({
+    appId:        S.UUID,
+    createdAt:    S.DateFromSelf,
+    runId:        S.UUID,
+    sequence:     S.Int.pipe(S.greaterThanOrEqualTo(1)),
+    snapshotHash: S.NonEmptyTrimmedString,
+    state:        S.Unknown,
+});
+const RetrievalArtifactSchema = S.Struct({
+    appId:               S.UUID,
+    artifactId:          S.UUID,
+    artifactType:        S.Literal('decision', 'constraint', 'fact', 'verification', 'incident'),
+    body:                S.NonEmptyString,
+    createdAt:           S.DateFromSelf,
+    metadata:            S.Unknown,
+    runId:               S.UUID,
+    sourceEventSequence: S.Int.pipe(S.greaterThanOrEqualTo(1)),
+    title:               S.NonEmptyTrimmedString,
+    updatedAt:           S.DateFromSelf,
 });
 
 // --- [FUNCTIONS] -------------------------------------------------------------
@@ -43,23 +79,23 @@ class CheckpointService extends Effect.Service<CheckpointService>()('kargadan/Ch
     effect: Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient;
         const store = yield* Ref.make({
-            artifacts: [] as ReadonlyArray<Kargadan.RetrievalArtifact>,
-            events:    [] as ReadonlyArray<Kargadan.RunEvent>,
-            snapshots: [] as ReadonlyArray<Kargadan.RunSnapshot>,
+            artifacts: [] as ReadonlyArray<typeof RetrievalArtifactSchema.Type>,
+            events:    [] as ReadonlyArray<typeof RunEventSchema.Type>,
+            snapshots: [] as ReadonlyArray<typeof RunSnapshotSchema.Type>,
         });
         const appendArtifact = Effect.fn('kargadan.checkpoint.append.artifact')((input: unknown) =>
-            S.decodeUnknown(Kargadan.RetrievalArtifactSchema)(input).pipe(
+            S.decodeUnknown(RetrievalArtifactSchema)(input).pipe(
                 Effect.flatMap((decoded) => Ref.update(store, (c) => ({ ...c, artifacts: [...c.artifacts, decoded] }))),
             ),
         );
         const appendTransition = Effect.fn('kargadan.checkpoint.append.transition')((input: unknown) =>
-            S.decodeUnknown(Kargadan.RunEventSchema)(input).pipe(
+            S.decodeUnknown(RunEventSchema)(input).pipe(
                 Effect.flatMap((decoded) => Ref.update(store, (c) => ({ ...c, events: [...c.events, decoded] }))),
             ),
         );
         const snapshot = Effect.fn('kargadan.checkpoint.snapshot')(
             (input: { readonly appId: string; readonly runId: string; readonly sequence: number; readonly state: unknown }) =>
-                S.decode(Kargadan.RunSnapshotSchema)({
+                S.decode(RunSnapshotSchema)({
                     appId: input.appId, createdAt: new Date(), runId: input.runId,
                     sequence: input.sequence, snapshotHash: hashCanonicalState(input.state), state: input.state,
                 }).pipe(Effect.flatMap((decoded) => Ref.update(store, (c) => ({ ...c, snapshots: [...c.snapshots, decoded] })))),
