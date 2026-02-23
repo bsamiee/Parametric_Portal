@@ -4,8 +4,11 @@
  */
 import { createHash } from 'node:crypto';
 import * as SqlClient from '@effect/sql/SqlClient';
-import { TelemetryContextSchema } from '../protocol/schemas';
 import { Effect, Match, Option, Ref, Schema as S } from 'effect';
+
+// --- [TYPES] -----------------------------------------------------------------
+
+type TransitionRecord = { readonly appId: string; readonly eventId?: string; readonly eventType: string; readonly payload: unknown; readonly requestId?: string; readonly runId: string; readonly sequence: number; readonly sessionId: string };
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
@@ -23,46 +26,9 @@ const _rowSchema = S.Struct({
     stateHash:           S.String,
     updatedAt:           S.DateFromString,
 });
-const RunEventSchema = S.Struct({
-    appId:            S.UUID,
-    createdAt:        S.DateFromSelf,
-    eventId:          S.UUID,
-    eventType:        S.NonEmptyTrimmedString,
-    idempotency:      S.optional(S.Struct({
-        idempotencyKey: S.String.pipe(S.pattern(/^[A-Za-z0-9:_-]{8,128}$/)),
-        payloadHash:    S.String.pipe(S.pattern(/^[a-f0-9]{64}$/)),
-    })),
-    payload:          S.Unknown,
-    requestId:        S.UUID,
-    runId:            S.UUID,
-    sequence:         S.Int.pipe(S.greaterThanOrEqualTo(1)),
-    sessionId:        S.UUID,
-    telemetryContext: TelemetryContextSchema,
-});
-const RunSnapshotSchema = S.Struct({
-    appId:        S.UUID,
-    createdAt:    S.DateFromSelf,
-    runId:        S.UUID,
-    sequence:     S.Int.pipe(S.greaterThanOrEqualTo(1)),
-    snapshotHash: S.NonEmptyTrimmedString,
-    state:        S.Unknown,
-});
-const RetrievalArtifactSchema = S.Struct({
-    appId:               S.UUID,
-    artifactId:          S.UUID,
-    artifactType:        S.Literal('decision', 'constraint', 'fact', 'verification', 'incident'),
-    body:                S.NonEmptyString,
-    createdAt:           S.DateFromSelf,
-    metadata:            S.Unknown,
-    runId:               S.UUID,
-    sourceEventSequence: S.Int.pipe(S.greaterThanOrEqualTo(1)),
-    title:               S.NonEmptyTrimmedString,
-    updatedAt:           S.DateFromSelf,
-});
 
 // --- [FUNCTIONS] -------------------------------------------------------------
 
-// Why: deterministic hashing requires recursive key-sorting for objects, preserving array order and primitives
 const _canonicalize = (v: unknown): unknown =>
     Match.value(v).pipe(
         Match.when(Match.instanceOf(Array), (values) => values.map(_canonicalize)),
@@ -72,45 +38,24 @@ const _canonicalize = (v: unknown): unknown =>
         Match.orElse((x) => x),
     );
 const hashCanonicalState = (state: unknown) => createHash('sha256').update(JSON.stringify(_canonicalize(state))).digest('hex');
+const verifySceneState = (storedHash: string, candidateHash: string) => ({ diverged: storedHash !== candidateHash } as const);
 
 // --- [SERVICES] --------------------------------------------------------------
 
 class CheckpointService extends Effect.Service<CheckpointService>()('kargadan/CheckpointService', {
     effect: Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient;
-        const store = yield* Ref.make({
-            artifacts: [] as ReadonlyArray<typeof RetrievalArtifactSchema.Type>,
-            events:    [] as ReadonlyArray<typeof RunEventSchema.Type>,
-            snapshots: [] as ReadonlyArray<typeof RunSnapshotSchema.Type>,
-        });
-        const appendArtifact = Effect.fn('kargadan.checkpoint.append.artifact')((input: unknown) =>
-            S.decodeUnknown(RetrievalArtifactSchema)(input).pipe(
-                Effect.flatMap((decoded) => Ref.update(store, (c) => ({ ...c, artifacts: [...c.artifacts, decoded] }))),
-            ),
-        );
-        const appendTransition = Effect.fn('kargadan.checkpoint.append.transition')((input: unknown) =>
-            S.decodeUnknown(RunEventSchema)(input).pipe(
-                Effect.flatMap((decoded) => Ref.update(store, (c) => ({ ...c, events: [...c.events, decoded] }))),
-            ),
-        );
-        const snapshot = Effect.fn('kargadan.checkpoint.snapshot')(
-            (input: { readonly appId: string; readonly runId: string; readonly sequence: number; readonly state: unknown }) =>
-                S.decode(RunSnapshotSchema)({
-                    appId: input.appId, createdAt: new Date(), runId: input.runId,
-                    sequence: input.sequence, snapshotHash: hashCanonicalState(input.state), state: input.state,
-                }).pipe(Effect.flatMap((decoded) => Ref.update(store, (c) => ({ ...c, snapshots: [...c.snapshots, decoded] })))),
+        const store = yield* Ref.make({ events: [] as ReadonlyArray<TransitionRecord> });
+        const appendTransition = Effect.fn('kargadan.checkpoint.append')((input: TransitionRecord) =>
+            Ref.update(store, (c) => ({ ...c, events: [...c.events, input] })),
         );
         const replay = Effect.fn('kargadan.checkpoint.replay')(
-            (input: { readonly runId: string; readonly expectedHash?: string | undefined }) =>
+            (input: { readonly expectedHash?: string; readonly runId: string }) =>
                 Ref.get(store).pipe(Effect.map((current) => {
                     const events = current.events.filter((e) => e.runId === input.runId).toSorted((a, b) => a.sequence - b.sequence);
                     const stateHash = hashCanonicalState(events.map((e) => ({ eventType: e.eventType, payload: e.payload, sequence: e.sequence })));
-                    const snapshotHash = current.snapshots.filter((s) => s.runId === input.runId).toSorted((a, b) => b.sequence - a.sequence).at(0)?.snapshotHash;
-                    return { events, expectedHash: input.expectedHash, matchesExpected: input.expectedHash === undefined || input.expectedHash === stateHash, snapshotHash, stateHash } as const;
+                    return { events, matchesExpected: input.expectedHash === undefined || input.expectedHash === stateHash, stateHash } as const;
                 })),
-        );
-        const listArtifacts = Effect.fn('kargadan.checkpoint.listArtifacts')((runId: string) =>
-            Ref.get(store).pipe(Effect.map((c) => c.artifacts.filter((a) => a.runId === runId))),
         );
         const save = Effect.fn('kargadan.checkpoint.save')((input: {
             readonly conversationHistory: ReadonlyArray<unknown>;
@@ -148,22 +93,13 @@ class CheckpointService extends Effect.Service<CheckpointService>()('kargadan/Ch
                 ),
             ),
         );
-        const verifySceneState = Effect.fn('kargadan.checkpoint.verifySceneState')(
-            (sessionId: string, currentSceneHash: string) =>
-                restore(sessionId).pipe(
-                    Effect.map(Option.match({
-                        onNone: () => ({ checkpoint: Option.none(), diverged: false }),
-                        onSome: (row) => ({ checkpoint: Option.some(row), diverged: row.stateHash !== currentSceneHash }),
-                    })),
-                ),
-        );
-        const remove = Effect.fn('kargadan.checkpoint.delete')((sessionId: string) =>
+        const remove = Effect.fn('kargadan.checkpoint.remove')((sessionId: string) =>
             sql`DELETE FROM ${sql(_table)} WHERE session_id = ${sessionId}`.pipe(Effect.asVoid),
         );
-        return { appendArtifact, appendTransition, listArtifacts, remove, replay, restore, save, snapshot, verifySceneState } as const;
+        return { appendTransition, remove, replay, restore, save } as const;
     }),
 }) {}
 
 // --- [EXPORT] ----------------------------------------------------------------
 
-export { CheckpointService, hashCanonicalState };
+export { CheckpointService, hashCanonicalState, verifySceneState };

@@ -1,13 +1,9 @@
-/**
- * Consolidates transport concerns for the Kargadan harness: port discovery, reconnection supervision, and WebSocket request/event routing.
- * Correlates request/response pairs via Deferred-keyed pending map, and drains event envelopes into an unbounded queue.
- */
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import * as FileSystem from '@effect/platform/FileSystem';
 import * as Socket from '@effect/platform/Socket';
 import { Data, Deferred, Duration, Effect, HashMap, Layer, Option, Queue, Ref, Schedule, Schema as S } from 'effect';
-import { type EventEnvelopeSchema, InboundEnvelopeSchema, OutboundEnvelopeSchema } from './protocol/schemas';
+import { EnvelopeSchema } from './protocol/schemas';
 import { HarnessConfig } from './config';
 
 // --- [TYPES] -----------------------------------------------------------------
@@ -82,7 +78,7 @@ class ReconnectionSupervisor extends Effect.Service<ReconnectionSupervisor>()('k
                     );
                 }),
         );
-        return { control: { requireConnected: _requireConnected, supervise: _supervise }, read: { connectionState, isConnected: Ref.get(connectionState).pipe(Effect.map((s) => s === 'connected')) } } as const;
+        return { control: { requireConnected: _requireConnected, supervise: _supervise } } as const;
     }),
 }) {}
 
@@ -91,23 +87,23 @@ class KargadanSocketClient extends Effect.Service<KargadanSocketClient>()('karga
         const socket = yield* Socket.Socket;
         const reconnectSupervisor = yield* ReconnectionSupervisor;
         const writer = yield* socket.writer;
-        const pending = yield* Ref.make(HashMap.empty<string, Deferred.Deferred<typeof InboundEnvelopeSchema.Type>>());
-        const events = yield* Queue.unbounded<typeof EventEnvelopeSchema.Type>();
+        const pending = yield* Ref.make(HashMap.empty<string, Deferred.Deferred<typeof EnvelopeSchema.Type>>());
+        const events = yield* Queue.unbounded<Extract<typeof EnvelopeSchema.Type, {_tag: 'event'}>>();
         const lastMessageAt = yield* Ref.make<Option.Option<number>>(Option.none());
-        const decodeInbound = S.decodeUnknown(S.parseJson(InboundEnvelopeSchema));
-        const encodeOutbound = S.encode(S.parseJson(OutboundEnvelopeSchema));
+        const decode = S.decodeUnknown(S.parseJson(EnvelopeSchema));
+        const encode = S.encode(S.parseJson(EnvelopeSchema));
         const _failAllPending = (reason: string) =>
-            Ref.getAndSet(pending, HashMap.empty<string, Deferred.Deferred<typeof InboundEnvelopeSchema.Type>>()).pipe(
+            Ref.getAndSet(pending, HashMap.empty<string, Deferred.Deferred<typeof EnvelopeSchema.Type>>()).pipe(
                 Effect.flatMap((old) => Effect.forEach(HashMap.values(old), (d) => Deferred.die(d, new SocketClientError({ issue: _SocketClientIssue.Disconnected({ reason }) })).pipe(Effect.ignore), { discard: true })),
             );
-        const _request = Effect.fn('kargadan.socket.request')((envelope: Extract<typeof OutboundEnvelopeSchema.Type, { readonly identity: unknown }>) => {
-            const requestId = envelope.identity.requestId;
+        const _request = Effect.fn('kargadan.socket.request')((envelope: typeof EnvelopeSchema.Type) => {
+            const requestId = envelope.requestId;
             return Effect.gen(function* () {
                 const timeoutMs = yield* HarnessConfig.commandDeadlineMs;
-                const deferred = yield* Deferred.make<typeof InboundEnvelopeSchema.Type>();
+                const deferred = yield* Deferred.make<typeof EnvelopeSchema.Type>();
                 yield* Ref.update(pending, HashMap.set(requestId, deferred));
                 yield* reconnectSupervisor.control.requireConnected;
-                const json = yield* encodeOutbound(envelope).pipe(
+                const json = yield* encode(envelope).pipe(
                     Effect.mapError((cause) => new SocketClientError({ issue: _SocketClientIssue.TransportFailure({ cause, stage: 'encode' }) })),
                 );
                 yield* writer(json).pipe(
@@ -120,20 +116,19 @@ class KargadanSocketClient extends Effect.Service<KargadanSocketClient>()('karga
         });
         const _dispatchChunk = (chunk: Uint8Array) =>
             Effect.gen(function* () {
-                const envelope = yield* decodeInbound(new TextDecoder().decode(chunk)).pipe(
+                const envelope = yield* decode(new TextDecoder().decode(chunk)).pipe(
                     Effect.mapError((cause) => new SocketClientError({ issue: _SocketClientIssue.TransportFailure({ cause, stage: 'decode' }) })),
                 );
                 yield* Ref.set(lastMessageAt, Option.some(Date.now()));
                 // Why: event envelopes go to queue; responses resolve pending deferreds via requestId correlation
                 return yield* envelope._tag === 'event'
                     ? Queue.offer(events, envelope)
-                    : Ref.modify(pending, (entries) => [HashMap.get(entries, envelope.identity.requestId), HashMap.remove(entries, envelope.identity.requestId)] as const).pipe(
+                    : Ref.modify(pending, (entries) => [HashMap.get(entries, envelope.requestId), HashMap.remove(entries, envelope.requestId)] as const).pipe(
                         Effect.flatMap((opt) => Option.isSome(opt) ? Deferred.succeed(opt.value, envelope) : Effect.void),
                     );
             }).pipe(Effect.catchTag('SocketClientError', (error) => Effect.logWarning('kargadan.socket.decode.failed', { issue: error.issue })));
-        const _heartbeatStalenessChecker = Effect.gen(function* () {
-            const timeoutMs = yield* HarnessConfig.heartbeatTimeoutMs;
-            return Ref.get(lastMessageAt).pipe(
+        const _heartbeatStalenessChecker = HarnessConfig.heartbeatTimeoutMs.pipe(Effect.flatMap((timeoutMs) =>
+            Ref.get(lastMessageAt).pipe(
                 Effect.flatMap(Option.match({
                     onNone: () => Effect.void,
                     onSome: (t) => {
@@ -144,8 +139,8 @@ class KargadanSocketClient extends Effect.Service<KargadanSocketClient>()('karga
                     },
                 })),
                 Effect.schedule(Schedule.fixed(Duration.millis(timeoutMs))),
-            );
-        });
+            ),
+        ));
         return {
             lifecycle: {
                 stalenessChecker: _heartbeatStalenessChecker,
