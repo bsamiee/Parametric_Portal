@@ -23,6 +23,7 @@ namespace ParametricPortal.Kargadan.Plugin.src.transport;
 internal delegate Task<Fin<JsonElement>> MessageDispatcher(
     TransportMessageTag tag,
     JsonElement message,
+    Func<JsonElement, Task> sendAckAsync,
     CancellationToken cancellationToken);
 
 // --- [ADAPTER] ---------------------------------------------------------------
@@ -265,6 +266,7 @@ internal sealed class WebSocketHost : IDisposable {
         ReadOnlyMemory<byte> messageBytes,
         CancellationToken cancellationToken) {
         Fin<JsonElement> responseResult = await BuildResponseAsync(
+            webSocket: webSocket,
             messageBytes: messageBytes,
             cancellationToken: cancellationToken).ConfigureAwait(false);
         byte[] responseBytes = SerializeResponse(responseResult: responseResult);
@@ -275,25 +277,47 @@ internal sealed class WebSocketHost : IDisposable {
             cancellationToken: cancellationToken).ConfigureAwait(false);
     }
     private async Task<Fin<JsonElement>> BuildResponseAsync(
+        WebSocket webSocket,
         ReadOnlyMemory<byte> messageBytes,
         CancellationToken cancellationToken) {
         try {
             JsonElement message = JsonSerializer.Deserialize<JsonElement>(messageBytes.Span);
-            return await DispatchByTagAsync(message: message, cancellationToken: cancellationToken).ConfigureAwait(false);
+            return await DispatchByTagAsync(
+                webSocket: webSocket,
+                message: message,
+                cancellationToken: cancellationToken).ConfigureAwait(false);
         } catch (JsonException exception) {
             RhinoApp.WriteLine($"[Kargadan] Message parse error: {exception.Message}");
             return Fin.Fail<JsonElement>(Error.New(message: exception.Message));
         }
     }
     private Task<Fin<JsonElement>> DispatchByTagAsync(
+        WebSocket webSocket,
         JsonElement message,
         CancellationToken cancellationToken) =>
         ParseTransportTag(message: message).Match(
             Succ: tag => _dispatcher(
                 tag: tag,
                 message: message,
+                sendAckAsync: ackPayload => SendAckAsync(webSocket: webSocket, ackPayload: ackPayload),
                 cancellationToken: cancellationToken),
             Fail: static error => Task.FromResult(Fin.Fail<JsonElement>(error)));
+    private static async Task SendAckAsync(WebSocket webSocket, JsonElement ackPayload) {
+        // why: silently drop ack if socket is no longer open -- ack failure must not propagate
+        switch (webSocket.State) {
+            case WebSocketState.Open:
+                byte[] ackBytes = JsonSerializer.SerializeToUtf8Bytes(
+                    value: ackPayload, options: JsonOptions);
+                await webSocket.SendAsync(
+                    buffer: ackBytes.AsMemory(),
+                    messageType: WebSocketMessageType.Text,
+                    endOfMessage: true,
+                    cancellationToken: CancellationToken.None).ConfigureAwait(false);
+                break;
+            default:
+                break;
+        }
+    }
     private static byte[] SerializeResponse(Fin<JsonElement> responseResult) =>
         responseResult.Match(
             Succ: responseElement => JsonSerializer.SerializeToUtf8Bytes(

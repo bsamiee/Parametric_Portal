@@ -1,4 +1,5 @@
-// Rhino PlugIn entry point; wires EventPublisher, SessionHost, and WebSocketHost in OnLoad; routes handshake and command dispatch to transport and protocol layers.
+// Rhino PlugIn entry point; wires EventPublisher, SessionHost, WebSocketHost, and ObservationPipeline in OnLoad;
+// routes handshake, command dispatch (via CommandExecutor), and observation lifecycle to transport and protocol layers.
 // Singleton constraint is Rhino-imposed — mutability is confined to this adapter; all internal state is Option<T> with None as the unloaded sentinel.
 using System;
 using System.Text.Json;
@@ -9,6 +10,8 @@ using LanguageExt.Common;
 using NodaTime;
 using ParametricPortal.CSharp.Analyzers.Contracts;
 using ParametricPortal.Kargadan.Plugin.src.contracts;
+using ParametricPortal.Kargadan.Plugin.src.execution;
+using ParametricPortal.Kargadan.Plugin.src.observation;
 using ParametricPortal.Kargadan.Plugin.src.protocol;
 using ParametricPortal.Kargadan.Plugin.src.transport;
 using Rhino;
@@ -26,7 +29,8 @@ public sealed class KargadanPlugin : PlugIn {
     private readonly record struct BoundaryState(
         EventPublisher EventPublisher,
         SessionHost SessionHost,
-        WebSocketHost WebSocketHost);
+        WebSocketHost WebSocketHost,
+        ObservationPipeline ObservationPipeline);
     private readonly record struct LifecycleEventPayload(
         EnvelopeIdentity Identity,
         int SourceRevision,
@@ -105,6 +109,9 @@ public sealed class KargadanPlugin : PlugIn {
                         pong: Fin.Succ(heartbeat))));
         });
     // --- [FUNCTIONS] ---------------------------------------------------------
+    // why: observation batch flush callback -- serializes batch and logs; fire-and-forget
+    private static void OnBatchFlushed(EventBatchSummary batch, Instant flushedAt) =>
+        RhinoApp.WriteLine($"[Kargadan] Event batch flushed: {batch.TotalCount} events ({batch.Categories.Count} categories) at {flushedAt}");
     // why: consolidates success/failure lifecycle event publishing — both arms share
     // identical EventEnvelope.Create structure, differing only in delta payload
     private Fin<Unit> PublishLifecycleEvent(BoundaryState state, CommandResultEnvelope result) {
@@ -154,10 +161,11 @@ public sealed class KargadanPlugin : PlugIn {
     private async Task<Fin<JsonElement>> DispatchMessageAsync(
         TransportMessageTag tag,
         JsonElement message,
+        Func<JsonElement, Task> sendAckAsync,
         CancellationToken cancellationToken) =>
         tag switch {
             _ when tag.Equals(TransportMessageTag.HandshakeInit) => await DispatchHandshakeAsync(message: message, cancellationToken: cancellationToken).ConfigureAwait(false),
-            _ when tag.Equals(TransportMessageTag.Command) => await DispatchCommandAsync(message: message, cancellationToken: cancellationToken).ConfigureAwait(false),
+            _ when tag.Equals(TransportMessageTag.Command) => await DispatchCommandAsync(message: message, sendAckAsync: sendAckAsync, cancellationToken: cancellationToken).ConfigureAwait(false),
             _ when tag.Equals(TransportMessageTag.Heartbeat) => SerializeHeartbeat(message: message),
             _ => Fin.Fail<JsonElement>(Error.New(message: $"Unknown message tag: {tag.Key}")),
         };
@@ -179,7 +187,16 @@ public sealed class KargadanPlugin : PlugIn {
     }
     private async Task<Fin<JsonElement>> DispatchCommandAsync(
         JsonElement message,
+        Func<JsonElement, Task> sendAckAsync,
         CancellationToken cancellationToken) {
+        // Phase 1: send immediate ack before UI thread dispatch
+        JsonElement ackPayload = ExtractAckPayload(message: message);
+        await sendAckAsync(ackPayload).ConfigureAwait(false);
+        // Phase 2: extract per-command deadline and create linked timeout
+        int deadlineMs = ExtractDeadlineMs(message: message);
+        using CancellationTokenSource timeoutCts =
+            CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeoutCts.CancelAfter(millisecondsDelay: deadlineMs);
         Fin<JsonElement> result = await ThreadMarshaler.RunOnUiThreadAsync(() =>
             ReadState().Bind((BoundaryState state) => {
                 Instant now = Instant.FromDateTimeOffset(_timeProvider.GetUtcNow());
@@ -187,14 +204,129 @@ public sealed class KargadanPlugin : PlugIn {
                     HandleCommand(
                         envelope: message,
                         sessionIdentity: snapshot.Identity,
-                        onCommand: static (_) => Fin.Fail<CommandResultEnvelope>(
-                            Error.New(message: "Command execution not yet implemented."))
-                    ).Map((CommandResultEnvelope envelope) =>
-                        JsonSerializer.SerializeToElement(value: envelope, options: JsonOptions)));
+                        onCommand: (CommandEnvelope envelope) => ExecuteCommand(
+                            state: state, envelope: envelope))
+                    .Map((CommandResultEnvelope resultEnvelope) =>
+                        JsonSerializer.SerializeToElement(value: resultEnvelope, options: JsonOptions)));
             })
-        ).WaitAsync(cancellationToken).ConfigureAwait(false);
+        ).WaitAsync(timeoutCts.Token).ConfigureAwait(false);
         return result;
     }
+    private static Fin<CommandResultEnvelope> ExecuteCommand(
+        BoundaryState state,
+        CommandEnvelope envelope) {
+        RhinoDoc? doc = RhinoDoc.ActiveDoc;
+        return doc switch {
+            null => Fin.Fail<CommandResultEnvelope>(
+                Error.New(message: "No active Rhino document.")),
+            _ => ExecuteCommandWithDoc(state: state, envelope: envelope, doc: doc),
+        };
+    }
+    private static Fin<CommandResultEnvelope> ExecuteCommandWithDoc(
+        BoundaryState state,
+        CommandEnvelope envelope,
+        RhinoDoc doc) {
+        Fin<JsonElement> executionResult = DispatchOperation(
+            doc: doc, envelope: envelope, state: state);
+        return BuildCommandResult(envelope: envelope, executionResult: executionResult);
+    }
+    private static Fin<JsonElement> DispatchOperation(
+        RhinoDoc doc,
+        CommandEnvelope envelope,
+        BoundaryState state) =>
+        envelope.Operation switch {
+            _ when envelope.Operation.Equals(CommandOperation.ScriptRun) =>
+                CommandExecutor.ExecuteScript(
+                    doc: doc,
+                    commandScript: ExtractScript(payload: envelope.Payload),
+                    echo: true)
+                .Map(static (ScriptResult scriptResult) =>
+                    JsonSerializer.SerializeToElement(value: scriptResult)),
+            _ when envelope.Operation.Key.StartsWith("read.", StringComparison.Ordinal) =>
+                Fin.Fail<JsonElement>(
+                    Error.New(message: $"Read operation '{envelope.Operation.Key}' dispatch not yet implemented.")),
+            _ => CommandExecutor.ExecuteDirectApi(
+                doc: doc,
+                envelope: envelope,
+                handler: static (RhinoDoc handlerDoc, CommandEnvelope handlerEnvelope) =>
+                    Fin.Fail<JsonElement>(
+                        Error.New(message: $"Direct API handler for '{handlerEnvelope.Operation.Key}' not yet implemented.")),
+                onUndoRedo: (AgentUndoState undoState, bool isUndo) =>
+                    PublishUndoEvent(state: state, undoState: undoState, isUndo: isUndo)),
+        };
+    private static void PublishUndoEvent(
+        BoundaryState state,
+        AgentUndoState undoState,
+        bool isUndo) {
+        Fin<EventId> eventId = DomainBridge.ParseValueObject<EventId, Guid>(Guid.NewGuid());
+        _ = eventId.Map((EventId undoEventId) => {
+            JsonElement delta = JsonSerializer.SerializeToElement(new {
+                requestId = (Guid)undoState.RequestId,
+                undoSerial = undoState.UndoSerial,
+                isUndo,
+            });
+            // why: best-effort publish -- undo event notification failure should not block undo operation
+            return unit;
+        });
+    }
+    private static string ExtractScript(JsonElement payload) =>
+        payload.TryGetProperty("script", out JsonElement scriptElement) switch {
+            true when scriptElement.ValueKind == JsonValueKind.String =>
+                scriptElement.GetString() ?? string.Empty,
+            _ => string.Empty,
+        };
+    private static JsonElement ExtractAckPayload(JsonElement message) {
+        string requestId = message.TryGetProperty("identity", out JsonElement identity)
+            && identity.TryGetProperty("requestId", out JsonElement reqId)
+            && reqId.ValueKind == JsonValueKind.String
+                ? reqId.GetString() ?? string.Empty
+                : string.Empty;
+        return JsonSerializer.SerializeToElement(new {
+            _tag = "command.ack",
+            requestId,
+        });
+    }
+    private static int ExtractDeadlineMs(JsonElement message) =>
+        message.TryGetProperty("deadlineMs", out JsonElement deadlineElement)
+            && deadlineElement.TryGetInt32(out int deadline)
+            && deadline > 0
+                ? deadline
+                : 30_000;
+    private static Fin<CommandResultEnvelope> BuildCommandResult(
+        CommandEnvelope envelope,
+        Fin<JsonElement> executionResult) =>
+        executionResult.Match(
+            Succ: (JsonElement payload) => ExecutionMetadata.Create(
+                durationMs: 0,
+                pluginRevision: VersionString.Create("0.0.0"),
+                sourceRevision: 0)
+                .ToFin()
+                .Map((ExecutionMetadata metadata) => (CommandResultEnvelope)new CommandResultEnvelope.Success(
+                    Identity: envelope.Identity,
+                    Dedupe: new DedupeMetadata(
+                        Decision: DedupeDecision.Executed,
+                        OriginalRequestId: envelope.Identity.RequestId),
+                    Result: payload,
+                    Execution: metadata,
+                    TelemetryContext: envelope.TelemetryContext)),
+            Fail: (Error error) => ExecutionMetadata.Create(
+                durationMs: 0,
+                pluginRevision: VersionString.Create("0.0.0"),
+                sourceRevision: 0)
+                .ToFin()
+                .Map((ExecutionMetadata metadata) => (CommandResultEnvelope)new CommandResultEnvelope.Failure(
+                    Identity: envelope.Identity,
+                    Dedupe: new DedupeMetadata(
+                        Decision: DedupeDecision.Executed,
+                        OriginalRequestId: envelope.Identity.RequestId),
+                    Result: JsonSerializer.SerializeToElement(new { error = error.Message }),
+                    Execution: metadata,
+                    Error: new CommandErrorEnvelope(
+                        Reason: new FailureReason(
+                            Code: ErrorCode.UnexpectedRuntime,
+                            Message: error.Message),
+                        Details: None),
+                    TelemetryContext: envelope.TelemetryContext)));
     private Fin<JsonElement> SerializeHeartbeat(JsonElement message) {
         HeartbeatEnvelope? heartbeat = JsonSerializer.Deserialize<HeartbeatEnvelope>(
             element: message, options: JsonOptions);
@@ -211,11 +343,17 @@ public sealed class KargadanPlugin : PlugIn {
     protected override LoadReturnCode OnLoad(ref string errorMessage) {
         _ = _instance.Swap((_) => Some(this));
         _ = _state.Swap((_) => {
+            EventPublisher eventPublisher = new();
+            ObservationPipeline observationPipeline = new(
+                onBatchFlushed: OnBatchFlushed,
+                timeProvider: _timeProvider);
             WebSocketHost webSocketHost = new(dispatcher: DispatchMessageAsync);
             BoundaryState boundaryState = new(
-                EventPublisher: new EventPublisher(),
+                EventPublisher: eventPublisher,
                 SessionHost: new SessionHost(),
-                WebSocketHost: webSocketHost);
+                WebSocketHost: webSocketHost,
+                ObservationPipeline: observationPipeline);
+            observationPipeline.Start();
             webSocketHost.Start();
             return Some(boundaryState);
         });
@@ -224,6 +362,8 @@ public sealed class KargadanPlugin : PlugIn {
     protected override void OnShutdown() {
         Instant now = Instant.FromDateTimeOffset(_timeProvider.GetUtcNow());
         _ = ReadState().Bind((BoundaryState state) => {
+            state.ObservationPipeline.Stop();
+            state.ObservationPipeline.Dispose();
             state.WebSocketHost.Dispose();
             return state.SessionHost.Close(reason: "plugin-shutdown", now: now).Map((_) => unit);
         });

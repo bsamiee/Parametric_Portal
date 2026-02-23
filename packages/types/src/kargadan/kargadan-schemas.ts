@@ -32,7 +32,7 @@ const IdempotencySchema =  S.Struct({
 const CommandOperationSchema = S.Literal(
     'read.scene.summary',    'read.object.metadata', 'read.object.geometry', 'read.layer.state',    'read.view.state',
     'read.tolerance.units',  'write.object.create',  'write.object.update',  'write.object.delete', 'write.layer.update',
-    'write.viewport.update', 'write.annotation.update',
+    'write.viewport.update', 'write.annotation.update', 'script.run',
 );
 const SceneObjectTypeSchema = S.Literal('Brep', 'Mesh', 'Curve', 'Surface', 'Annotation', 'Instance', 'LayoutDetail');
 const SceneObjectRefSchema = S.Struct({
@@ -93,7 +93,7 @@ const EventEnvelopeSchema = S.Struct({
     causationRequestId: S.optional(S.UUID),
     delta:              S.Unknown,
     eventId:            S.UUID,
-    eventType:          S.Literal('objects.changed', 'layers.changed', 'view.changed', 'undo.redo', 'session.lifecycle', 'stream.compacted'),
+    eventType:          S.Literal('objects.changed', 'layers.changed', 'view.changed', 'undo.redo', 'session.lifecycle', 'stream.compacted', 'selection.changed', 'material.changed', 'properties.changed', 'tables.changed'),
     identity:           EnvelopeIdentitySchema,
     sourceRevision:     S.Int.pipe(S.greaterThanOrEqualTo(0)),
     telemetryContext:   TelemetryContextSchema,
@@ -141,6 +141,43 @@ const RetrievalArtifactSchema = S.Struct({
     updatedAt:           S.DateFromSelf,
 });
 
+// --- [EXECUTION_SCHEMAS] -----------------------------------------------------
+
+const EventTypeSchema = S.Literal(
+    'objects.changed', 'layers.changed', 'view.changed', 'undo.redo', 'session.lifecycle', 'stream.compacted',
+    'selection.changed', 'material.changed', 'properties.changed', 'tables.changed',
+);
+const CommandExecutionModeSchema = S.Literal('direct_api', 'script');
+const CommandCategorySchema = S.Literal('read', 'write', 'geometric');
+const EventSubtypeSchema = S.Literal(
+    'added', 'deleted', 'replaced', 'modified', 'undeleted',
+    'selected', 'deselected', 'deselect_all', 'properties_changed',
+);
+const ScriptResultSchema = S.Struct({
+    commandName:         S.NonEmptyTrimmedString,
+    commandResult:       S.Int.pipe(S.greaterThanOrEqualTo(0), S.lessThanOrEqualTo(6)),
+    objectsCreatedCount: S.Int.pipe(S.greaterThanOrEqualTo(0)),
+});
+const SubtypeCountSchema = S.Struct({
+    count:   S.Int.pipe(S.greaterThanOrEqualTo(0)),
+    subtype: EventSubtypeSchema,
+});
+const CategoryCountSchema = S.Struct({
+    category: EventTypeSchema,
+    count:    S.Int.pipe(S.greaterThanOrEqualTo(0)),
+    subtypes: S.Array(SubtypeCountSchema),
+});
+const EventBatchSummarySchema = S.Struct({
+    batchWindowMs:    S.Int.pipe(S.greaterThan(0)),
+    categories:       S.Array(CategoryCountSchema),
+    containsUndoRedo: S.Boolean,
+    totalCount:       S.Int.pipe(S.greaterThanOrEqualTo(0)),
+});
+const CommandAckSchema = S.Struct({
+    _tag:      S.Literal('command.ack'),
+    requestId: S.UUID,
+});
+
 // --- [UNIONS] ----------------------------------------------------------------
 
 const InboundEnvelopeSchema = S.Union(
@@ -154,30 +191,40 @@ const OutboundEnvelopeSchema = S.Union(
 
 // biome-ignore lint/correctness/noUnusedVariables: const+namespace merge pattern
 const Kargadan = {
-    CommandEnvelopeSchema, CommandOperationSchema, EventEnvelopeSchema, FailureReasonSchema, HandshakeEnvelopeSchema, HeartbeatEnvelopeSchema,
-    IdempotencySchema, InboundEnvelopeSchema, OutboundEnvelopeSchema, ProtocolVersionSchema, ResultEnvelopeSchema, RetrievalArtifactSchema,
-    RunEventSchema, RunSnapshotSchema, RunStatusSchema, TelemetryContextSchema,
+    CategoryCountSchema, CommandAckSchema, CommandCategorySchema, CommandEnvelopeSchema, CommandExecutionModeSchema, CommandOperationSchema,
+    EventBatchSummarySchema, EventEnvelopeSchema, EventSubtypeSchema, EventTypeSchema, FailureReasonSchema, HandshakeEnvelopeSchema,
+    HeartbeatEnvelopeSchema, IdempotencySchema, InboundEnvelopeSchema, OutboundEnvelopeSchema, ProtocolVersionSchema, ResultEnvelopeSchema,
+    RetrievalArtifactSchema, RunEventSchema, RunSnapshotSchema, RunStatusSchema, ScriptResultSchema, SubtypeCountSchema, TelemetryContextSchema,
 } as const;
 
 // --- [NAMESPACE] -------------------------------------------------------------
 
 namespace Kargadan {
-    export type CommandEnvelope =   typeof CommandEnvelopeSchema.Type;
-    export type CommandOperation =  typeof CommandOperationSchema.Type;
-    export type EnvelopeIdentity =  typeof EnvelopeIdentitySchema.Type;
-    export type EventEnvelope =     typeof EventEnvelopeSchema.Type;
-    export type FailureClass =      typeof FailureClassSchema.Type;
-    export type FailureReason =     typeof FailureReasonSchema.Type;
-    export type HandshakeEnvelope = typeof HandshakeEnvelopeSchema.Type;
-    export type HeartbeatEnvelope = typeof HeartbeatEnvelopeSchema.Type;
-    export type InboundEnvelope =   typeof InboundEnvelopeSchema.Type;
-    export type OutboundEnvelope =  typeof OutboundEnvelopeSchema.Type;
-    export type ProtocolVersion =   typeof ProtocolVersionSchema.Type;
-    export type ResultEnvelope =    typeof ResultEnvelopeSchema.Type;
-    export type RetrievalArtifact = typeof RetrievalArtifactSchema.Type;
-    export type RunEvent =          typeof RunEventSchema.Type;
-    export type RunSnapshot =       typeof RunSnapshotSchema.Type;
-    export type TelemetryContext =  typeof TelemetryContextSchema.Type;
+    export type CategoryCount =         typeof CategoryCountSchema.Type;
+    export type CommandAck =            typeof CommandAckSchema.Type;
+    export type CommandCategory =       typeof CommandCategorySchema.Type;
+    export type CommandEnvelope =       typeof CommandEnvelopeSchema.Type;
+    export type CommandExecutionMode =  typeof CommandExecutionModeSchema.Type;
+    export type CommandOperation =      typeof CommandOperationSchema.Type;
+    export type EnvelopeIdentity =      typeof EnvelopeIdentitySchema.Type;
+    export type EventBatchSummary =     typeof EventBatchSummarySchema.Type;
+    export type EventEnvelope =         typeof EventEnvelopeSchema.Type;
+    export type EventSubtype =          typeof EventSubtypeSchema.Type;
+    export type EventType =             typeof EventTypeSchema.Type;
+    export type FailureClass =          typeof FailureClassSchema.Type;
+    export type FailureReason =         typeof FailureReasonSchema.Type;
+    export type HandshakeEnvelope =     typeof HandshakeEnvelopeSchema.Type;
+    export type HeartbeatEnvelope =     typeof HeartbeatEnvelopeSchema.Type;
+    export type InboundEnvelope =       typeof InboundEnvelopeSchema.Type;
+    export type OutboundEnvelope =      typeof OutboundEnvelopeSchema.Type;
+    export type ProtocolVersion =       typeof ProtocolVersionSchema.Type;
+    export type ResultEnvelope =        typeof ResultEnvelopeSchema.Type;
+    export type RetrievalArtifact =     typeof RetrievalArtifactSchema.Type;
+    export type RunEvent =              typeof RunEventSchema.Type;
+    export type RunSnapshot =           typeof RunSnapshotSchema.Type;
+    export type ScriptResult =          typeof ScriptResultSchema.Type;
+    export type SubtypeCount =          typeof SubtypeCountSchema.Type;
+    export type TelemetryContext =      typeof TelemetryContextSchema.Type;
 }
 
 // --- [EXPORT] ----------------------------------------------------------------
