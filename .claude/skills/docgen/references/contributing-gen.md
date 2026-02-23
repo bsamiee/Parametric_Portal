@@ -32,61 +32,37 @@ Before generating, gather information from:
 
 ### [2.1][DEVELOPMENT_SETUP]
 
-Exact commands from clone to running tests:
-
-```markdown
-## Development Setup
-
-```sh
-git clone <repo-url>
-cd <repo>
-pnpm install
-pnpm test
-```
-```
+Exact commands from clone to running tests. Section contains one H2 heading (`## Development Setup`) followed by a single `sh` fenced code block with four sequential commands: `git clone <repo-url>`, `cd <repo>`, `pnpm install`, `pnpm test`.
 
 Include fork vs. direct clone policy, required environment variables, database setup if applicable.
 
 ---
 ### [2.2][WORKFLOW]
 
-Branch naming, commit conventions, PR process:
+Branch naming, commit conventions, PR process. Section contains one H2 heading (`## Workflow`) followed by a numbered list of four steps:
 
-```markdown
-## Workflow
-
-1. Create branch from `main`: `feat/short-description` or `fix/short-description`.
-2. Commit using Conventional Commits: `feat:`, `fix:`, `docs:`, `refactor:`.
-3. Push; open PR against `main`.
-4. Address review feedback; all CI checks pass before merge.
-```
+1. **Branch creation:** Create branch from `main` using `feat/short-description` or `fix/short-description` convention.
+2. **Commit format:** Conventional Commits prefixes — `feat:`, `fix:`, `docs:`, `refactor:`.
+3. **PR submission:** Push branch; open PR against `main`.
+4. **Review cycle:** Address feedback; all CI checks pass before merge.
 
 ---
 ### [2.3][CODE_STANDARDS]
 
-Link to language-specific standards; do not inline them:
+Link to language-specific standards; do not inline them. Section contains one H2 heading (`## Code Standards`) followed by a bullet list linking each language to its standards document:
 
-```markdown
-## Code Standards
-
-- C#: See [csharp-standards](./docs/standards/csharp-standards.md)
-- TypeScript: See [ts-standards](./docs/standards/ts-standards.md)
-- Python: See [python-standards](./docs/standards/python-standards.md)
-```
+- **C#:** `[csharp-standards](./docs/standards/csharp-standards.md)`
+- **TypeScript:** `[ts-standards](./docs/standards/ts-standards.md)`
+- **Python:** `[python-standards](./docs/standards/python-standards.md)`
 
 ---
 ### [2.4][TESTING]
 
-Commands and coverage expectations:
+Commands and coverage expectations. Section contains one H2 heading (`## Testing`) followed by two inline code commands and a coverage threshold statement:
 
-```markdown
-## Testing
-
-Run all tests: `pnpm test`
-Run with coverage: `pnpm test:coverage`
-
-Coverage threshold: 80% line coverage; PRs below threshold fail CI.
-```
+- **Run all tests:** `pnpm test`
+- **Run with coverage:** `pnpm test:coverage`
+- **Coverage threshold:** 80% line coverage; PRs below threshold fail CI.
 
 ---
 ### [2.5][ISSUE_REPORTING]

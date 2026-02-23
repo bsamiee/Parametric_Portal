@@ -164,12 +164,12 @@ Per-package READMEs in monorepo workspaces:
 
 Diátaxis framework classifies documentation into four quadrants. READMEs are primarily **Reference** documents with **How-To** elements.
 
-| [INDEX] | [QUADRANT]      | [PURPOSE]                  | [README_APPLICATION]                                     |
-| :-----: | --------------- | -------------------------- | -------------------------------------------------------- |
-|   [1]   | **Tutorial**    | Learning-oriented          | Not a README concern. Tutorials live in `docs/tutorials/`. |
-|   [2]   | **How-To**      | Task-oriented              | Install and Usage sections. Step-by-step, assumes competence. |
-|   [3]   | **Reference**   | Information-oriented       | API, Configuration, Architecture sections. Lookup-focused. |
-|   [4]   | **Explanation** | Understanding-oriented     | Description, Background sections. Context and rationale. |
+| [INDEX] | [QUADRANT]      | [PURPOSE]              | [README_APPLICATION]                                          |
+| :-----: | --------------- | ---------------------- | ------------------------------------------------------------- |
+|   [1]   | **Tutorial**    | Learning-oriented      | Not a README concern. Tutorials live in `docs/tutorials/`.    |
+|   [2]   | **How-To**      | Task-oriented          | Install and Usage sections. Step-by-step, assumes competence. |
+|   [3]   | **Reference**   | Information-oriented   | API, Configuration, Architecture sections. Lookup-focused.    |
+|   [4]   | **Explanation** | Understanding-oriented | Description, Background sections. Context and rationale.      |
 
 **Classification rules per README section:**
 
@@ -193,17 +193,17 @@ Package-level READMEs (scope [2] in §3.1) serve fundamentally different purpose
 
 Required sections for package/workspace READMEs in priority order:
 
-| [INDEX] | [SECTION]              | [CONTENT]                                                     |
-| :-----: | ---------------------- | ------------------------------------------------------------- |
-|   [1]   | **Title**              | Package name matching `package.json` or `*.csproj` name.      |
-|   [2]   | **Purpose**            | One-two sentences: what capability this package provides.     |
-|   [3]   | **Ownership**          | Team name, point of contact, CODEOWNERS path.                 |
-|   [4]   | **Dependencies**       | Internal (`@org/other-package`) and external, with versions.  |
-|   [5]   | **API surface**        | Exported functions/types from the package entry point.        |
-|   [6]   | **Usage examples**     | 2-3 common invocation patterns importing the published name.  |
-|   [7]   | **Important files**    | Annotated listing of key source files and their purpose.      |
-|   [8]   | **Testing**            | Commands to run tests locally, coverage expectations.         |
-|   [9]   | **Build**              | Compilation commands if applicable. Omit for JIT packages.    |
+| [INDEX] | [SECTION]           | [CONTENT]                                                    |
+| :-----: | ------------------- | ------------------------------------------------------------ |
+|   [1]   | **Title**           | Package name matching `package.json` or `*.csproj` name.     |
+|   [2]   | **Purpose**         | One-two sentences: what capability this package provides.    |
+|   [3]   | **Ownership**       | Team name, point of contact, CODEOWNERS path.                |
+|   [4]   | **Dependencies**    | Internal (`@org/other-package`) and external, with versions. |
+|   [5]   | **API surface**     | Exported functions/types from the package entry point.       |
+|   [6]   | **Usage examples**  | 2-3 common invocation patterns importing the published name. |
+|   [7]   | **Important files** | Annotated listing of key source files and their purpose.     |
+|   [8]   | **Testing**         | Commands to run tests locally, coverage expectations.        |
+|   [9]   | **Build**           | Compilation commands if applicable. Omit for JIT packages.   |
 
 ---
 ### [5.2][OWNERSHIP_SECTION]

@@ -102,26 +102,26 @@ Per-document-type checklists for auditing documentation artifacts. Use after cre
 - [ ] Diagrams use Mermaid syntax and render without errors.
 
 ---
-## [8][DETECTION_HEURISTICS]
+## [7][DETECTION_HEURISTICS]
 >**Dictum:** *Searchable patterns enable automated pre-screening.*
 
 <br>
 
-| [INDEX] | [SEARCH_FOR]                                           | [INDICATES]        | [SEVERITY] |
-| :-----: | :----------------------------------------------------- | :----------------- | :--------: |
-|   [1]   | `README.md` missing in project root                    | Missing README     |    High    |
-|   [2]   | `## Install` absent in README                          | TROPHY_README      |    High    |
-|   [3]   | `## Usage` absent in README                            | TROPHY_README      |    High    |
-|   [4]   | ADR without `## Consequences`                          | WALL_OF_TEXT_ADR   |    High    |
-|   [5]   | ADR with single Considered Option                      | Incomplete ADR     |   Medium   |
-|   [6]   | `@param \w+ the \w+` pattern in doc comments           | PARAMETER_NOISE    |   Medium   |
-|   [7]   | `Returns a` followed by type name in doc comments      | TYPE_RESTATING     |   Medium   |
-|   [8]   | `// TODO` without issue link in source files           | Untracked debt     |    Low     |
-|   [9]   | Commented-out code blocks (`// ...` spanning 3+ lines) | Code archaeology   |    Low     |
-|  [10]   | CHANGELOG with commit hashes in entry text             | COMMIT_CHANGELOG   |   Medium   |
+| [INDEX] | [SEARCH_FOR]                                           | [INDICATES]      | [SEVERITY] |
+| :-----: | :----------------------------------------------------- | :--------------- | :--------: |
+|   [1]   | `README.md` missing in project root                    | Missing README   |    High    |
+|   [2]   | `## Install` absent in README                          | TROPHY_README    |    High    |
+|   [3]   | `## Usage` absent in README                            | TROPHY_README    |    High    |
+|   [4]   | ADR without `## Consequences`                          | WALL_OF_TEXT_ADR |    High    |
+|   [5]   | ADR with single Considered Option                      | Incomplete ADR   |   Medium   |
+|   [6]   | `@param \w+ the \w+` pattern in doc comments           | PARAMETER_NOISE  |   Medium   |
+|   [7]   | `Returns a` followed by type name in doc comments      | TYPE_RESTATING   |   Medium   |
+|   [8]   | `// TODO` without issue link in source files           | Untracked debt   |    Low     |
+|   [9]   | Commented-out code blocks (`// ...` spanning 3+ lines) | Code archaeology |    Low     |
+|  [10]   | CHANGELOG with commit hashes in entry text             | COMMIT_CHANGELOG |   Medium   |
 
 ---
-## [9][QUICK_REFERENCE]
+## [8][QUICK_REFERENCE]
 >**Dictum:** *Quick reference accelerates validation by consolidating checklists.*
 
 <br>
@@ -132,6 +132,6 @@ Per-document-type checklists for auditing documentation artifacts. Use after cre
 |   [2]   | **ADR**                  | Format, status, content discipline, lifecycle                  | `adr.md`              |
 |   [3]   | **CHANGELOG**            | Keep-a-Changelog format, semantic versioning, user-facing text | `changelog-gen.md`    |
 |   [4]   | **CODE_DOCUMENTATION**   | Coverage, format compliance, signal hierarchy                  | `code-docs.md`        |
-|   [5]   | **CONTRIBUTING**         | Workflow accuracy, CI alignment, setup reproducibility         | `contributing-gen.md`   |
-|   [6]   | **ARCHITECTURE**         | Diagrams, codemap, decisions, cross-cutting concerns           | `architecture-gen.md`   |
-|   [7]   | **DETECTION_HEURISTICS** | 10 grep-able patterns with severity classification             | —                       |
+|   [5]   | **CONTRIBUTING**         | Workflow accuracy, CI alignment, setup reproducibility         | `contributing-gen.md` |
+|   [6]   | **ARCHITECTURE**         | Diagrams, codemap, decisions, cross-cutting concerns           | `architecture-gen.md` |
+|   [7]   | **DETECTION_HEURISTICS** | 10 grep-able patterns with severity classification             | —                     |

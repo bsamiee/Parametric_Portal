@@ -38,22 +38,22 @@ Single authority on documentation structure, content requirements, and generatio
 
 **Step 2 — Task-specific (load per routing table)**
 
-| [INDEX] | [REFERENCE]           | [LOAD_WHEN]                       |
-| :-----: | :-------------------- | --------------------------------- |
-|   [3]   | `readme-gen.md`       | README creation or update         |
-|   [4]   | `adr.md`              | Architecture decision recording   |
-|   [5]   | `code-docs.md`        | Code documentation (any language) |
-|   [6]   | `changelog-gen.md`    | Changelog or release notes        |
-|   [7]   | `contributing-gen.md` | CONTRIBUTING.md creation          |
+| [INDEX] | [REFERENCE]           | [LOAD_WHEN]                        |
+| :-----: | :-------------------- | ---------------------------------- |
+|   [3]   | `readme-gen.md`       | README creation or update          |
+|   [4]   | `adr.md`              | Architecture decision recording    |
+|   [5]   | `code-docs.md`        | Code documentation (any language)  |
+|   [6]   | `changelog-gen.md`    | Changelog or release notes         |
+|   [7]   | `contributing-gen.md` | CONTRIBUTING.md creation           |
 |   [8]   | `architecture-gen.md` | ARCHITECTURE.md creation or update |
 
 **Step 3 — Template (scaffolding only)**
 
-| [INDEX] | [TEMPLATE]                 | [ARCHETYPE]    |
-| :-----: | :------------------------- | :------------: |
-|   [9]   | `readme.template.md`       | README         |
-|  [10]   | `adr.template.md`          | ADR            |
-|  [11]   | `architecture.template.md` | ARCHITECTURE   |
+| [INDEX] | [TEMPLATE]                 | [ARCHETYPE]  |
+| :-----: | :------------------------- | :----------: |
+|   [9]   | `readme.template.md`       |    README    |
+|  [10]   | `adr.template.md`          |     ADR      |
+|  [11]   | `architecture.template.md` | ARCHITECTURE |
 
 ---
 ## [2][CONTRACTS]
@@ -81,13 +81,13 @@ Single authority on documentation structure, content requirements, and generatio
 
 <br>
 
-| [INDEX] | [TASK]                    | [REFERENCES]        | [TEMPLATE]         | [STANDARDS_DOC]                 |
-| :-----: | ------------------------- | ------------------- | ------------------ | ------------------------------- |
-|   [1]   | **README creation**       | readme-gen.md       | readme.template.md | readme-standards.md             |
-|   [2]   | **README update**         | readme-gen.md       | —                  | readme-standards.md             |
-|   [3]   | **ADR creation**          | adr.md              | adr.template.md    | adr-standards.md                |
-|   [4]   | **ADR review**            | adr.md              | —                  | adr-standards.md                |
-|   [5]   | **Code documentation**    | code-docs.md        | —                  | code-documentation-standards.md |
+| [INDEX] | [TASK]                    | [REFERENCES]        | [TEMPLATE]               | [STANDARDS_DOC]                 |
+| :-----: | ------------------------- | ------------------- | ------------------------ | ------------------------------- |
+|   [1]   | **README creation**       | readme-gen.md       | readme.template.md       | readme-standards.md             |
+|   [2]   | **README update**         | readme-gen.md       | —                        | readme-standards.md             |
+|   [3]   | **ADR creation**          | adr.md              | adr.template.md          | adr-standards.md                |
+|   [4]   | **ADR review**            | adr.md              | —                        | adr-standards.md                |
+|   [5]   | **Code documentation**    | code-docs.md        | —                        | code-documentation-standards.md |
 |   [6]   | **CONTRIBUTING creation** | contributing-gen.md | —                        | —                               |
 |   [7]   | **ARCHITECTURE creation** | architecture-gen.md | architecture.template.md | architecture-standards.md       |
 |   [8]   | **ARCHITECTURE update**   | architecture-gen.md | —                        | architecture-standards.md       |
@@ -112,7 +112,7 @@ Single authority on documentation structure, content requirements, and generatio
 |   [5]   | Version release, feature completion          |    Changelog     |
 |   [6]   | New/modified exported API surface            |     Code-Doc     |
 |   [7]   | New project accepting external contributions |   CONTRIBUTING   |
-|   [8]   | System with 10k+ LOC needing structural docs | ARCHITECTURE    |
+|   [8]   | System with 10k+ LOC needing structural docs |   ARCHITECTURE   |
 |   [9]   | Existing documentation accuracy concern      |    Validation    |
 
 **README scope routing:**
