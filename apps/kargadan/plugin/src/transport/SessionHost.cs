@@ -1,5 +1,6 @@
 // Lock-gated mutable session state machine tracking lifecycle phase from Connected through Active to terminal states.
 // Mutability is confined here — all transitions return Fin<SessionSnapshot> and are serialized under _gate; no state escapes the lock.
+using System;
 using LanguageExt;
 using LanguageExt.Common;
 using NodaTime;
@@ -107,6 +108,64 @@ public sealed class SessionHost {
             TimeoutIfNeeded(
                 snapshot: snapshot,
                 now: now));
+    }
+    public Fin<SessionSnapshot> Snapshot() {
+        using Lock.Scope _ = _gate.EnterScope();
+        return _current.ToFin(SessionNotOpen);
+    }
+
+    // --- [HANDSHAKE] ---------------------------------------------------------
+    internal static HandshakeEnvelope Negotiate(
+        HandshakeEnvelope.Init init,
+        int supportedMajor,
+        int supportedMinor,
+        ServerInfo server,
+        Instant now) {
+        bool tokenExpired = init.Auth.ExpiresAt <= now;
+        bool majorCompatible = init.Identity.ProtocolVersion.Major == supportedMajor;
+        bool minorCompatible = init.Identity.ProtocolVersion.Minor <= supportedMinor;
+        Seq<string> requiredCapabilities = init.Capabilities.Required;
+        Seq<string> optionalCapabilities = init.Capabilities.Optional;
+        Seq<string> missingCapabilities =
+            requiredCapabilities.Filter(
+                static required =>
+                    !CommandOperation.SupportsCapability(required));
+        Seq<string> acceptedCapabilities =
+            requiredCapabilities
+                .Append(optionalCapabilities)
+                .Distinct()
+                .Filter(static capability => CommandOperation.SupportsCapability(capability));
+        return (tokenExpired, majorCompatible, minorCompatible, missingCapabilities.IsEmpty) switch {
+            (true, _, _, _) => new HandshakeEnvelope.Reject(
+                Identity: init.Identity,
+                Reason: FailureMapping.FromCode(
+                    code: ErrorCode.TokenExpired,
+                    message: "Handshake token is expired."),
+                TelemetryContext: init.TelemetryContext),
+            (false, false, _, _) => new HandshakeEnvelope.Reject(
+                Identity: init.Identity,
+                Reason: FailureMapping.FromCode(
+                    code: ErrorCode.ProtocolIncompatible,
+                    message: "Protocol major version mismatch."),
+                TelemetryContext: init.TelemetryContext),
+            (false, true, false, _) => new HandshakeEnvelope.Reject(
+                Identity: init.Identity,
+                Reason: FailureMapping.FromCode(
+                    code: ErrorCode.ProtocolIncompatible,
+                    message: $"Protocol minor version {init.Identity.ProtocolVersion.Minor} exceeds supported {supportedMinor}."),
+                TelemetryContext: init.TelemetryContext),
+            (false, true, true, false) => new HandshakeEnvelope.Reject(
+                Identity: init.Identity,
+                Reason: FailureMapping.FromCode(
+                    code: ErrorCode.CapabilityUnsupported,
+                    message: $"Missing required capabilities: {string.Join(',', missingCapabilities)}"),
+                TelemetryContext: init.TelemetryContext),
+            (false, true, true, true) => new HandshakeEnvelope.Ack(
+                Identity: init.Identity,
+                AcceptedCapabilities: acceptedCapabilities,
+                Server: server,
+                TelemetryContext: init.TelemetryContext),
+        };
     }
     // --- [TRANSITIONS] -------------------------------------------------------
     private Fin<SessionSnapshot> TransitionFromMutablePhase(

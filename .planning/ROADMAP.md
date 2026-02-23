@@ -13,7 +13,7 @@ Kargadan delivers a CLI-based AI agent that controls Rhino 9 through natural lan
 Decimal phases appear between their surrounding integers in numeric order.
 
 - [x] **Phase 1: Plugin Transport Foundation** - WebSocket bridge between CLI harness and Rhino plugin on localhost with reconnection and heartbeat (completed 2026-02-22)
-- [ ] **Phase 2: RhinoDoc Execution and Events** - Command execution, direct API access, event subscriptions, and undo integration inside Rhino
+- [ ] **Phase 2: RhinoDoc Execution and Events** - Command execution, direct API access, event subscriptions, and undo integration inside Rhino (in progress; post-cutover re-verification active)
 - [ ] **Phase 3: Schema Redesign and Topology** - Delete legacy schemas, extract universal concepts to packages/, isolate app-specific protocol in apps/kargadan
 - [ ] **Phase 4: Session Persistence and Knowledge Base** - PostgreSQL-backed session store replacing in-memory trace, plus Rhino command knowledge base for RAG
 - [ ] **Phase 5: Agent Core and Provider Abstraction** - Generic agent loop in packages/ai with tool orchestration, RAG discovery, multi-provider support, and fallback chains
@@ -54,6 +54,11 @@ Plans:
 Plans:
 - [ ] 02-01-PLAN.md -- Protocol contracts extension + CommandExecutor with bifurcated undo strategy (direct API undo wrapping, RunScript result tracking, RhinoCommon facades)
 - [ ] 02-02-PLAN.md -- ObservationPipeline (15 events + undo detection + batched flush), WebSocketHost two-phase ack, KargadanPlugin execution/observation wiring, TS schema sync
+
+Verification status (2026-02-23 root reconciliation):
+- Prior stub paths removed (`OnBatchFlushed`/`PublishUndoEvent`/`not yet implemented` markers no longer present in plugin source).
+- Direct API write routing for object create/update/delete is implemented through `CommandExecutor`.
+- Remaining Phase 2 status is "re-verification in progress" until runtime/manual scenarios and harness-observed event flow are re-confirmed and the verification report is refreshed.
 
 ### Phase 3: Schema Redesign and Topology
 **Goal**: Monorepo topology is clean — universal concepts live in packages/, app-specific protocol lives in apps/kargadan, and public API surface is minimal
@@ -163,7 +168,7 @@ Note: Phases 6, 7, and 8 all depend on Phase 5 but not on each other. They can b
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Plugin Transport Foundation | 2/2 | Complete   | 2026-02-22 |
-| 2. RhinoDoc Execution and Events | 0/2 | Not started | - |
+| 2. RhinoDoc Execution and Events | 2/2 | In progress (post-cutover re-verification) | - |
 | 3. Schema Redesign and Topology | 0/2 | Not started | - |
 | 4. Session Persistence and Knowledge Base | 0/2 | Not started | - |
 | 5. Agent Core and Provider Abstraction | 0/3 | Not started | - |

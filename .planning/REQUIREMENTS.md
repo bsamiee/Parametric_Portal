@@ -10,7 +10,7 @@ Requirements for initial release. Each maps to roadmap phases.
 ### Transport
 
 - [x] **TRAN-01**: Plugin opens a WebSocket/TCP listener on localhost inside Rhino on a configurable port, accepting connections from the CLI harness
-- [x] **TRAN-02**: Plugin targets net9.0 single-target for Rhino 9 only — no Rhino 8, no multi-target build (user decision: Phase 1 CONTEXT.md override)
+- [ ] **TRAN-02**: Plugin targets net9.0 single-target for Rhino 9 only — no Rhino 8, no multi-target build (currently deviates: plugin inherits net10.0; decision/update required)
 - [x] **TRAN-03**: Plugin marshals all incoming WebSocket commands to Rhino's UI thread via `RhinoApp.InvokeOnUiThread` before executing any RhinoDoc operation
 - [x] **TRAN-04**: Harness detects plugin disconnection (Rhino quit/crash) and reconnects automatically when the plugin becomes available again
 - [x] **TRAN-05**: Session state survives plugin disconnection — harness restores context from PostgreSQL checkpoint on reconnection without losing conversation history
@@ -19,10 +19,10 @@ Requirements for initial release. Each maps to roadmap phases.
 ### Execution
 
 - [x] **EXEC-01**: Plugin wraps `RhinoApp.RunScript(commandString, echo)` for executing arbitrary Rhino commands by string — enabling the agent to invoke any command a human can type
-- [x] **EXEC-02**: Plugin provides direct RhinoCommon API access for precise geometry operations (create, modify, query objects via `RhinoDoc.Objects`, `RhinoDoc.Layers`, etc.)
-- [x] **EXEC-03**: Plugin subscribes to RhinoDoc events (AddRhinoObject, DeleteRhinoObject, ModifyObjectAttributes, LayerTableEvent, UndoRedo) and pushes them to the harness with 200ms debounce batching
+- [ ] **EXEC-02**: Plugin provides direct RhinoCommon API access for precise geometry operations (create, modify, query objects via `RhinoDoc.Objects`, `RhinoDoc.Layers`, etc.) — implemented in code; post-cutover re-verification pending
+- [ ] **EXEC-03**: Plugin subscribes to RhinoDoc events (AddRhinoObject, DeleteRhinoObject, ModifyObjectAttributes, LayerTableEvent, UndoRedo) and pushes them to the harness with 200ms debounce batching — implemented in code; post-cutover re-verification pending
 - [x] **EXEC-04**: Each logical AI action wraps in a single `BeginUndoRecord`/`EndUndoRecord` pair so Cmd+Z undoes the entire action atomically
-- [x] **EXEC-05**: Agent state snapshots are stored via `AddCustomUndoEvent` so undo/redo keeps the agent's internal model consistent with the document
+- [ ] **EXEC-05**: Agent state snapshots are stored via `AddCustomUndoEvent` so undo/redo keeps the agent's internal model consistent with the document — implemented in code; post-cutover re-verification pending
 - [ ] **EXEC-06**: Plugin provides Grasshopper 1 programmatic access via the stable GH1 C# SDK — loading definitions, setting parameters, solving, and extracting outputs
 
 ### Agent
@@ -129,16 +129,16 @@ Which phases cover which requirements. Updated during roadmap creation.
 | Requirement | Phase | Status |
 |-------------|-------|--------|
 | TRAN-01 | Phase 1 | Complete |
-| TRAN-02 | Phase 1 | Complete |
+| TRAN-02 | Phase 1 | Open (current implementation inherits net10.0; requirement/doc decision pending) |
 | TRAN-03 | Phase 1 | Complete |
 | TRAN-04 | Phase 1 | Complete |
 | TRAN-05 | Phase 1 | Complete |
 | TRAN-06 | Phase 1 | Complete |
 | EXEC-01 | Phase 2 | Complete |
-| EXEC-02 | Phase 2 | Complete |
-| EXEC-03 | Phase 2 | Complete |
+| EXEC-02 | Phase 2 | In verification (post-cutover implementation) |
+| EXEC-03 | Phase 2 | In verification (post-cutover implementation) |
 | EXEC-04 | Phase 2 | Complete |
-| EXEC-05 | Phase 2 | Complete |
+| EXEC-05 | Phase 2 | In verification (post-cutover implementation) |
 | EXEC-06 | Phase 7 | Pending |
 | AGNT-01 | Phase 5 | Pending |
 | AGNT-02 | Phase 5 | Pending |
@@ -187,4 +187,4 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 ---
 *Requirements defined: 2026-02-22*
-*Last updated: 2026-02-22 after roadmap creation — all 51 requirements mapped to phases*
+*Last updated: 2026-02-23 after Phase 2 cutover status reconciliation*

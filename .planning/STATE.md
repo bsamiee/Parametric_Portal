@@ -11,8 +11,8 @@ See: .planning/PROJECT.md (updated 2026-02-22)
 
 Phase: 2 of 8 (RhinoDoc Execution and Events)
 Plan: 2 of 2 in current phase
-Status: Phase 02 complete
-Last activity: 2026-02-23 -- Completed 02-02 (event observation pipeline and execution dispatch wiring)
+Status: Phase 02 in progress (post-cutover re-verification)
+Last activity: 2026-02-23 -- Reconciled root planning status with cutover implementation and verification follow-up
 
 Progress: [███░░░░░░░] 25.0%
 
@@ -58,13 +58,13 @@ Recent decisions affecting current work:
 - [Phase 01]: Kept net10.0 target -- LanguageExt.Core 5.0.0-beta-77 requires net10.0 System.Runtime; net9.0 override impossible without breaking existing v5 code
 - [Phase 01]: MessageDispatcher delegate decouples WebSocketHost from KargadanPlugin -- enables isolated testing and future transport swaps
 - [02-01]: Thinktecture ValueObject KeyMember accessor is non-public -- use implicit conversion operators (e.g., (string)scope) instead of .Value
-- [02-01]: CA1508 false positive on event-handler-mutated variables -- suppress with pragma and explanatory comment
+- [02-01]: Suppression pragmas removed in plugin cutover; boundary exemptions retained only where Rhino/.NET callback signatures force imperative boundaries
 - [02-01]: RhinoObject.NextRuntimeSerialNumber is static property (not on ObjectTable) -- used for new-object tracking across RunScript
 - [02-01]: FindByLayer uses string overload directly instead of two-step FindByFullPath + index lookup
 - [02-02]: RhinoObjectEventArgs lacks Document property -- used RhinoDoc.ActiveDoc for UndoActive/RedoActive detection
 - [02-02]: DimensionStyleTableEventArgs does not exist in SDK -- used base EventArgs
-- [02-02]: OnBatchFlushed extracted to static method to avoid nested lambda type inference in Atom.Swap
-- [02-02]: Individual operation handlers use stub Fin.Fail responses -- ScriptRun is the fully wired critical path
+- [02-02]: Event batch flush publishes through EventPublisher via boundary wiring instead of log-only callback
+- [02-02]: Direct API object write routes execute through CommandExecutor (no `not yet implemented` stubs)
 
 ### Pending Todos
 

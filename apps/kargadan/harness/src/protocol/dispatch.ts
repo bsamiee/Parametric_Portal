@@ -1,14 +1,59 @@
 /**
- * Orchestrates Kargadan WebSocket protocol surface: handshake negotiation, command execution, heartbeat round-trips, and inbound event streaming.
- * Bridges KargadanSocketClient and SessionSupervisor into a single typed service; all failure paths surface as CommandDispatchError variants.
- * Propagates DisconnectedError from transport layer as CommandDispatchError('disconnected') so callers can trigger reconnection flow.
+ * Consolidates Kargadan session state supervision and protocol dispatch in one service module.
+ * Orchestrates handshake negotiation, command execution, heartbeat round-trips, and inbound event streaming.
  */
 import type { Kargadan } from '@parametric-portal/types/kargadan';
-import { Data, Duration, Effect, Match } from 'effect';
+import { Data, Duration, Effect, Match, Ref } from 'effect';
 import { HarnessConfig } from '../config';
-import { SessionSupervisor, SessionTransition } from './supervisor';
 import { KargadanSocketClient } from '../socket';
-import { DisconnectedError } from '../transport/reconnect';
+
+// --- [TYPES] -----------------------------------------------------------------
+
+type _SessionTransition = Data.TaggedEnum<{
+    Activate:     { readonly at:        Date   };
+    Authenticate: { readonly at:        Date   };
+    Beat:         { readonly at:        Date   };
+    Close:        { readonly reason?:   string };
+    Connect:      { readonly sessionId: string };
+    Reap:         { readonly reason:    string };
+    Reject:       { readonly reason:    string };
+    Timeout:      { readonly reason:    string };
+}>;
+type _SessionState = {
+    readonly heartbeatAt: Date | undefined;
+    readonly phase: 'idle' | 'connected' | 'authenticated' | 'active' | 'closed' | 'timed_out' | 'reaped' | 'rejected';
+    readonly reason:      string | undefined;
+    readonly sessionId:   string | undefined;
+};
+
+// --- [CONSTANTS] -------------------------------------------------------------
+
+const SessionTransition = Data.taggedEnum<_SessionTransition>();
+
+// --- [SUPERVISOR] ------------------------------------------------------------
+
+class SessionSupervisor extends Effect.Service<SessionSupervisor>()('kargadan/SessionSupervisor', {
+    effect: Effect.gen(function* () {
+        const state = yield* Ref.make<_SessionState>({ heartbeatAt: undefined, phase: 'idle', reason: undefined, sessionId: undefined });
+        const _transition = Effect.fn('kargadan.session.transition')((event: _SessionTransition) =>
+            Ref.update(state, (current) => ({
+                ...current,
+                ...Match.valueTags(event, {
+                    Activate:     ({ at }) => ({ heartbeatAt: at, phase: 'active' as const, reason: undefined }),
+                    Authenticate: ({ at }) => ({ heartbeatAt: at, phase: 'authenticated' as const, reason: undefined }),
+                    Beat:         ({ at }) => ({ heartbeatAt: at }),
+                    Close:        ({ reason }) => ({ heartbeatAt: undefined, phase: 'closed' as const, reason, sessionId: undefined }),
+                    Connect:      ({ sessionId }) => ({ heartbeatAt: undefined, phase: 'connected' as const, reason: undefined, sessionId }),
+                    Reap:         ({ reason }) => ({ heartbeatAt: undefined, phase: 'reaped' as const, reason, sessionId: undefined }),
+                    Reject:       ({ reason }) => ({ heartbeatAt: undefined, phase: 'rejected' as const, reason, sessionId: undefined }),
+                    Timeout:      ({ reason }) => ({ heartbeatAt: undefined, phase: 'timed_out' as const, reason, sessionId: undefined }),
+                }),
+            })),
+        );
+        const _snapshot = Effect.fn('kargadan.session.snapshot')(() => Ref.get(state));
+        return { read: { snapshot: _snapshot }, transition: _transition } as const;
+    }),
+}) {}
 
 // --- [ERRORS] ----------------------------------------------------------------
 
@@ -36,9 +81,11 @@ class CommandDispatch extends Effect.Service<CommandDispatch>()('kargadan/Comman
         const [session, socket] = yield* Effect.all([SessionSupervisor, KargadanSocketClient]);
         const _request = Effect.fn('CommandDispatch.request')((envelope: Kargadan.OutboundEnvelope) =>
             socket.write.request(envelope).pipe(
-                Effect.catchIf(
-                    (error): error is DisconnectedError => error instanceof DisconnectedError,
-                    (error) => Effect.fail(CommandDispatchError.of('disconnected', error.reason)),
+                Effect.catchTag('SocketClientError', (error) =>
+                    Match.value(error.issue).pipe(
+                        Match.tag('Disconnected', ({ reason }) => Effect.fail(CommandDispatchError.of('disconnected', { reason })),),
+                        Match.orElse((issue) => Effect.fail(CommandDispatchError.of('transport', { issue })),),
+                    ),
                 ),
             ),
         );
@@ -50,17 +97,17 @@ class CommandDispatch extends Effect.Service<CommandDispatch>()('kargadan/Comman
                     const envelope = {
                         _tag: 'handshake.init',
                         auth: {
-                            token:   input.token,
+                            token:         input.token,
                             tokenExpiresAt: new Date(Date.now() + Duration.toMillis(Duration.minutes(15))),
                             tokenIssuedAt:  new Date(),
                         },
                         capabilities,
-                        identity:    input.identity,
+                        identity: input.identity,
                         telemetryContext: {
-                            attempt: 1,
+                            attempt:      1,
                             operationTag: 'handshake',
-                            spanId:  input.identity.requestId.replaceAll('-', ''),
-                            traceId: input.traceId,
+                            spanId:       input.identity.requestId.replaceAll('-', ''),
+                            traceId:      input.traceId,
                         },
                     } satisfies Kargadan.HandshakeEnvelope;
                     const response = yield* _request(envelope);
@@ -71,18 +118,8 @@ class CommandDispatch extends Effect.Service<CommandDispatch>()('kargadan/Comman
                                 Effect.as(ack),
                             ),
                         ),
-                        Match.tag('handshake.reject', (reject) =>
-                            session.transition(SessionTransition.Reject({ reason: reject.reason.message })).pipe(
-                                Effect.zipRight(
-                                    Effect.fail(CommandDispatchError.of('rejected', reject.reason, reject.reason.failureClass)),
-                                ),
-                            ),
-                        ),
-                        Match.orElse((other) =>
-                            Effect.fail(
-                                CommandDispatchError.of('protocol', { expected: 'handshake.ack|handshake.reject', received: other._tag }),
-                            ),
-                        ),
+                        Match.tag('handshake.reject', (reject) => session.transition(SessionTransition.Reject({ reason: reject.reason.message })).pipe(Effect.zipRight(Effect.fail(CommandDispatchError.of('rejected', reject.reason, reject.reason.failureClass)))),),
+                        Match.orElse((other) => Effect.fail(CommandDispatchError.of('protocol', { expected: 'handshake.ack|handshake.reject', received: other._tag }))),
                     );
                 }),
         );
@@ -91,12 +128,8 @@ class CommandDispatch extends Effect.Service<CommandDispatch>()('kargadan/Comman
                 Effect.flatMap((response) =>
                     Match.value(response).pipe(
                         Match.tag('result', (result) => Effect.succeed(result)),
-                        Match.tag('handshake.reject', (reject) =>
-                            Effect.fail(CommandDispatchError.of('rejected', reject.reason, reject.reason.failureClass)),
-                        ),
-                        Match.orElse((other) =>
-                            Effect.fail(CommandDispatchError.of('protocol', { expected: 'result', received: other._tag })),
-                        ),
+                        Match.tag('handshake.reject', (reject) => Effect.fail(CommandDispatchError.of('rejected', reject.reason, reject.reason.failureClass))),
+                        Match.orElse((other) => Effect.fail(CommandDispatchError.of('protocol', { expected: 'result', received: other._tag }))),
                     ),
                 ),
             ),
@@ -113,21 +146,15 @@ class CommandDispatch extends Effect.Service<CommandDispatch>()('kargadan/Comman
             return _request(envelope).pipe(
                 Effect.flatMap((response) =>
                     Match.value(response).pipe(
-                        Match.when({ _tag: 'heartbeat', mode: 'pong' }, (hb) =>
-                            session.transition(SessionTransition.Beat({ at: new Date() })).pipe(Effect.as(hb)),
-                        ),
+                        Match.when({ _tag: 'heartbeat', mode: 'pong' }, (hb) => session.transition(SessionTransition.Beat({ at: new Date() })).pipe(Effect.as(hb)),),
                         Match.tag('heartbeat', (hb) =>
                             session.transition(SessionTransition.Timeout({ reason: 'heartbeat-missing-pong' })).pipe(
-                                Effect.zipRight(
-                                    Effect.fail(CommandDispatchError.of('protocol', { expected: 'pong', received: hb.mode })),
-                                ),
+                                Effect.zipRight(Effect.fail(CommandDispatchError.of('protocol', { expected: 'pong', received: hb.mode }))),
                             ),
                         ),
                         Match.orElse((other) =>
                             session.transition(SessionTransition.Timeout({ reason: 'heartbeat-invalid-response' })).pipe(
-                                Effect.zipRight(
-                                    Effect.fail(CommandDispatchError.of('protocol', { expected: 'heartbeat', received: other._tag })),
-                                ),
+                                Effect.zipRight(Effect.fail(CommandDispatchError.of('protocol', { expected: 'heartbeat', received: other._tag }))),
                             ),
                         ),
                     ),
@@ -146,4 +173,4 @@ class CommandDispatch extends Effect.Service<CommandDispatch>()('kargadan/Comman
 
 // --- [EXPORT] ----------------------------------------------------------------
 
-export { CommandDispatch, CommandDispatchError };
+export { CommandDispatch, CommandDispatchError, SessionSupervisor, SessionTransition };

@@ -38,6 +38,16 @@ internal sealed class WebSocketHost : IDisposable {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
         WriteIndented = false,
     };
+    private static readonly JsonSerializerOptions PortFileJsonOptions = new() {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        WriteIndented = false,
+    };
+    private static readonly string PortFilePath =
+        Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            ".kargadan",
+            "port");
+    private static readonly string PortFileTempPath = PortFilePath + ".tmp";
 
     // --- [STATE] -------------------------------------------------------------
     private readonly MessageDispatcher _dispatcher;
@@ -56,13 +66,13 @@ internal sealed class WebSocketHost : IDisposable {
         _listener.Prefixes.Add($"http://127.0.0.1:{port}/");
         _listener.Start();
         Port = port;
-        PortFile.WritePortFile(port: Port);
+        WritePortFile(port: Port);
         RhinoApp.WriteLine($"[Kargadan] WebSocket server listening on 127.0.0.1:{Port}");
         _ = Task.Run(() => AcceptLoopAsync(cancellationToken: _cts.Token));
     }
     internal void Stop() {
         _cts.Cancel();
-        PortFile.DeletePortFile();
+        DeletePortFile();
         _activeWebSocket?.Dispose();
         _listener?.Close();
         RhinoApp.WriteLine("[Kargadan] WebSocket server stopped.");
@@ -83,6 +93,33 @@ internal sealed class WebSocketHost : IDisposable {
         using TcpListener listener = new(localaddr: IPAddress.Loopback, port: 0);
         listener.Start();
         return ((IPEndPoint)listener.LocalEndpoint).Port;
+    }
+    private static void WritePortFile(int port) {
+        string directory = Path.GetDirectoryName(PortFilePath)!;
+        Directory.CreateDirectory(directory);
+        PortFilePayload payload = new(
+            Port: port,
+            Pid: Environment.ProcessId,
+            StartedAt: DateTimeOffset.UtcNow);
+        string json = JsonSerializer.Serialize(
+            value: payload,
+            options: PortFileJsonOptions);
+        File.WriteAllText(
+            path: PortFileTempPath,
+            contents: json);
+        File.Move(
+            sourceFileName: PortFileTempPath,
+            destFileName: PortFilePath,
+            overwrite: true);
+    }
+    private static void DeletePortFile() {
+        try {
+            File.Delete(PortFilePath);
+        } catch (IOException) {
+            // why: best-effort cleanup on shutdown
+        } catch (UnauthorizedAccessException) {
+            // why: best-effort cleanup on shutdown
+        }
     }
     // --- [ACCEPT_LOOP] -------------------------------------------------------
     private async Task AcceptLoopAsync(CancellationToken cancellationToken) {
@@ -337,4 +374,7 @@ internal sealed class WebSocketHost : IDisposable {
             false => Fin.Fail<TransportMessageTag>(
                 Error.New(message: "Envelope _tag is required.")),
         };
+
+    // --- [PORT_FILE] ---------------------------------------------------------
+    private sealed record PortFilePayload(int Port, int Pid, DateTimeOffset StartedAt);
 }

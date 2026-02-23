@@ -189,8 +189,7 @@ const OutboundEnvelopeSchema = S.Union(
 
 // --- [ENTRY_POINT] -----------------------------------------------------------
 
-// biome-ignore lint/correctness/noUnusedVariables: const+namespace merge pattern
-const Kargadan = {
+export const Kargadan = {
     CategoryCountSchema, CommandAckSchema, CommandCategorySchema, CommandEnvelopeSchema, CommandExecutionModeSchema, CommandOperationSchema,
     EventBatchSummarySchema, EventEnvelopeSchema, EventSubtypeSchema, EventTypeSchema, FailureReasonSchema, HandshakeEnvelopeSchema,
     HeartbeatEnvelopeSchema, IdempotencySchema, InboundEnvelopeSchema, OutboundEnvelopeSchema, ProtocolVersionSchema, ResultEnvelopeSchema,
@@ -199,7 +198,7 @@ const Kargadan = {
 
 // --- [NAMESPACE] -------------------------------------------------------------
 
-namespace Kargadan {
+export namespace Kargadan {
     export type CategoryCount =         typeof CategoryCountSchema.Type;
     export type CommandAck =            typeof CommandAckSchema.Type;
     export type CommandCategory =       typeof CommandCategorySchema.Type;
@@ -226,7 +225,3 @@ namespace Kargadan {
     export type SubtypeCount =          typeof SubtypeCountSchema.Type;
     export type TelemetryContext =      typeof TelemetryContextSchema.Type;
 }
-
-// --- [EXPORT] ----------------------------------------------------------------
-
-export { Kargadan };
