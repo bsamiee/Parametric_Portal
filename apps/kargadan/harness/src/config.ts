@@ -2,8 +2,8 @@
  * Resolves environment-driven HarnessConfig for the Kargadan harness via Effect Config.
  * Parses protocol version, capability sets, loop operations, reconnection, checkpoint, and heartbeat settings.
  */
-import { Kargadan } from '@parametric-portal/types/kargadan';
 import { Config, Duration, Effect, Schema as S } from 'effect';
+import { CommandEnvelopeSchema, EnvelopeIdentitySchema } from './protocol/schemas';
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
@@ -43,7 +43,7 @@ const _splitCsv = (value: string) =>
 
 const _resolveProtocolVersion = _env.protocolVersion.pipe(Effect.flatMap(S.decodeUnknown(S.transform(
     S.String.pipe(S.pattern(/^\d+\.\d+$/)),
-    Kargadan.ProtocolVersionSchema,
+    EnvelopeIdentitySchema.fields.protocolVersion,
     {
         decode: (value) => {
             const [major = '0', minor = '0'] = value.split('.');
@@ -61,7 +61,7 @@ const _resolveCapabilities = Effect.all([_env.capabilityRequired, _env.capabilit
 );
 const _resolveLoopOperations = _env.loopOperations.pipe(
     Effect.map(_splitCsv),
-    Effect.flatMap((operations) => S.decodeUnknown(S.Array(Kargadan.CommandOperationSchema))(operations)),
+    Effect.flatMap((operations) => S.decodeUnknown(S.Array(CommandEnvelopeSchema.fields.operation))(operations)),
 );
 const _resolveWriteObjectRef = Effect.all([
     _env.writeObjectId,

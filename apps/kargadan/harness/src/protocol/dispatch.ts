@@ -2,10 +2,14 @@
  * Consolidates Kargadan session state supervision and protocol dispatch in one service module.
  * Orchestrates handshake negotiation, command execution, heartbeat round-trips, and inbound event streaming.
  */
-import type { Kargadan } from '@parametric-portal/types/kargadan';
-import { Data, Duration, Effect, Match, Ref, Schema as S } from 'effect';
+import { Data, Duration, Effect, Match, Ref } from 'effect';
 import { HarnessConfig } from '../config';
 import { KargadanSocketClient } from '../socket';
+import {
+    CommandEnvelopeSchema, EnvelopeIdentitySchema, EventEnvelopeSchema, FailureReasonSchema,
+    HandshakeEnvelopeSchema, HeartbeatEnvelopeSchema, InboundEnvelopeSchema, OutboundEnvelopeSchema,
+    ResultEnvelopeSchema, TelemetryContextSchema,
+} from './schemas';
 
 // --- [TYPES] -----------------------------------------------------------------
 
@@ -25,110 +29,6 @@ type _SessionState = {
     readonly reason:      string | undefined;
     readonly sessionId:   string | undefined;
 };
-
-// --- [SCHEMA] ----------------------------------------------------------------
-
-const TelemetryContextSchema = S.Struct({
-    attempt:      S.Int.pipe(S.greaterThanOrEqualTo(1)),
-    operationTag: S.NonEmptyTrimmedString,
-    spanId:       S.String.pipe(S.pattern(/^[A-Fa-f0-9]{8,64}$/)),
-    traceId:      S.String.pipe(S.pattern(/^[A-Fa-f0-9]{8,64}$/)),
-});
-const EnvelopeIdentitySchema = S.Struct({
-    appId:           S.UUID,
-    issuedAt:        S.DateFromString,
-    protocolVersion: S.Struct({ major: S.Int.pipe(S.greaterThanOrEqualTo(0)), minor: S.Int.pipe(S.greaterThanOrEqualTo(0)) }),
-    requestId:       S.UUID,
-    runId:           S.UUID,
-    sessionId:       S.UUID,
-});
-const FailureReasonSchema = S.Struct({
-    code:         S.NonEmptyTrimmedString,
-    failureClass: S.Literal('retryable', 'correctable', 'compensatable', 'fatal'),
-    message:      S.NonEmptyTrimmedString,
-});
-const IdempotencySchema = S.Struct({
-    idempotencyKey: S.String.pipe(S.pattern(/^[A-Za-z0-9:_-]{8,128}$/)),
-    payloadHash:    S.String.pipe(S.pattern(/^[a-f0-9]{64}$/)),
-});
-const HandshakeEnvelopeSchema = S.Union(
-    S.Struct({
-        _tag:             S.Literal('handshake.init'),
-        auth:             S.Struct({ token: S.NonEmptyTrimmedString, tokenExpiresAt: S.DateFromString, tokenIssuedAt: S.DateFromString }),
-        capabilities:     S.Struct({ optional: S.Array(S.NonEmptyTrimmedString), required: S.Array(S.NonEmptyTrimmedString) }),
-        identity:         EnvelopeIdentitySchema,
-        telemetryContext: TelemetryContextSchema,
-    }),
-    S.Struct({
-        _tag:                 S.Literal('handshake.ack'),
-        acceptedCapabilities: S.Array(S.NonEmptyTrimmedString),
-        identity:             EnvelopeIdentitySchema,
-        server:               S.Struct({ pluginRevision: S.NonEmptyTrimmedString, rhinoVersion: S.NonEmptyTrimmedString }),
-        telemetryContext:     TelemetryContextSchema,
-    }),
-    S.Struct({
-        _tag:             S.Literal('handshake.reject'),
-        identity:         EnvelopeIdentitySchema,
-        reason:           FailureReasonSchema,
-        telemetryContext: TelemetryContextSchema,
-    }),
-);
-const CommandEnvelopeSchema = S.Struct({
-    _tag:             S.Literal('command'),
-    deadlineMs:       S.Int.pipe(S.greaterThan(0)),
-    idempotency:      S.optional(IdempotencySchema),
-    identity:         EnvelopeIdentitySchema,
-    objectRefs:       S.optional(S.Array(S.Struct({
-        objectId:       S.UUID,
-        sourceRevision: S.Int.pipe(S.greaterThanOrEqualTo(0)),
-        typeTag:        S.Literal('Brep', 'Mesh', 'Curve', 'Surface', 'Annotation', 'Instance', 'LayoutDetail'),
-    }))),
-    operation:        S.Literal(
-        'read.scene.summary', 'read.object.metadata', 'read.object.geometry', 'read.layer.state', 'read.view.state',
-        'read.tolerance.units', 'write.object.create', 'write.object.update', 'write.object.delete', 'write.layer.update',
-        'write.viewport.update', 'write.annotation.update', 'script.run',
-    ),
-    payload:          S.Unknown,
-    telemetryContext: TelemetryContextSchema,
-    undoScope:        S.optional(S.NonEmptyTrimmedString),
-});
-const ResultEnvelopeSchema = S.Struct({
-    _tag:             S.Literal('result'),
-    dedupe:           S.Struct({ decision: S.Literal('executed', 'duplicate', 'rejected'), originalRequestId: S.UUID }),
-    error:            S.optional(S.Struct({ details: S.optional(S.Unknown), reason: FailureReasonSchema })),
-    execution:        S.Struct({ durationMs: S.Int.pipe(S.greaterThanOrEqualTo(0)), pluginRevision: S.NonEmptyTrimmedString, sourceRevision: S.Int.pipe(S.greaterThanOrEqualTo(0)) }),
-    identity:         EnvelopeIdentitySchema,
-    result:           S.Unknown,
-    status:           S.Literal('ok', 'error'),
-    telemetryContext: TelemetryContextSchema,
-});
-const EventEnvelopeSchema = S.Struct({
-    _tag:               S.Literal('event'),
-    causationRequestId: S.optional(S.UUID),
-    delta:              S.Unknown,
-    eventId:            S.UUID,
-    eventType:          S.Literal('objects.changed', 'layers.changed', 'view.changed', 'undo.redo', 'session.lifecycle', 'stream.compacted', 'selection.changed', 'material.changed', 'properties.changed', 'tables.changed'),
-    identity:           EnvelopeIdentitySchema,
-    sourceRevision:     S.Int.pipe(S.greaterThanOrEqualTo(0)),
-    telemetryContext:   TelemetryContextSchema,
-});
-const HeartbeatEnvelopeSchema = S.Struct({
-    _tag:             S.Literal('heartbeat'),
-    identity:         EnvelopeIdentitySchema,
-    mode:             S.Literal('ping', 'pong'),
-    serverTime:       S.DateFromString,
-    telemetryContext: TelemetryContextSchema,
-});
-const CommandAckSchema = S.Struct({
-    _tag:      S.Literal('command.ack'),
-    requestId: S.UUID,
-});
-const InboundEnvelopeSchema = S.Union(
-    HandshakeEnvelopeSchema, HeartbeatEnvelopeSchema, EventEnvelopeSchema, ResultEnvelopeSchema,
-);
-const OutboundEnvelopeSchema = S.Union(
-    HandshakeEnvelopeSchema, CommandEnvelopeSchema, HeartbeatEnvelopeSchema, CommandAckSchema,
-);
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
@@ -164,12 +64,12 @@ class SessionSupervisor extends Effect.Service<SessionSupervisor>()('kargadan/Se
 class CommandDispatchError extends Data.TaggedError('CommandDispatchError')<{
     readonly reason: 'disconnected' | 'protocol' | 'rejected' | 'transport';
     readonly details?: unknown;
-    readonly failureClass?: Kargadan.FailureClass;
+    readonly failureClass?: typeof FailureReasonSchema.fields.failureClass.Type;
 }> {
     static readonly of = (
         reason: CommandDispatchError['reason'],
         details?: unknown,
-        failureClass?: Kargadan.FailureClass,
+        failureClass?: typeof FailureReasonSchema.fields.failureClass.Type,
     ) => new CommandDispatchError({ details, reason, ...(failureClass === undefined ? {} : { failureClass }) });
     override get message() {
         const formatted = typeof this.details === 'string' ? this.details : JSON.stringify(this.details);
@@ -183,7 +83,7 @@ class CommandDispatchError extends Data.TaggedError('CommandDispatchError')<{
 class CommandDispatch extends Effect.Service<CommandDispatch>()('kargadan/CommandDispatch', {
     effect: Effect.gen(function* () {
         const [session, socket] = yield* Effect.all([SessionSupervisor, KargadanSocketClient]);
-        const _request = Effect.fn('CommandDispatch.request')((envelope: Kargadan.OutboundEnvelope) =>
+        const _request = Effect.fn('CommandDispatch.request')((envelope: typeof OutboundEnvelopeSchema.Type) =>
             socket.write.request(envelope).pipe(
                 Effect.catchTag('SocketClientError', (error) =>
                     Match.value(error.issue).pipe(
@@ -194,7 +94,7 @@ class CommandDispatch extends Effect.Service<CommandDispatch>()('kargadan/Comman
             ),
         );
         const _handshake = Effect.fn('CommandDispatch.handshake')(
-            (input: { readonly identity: Kargadan.EnvelopeIdentity; readonly token: string; readonly traceId: string }) =>
+            (input: { readonly identity: typeof EnvelopeIdentitySchema.Type; readonly token: string; readonly traceId: string }) =>
                 Effect.gen(function* () {
                     const capabilities = yield* HarnessConfig.resolveCapabilities;
                     yield* session.transition(SessionTransition.Connect({ sessionId: input.identity.sessionId }));
@@ -213,7 +113,7 @@ class CommandDispatch extends Effect.Service<CommandDispatch>()('kargadan/Comman
                             spanId:       input.identity.requestId.replaceAll('-', ''),
                             traceId:      input.traceId,
                         },
-                    } satisfies Kargadan.HandshakeEnvelope;
+                    } satisfies typeof HandshakeEnvelopeSchema.Type;
                     const response = yield* _request(envelope);
                     return yield* Match.value(response).pipe(
                         Match.tag('handshake.ack', (ack) =>
@@ -227,7 +127,7 @@ class CommandDispatch extends Effect.Service<CommandDispatch>()('kargadan/Comman
                     );
                 }),
         );
-        const _execute = Effect.fn('CommandDispatch.execute')((command: Kargadan.CommandEnvelope) =>
+        const _execute = Effect.fn('CommandDispatch.execute')((command: typeof CommandEnvelopeSchema.Type) =>
             _request(command).pipe(
                 Effect.flatMap((response) =>
                     Match.value(response).pipe(
@@ -238,9 +138,9 @@ class CommandDispatch extends Effect.Service<CommandDispatch>()('kargadan/Comman
                 ),
             ),
         );
-        const _heartbeat = Effect.fn('CommandDispatch.heartbeat')((identity: Kargadan.EnvelopeIdentity, traceId: string, attempt = 1) => {
+        const _heartbeat = Effect.fn('CommandDispatch.heartbeat')((identity: typeof EnvelopeIdentitySchema.Type, traceId: string, attempt = 1) => {
             const requestId = crypto.randomUUID();
-            const envelope: Kargadan.HeartbeatEnvelope = {
+            const envelope: typeof HeartbeatEnvelopeSchema.Type = {
                 _tag: 'heartbeat',
                 identity: { ...identity, issuedAt: new Date(), requestId },
                 mode: 'ping',
@@ -278,7 +178,7 @@ class CommandDispatch extends Effect.Service<CommandDispatch>()('kargadan/Comman
 // --- [EXPORT] ----------------------------------------------------------------
 
 export {
-    CommandAckSchema, CommandDispatch, CommandDispatchError, CommandEnvelopeSchema,
+    type CommandAckSchema, CommandDispatch, CommandDispatchError, CommandEnvelopeSchema,
     EnvelopeIdentitySchema, EventEnvelopeSchema, FailureReasonSchema,
     HandshakeEnvelopeSchema, HeartbeatEnvelopeSchema, InboundEnvelopeSchema,
     OutboundEnvelopeSchema, ResultEnvelopeSchema, SessionSupervisor, SessionTransition,

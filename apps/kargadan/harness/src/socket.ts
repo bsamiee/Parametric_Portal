@@ -6,8 +6,8 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import * as FileSystem from '@effect/platform/FileSystem';
 import * as Socket from '@effect/platform/Socket';
-import { Kargadan } from '@parametric-portal/types/kargadan';
 import { Data, Deferred, Duration, Effect, HashMap, Layer, Option, Queue, Ref, Schedule, Schema as S } from 'effect';
+import { type EventEnvelopeSchema, InboundEnvelopeSchema, OutboundEnvelopeSchema } from './protocol/schemas';
 import { HarnessConfig } from './config';
 
 // --- [TYPES] -----------------------------------------------------------------
@@ -91,20 +91,20 @@ class KargadanSocketClient extends Effect.Service<KargadanSocketClient>()('karga
         const socket = yield* Socket.Socket;
         const reconnectSupervisor = yield* ReconnectionSupervisor;
         const writer = yield* socket.writer;
-        const pending = yield* Ref.make(HashMap.empty<string, Deferred.Deferred<Kargadan.InboundEnvelope>>());
-        const events = yield* Queue.unbounded<Kargadan.EventEnvelope>();
+        const pending = yield* Ref.make(HashMap.empty<string, Deferred.Deferred<typeof InboundEnvelopeSchema.Type>>());
+        const events = yield* Queue.unbounded<typeof EventEnvelopeSchema.Type>();
         const lastMessageAt = yield* Ref.make<Option.Option<number>>(Option.none());
-        const decodeInbound = S.decodeUnknown(S.parseJson(Kargadan.InboundEnvelopeSchema));
-        const encodeOutbound = S.encode(S.parseJson(Kargadan.OutboundEnvelopeSchema));
+        const decodeInbound = S.decodeUnknown(S.parseJson(InboundEnvelopeSchema));
+        const encodeOutbound = S.encode(S.parseJson(OutboundEnvelopeSchema));
         const _failAllPending = (reason: string) =>
-            Ref.getAndSet(pending, HashMap.empty<string, Deferred.Deferred<Kargadan.InboundEnvelope>>()).pipe(
+            Ref.getAndSet(pending, HashMap.empty<string, Deferred.Deferred<typeof InboundEnvelopeSchema.Type>>()).pipe(
                 Effect.flatMap((old) => Effect.forEach(HashMap.values(old), (d) => Deferred.die(d, new SocketClientError({ issue: _SocketClientIssue.Disconnected({ reason }) })).pipe(Effect.ignore), { discard: true })),
             );
-        const _request = Effect.fn('kargadan.socket.request')((envelope: Kargadan.OutboundEnvelope) => {
+        const _request = Effect.fn('kargadan.socket.request')((envelope: typeof OutboundEnvelopeSchema.Type) => {
             const requestId = envelope.identity.requestId;
             return Effect.gen(function* () {
                 const timeoutMs = yield* HarnessConfig.commandDeadlineMs;
-                const deferred = yield* Deferred.make<Kargadan.InboundEnvelope>();
+                const deferred = yield* Deferred.make<typeof InboundEnvelopeSchema.Type>();
                 yield* Ref.update(pending, HashMap.set(requestId, deferred));
                 yield* reconnectSupervisor.control.requireConnected;
                 const json = yield* encodeOutbound(envelope).pipe(

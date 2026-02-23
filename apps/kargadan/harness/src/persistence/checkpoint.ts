@@ -4,7 +4,7 @@
  */
 import { createHash } from 'node:crypto';
 import * as SqlClient from '@effect/sql/SqlClient';
-import { TelemetryContextSchema } from '../protocol/dispatch';
+import { TelemetryContextSchema } from '../protocol/schemas';
 import { Effect, Match, Option, Ref, Schema as S } from 'effect';
 
 // --- [CONSTANTS] -------------------------------------------------------------
