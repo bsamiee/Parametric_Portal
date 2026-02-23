@@ -1,5 +1,3 @@
-// HttpListener-based WebSocket server with typed message-tag dispatch and single active client policy.
-// Binds exclusively to 127.0.0.1 and rejects additional concurrent clients with HTTP 503.
 using System;
 using System.Buffers;
 using System.IO;
@@ -15,30 +13,22 @@ using LanguageExt.Common;
 using ParametricPortal.Kargadan.Plugin.src.contracts;
 using Rhino;
 using static LanguageExt.Prelude;
-
 namespace ParametricPortal.Kargadan.Plugin.src.transport;
-
-// --- [TYPES] -----------------------------------------------------------------
 
 internal delegate Task<Fin<JsonElement>> MessageDispatcher(
     TransportMessageTag tag,
     JsonElement message,
     Func<JsonElement, Task> sendAckAsync,
     CancellationToken cancellationToken);
-
-// --- [ADAPTER] ---------------------------------------------------------------
-
+internal delegate Seq<EventEnvelope> EventEnvelopeDrain();
+internal delegate Unit EventEnvelopeRequeue(Seq<EventEnvelope> envelopes);
 internal sealed class WebSocketHost : IDisposable {
-    // --- [CONSTANTS] ---------------------------------------------------------
+    private const int EventPumpIntervalMs = 25;
     private const int ReceiveBufferSize = 16_384;
     private static readonly TimeSpan KeepAliveInterval = TimeSpan.FromSeconds(5);
     private static readonly byte[] Http503Response = Encoding.UTF8.GetBytes(
         string.Join("\r\n", "HTTP/1.1 503 Service Unavailable", "Connection: close", "", ""));
     private static readonly JsonSerializerOptions JsonOptions = new() {
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-        WriteIndented = false,
-    };
-    private static readonly JsonSerializerOptions PortFileJsonOptions = new() {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
         WriteIndented = false,
     };
@@ -48,17 +38,23 @@ internal sealed class WebSocketHost : IDisposable {
             ".kargadan",
             "port");
     private static readonly string PortFileTempPath = PortFilePath + ".tmp";
-
-    // --- [STATE] -------------------------------------------------------------
     private readonly MessageDispatcher _dispatcher;
+    private readonly EventEnvelopeDrain _drainPublishedEvents;
+    private readonly EventEnvelopeRequeue _requeueEvents;
     private readonly CancellationTokenSource _cts = new();
+    private readonly SemaphoreSlim _sendGate = new(1, 1);
     private HttpListener? _listener;
     private WebSocket? _activeWebSocket;
     private int _activeConnectionCount;
     private bool _disposed;
-
-    // --- [LIFECYCLE] ---------------------------------------------------------
-    internal WebSocketHost(MessageDispatcher dispatcher) => _dispatcher = dispatcher;
+    internal WebSocketHost(
+        MessageDispatcher dispatcher,
+        EventEnvelopeDrain drainPublishedEvents,
+        EventEnvelopeRequeue requeueEvents) {
+        _dispatcher = dispatcher;
+        _drainPublishedEvents = drainPublishedEvents;
+        _requeueEvents = requeueEvents;
+    }
     internal int Port { get; private set; }
     internal void Start() {
         int port = ReserveLoopbackPort();
@@ -86,6 +82,7 @@ internal sealed class WebSocketHost : IDisposable {
     private Unit DisposeCore() {
         _disposed = true;
         Stop();
+        _sendGate.Dispose();
         _cts.Dispose();
         return unit;
     }
@@ -96,14 +93,14 @@ internal sealed class WebSocketHost : IDisposable {
     }
     private static void WritePortFile(int port) {
         string directory = Path.GetDirectoryName(PortFilePath)!;
-        Directory.CreateDirectory(directory);
+        _ = Directory.CreateDirectory(directory);
         PortFilePayload payload = new(
             Port: port,
             Pid: Environment.ProcessId,
             StartedAt: DateTimeOffset.UtcNow);
         string json = JsonSerializer.Serialize(
             value: payload,
-            options: PortFileJsonOptions);
+            options: JsonOptions);
         File.WriteAllText(
             path: PortFileTempPath,
             contents: json);
@@ -121,7 +118,6 @@ internal sealed class WebSocketHost : IDisposable {
             // why: best-effort cleanup on shutdown
         }
     }
-    // --- [ACCEPT_LOOP] -------------------------------------------------------
     private async Task AcceptLoopAsync(CancellationToken cancellationToken) {
         while (!cancellationToken.IsCancellationRequested) {
             HttpListenerContext? context = await TryGetContextAsync(cancellationToken: cancellationToken).ConfigureAwait(false);
@@ -138,6 +134,16 @@ internal sealed class WebSocketHost : IDisposable {
         CancellationToken cancellationToken) {
         try {
             await RunConnectionAsync(context: context, cancellationToken: cancellationToken).ConfigureAwait(false);
+        } catch (OperationCanceledException) {
+            // why: connection cancellation during shutdown is expected
+        } catch (WebSocketException exception) {
+            RhinoApp.WriteLine($"[Kargadan] Connection scope error: {exception.Message}");
+        } catch (IOException exception) {
+            RhinoApp.WriteLine($"[Kargadan] Connection scope error: {exception.Message}");
+        } catch (ObjectDisposedException exception) {
+            RhinoApp.WriteLine($"[Kargadan] Connection scope error: {exception.Message}");
+        } catch (InvalidOperationException exception) {
+            RhinoApp.WriteLine($"[Kargadan] Connection scope error: {exception.Message}");
         } finally {
             _ = Interlocked.Exchange(ref _activeConnectionCount, 0);
             _activeWebSocket = null;
@@ -148,9 +154,9 @@ internal sealed class WebSocketHost : IDisposable {
             case null:
             case { IsListening: false }:
                 return null;
-            case HttpListener listener:
+            default:
                 try {
-                    return await listener.GetContextAsync().WaitAsync(cancellationToken).ConfigureAwait(false);
+                    return await _listener.GetContextAsync().WaitAsync(cancellationToken).ConfigureAwait(false);
                 } catch (OperationCanceledException) {
                     return null;
                 } catch (HttpListenerException) when (cancellationToken.IsCancellationRequested) {
@@ -176,18 +182,17 @@ internal sealed class WebSocketHost : IDisposable {
         }
         context.Response.Close();
     }
-    // --- [CONNECTION] --------------------------------------------------------
     private Task RunConnectionAsync(
         HttpListenerContext context,
         CancellationToken cancellationToken) =>
         context.Request.IsWebSocketRequest switch {
-            false => RejectNonWebSocketAsync(context: context),
+            false => Task.FromResult(RejectNonWebSocket(context: context)),
             true => AcceptConnectionAsync(context: context, cancellationToken: cancellationToken),
         };
-    private static Task RejectNonWebSocketAsync(HttpListenerContext context) {
+    private static Unit RejectNonWebSocket(HttpListenerContext context) {
         context.Response.StatusCode = 400;
         context.Response.Close();
-        return Task.CompletedTask;
+        return unit;
     }
     private async Task AcceptConnectionAsync(
         HttpListenerContext context,
@@ -203,12 +208,34 @@ internal sealed class WebSocketHost : IDisposable {
             context.Response.Close();
             return;
         }
-        using WebSocket webSocket = wsContext.WebSocket;
+        WebSocket webSocket = wsContext.WebSocket;
         _activeWebSocket = webSocket;
         RhinoApp.WriteLine("[Kargadan] Client connected.");
-        await ReceiveLoopAsync(webSocket: webSocket, cancellationToken: cancellationToken).ConfigureAwait(false);
-        await CloseWebSocketSafelyAsync(webSocket: webSocket).ConfigureAwait(false);
-        RhinoApp.WriteLine("[Kargadan] Client disconnected.");
+        try {
+            using CancellationTokenSource connectionCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            Task receiveLoop = ReceiveLoopAsync(
+                webSocket: webSocket,
+                cancellationToken: connectionCts.Token);
+            Task eventPumpLoop = PumpEventsAsync(
+                webSocket: webSocket,
+                cancellationToken: connectionCts.Token);
+            _ = await Task.WhenAny(receiveLoop, eventPumpLoop).ConfigureAwait(false);
+            await connectionCts.CancelAsync().ConfigureAwait(false);
+            try {
+                await receiveLoop.ConfigureAwait(false);
+            } catch (OperationCanceledException) {
+                // why: loop cancellation is expected when connection scope closes
+            }
+            try {
+                await eventPumpLoop.ConfigureAwait(false);
+            } catch (OperationCanceledException) {
+                // why: loop cancellation is expected when connection scope closes
+            }
+            await CloseWebSocketSafelyAsync(webSocket: webSocket).ConfigureAwait(false);
+            RhinoApp.WriteLine("[Kargadan] Client disconnected.");
+        } finally {
+            webSocket.Dispose();
+        }
     }
     private static async Task CloseWebSocketSafelyAsync(WebSocket webSocket) {
         switch (webSocket.State) {
@@ -227,7 +254,6 @@ internal sealed class WebSocketHost : IDisposable {
                 break;
         }
     }
-    // --- [RECEIVE] -----------------------------------------------------------
     private async Task ReceiveLoopAsync(WebSocket webSocket, CancellationToken cancellationToken) {
         byte[] frameBuffer = new byte[ReceiveBufferSize];
         while (webSocket.State == WebSocketState.Open && !cancellationToken.IsCancellationRequested) {
@@ -248,10 +274,10 @@ internal sealed class WebSocketHost : IDisposable {
                     switch (messageBytes) {
                         case null:
                             return;
-                        case byte[] bytes:
+                        default:
                             await ProcessMessageAsync(
                                 webSocket: webSocket,
-                                messageBytes: bytes.AsMemory(),
+                                messageBytes: messageBytes.AsMemory(),
                                 cancellationToken: cancellationToken).ConfigureAwait(false);
                             break;
                     }
@@ -297,7 +323,35 @@ internal sealed class WebSocketHost : IDisposable {
         }
         return messageBuffer.WrittenMemory.ToArray();
     }
-    // --- [DISPATCH] ----------------------------------------------------------
+    private async Task PumpEventsAsync(
+        WebSocket webSocket,
+        CancellationToken cancellationToken) {
+        while (webSocket.State == WebSocketState.Open && !cancellationToken.IsCancellationRequested) {
+            Seq<EventEnvelope> drained = _drainPublishedEvents();
+            Seq<EventEnvelope> remaining = drained;
+            while (remaining.Count > 0) {
+                EventEnvelope current = remaining[0];
+                remaining = remaining.Tail;
+                try {
+                    await SendBytesAsync(
+                        webSocket: webSocket,
+                        payloadBytes: SerializeEvent(envelope: current),
+                        cancellationToken: cancellationToken).ConfigureAwait(false);
+                } catch (WebSocketException exception) {
+                    RhinoApp.WriteLine($"[Kargadan] Event send failed: {exception.Message}");
+                    _ = _requeueEvents(Seq(current) + remaining);
+                    return;
+                } catch (IOException exception) {
+                    RhinoApp.WriteLine($"[Kargadan] Event send failed: {exception.Message}");
+                    _ = _requeueEvents(Seq(current) + remaining);
+                    return;
+                }
+            }
+            await Task.Delay(
+                millisecondsDelay: EventPumpIntervalMs,
+                cancellationToken: cancellationToken).ConfigureAwait(false);
+        }
+    }
     private async Task ProcessMessageAsync(
         WebSocket webSocket,
         ReadOnlyMemory<byte> messageBytes,
@@ -307,10 +361,9 @@ internal sealed class WebSocketHost : IDisposable {
             messageBytes: messageBytes,
             cancellationToken: cancellationToken).ConfigureAwait(false);
         byte[] responseBytes = SerializeResponse(responseResult: responseResult);
-        await webSocket.SendAsync(
-            buffer: responseBytes.AsMemory(),
-            messageType: WebSocketMessageType.Text,
-            endOfMessage: true,
+        await SendBytesAsync(
+            webSocket: webSocket,
+            payloadBytes: responseBytes,
             cancellationToken: cancellationToken).ConfigureAwait(false);
     }
     private async Task<Fin<JsonElement>> BuildResponseAsync(
@@ -339,20 +392,32 @@ internal sealed class WebSocketHost : IDisposable {
                 sendAckAsync: ackPayload => SendAckAsync(webSocket: webSocket, ackPayload: ackPayload),
                 cancellationToken: cancellationToken),
             Fail: static error => Task.FromResult(Fin.Fail<JsonElement>(error)));
-    private static async Task SendAckAsync(WebSocket webSocket, JsonElement ackPayload) {
-        // why: silently drop ack if socket is no longer open -- ack failure must not propagate
-        switch (webSocket.State) {
-            case WebSocketState.Open:
-                byte[] ackBytes = JsonSerializer.SerializeToUtf8Bytes(
-                    value: ackPayload, options: JsonOptions);
-                await webSocket.SendAsync(
-                    buffer: ackBytes.AsMemory(),
-                    messageType: WebSocketMessageType.Text,
-                    endOfMessage: true,
-                    cancellationToken: CancellationToken.None).ConfigureAwait(false);
-                break;
-            default:
-                break;
+    private Task SendAckAsync(WebSocket webSocket, JsonElement ackPayload) =>
+        SendBytesAsync(
+            webSocket: webSocket,
+            payloadBytes: JsonSerializer.SerializeToUtf8Bytes(
+                value: ackPayload,
+                options: JsonOptions),
+            cancellationToken: CancellationToken.None);
+    private async Task SendBytesAsync(
+        WebSocket webSocket,
+        byte[] payloadBytes,
+        CancellationToken cancellationToken) {
+        await _sendGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try {
+            switch (webSocket.State) {
+                case WebSocketState.Open:
+                    await webSocket.SendAsync(
+                        buffer: payloadBytes.AsMemory(),
+                        messageType: WebSocketMessageType.Text,
+                        endOfMessage: true,
+                        cancellationToken: cancellationToken).ConfigureAwait(false);
+                    break;
+                default:
+                    break;
+            }
+        } finally {
+            _ = _sendGate.Release();
         }
     }
     private static byte[] SerializeResponse(Fin<JsonElement> responseResult) =>
@@ -364,17 +429,36 @@ internal sealed class WebSocketHost : IDisposable {
                 _tag = TransportMessageTag.Error.Key,
                 message = error.Message,
             }, options: JsonOptions));
+    private static byte[] SerializeEvent(EventEnvelope envelope) =>
+        envelope.CausationRequestId.Match(
+            Some: causationRequestId => JsonSerializer.SerializeToUtf8Bytes(new {
+                _tag = "event",
+                causationRequestId = (Guid)causationRequestId,
+                delta = envelope.Delta,
+                eventId = (Guid)envelope.EventId,
+                eventType = envelope.EventType.Key,
+                identity = envelope.Identity,
+                sourceRevision = envelope.SourceRevision,
+                telemetryContext = envelope.TelemetryContext,
+            }, options: JsonOptions),
+            None: () => JsonSerializer.SerializeToUtf8Bytes(new {
+                _tag = "event",
+                delta = envelope.Delta,
+                eventId = (Guid)envelope.EventId,
+                eventType = envelope.EventType.Key,
+                identity = envelope.Identity,
+                sourceRevision = envelope.SourceRevision,
+                telemetryContext = envelope.TelemetryContext,
+            }, options: JsonOptions));
     private static Fin<TransportMessageTag> ParseTransportTag(JsonElement message) =>
         message.TryGetProperty("_tag", out JsonElement tagElement) switch {
             true when tagElement.ValueKind == JsonValueKind.String =>
                 DomainBridge.ParseSmartEnum<TransportMessageTag, string>(
-                    candidate: tagElement.GetString() ?? string.Empty),
+                    candidate: (tagElement.GetString() ?? string.Empty).Trim()),
             true => Fin.Fail<TransportMessageTag>(
                 Error.New(message: "Envelope _tag must be a string.")),
             false => Fin.Fail<TransportMessageTag>(
                 Error.New(message: "Envelope _tag is required.")),
         };
-
-    // --- [PORT_FILE] ---------------------------------------------------------
     private sealed record PortFilePayload(int Port, int Pid, DateTimeOffset StartedAt);
 }

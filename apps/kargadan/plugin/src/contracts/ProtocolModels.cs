@@ -35,9 +35,9 @@ public readonly record struct TelemetryContext {
         Attempt = attempt;
     }
     public static Fin<TelemetryContext> Create(TraceId traceId, SpanId spanId, OperationTag operationTag, int attempt) =>
-        (attempt < 1) switch {
-            true => Fin.Fail<TelemetryContext>(Error.New(message: "Attempt must be >= 1.")),
-            false => Fin.Succ(new TelemetryContext(
+        attempt switch {
+            < 1 => Fin.Fail<TelemetryContext>(Error.New(message: "Attempt must be >= 1.")),
+            _ => Fin.Succ(new TelemetryContext(
                 traceId: traceId,
                 spanId: spanId,
                 operationTag: operationTag,

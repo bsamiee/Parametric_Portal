@@ -1,33 +1,26 @@
 // In-process lock-gated queue for EventEnvelope emission; Drain atomically snapshots and clears pending events.
 // Lifetime is managed by KargadanPlugin.OnLoad/OnShutdown — queue reference is never exposed outside the boundary adapter.
 using LanguageExt;
-using NodaTime;
 using ParametricPortal.CSharp.Analyzers.Contracts;
 using ParametricPortal.Kargadan.Plugin.src.contracts;
 using static LanguageExt.Prelude;
-
 namespace ParametricPortal.Kargadan.Plugin.src.boundary;
-
-// --- [TYPES] -----------------------------------------------------------------
-
-public readonly record struct PublishedEvent(EventEnvelope Envelope, Instant PublishedAt);
-
-// --- [ADAPTER] ---------------------------------------------------------------
 
 [BoundaryAdapter]
 public sealed class EventPublisher {
-    // --- [STATE] -------------------------------------------------------------
-    private readonly Ref<Seq<PublishedEvent>> _queue = Ref(Seq<PublishedEvent>());
-    // --- [INTERFACE] ---------------------------------------------------------
-    public Unit Publish(EventEnvelope envelope, Instant publishedAt) {
-        _ = _queue.Swap(queue => queue.Add(
-            new PublishedEvent(Envelope: envelope, PublishedAt: publishedAt)));
+    private readonly Ref<Seq<EventEnvelope>> _queue = Ref(Seq<EventEnvelope>());
+    public Unit Publish(EventEnvelope envelope) {
+        _ = _queue.Swap(queue => queue.Add(envelope));
         return unit;
     }
-    public Seq<PublishedEvent> Drain() =>
+    public Seq<EventEnvelope> Drain() =>
         atomic(() => {
-            Seq<PublishedEvent> snapshot = _queue.Value;
-            _ = _queue.Swap(static _ => Seq<PublishedEvent>());
+            Seq<EventEnvelope> snapshot = _queue.Value;
+            _ = _queue.Swap(static _ => Seq<EventEnvelope>());
             return snapshot;
         });
+    public Unit Requeue(Seq<EventEnvelope> envelopes) {
+        _ = _queue.Swap(queue => envelopes + queue);
+        return unit;
+    }
 }

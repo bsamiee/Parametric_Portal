@@ -102,9 +102,9 @@ public sealed record EventEnvelope {
         Option<RequestId> causationRequestId,
         JsonElement delta,
         TelemetryContext telemetryContext) =>
-        (sourceRevision < 0) switch {
-            true => Fin.Fail<EventEnvelope>(Error.New(message: "SourceRevision must be non-negative.")),
-            false => Fin.Succ(new EventEnvelope(
+        sourceRevision switch {
+            < 0 => Fin.Fail<EventEnvelope>(Error.New(message: "SourceRevision must be non-negative.")),
+            _ => Fin.Succ(new EventEnvelope(
                 eventId: eventId,
                 eventType: eventType,
                 identity: identity,

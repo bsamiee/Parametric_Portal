@@ -1,5 +1,5 @@
-import type { Kargadan } from '@parametric-portal/types/kargadan';
-import { Data, Duration, Effect, Fiber, Match, Option, pipe } from 'effect';
+import { Kargadan } from '@parametric-portal/types/kargadan';
+import { Data, Duration, Effect, Fiber, Match, Option, Ref, Schema as S, pipe } from 'effect';
 import { HarnessConfig } from '../config';
 import { CheckpointService, hashCanonicalState } from '../persistence/checkpoint';
 import { CommandDispatch, CommandDispatchError } from '../protocol/dispatch';
@@ -8,6 +8,7 @@ import { CommandDispatch, CommandDispatchError } from '../protocol/dispatch';
 
 type IdentityBase = { readonly appId: string; readonly protocolVersion: Kargadan.ProtocolVersion; readonly runId: string; readonly sessionId: string; readonly traceId: string };
 type LoopState = { readonly attempt: number; readonly command: Kargadan.CommandEnvelope | undefined; readonly correctionCycles: number; readonly identityBase: IdentityBase; readonly operations: ReadonlyArray<Kargadan.CommandOperation>; readonly sequence: number; readonly status: typeof Kargadan.RunStatusSchema.Type };
+type SceneObjectRef = NonNullable<Kargadan.CommandEnvelope['objectRefs']>[number];
 type Verification = Data.TaggedEnum<{ Failed: { readonly error: Kargadan.FailureReason & { readonly details?: unknown } }; Verified: { readonly ok: true } }>;
 
 // --- [SCHEMA] ----------------------------------------------------------------
@@ -17,10 +18,11 @@ const Verification = Data.taggedEnum<Verification>();
 // --- [CONSTANTS] -------------------------------------------------------------
 
 const writeOperations = new Set<Kargadan.CommandOperation>(['write.annotation.update', 'write.layer.update', 'write.object.create', 'write.object.delete', 'write.object.update', 'write.viewport.update']);
+const eventSequenceBase = 1_000_000;
 
 // --- [FUNCTIONS] -------------------------------------------------------------
 
-const planCommand = (input: { readonly deadline: number; readonly state: LoopState }) =>
+const planCommand = (input: { readonly deadline: number; readonly state: LoopState; readonly writeObjectRef: SceneObjectRef }) =>
     pipe(
         Option.fromNullable(input.state.command),
         Option.map((command) => ({ ...command, identity: { ...command.identity, issuedAt: new Date() }, telemetryContext: { ...command.telemetryContext, attempt: input.state.attempt } }) satisfies Kargadan.CommandEnvelope),
@@ -38,7 +40,7 @@ const planCommand = (input: { readonly deadline: number; readonly state: LoopSta
                 deadlineMs: input.deadline,
                 idempotency: isWrite ? { idempotencyKey: `run:${base.runId.slice(0, 8)}:seq:${String(sequence).padStart(4, '0')}`, payloadHash: hashCanonicalState(payload) } : undefined,
                 identity,
-                objectRefs: isWrite ? undefined : [{ objectId: '00000000-0000-0000-0000-000000000100', sourceRevision: 0, typeTag: 'Brep' }],
+                objectRefs: [input.writeObjectRef],
                 operation,
                 payload,
                 telemetryContext,
@@ -52,16 +54,46 @@ const planCommand = (input: { readonly deadline: number; readonly state: LoopSta
 
 class AgentLoop extends Effect.Service<AgentLoop>()('kargadan/AgentLoop', {
     effect: Effect.gen(function* () {
-        const [dispatch, checkpoint, commandDeadlineMs, retryMax, correctionMax, operations, simulatedPluginRevision] = yield* Effect.all([
+        const [dispatch, checkpoint, commandDeadlineMs, retryMax, correctionMax, operations, writeObjectRef, simulatedPluginRevision] = yield* Effect.all([
             CommandDispatch,
             CheckpointService,
             HarnessConfig.commandDeadlineMs,
             HarnessConfig.retryMaxAttempts,
             HarnessConfig.correctionCycles,
             HarnessConfig.resolveLoopOperations,
+            HarnessConfig.resolveWriteObjectRef,
             HarnessConfig.simulatedPluginRevision,
         ]);
+        const eventSequence = yield* Ref.make(eventSequenceBase);
         const normalizeDispatchError = (error: unknown) => Match.value(error).pipe(Match.when(Match.instanceOf(CommandDispatchError), (dispatchError) => dispatchError), Match.orElse(() => CommandDispatchError.of('transport', { error: String(error) })));
+        const persistInboundEvent = (eventEnvelope: Kargadan.EventEnvelope) =>
+            Effect.gen(function* () {
+                const sequence = yield* Ref.modify(eventSequence, (current) => [current, current + 1] as const);
+                const summary = yield* Match.value(eventEnvelope.eventType).pipe(
+                    Match.when('stream.compacted', () => S.decodeUnknown(Kargadan.EventBatchSummarySchema)(eventEnvelope.delta).pipe(Effect.map(Option.some))),
+                    Match.orElse(() => Effect.succeed(Option.none())),
+                );
+                const batchSummary = Option.getOrUndefined(summary);
+                yield* checkpoint.appendTransition({
+                    appId: eventEnvelope.identity.appId,
+                    createdAt: new Date(),
+                    eventId: eventEnvelope.eventId,
+                    eventType: `transport.event.${eventEnvelope.eventType}`,
+                    payload: {
+                        causationRequestId: eventEnvelope.causationRequestId,
+                        delta: eventEnvelope.delta,
+                        eventType: eventEnvelope.eventType,
+                        sourceRevision: eventEnvelope.sourceRevision,
+                        ...(batchSummary === undefined ? {} : { batchSummary }),
+                    },
+                    requestId: eventEnvelope.identity.requestId,
+                    runId: eventEnvelope.identity.runId,
+                    sequence,
+                    sessionId: eventEnvelope.identity.sessionId,
+                    telemetryContext: { ...eventEnvelope.telemetryContext, operationTag: 'EVENT' },
+                });
+                return { eventEnvelope, sequence, totalCount: batchSummary?.totalCount ?? 0 } as const;
+            });
         const dispatchFailure = (command: Kargadan.CommandEnvelope, error: unknown): Kargadan.ResultEnvelope => {
             const dispatchError = normalizeDispatchError(error);
             return {
@@ -119,7 +151,7 @@ class AgentLoop extends Effect.Service<AgentLoop>()('kargadan/AgentLoop', {
         const execute = (state: LoopState, command: Kargadan.CommandEnvelope): Effect.Effect<LoopState, unknown, never> => dispatch.command.execute(command).pipe(Effect.catchAll((error) => Effect.succeed(dispatchFailure(command, error))), Effect.flatMap((result) => persist(state, command, result)));
         const plan = (state: LoopState): Effect.Effect<LoopState, unknown, never> =>
             Effect.gen(function* () {
-                const command = yield* planCommand({ deadline: commandDeadlineMs, state });
+                const command = yield* planCommand({ deadline: commandDeadlineMs, state, writeObjectRef });
                 const { appId, runId, sessionId } = state.identityBase;
                 yield* checkpoint.appendTransition({ appId, createdAt: new Date(), eventId: crypto.randomUUID(), eventType: 'command.plan', idempotency: command.idempotency, payload: { operation: command.operation, status: state.status }, requestId: command.identity.requestId, runId, sequence: state.sequence + 1, sessionId, telemetryContext: command.telemetryContext });
                 return yield* execute(state, command);
@@ -138,7 +170,8 @@ class AgentLoop extends Effect.Service<AgentLoop>()('kargadan/AgentLoop', {
                     Effect.forever,
                 );
                 const inboundLoop = dispatch.transport.takeEvent().pipe(
-                    Effect.tap((eventEnvelope) => Effect.logDebug('kargadan.harness.transport.event', { eventId: eventEnvelope.eventId, eventType: eventEnvelope.eventType, requestId: eventEnvelope.identity.requestId, runId: eventEnvelope.identity.runId })),
+                    Effect.flatMap((eventEnvelope) => persistInboundEvent(eventEnvelope)),
+                    Effect.tap((eventState) => Effect.logDebug('kargadan.harness.transport.event', { batchCount: eventState.totalCount, eventId: eventState.eventEnvelope.eventId, eventType: eventState.eventEnvelope.eventType, requestId: eventState.eventEnvelope.identity.requestId, runId: eventState.eventEnvelope.identity.runId, sequence: eventState.sequence })),
                     Effect.catchAll((error) => Effect.logWarning('kargadan.harness.transport.event.failed', { error: String(error), runId: connected.identity.runId })),
                     Effect.forever,
                 );

@@ -3,10 +3,7 @@ using LanguageExt;
 using LanguageExt.Common;
 using Thinktecture;
 using static LanguageExt.Prelude;
-
 namespace ParametricPortal.Kargadan.Plugin.src.contracts;
-
-// --- [ENUMS] -----------------------------------------------------------------
 
 [SmartEnum<string>]
 public sealed partial class ErrorCode {
@@ -75,28 +72,25 @@ public sealed partial class CommandOperation {
     public static readonly CommandOperation ViewportUpdate = new("write.viewport.update");
     public static readonly CommandOperation AnnotationUpdate = new("write.annotation.update");
     public static readonly CommandOperation ScriptRun = new("script.run");
-
-    // --- [CAPABILITIES] -------------------------------------------------------
-
-    private static readonly Lazy<System.Collections.Generic.HashSet<string>> SupportedCapabilityLookup = new(
-        valueFactory: static () => SupportedCapabilities.ToHashSet(comparer: StringComparer.Ordinal));
-    public static Seq<string> SupportedCapabilities =>
-        Seq(
-            SceneSummary,
-            ObjectMetadata,
-            ObjectGeometry,
-            LayerState,
-            ViewState,
-            ToleranceUnits,
-            ObjectCreate,
-            ObjectUpdate,
-            ObjectDelete,
-            LayerUpdate,
-            ViewportUpdate,
-            AnnotationUpdate,
-            ScriptRun).Map(static (CommandOperation operation) => operation.Key);
+    private (CommandExecutionMode ExecutionMode, CommandCategory Category) Metadata =>
+        Map(
+            sceneSummary: (CommandExecutionMode.DirectApi, CommandCategory.Read),
+            objectMetadata: (CommandExecutionMode.DirectApi, CommandCategory.Read),
+            objectGeometry: (CommandExecutionMode.DirectApi, CommandCategory.Read),
+            layerState: (CommandExecutionMode.DirectApi, CommandCategory.Read),
+            viewState: (CommandExecutionMode.DirectApi, CommandCategory.Read),
+            toleranceUnits: (CommandExecutionMode.DirectApi, CommandCategory.Read),
+            objectCreate: (CommandExecutionMode.DirectApi, CommandCategory.Write),
+            objectUpdate: (CommandExecutionMode.DirectApi, CommandCategory.Write),
+            objectDelete: (CommandExecutionMode.DirectApi, CommandCategory.Write),
+            layerUpdate: (CommandExecutionMode.DirectApi, CommandCategory.Write),
+            viewportUpdate: (CommandExecutionMode.DirectApi, CommandCategory.Write),
+            annotationUpdate: (CommandExecutionMode.DirectApi, CommandCategory.Write),
+            scriptRun: (CommandExecutionMode.Script, CommandCategory.Geometric));
+    public CommandExecutionMode ExecutionMode => Metadata.ExecutionMode;
+    public CommandCategory Category => Metadata.Category;
     public static bool SupportsCapability(string capability) =>
-        SupportedCapabilityLookup.Value.Contains(item: capability);
+        TryGet((capability ?? string.Empty).Trim(), out CommandOperation? _);
 }
 [SmartEnum<string>]
 public sealed partial class SceneObjectType {

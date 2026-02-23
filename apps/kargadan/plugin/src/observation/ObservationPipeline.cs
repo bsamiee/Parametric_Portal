@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Channels;
 using LanguageExt;
@@ -10,13 +11,10 @@ using Rhino.Commands;
 using Rhino.DocObjects;
 using Rhino.DocObjects.Tables;
 using static LanguageExt.Prelude;
-
 namespace ParametricPortal.Kargadan.Plugin.src.observation;
 
 internal delegate void EventBatchFlushed(EventBatchSummary batch, Instant flushedAt);
-
 public sealed class ObservationPipeline : IDisposable {
-    // --- [CONSTANTS] ---------------------------------------------------------
     private const int ChannelCapacity = 256;
     private const int DebounceWindowMs = 200;
     private readonly record struct RhinoSubscription(
@@ -73,15 +71,11 @@ public sealed class ObservationPipeline : IDisposable {
         new(
             Attach: static pipeline => RhinoDoc.DocumentPropertiesChanged += pipeline.OnDocPropertiesChanged,
             Detach: static pipeline => RhinoDoc.DocumentPropertiesChanged -= pipeline.OnDocPropertiesChanged));
-
-    // --- [STATE] -------------------------------------------------------------
     private readonly Channel<RawDocEvent> _channel = Channel.CreateBounded<RawDocEvent>(ChannelOptions);
-    private readonly System.Timers.Timer _debounceTimer = new(interval: DebounceWindowMs) { AutoReset = true };
+    private readonly System.Timers.Timer _debounceTimer = new(interval: DebounceWindowMs) { AutoReset = false };
     private readonly EventBatchFlushed _onBatchFlushed;
     private readonly TimeProvider _timeProvider;
     private bool _disposed;
-
-    // --- [LIFECYCLE] ---------------------------------------------------------
     internal ObservationPipeline(EventBatchFlushed onBatchFlushed, TimeProvider timeProvider) {
         _onBatchFlushed = onBatchFlushed;
         _timeProvider = timeProvider;
@@ -111,8 +105,6 @@ public sealed class ObservationPipeline : IDisposable {
         _debounceTimer.Dispose();
         return unit;
     }
-
-    // --- [SUBSCRIPTION] ------------------------------------------------------
     [BoundaryImperativeExemption(
         ruleId: "CSP0001",
         reason: BoundaryImperativeReason.ProtocolRequired,
@@ -127,8 +119,6 @@ public sealed class ObservationPipeline : IDisposable {
         expiresOnUtc: "2026-08-22")]
     private void Unsubscribe() =>
         RhinoSubscriptions.Iter(subscription => subscription.Detach(this));
-
-    // --- [EVENTS] ------------------------------------------------------------
     private static bool IsUndoRedoActive() =>
         IsUndoRedoActive(RhinoDoc.ActiveDoc);
     private static bool IsUndoRedoActive(RhinoDoc? doc) =>
@@ -180,7 +170,6 @@ public sealed class ObservationPipeline : IDisposable {
             isUndoRedo: true);
         return unit;
     }
-
     private void OnAddObject(object? sender, RhinoObjectEventArgs e) => EmitObjectChange(subtype: EventSubtype.Added, objectId: e.ObjectId, oldObjectId: None, objectType: Some(e.TheObject.ObjectType.ToString()), isUndoRedo: IsUndoRedoActive());
     private void OnDeleteObject(object? sender, RhinoObjectEventArgs e) => EmitObjectChange(subtype: EventSubtype.Deleted, objectId: e.ObjectId, oldObjectId: None, objectType: None, isUndoRedo: IsUndoRedoActive());
     private void OnUndeleteObject(object? sender, RhinoObjectEventArgs e) => EmitObjectChange(subtype: EventSubtype.Undeleted, objectId: e.ObjectId, oldObjectId: None, objectType: None, isUndoRedo: IsUndoRedoActive());
@@ -196,56 +185,51 @@ public sealed class ObservationPipeline : IDisposable {
     private void OnLightTable(object? sender, LightTableEventArgs e) => EmitSimple(type: EventType.TablesChanged, subtype: EventSubtype.Modified);
     private void OnGroupTable(object? sender, GroupTableEventArgs e) => EmitSimple(type: EventType.TablesChanged, subtype: EventSubtype.Modified);
     private void OnDocPropertiesChanged(object? sender, DocumentEventArgs e) => EmitSimple(type: EventType.PropertiesChanged, subtype: EventSubtype.PropertiesChanged);
-
-    // --- [AGGREGATION] -------------------------------------------------------
     [BoundaryImperativeExemption(
         ruleId: "CSP0001",
         reason: BoundaryImperativeReason.ProtocolRequired,
         ticket: "EXEC-03",
         expiresOnUtc: "2026-08-22")]
     private void OnDebounceTimerElapsed(object? sender, System.Timers.ElapsedEventArgs e) {
-        Seq<RawDocEvent> pending = DrainChannel();
-        _ = (pending.Count > 0) switch {
-            false => unit,
-            true => FlushBatch(pending: pending),
-        };
-    }
-    [BoundaryImperativeExemption(
-        ruleId: "CSP0001",
-        reason: BoundaryImperativeReason.ProtocolRequired,
-        ticket: "EXEC-03",
-        expiresOnUtc: "2026-08-22")]
-    private Seq<RawDocEvent> DrainChannel() {
-        Seq<RawDocEvent> events = Seq<RawDocEvent>();
+        Dictionary<string, Dictionary<string, int>> categorySubtypeCounts = [];
+        int totalCount = 0;
+        bool containsUndoRedo = false;
         while (_channel.Reader.TryRead(out RawDocEvent raw)) {
-            events = events.Add(raw);
+            totalCount += 1;
+            containsUndoRedo = containsUndoRedo || raw.IsUndoRedo;
+            _ = categorySubtypeCounts.TryGetValue(raw.Type.Key, out Dictionary<string, int>? subtypeCounts);
+            subtypeCounts ??= [];
+            _ = categorySubtypeCounts.TryAdd(raw.Type.Key, subtypeCounts);
+            int nextCount = subtypeCounts.TryGetValue(raw.Subtype.Key, out int count) switch {
+                true => count + 1,
+                _ => 1,
+            };
+            subtypeCounts[raw.Subtype.Key] = nextCount;
         }
-        return events;
+        _ = totalCount switch {
+            0 => unit,
+            _ => FlushBatch(categorySubtypeCounts, totalCount, containsUndoRedo),
+        };
+        _debounceTimer.Start();
     }
-    private Unit FlushBatch(Seq<RawDocEvent> pending) {
-        Seq<CategoryCount> categories = toSeq(
-            pending
-                .GroupBy(static raw => raw.Type.Key, StringComparer.Ordinal)
-                .Select(static group => new CategoryCount(
-                    Category: EventType.Get(group.Key),
-                    Count: group.Count(),
-                    Subtypes: toSeq(
-                        group
-                            .GroupBy(static raw => raw.Subtype.Key, StringComparer.Ordinal)
-                            .Select(static sub => new SubtypeCount(
-                                Subtype: EventSubtype.Get(sub.Key),
-                                Count: sub.Count()))))));
-        EventBatchSummary batch = new(
-            TotalCount: pending.Count,
-            Categories: categories,
-            ContainsUndoRedo: pending.Any(static raw => raw.IsUndoRedo),
-            BatchWindowMs: DebounceWindowMs);
+    private Unit FlushBatch(
+        Dictionary<string, Dictionary<string, int>> categorySubtypeCounts,
+        int totalCount,
+        bool containsUndoRedo) {
         Instant now = Instant.FromDateTimeOffset(_timeProvider.GetUtcNow());
-        _onBatchFlushed(batch: batch, flushedAt: now);
+        _onBatchFlushed(new EventBatchSummary(
+                TotalCount: totalCount,
+                Categories: toSeq(categorySubtypeCounts.Select(category => new CategoryCount(
+                    Category: EventType.Get(category.Key),
+                    Count: category.Value.Values.Sum(),
+                    Subtypes: toSeq(category.Value.Select(subtype => new SubtypeCount(
+                        Subtype: EventSubtype.Get(subtype.Key),
+                        Count: subtype.Value)))))),
+                ContainsUndoRedo: containsUndoRedo,
+                BatchWindowMs: DebounceWindowMs),
+            now);
         return unit;
     }
-
-    // --- [UNDO] --------------------------------------------------------------
     [BoundaryImperativeExemption(
         ruleId: "CSP0001",
         reason: BoundaryImperativeReason.ProtocolRequired,

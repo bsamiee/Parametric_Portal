@@ -16,51 +16,29 @@ using Rhino;
 using Rhino.PlugIns;
 using static LanguageExt.Prelude;
 using Duration = NodaTime.Duration;
-
 namespace ParametricPortal.Kargadan.Plugin.src.boundary;
 
 [BoundaryAdapter]
 public sealed class KargadanPlugin : PlugIn {
-    // --- [TYPES] -------------------------------------------------------------
     private readonly record struct BoundaryState(
         EventPublisher EventPublisher,
         SessionHost SessionHost,
         WebSocketHost WebSocketHost,
         ObservationPipeline ObservationPipeline);
-    private readonly record struct LifecycleEventPayload(
-        EnvelopeIdentity Identity,
-        int SourceRevision,
-        RequestId RequestId,
-        JsonElement Delta,
-        TelemetryContext TelemetryContext);
-
-    // --- [CONSTANTS] ---------------------------------------------------------
     private static readonly Duration HandshakeHeartbeatInterval = Duration.FromSeconds(5);
     private static readonly Duration HandshakeHeartbeatTimeout = Duration.FromSeconds(15);
     private static readonly JsonSerializerOptions JsonOptions = new() {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
         WriteIndented = false,
     };
-
-    // --- [STATE] -------------------------------------------------------------
     private static readonly Atom<Option<KargadanPlugin>> _instance = Atom(Option<KargadanPlugin>.None);
     private readonly TimeProvider _timeProvider;
     private readonly Atom<Option<BoundaryState>> _state = Atom(Option<BoundaryState>.None);
-
-    // --- [LIFECYCLE] ---------------------------------------------------------
     public KargadanPlugin() : this(timeProvider: TimeProvider.System) { }
     internal KargadanPlugin(TimeProvider timeProvider) => _timeProvider = timeProvider;
     public override PlugInLoadTime LoadTime => PlugInLoadTime.AtStartup;
-
-    // --- [INTERFACE] ---------------------------------------------------------
     public static Fin<KargadanPlugin> Instance =>
         _instance.Value.ToFin(Error.New(message: "KargadanPlugin has not been loaded."));
-    public Fin<EventPublisher> EventPublisher =>
-        ReadState().Map(static (BoundaryState state) => state.EventPublisher);
-    public Fin<SessionHost> SessionHost =>
-        ReadState().Map(static (BoundaryState state) => state.SessionHost);
-    public Fin<Seq<PublishedEvent>> DrainPublishedEvents() =>
-        ReadState().Map(static (BoundaryState state) => state.EventPublisher.Drain());
     public Fin<HandshakeEnvelope> HandleHandshake(HandshakeEnvelope.Init init) =>
         ReadState().Bind((BoundaryState state) => {
             Instant now = Instant.FromDateTimeOffset(_timeProvider.GetUtcNow());
@@ -108,49 +86,37 @@ public sealed class KargadanPlugin : PlugIn {
                             TelemetryContext: heartbeat.TelemetryContext)),
                         pong: Fin.Succ(heartbeat))));
         });
-
-    // --- [FUNCTIONS] ---------------------------------------------------------
     private Fin<Unit> PublishLifecycleEvent(BoundaryState state, CommandResultEnvelope result) {
         Instant publishedAt = Instant.FromDateTimeOffset(_timeProvider.GetUtcNow());
-        Fin<EventId> eventId = DomainBridge.ParseValueObject<EventId, Guid>(Guid.NewGuid());
-        return eventId.Bind((EventId lifecycleEventId) =>
-            BuildLifecycleEventDelta(result: result).Bind((LifecycleEventPayload payload) =>
-                EventEnvelope.Create(
-                    eventId: lifecycleEventId,
+        return result.Switch(
+            success: (CommandResultEnvelope.Success success) =>
+                PublishEventEnvelope(
+                    eventPublisher: state.EventPublisher,
                     eventType: EventType.SessionLifecycle,
-                    identity: payload.Identity,
-                    sourceRevision: payload.SourceRevision,
-                    causationRequestId: Some(payload.RequestId),
-                    delta: payload.Delta,
-                    telemetryContext: payload.TelemetryContext).Bind((EventEnvelope eventEnvelope) => {
-                        _ = state.EventPublisher.Publish(eventEnvelope, publishedAt);
-                        return Fin.Succ(unit);
-                    })));
-    }
-    private static Fin<LifecycleEventPayload>
-        BuildLifecycleEventDelta(CommandResultEnvelope result) =>
-        result.Switch(
-            success: (CommandResultEnvelope.Success success) => Fin.Succ(
-                new LifecycleEventPayload(
-                    Identity: success.Identity,
-                    SourceRevision: success.Execution.SourceRevision,
-                    RequestId: success.Identity.RequestId,
-                    Delta: JsonSerializer.SerializeToElement(new {
+                    identity: success.Identity,
+                    sourceRevision: success.Execution.SourceRevision,
+                    causationRequestId: Some(success.Identity.RequestId),
+                    delta: JsonSerializer.SerializeToElement(new {
                         dedupeDecision = success.Dedupe.Decision.Key,
                         status = CommandResultStatus.Ok.Key,
                     }),
-                    TelemetryContext: success.TelemetryContext)),
-            failure: (CommandResultEnvelope.Failure failure) => Fin.Succ(
-                new LifecycleEventPayload(
-                    Identity: failure.Identity,
-                    SourceRevision: failure.Execution.SourceRevision,
-                    RequestId: failure.Identity.RequestId,
-                    Delta: JsonSerializer.SerializeToElement(new {
+                    telemetryContext: success.TelemetryContext,
+                    publishedAt: publishedAt),
+            failure: (CommandResultEnvelope.Failure failure) =>
+                PublishEventEnvelope(
+                    eventPublisher: state.EventPublisher,
+                    eventType: EventType.SessionLifecycle,
+                    identity: failure.Identity,
+                    sourceRevision: failure.Execution.SourceRevision,
+                    causationRequestId: Some(failure.Identity.RequestId),
+                    delta: JsonSerializer.SerializeToElement(new {
                         errorCode = failure.Error.Reason.Code.Key,
                         failureClass = failure.Error.Reason.FailureClass.Key,
                         status = CommandResultStatus.Error.Key,
                     }),
-                    TelemetryContext: failure.TelemetryContext)));
+                    telemetryContext: failure.TelemetryContext,
+                    publishedAt: publishedAt));
+    }
     private static Fin<Unit> PublishBatchEvent(
         SessionHost sessionHost,
         EventPublisher eventPublisher,
@@ -194,25 +160,43 @@ public sealed class KargadanPlugin : PlugIn {
         Instant publishedAt,
         Func<SessionSnapshot, JsonElement> buildDelta) =>
         sessionHost.Snapshot().Bind((SessionSnapshot snapshot) =>
-            DomainBridge.ParseValueObject<EventId, Guid>(Guid.NewGuid()).Bind((EventId eventId) =>
-                BuildTelemetryContext(
-                    requestId: requestId,
-                    operationTag: operationTag).Bind((TelemetryContext telemetryContext) =>
-                    EventEnvelope.Create(
-                        eventId: eventId,
-                        eventType: eventType,
-                        identity: snapshot.Identity with {
-                            RequestId = requestId,
-                            IssuedAt = publishedAt,
-                        },
-                        sourceRevision: 0,
-                        causationRequestId: causationRequestId,
-                        delta: buildDelta(snapshot),
-                        telemetryContext: telemetryContext)
-                    .Map((EventEnvelope eventEnvelope) => {
-                        _ = eventPublisher.Publish(eventEnvelope, publishedAt);
-                        return unit;
-                    }))));
+            BuildTelemetryContext(
+                requestId: requestId,
+                operationTag: operationTag).Bind((TelemetryContext telemetryContext) =>
+                PublishEventEnvelope(
+                    eventPublisher: eventPublisher,
+                    eventType: eventType,
+                    identity: snapshot.Identity with {
+                        RequestId = requestId,
+                        IssuedAt = publishedAt,
+                    },
+                    sourceRevision: 0,
+                    causationRequestId: causationRequestId,
+                    delta: buildDelta(snapshot),
+                    telemetryContext: telemetryContext,
+                    publishedAt: publishedAt)));
+    private static Fin<Unit> PublishEventEnvelope(
+        EventPublisher eventPublisher,
+        EventType eventType,
+        EnvelopeIdentity identity,
+        int sourceRevision,
+        Option<RequestId> causationRequestId,
+        JsonElement delta,
+        TelemetryContext telemetryContext,
+        Instant publishedAt) =>
+        DomainBridge.ParseValueObject<EventId, Guid>(Guid.NewGuid()).Bind((EventId eventId) =>
+            EventEnvelope.Create(
+                eventId: eventId,
+                eventType: eventType,
+                identity: identity,
+                sourceRevision: sourceRevision,
+                causationRequestId: causationRequestId,
+                delta: delta,
+                telemetryContext: telemetryContext)
+            .Map((EventEnvelope eventEnvelope) => {
+                _ = eventPublisher.Publish(eventEnvelope);
+                return unit;
+            }));
     private static JsonElement BuildBatchDelta(EventBatchSummary batch) =>
         JsonSerializer.SerializeToElement(new {
             totalCount = batch.TotalCount,
@@ -247,8 +231,6 @@ public sealed class KargadanPlugin : PlugIn {
                         operationTag: parsedOperationTag,
                         attempt: 1))));
     }
-
-    // --- [DISPATCH] ----------------------------------------------------------
     private async Task<Fin<JsonElement>> DispatchMessageAsync(
         TransportMessageTag tag,
         JsonElement message,
@@ -302,24 +284,30 @@ public sealed class KargadanPlugin : PlugIn {
         CancellationToken cancellationToken) {
         JsonElement ackPayload = ExtractAckPayload(message: message);
         await sendAckAsync(ackPayload).ConfigureAwait(false);
-
         int deadlineMs = ExtractDeadlineMs(message: message);
         using CancellationTokenSource timeoutCts =
             CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeoutCts.CancelAfter(millisecondsDelay: deadlineMs);
-
         Fin<JsonElement> result = await RunOnUiThreadAsync(() =>
             ReadState().Bind((BoundaryState state) => {
                 Instant now = Instant.FromDateTimeOffset(_timeProvider.GetUtcNow());
                 return state.SessionHost.Timeout(now).Bind((SessionSnapshot snapshot) =>
-                    HandleCommand(
-                        envelope: message,
-                        sessionIdentity: snapshot.Identity,
-                        onCommand: (CommandEnvelope envelope) => ExecuteCommand(
-                            state: state,
-                            envelope: envelope))
-                    .Map((CommandResultEnvelope resultEnvelope) =>
-                        JsonSerializer.SerializeToElement(value: resultEnvelope, options: JsonOptions)));
+                    snapshot.Phase switch {
+                        SessionPhase.Active => HandleCommand(
+                                envelope: message,
+                                sessionIdentity: snapshot.Identity,
+                                onCommand: (CommandEnvelope envelope) => ExecuteCommand(
+                                    state: state,
+                                    envelope: envelope))
+                            .Map((CommandResultEnvelope resultEnvelope) =>
+                                JsonSerializer.SerializeToElement(value: resultEnvelope, options: JsonOptions)),
+                        SessionPhase.Connected => Fin.Fail<JsonElement>(
+                            Error.New(message: "Session is not active; handshake is not fully negotiated.")),
+                        SessionPhase.Terminal terminal => Fin.Fail<JsonElement>(
+                            Error.New(message: $"Session is not active; current state is '{terminal.StateTag.Key}'.")),
+                        _ => Fin.Fail<JsonElement>(
+                            Error.New(message: "Session is not active.")),
+                    });
             })
         ).WaitAsync(timeoutCts.Token).ConfigureAwait(false);
         return result;
@@ -403,8 +391,6 @@ public sealed class KargadanPlugin : PlugIn {
                 (HeartbeatEnvelope envelope) => JsonSerializer.SerializeToElement(value: envelope, options: JsonOptions)),
         };
     }
-
-    // --- [INTERNAL] ----------------------------------------------------------
     private Fin<BoundaryState> ReadState() =>
         _state.Value.ToFin(Error.New(message: "Plugin boundary state is unavailable before plugin load."));
     protected override LoadReturnCode OnLoad(ref string errorMessage) {
@@ -420,7 +406,10 @@ public sealed class KargadanPlugin : PlugIn {
                         batch: batch,
                         flushedAt: flushedAt),
                 timeProvider: _timeProvider);
-            WebSocketHost webSocketHost = new(dispatcher: DispatchMessageAsync);
+            WebSocketHost webSocketHost = new(
+                dispatcher: DispatchMessageAsync,
+                drainPublishedEvents: eventPublisher.Drain,
+                requeueEvents: eventPublisher.Requeue);
             BoundaryState boundaryState = new(
                 EventPublisher: eventPublisher,
                 SessionHost: sessionHost,

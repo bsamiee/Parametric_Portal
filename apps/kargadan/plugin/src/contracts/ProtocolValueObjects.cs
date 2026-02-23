@@ -1,131 +1,102 @@
 using System;
 using Thinktecture;
-
 namespace ParametricPortal.Kargadan.Plugin.src.contracts;
 
-// --- [GUID_VALUE_OBJECTS] ----------------------------------------------------
-
 [ValueObject<Guid>(KeyMemberName = "Value")]
-public readonly partial struct AppId {
+public readonly partial struct AppId : ITryCreateFactory<AppId, Guid> {
     static partial void ValidateFactoryArguments(ref ValidationError? validationError, ref Guid value) =>
         validationError = Require.NonEmptyGuid(value: value, typeName: nameof(AppId));
 }
-
 [ValueObject<Guid>(KeyMemberName = "Value")]
-public readonly partial struct RunId {
+public readonly partial struct RunId : ITryCreateFactory<RunId, Guid> {
     static partial void ValidateFactoryArguments(ref ValidationError? validationError, ref Guid value) =>
         validationError = Require.NonEmptyGuid(value: value, typeName: nameof(RunId));
 }
-
 [ValueObject<Guid>(KeyMemberName = "Value")]
-public readonly partial struct SessionId {
+public readonly partial struct SessionId : ITryCreateFactory<SessionId, Guid> {
     static partial void ValidateFactoryArguments(ref ValidationError? validationError, ref Guid value) =>
         validationError = Require.NonEmptyGuid(value: value, typeName: nameof(SessionId));
 }
-
 [ValueObject<Guid>(KeyMemberName = "Value")]
-public readonly partial struct RequestId {
+public readonly partial struct RequestId : ITryCreateFactory<RequestId, Guid> {
     static partial void ValidateFactoryArguments(ref ValidationError? validationError, ref Guid value) =>
         validationError = Require.NonEmptyGuid(value: value, typeName: nameof(RequestId));
 }
-
 [ValueObject<Guid>(KeyMemberName = "Value")]
-public readonly partial struct EventId {
+public readonly partial struct EventId : ITryCreateFactory<EventId, Guid> {
     static partial void ValidateFactoryArguments(ref ValidationError? validationError, ref Guid value) =>
         validationError = Require.NonEmptyGuid(value: value, typeName: nameof(EventId));
 }
-
 [ValueObject<Guid>(KeyMemberName = "Value")]
-public readonly partial struct ObjectId {
+public readonly partial struct ObjectId : ITryCreateFactory<ObjectId, Guid> {
     static partial void ValidateFactoryArguments(ref ValidationError? validationError, ref Guid value) =>
         validationError = Require.NonEmptyGuid(value: value, typeName: nameof(ObjectId));
 }
-
-// --- [STRING_VALUE_OBJECTS] --------------------------------------------------
-
 [ValueObject<string>(KeyMemberName = "Value")]
 [KeyMemberEqualityComparer<ComparerAccessors.StringOrdinal, string>]
 [KeyMemberComparer<ComparerAccessors.StringOrdinal, string>]
-public readonly partial struct TraceId {
+public readonly partial struct TraceId : ITryCreateFactory<TraceId, string> {
     static partial void ValidateFactoryArguments(ref ValidationError? validationError, ref string value) =>
         validationError = Require.TrimmedMatching(
             value: ref value,
             typeName: nameof(TraceId),
             pattern: Require.Patterns.TelemetryHex);
 }
-
 [ValueObject<string>(KeyMemberName = "Value")]
 [KeyMemberEqualityComparer<ComparerAccessors.StringOrdinal, string>]
 [KeyMemberComparer<ComparerAccessors.StringOrdinal, string>]
-public readonly partial struct SpanId {
+public readonly partial struct SpanId : ITryCreateFactory<SpanId, string> {
     static partial void ValidateFactoryArguments(ref ValidationError? validationError, ref string value) =>
         validationError = Require.TrimmedMatching(
             value: ref value,
             typeName: nameof(SpanId),
             pattern: Require.Patterns.TelemetryHex);
 }
-
 [ValueObject<string>(KeyMemberName = "Value")]
 [KeyMemberEqualityComparer<ComparerAccessors.StringOrdinal, string>]
 [KeyMemberComparer<ComparerAccessors.StringOrdinal, string>]
-public readonly partial struct OperationTag {
+public readonly partial struct OperationTag : ITryCreateFactory<OperationTag, string> {
     static partial void ValidateFactoryArguments(ref ValidationError? validationError, ref string value) =>
         validationError = Require.TrimmedNonEmpty(value: ref value, typeName: nameof(OperationTag));
 }
-
 [ValueObject<string>(KeyMemberName = "Value")]
 [KeyMemberEqualityComparer<ComparerAccessors.StringOrdinal, string>]
 [KeyMemberComparer<ComparerAccessors.StringOrdinal, string>]
-public readonly partial struct VersionString {
+public readonly partial struct VersionString : ITryCreateFactory<VersionString, string> {
     static partial void ValidateFactoryArguments(ref ValidationError? validationError, ref string value) =>
         validationError = Require.TrimmedNonEmpty(value: ref value, typeName: nameof(VersionString));
 }
-
 [ValueObject<string>(KeyMemberName = "Value")]
 [KeyMemberEqualityComparer<ComparerAccessors.StringOrdinal, string>]
 [KeyMemberComparer<ComparerAccessors.StringOrdinal, string>]
-public readonly partial struct TokenValue {
+public readonly partial struct TokenValue : ITryCreateFactory<TokenValue, string> {
     static partial void ValidateFactoryArguments(ref ValidationError? validationError, ref string value) =>
         validationError = Require.TrimmedNonEmpty(value: ref value, typeName: nameof(TokenValue));
 }
-
 [ValueObject<string>(KeyMemberName = "Value")]
 [KeyMemberEqualityComparer<ComparerAccessors.StringOrdinal, string>]
 [KeyMemberComparer<ComparerAccessors.StringOrdinal, string>]
-public readonly partial struct UndoScope {
+public readonly partial struct UndoScope : ITryCreateFactory<UndoScope, string> {
     static partial void ValidateFactoryArguments(ref ValidationError? validationError, ref string value) =>
         validationError = Require.TrimmedNonEmpty(value: ref value, typeName: nameof(UndoScope));
 }
-
 [ValueObject<string>(KeyMemberName = "Value")]
 [KeyMemberEqualityComparer<ComparerAccessors.StringOrdinal, string>]
 [KeyMemberComparer<ComparerAccessors.StringOrdinal, string>]
-public readonly partial struct IdempotencyKey {
+public readonly partial struct IdempotencyKey : ITryCreateFactory<IdempotencyKey, string> {
     static partial void ValidateFactoryArguments(ref ValidationError? validationError, ref string value) =>
         validationError = Require.TrimmedMatching(
             value: ref value,
             typeName: nameof(IdempotencyKey),
             pattern: Require.Patterns.IdempotencyKey);
 }
-
 [ValueObject<string>(KeyMemberName = "Value")]
 [KeyMemberEqualityComparer<ComparerAccessors.StringOrdinal, string>]
 [KeyMemberComparer<ComparerAccessors.StringOrdinal, string>]
-public readonly partial struct PayloadHash {
+public readonly partial struct PayloadHash : ITryCreateFactory<PayloadHash, string> {
     static partial void ValidateFactoryArguments(ref ValidationError? validationError, ref string value) =>
         validationError = Require.TrimmedMatching(
             value: ref value,
             typeName: nameof(PayloadHash),
             pattern: Require.Patterns.PayloadHash);
-}
-
-// --- [UINT_VALUE_OBJECTS] ----------------------------------------------------
-
-[ValueObject<uint>(KeyMemberName = "Value")]
-public readonly partial struct UndoRecordId {
-    static partial void ValidateFactoryArguments(ref ValidationError? validationError, ref uint value) =>
-        validationError = (value == 0) switch {
-            true => new ValidationError($"{nameof(UndoRecordId)} must be greater than zero."),
-            false => null
-        };
 }

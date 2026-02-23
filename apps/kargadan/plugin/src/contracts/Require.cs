@@ -40,9 +40,9 @@ internal static class Require {
     }
     // --- [NUMERIC_RULES] ------------------------------------------------------
     internal static Validation<Error, int> NonNegative(int value, string field) =>
-        (value >= 0) switch {
-            true => Success<Error, int>(value),
-            false => Fail<Error, int>(Error.New(message: $"{field} must be non-negative."))
+        value switch {
+            >= 0 => Success<Error, int>(value),
+            _ => Fail<Error, int>(Error.New(message: $"{field} must be non-negative."))
         };
     // --- [PATTERNS] -----------------------------------------------------------
     internal static class Patterns {
