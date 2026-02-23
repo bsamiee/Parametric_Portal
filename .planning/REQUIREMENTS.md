@@ -30,7 +30,7 @@ Requirements for initial release. Each maps to roadmap phases.
 - [ ] **AGNT-01**: packages/ai provides a generic agent loop service (tool-calling orchestration, planning, conversation management) consumable by any app — not Kargadan-specific
 - [ ] **AGNT-02**: Tools are defined via @effect/ai `Tool.make` with schema-driven parameters, typed success/failure, and descriptive annotations — composed into `Toolkit` collections
 - [ ] **AGNT-03**: Agent translates natural language user input into appropriate Rhino commands or RhinoCommon API calls via LLM inference
-- [ ] **AGNT-04**: Agent discovers relevant commands from a large catalog via RAG-backed pgvector search over an embedded Rhino command knowledge base
+- [ ] **AGNT-04**: C# bridge plugin exports the real Rhino command catalog as structured JSON on connection; harness decodes via CommandManifest, seeds via KBSeeder with a real embed function, and agent discovers relevant commands via pgvector cosine similarity over the populated knowledge base
 - [ ] **AGNT-05**: Agent uses @effect/ai `Chat` for multi-turn conversation with Ref-based history accumulation
 - [ ] **AGNT-06**: Architect/Editor model split — strong reasoning model (configurable) plans the operation strategy, faster model executes the command sequence
 - [ ] **AGNT-07**: Anthropic Tool Search Tool integration for on-demand tool discovery from large catalogs without upfront context loading
@@ -51,7 +51,7 @@ Requirements for initial release. Each maps to roadmap phases.
 - [x] **PERS-02**: Session resumption restores from the last PostgreSQL checkpoint — rebuilds loop state, Chat history, and active context without data loss
 - [x] **PERS-03**: Every tool call is logged with parameters, result, duration, and failure status for audit and replay
 - [x] **PERS-04**: Past agent sessions are queryable and replayable from the audit trail
-- [x] **PERS-05**: Rhino command knowledge base is seeded with command descriptions, parameters, examples, and alias enrichment for accurate RAG retrieval
+- [x] **PERS-05**: Rhino command knowledge base infrastructure — CommandManifest decode schema and KBSeeder write pipeline (search_documents + search_embeddings via injected embed function) ready for real command catalog ingestion
 
 ### Scene
 
@@ -187,4 +187,4 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 ---
 *Requirements defined: 2026-02-22*
-*Last updated: 2026-02-23 after Phase 2 completion reconciliation*
+*Last updated: 2026-02-23 after Phase 4 refactoring (PERS-05 alias removal, AGNT-04 extraction pipeline)*

@@ -5,14 +5,14 @@
 See: .planning/PROJECT.md (updated 2026-02-22)
 
 **Core value:** The agent can execute any operation a human can perform in Rhino 9 through natural language, with reliable state persistence and verification — without hardcoding individual commands.
-**Current focus:** Phase 5 - Agent Intelligence Pipeline
+**Current focus:** Phase 5 - Agent Core and Provider Abstraction
 
 ## Current Position
 
-Phase: 5 of 8 (Agent Intelligence Pipeline)
-Plan: 0 of ? in current phase
-Status: Phase 04 complete; Phase 05 next
-Last activity: 2026-02-23 -- Rhino command manifest and KB seeder service for pgvector semantic search
+Phase: 5 of 8 (Agent Core and Provider Abstraction)
+Plan: 0 of 3 in current phase
+Status: Phase 04 complete (refactored); Phase 05 next
+Last activity: 2026-02-23 -- Phase 4 refactoring: removed static sample manifest, reduced manifest.ts to decode boundary schema, reduced seeder.ts to write pipeline only
 
 Progress: [█████░░░░░] 50.0%
 
@@ -84,18 +84,30 @@ Recent decisions affecting current work:
 - [04-01]: chatJson is empty string placeholder until Phase 5 wires Chat.exportJson
 - [04-02]: Deterministic UUID from command ID via SHA-256 namespace hashing -- search_documents.entity_id requires UUID but manifest uses string IDs
 - [04-02]: Embedding function injected as parameter to seed() -- keeps seeder decoupled from server-side AiRuntime dependencies
+- [04-refactor]: Removed static SAMPLE_MANIFEST (16 hardcoded commands) -- was speculative string data, not real knowledge. manifest.ts is now a decode boundary schema only; seeder.ts is a write pipeline only. Real command data comes from the C# bridge plugin at runtime.
+- [04-refactor]: No aliasing in CommandManifestEntrySchema -- user decision, explicitly rejected
+- [04-refactor]: KBSeeder wired into ServicesLayer (previously only defined, not integrated)
+- [04-refactor]: hashCanonicalState cross-concern: lives in persistence/checkpoint.ts but used by knowledge/seeder.ts -- pure hash utility in the wrong module, should be extracted when a natural home emerges
 
 ### Pending Todos
 
-None yet.
+- [Phase 5]: hashCanonicalState should be extracted from persistence/checkpoint.ts to a shared location -- currently a cross-concern dependency from knowledge/seeder.ts
 
 ### Blockers/Concerns
 
 - [Research]: Phase 5/6 needs verification of Anthropic Tool Search Tool beta API contract before AiToolkit design
 - [Research]: Phase 7 needs re-verification of @effect/workflow 0.16.0 alpha stability before committing to durable workflows
 
+### Phase 5 Open Questions (must resolve during discuss-phase)
+
+1. **Command catalog extraction**: How does the C# plugin enumerate its command catalog? Options: (a) RhinoApp.RunScript("_CommandList") parsing, (b) Rhino SDK reflection over registered commands, (c) static manifest file shipped with plugin, (d) plugin exposes a "catalog" message type over the bridge protocol
+2. **When does seeding happen?** On every harness startup? Once on first connection? On-demand via CLI command? After bridge reports its catalog?
+3. **Embed function source**: Which provider's embedding API? OpenAI text-embedding-3-small (already configured in _EMBEDDING)? Anthropic? Must resolve before wiring KBSeeder.seed()
+4. **Chat.exportJson/fromJson**: Is this @effect/ai Chat API stable enough to wire now? Phase 4 deferred it as empty string placeholder.
+5. **Tool.make from manifest**: Can CommandManifestEntry.params be mechanically converted to an S.Struct for Tool.make parameters? Or does the agent need a different schema shape?
+
 ## Session Continuity
 
 Last session: 2026-02-23
-Stopped at: Completed 04-02-PLAN.md (Phase 04 complete)
-Resume file: Phase 05 planning
+Stopped at: Phase 04 refactored (manifest.ts + seeder.ts cleaned up), .planning files refined for Phase 5
+Resume file: /gsd:discuss-phase 5
