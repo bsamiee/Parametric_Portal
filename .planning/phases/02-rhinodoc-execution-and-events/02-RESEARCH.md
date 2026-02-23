@@ -1,7 +1,7 @@
 # Phase 2: RhinoDoc Execution and Events - Research
 
 **Researched:** 2026-02-22
-**Updated:** 2026-02-22 (re-research -- verified all claims against official docs, corrected UndoActive/RedoActive sourcing, refined RunScript undo strategy, added ObjectTable API coverage)
+**Updated:** 2026-02-22 (re-research -- verified all claims against official docs, corrected UndoActive/RedoActive sourcing, refined RunScript undo strategy, added ObjectTable API coverage, verified codebase state post-Phase 1, confirmed plans 02-01 and 02-02 are unexecuted)
 **Domain:** RhinoCommon SDK -- command execution, undo system, document events, direct API access
 **Confidence:** MEDIUM-HIGH
 
@@ -14,6 +14,57 @@ The bifurcated undo strategy (CONTEXT.md decision) is the most architecturally s
 There is **no programmatic way to cancel a running Rhino command**. McNeel has explicitly stated this (Dale Fugier: "There is no programatic way... of canceling one"). Timeout enforcement wraps `WaitAsync()` on the calling side -- the harness receives a timeout error, but the Rhino command may still be running. `RhinoApp.SendKeystrokes` with Escape is unreliable best-effort only.
 
 **Primary recommendation:** Use direct RhinoCommon API (`doc.Objects.Add*`, `doc.Objects.Replace`, `doc.Objects.Delete`, `doc.Layers`) for all typed operations; reserve `RunScript` as escape hatch for commands without API equivalents. Wrap all document-modifying direct API operations in `BeginUndoRecord`/`EndUndoRecord` pairs with `AddCustomUndoEvent` for agent state snapshots. Subscribe to `Command.UndoRedo` event to detect Cmd+Z/Cmd+Shift+Z.
+
+## Codebase State (Post-Phase 1)
+
+Phase 1 produced the transport foundation. Phase 2 plans (02-01-PLAN.md, 02-02-PLAN.md) exist but have NOT been executed -- no files exist in `execution/` or `observation/` directories.
+
+### Existing C# Plugin Files (15 files)
+
+| File | Purpose | Phase 2 Impact |
+|------|---------|----------------|
+| `boundary/KargadanPlugin.cs` (234 lines) | Plugin entry point with WebSocket lifecycle and dispatch | MODIFY: Add execution routing, two-phase ack, ObservationLifecycle integration |
+| `boundary/EventPublisher.cs` | Lock-gated event queue with atomic Drain | NO CHANGE: Flush callback wraps batches into EventEnvelope at boundary |
+| `contracts/ProtocolEnums.cs` | 9 SmartEnums (ErrorCode, FailureClass, TransportMessageTag, etc.) | EXTEND: Add CommandExecutionMode, CommandCategory, EventSubtype; extend CommandOperation, EventType |
+| `contracts/ProtocolModels.cs` | Domain models (ProtocolVersion, TelemetryContext, etc.) | EXTEND: Add AgentUndoState, ScriptResult, RawDocEvent, EventBatchSummary, CategoryCount, SubtypeCount |
+| `contracts/ProtocolValueObjects.cs` | 14 value objects (AppId, RunId, etc.) | EXTEND: Add UndoRecordId |
+| `contracts/ProtocolEnvelopes.cs` | CommandEnvelope, CommandResultEnvelope, HandshakeEnvelope, etc. | NO CHANGE |
+| `contracts/Require.cs` | Validation rules | NO CHANGE |
+| `contracts/DomainBridge.cs` | ParseValueObject, ParseSmartEnum | NO CHANGE |
+| `protocol/Router.cs` | CommandRouter.Decode JSON to CommandEnvelope | NO CHANGE |
+| `protocol/FailureMapping.cs` | Error mapping | NO CHANGE |
+| `transport/WebSocketHost.cs` (316 lines) | HttpListener-based WebSocket server | MODIFY: Update MessageDispatcher delegate to include sendAckAsync parameter |
+| `transport/ThreadMarshaler.cs` | RunOnUiThreadAsync via InvokeOnUiThread + TaskCompletionSource | NO CHANGE |
+| `transport/SessionHost.cs` | Session state machine | NO CHANGE |
+| `transport/Handshake.cs` | Pure handshake negotiation | NO CHANGE |
+| `transport/PortFile.cs` | Atomic port file write/read/delete | NO CHANGE |
+
+### Key Integration Points
+
+1. **MessageDispatcher delegate** (WebSocketHost.cs line 23): Currently `Task<Fin<JsonElement>> (TransportMessageTag, JsonElement, CancellationToken)`. Plan 02-02 adds `Func<RequestId, Task> sendAckAsync` parameter for two-phase response.
+
+2. **DispatchCommandAsync** (KargadanPlugin.cs line 180): Currently returns `Fin.Fail("Command execution not yet implemented.")`. Plan 02-01 replaces this with actual execution routing to CommandExecutor.
+
+3. **BoundaryState** (KargadanPlugin.cs line 26): Currently holds `EventPublisher`, `SessionHost`, `WebSocketHost`. Plan 02-02 adds `ObservationLifecycle` field.
+
+4. **EventPublisher.Publish** (EventPublisher.cs line 22): Generic `Publish(EventEnvelope, Instant)`. Phase 2 uses this unchanged -- the flush callback in ObservationLifecycle wraps EventBatchSummary into EventEnvelope.
+
+### Existing Harness Files (10 files)
+
+| File | Purpose | Phase 2 Impact |
+|------|---------|----------------|
+| `transport/reconnect.ts` | ReconnectionSupervisor with exponential backoff | NO CHANGE |
+| `transport/port-discovery.ts` | Port file reader with PID validation | NO CHANGE |
+| `persistence/checkpoint.ts` | PostgreSQL checkpoint service | NO CHANGE |
+| `persistence/schema.ts` | Checkpoint table schema | NO CHANGE |
+| `config.ts` | Config resolution | NO CHANGE (Phase 2 is plugin-side only) |
+| `socket.ts` | WebSocket client | NO CHANGE |
+| `protocol/dispatch.ts` | Command dispatch with Deferred correlation | NO CHANGE |
+| `protocol/supervisor.ts` | Session state machine | NO CHANGE |
+| `runtime/agent-loop.ts` | Agent loop (PLAN/EXECUTE/VERIFY/PERSIST/DECIDE) | NO CHANGE |
+| `runtime/loop-stages.ts` | Pure stage functions | NO CHANGE |
+
+**Phase 2 is entirely C# plugin-side.** No TypeScript harness changes are needed. The harness already sends CommandEnvelopes and receives CommandResultEnvelopes -- Phase 2 makes the plugin actually execute those commands instead of returning "not yet implemented."
 
 <user_constraints>
 ## User Constraints (from CONTEXT.md)
@@ -95,18 +146,25 @@ None -- discussion stayed within phase scope
 apps/kargadan/plugin/src/
   boundary/
     KargadanPlugin.cs          # [EXISTING] Plugin entry point; gains command execution dispatch routing
-    EventPublisher.cs          # [EXISTING] Lock-gated event queue; gains RhinoDoc event subscriptions
+    EventPublisher.cs          # [EXISTING] Lock-gated event queue; NO CHANGES
+    ObservationLifecycle.cs    # [NEW] Encapsulates EventSubscriber, EventAggregator, UndoObserver lifecycle
   contracts/
-    ProtocolEnvelopes.cs       # [EXISTING] Gains execution result envelope variants and event batch envelope
-    ProtocolEnums.cs           # [EXISTING] Gains new CommandOperation variants (RunScript, DirectApi) and EventCategory
-    ProtocolModels.cs          # [EXISTING] Gains event batch models (EventBatchSummary, CategoryCount)
+    ProtocolEnvelopes.cs       # [EXISTING] NO CHANGES
+    ProtocolEnums.cs           # [EXISTING] Gains CommandExecutionMode, CommandCategory, EventSubtype; extends CommandOperation, EventType
+    ProtocolModels.cs          # [EXISTING] Gains AgentUndoState, ScriptResult, RawDocEvent, EventBatchSummary models
     ProtocolValueObjects.cs    # [EXISTING] Gains UndoRecordId value object
+    ProtocolContracts.cs       # [EXISTING] NO CHANGES
+    Require.cs                 # [EXISTING] NO CHANGES
+    DomainBridge.cs            # [EXISTING] NO CHANGES
   protocol/
-    Router.cs                  # [EXISTING] Command envelope decoding -- gains new operation routing
+    Router.cs                  # [EXISTING] NO CHANGES
+    FailureMapping.cs          # [EXISTING] NO CHANGES
   transport/
-    ThreadMarshaler.cs         # [EXISTING] UI thread dispatch -- no changes needed
-    WebSocketHost.cs           # [EXISTING] WebSocket listener -- no changes needed
-    SessionHost.cs             # [EXISTING] Session state machine -- no changes needed
+    ThreadMarshaler.cs         # [EXISTING] NO CHANGES
+    WebSocketHost.cs           # [EXISTING] Updated MessageDispatcher delegate with sendAckAsync parameter
+    SessionHost.cs             # [EXISTING] NO CHANGES
+    Handshake.cs               # [EXISTING] NO CHANGES
+    PortFile.cs                # [EXISTING] NO CHANGES
   execution/
     CommandExecutor.cs         # [NEW] Orchestrates command execution with undo wrapping and rollback
     ScriptRunner.cs            # [NEW] RunScript wrapper with Command.EndCommand result tracking
@@ -116,6 +174,9 @@ apps/kargadan/plugin/src/
     EventAggregator.cs         # [NEW] Debounce/batch/summarize event stream via Channel + Timer
     UndoObserver.cs            # [NEW] Command.UndoRedo event handler; notifies harness of undo/redo
 ```
+
+**New files: 6** (CommandExecutor, ScriptRunner, DocumentApi, EventSubscriber, EventAggregator, UndoObserver + ObservationLifecycle = 7 total new files)
+**Modified files: 4** (ProtocolEnums, ProtocolModels, ProtocolValueObjects, KargadanPlugin + WebSocketHost = 5 total modified files)
 
 ### Pattern 1: Undo-Wrapped Direct API Execution
 
@@ -133,7 +194,8 @@ apps/kargadan/plugin/src/
 public Fin<CommandResultEnvelope> ExecuteDirectApi(
     RhinoDoc doc,
     CommandEnvelope envelope,
-    Func<RhinoDoc, CommandEnvelope, Fin<JsonElement>> handler) {
+    Func<RhinoDoc, CommandEnvelope, Fin<JsonElement>> handler,
+    Action<AgentUndoState> onUndoRedo) {
 
     string description = envelope.UndoScope.Map(scope => scope.Value).IfNone("Agent Action");
     uint undoSerial = doc.BeginUndoRecord(description);
@@ -320,10 +382,12 @@ Command.UndoRedo += _undoObserver.OnUndoRedo;
 // Integrates with existing KargadanPlugin.DispatchCommandAsync pattern from Phase 1
 public async Task<Fin<JsonElement>> DispatchCommandAsync(
     JsonElement message,
+    Func<RequestId, Task> sendAckAsync,
     CancellationToken cancellationToken) {
 
     // Phase 1: Send ack immediately (before UI thread dispatch)
-    await SendAckAsync(message);
+    RequestId requestId = ExtractRequestId(message);
+    await sendAckAsync(requestId);
 
     // Phase 2: Execute on UI thread with per-command timeout
     int deadlineMs = ExtractDeadlineMs(message);
@@ -341,6 +405,16 @@ public async Task<Fin<JsonElement>> DispatchCommandAsync(
 
 **Confidence:** HIGH -- `ThreadMarshaler.RunOnUiThreadAsync` already implemented in Phase 1. `WaitAsync(CancellationToken)` is standard .NET Task extension. Two-phase response is a CONTEXT.md locked decision.
 
+### Pattern 6: ObservationLifecycle Extraction
+
+**What:** Extract all event observation setup into a dedicated `ObservationLifecycle` class to keep KargadanPlugin.cs under the 225-line module cap. ObservationLifecycle encapsulates EventSubscriber, EventAggregator, UndoObserver creation, flush callback, and Start/Stop lifecycle.
+
+**When to use:** KargadanPlugin.OnLoad/OnShutdown integration.
+
+**Why needed:** KargadanPlugin.cs is currently 234 lines (just under the 225-line cap pre-edit). Adding observation setup inline would exceed the cap. Extracting to a lifecycle class keeps KargadanPlugin additions to ~6 lines total.
+
+**Confidence:** HIGH -- Standard composition pattern; keeps boundary adapter thin.
+
 ### Anti-Patterns to Avoid
 
 - **Wrapping RunScript in BeginUndoRecord/EndUndoRecord:** RunScript delegates to a command that creates its own undo record. Nesting `BeginUndoRecord` around it risks conflicting undo state. Use `BeginUndoRecord`/`EndUndoRecord` ONLY for direct API calls.
@@ -349,6 +423,7 @@ public async Task<Fin<JsonElement>> DispatchCommandAsync(
 - **Modifying RhinoDoc inside AddCustomUndoEvent callbacks:** McNeel explicitly warns "NEVER change any setting in the Rhino document or application" inside the undo handler. Only modify private plugin data and notify harness.
 - **Creating undo records for read operations:** Read operations do not modify the document. Creating empty undo records pollutes the undo stack and confuses users.
 - **Blocking the UI thread in event handlers:** Event handlers fire on the UI thread. Keep them fast -- write to `Channel<T>` and return immediately. No WebSocket writes, JSON serialization, or blocking operations.
+- **Subscribing to Command.EndCommand globally:** ScriptRunner subscribes/unsubscribes per-call to avoid capturing unrelated command results. EventSubscriber does NOT subscribe to Command.EndCommand.
 
 ## Don't Hand-Roll
 
@@ -409,6 +484,12 @@ public async Task<Fin<JsonElement>> DispatchCommandAsync(
 **How to avoid:** Always bracket `AddCustomUndoEvent` within `BeginUndoRecord`/`EndUndoRecord` when calling from outside a command context (which is our case -- we dispatch from WebSocket handler, not from a Rhino command).
 **Warning signs:** Undo/redo does not restore agent state; `AddCustomUndoEvent` returns false.
 
+### Pitfall 8: KargadanPlugin.cs Exceeding 225-Line Cap
+**What goes wrong:** Adding observation lifecycle and execution dispatch inline in KargadanPlugin pushes it well over the 225-line module cap.
+**Why it happens:** KargadanPlugin is the natural integration point for all plugin subsystems.
+**How to avoid:** Extract observation lifecycle into `ObservationLifecycle.cs`. Extract command routing logic into a private static method or separate dispatcher class. KargadanPlugin should only wire subsystem lifecycle methods (Start/Stop) and delegate dispatch.
+**Warning signs:** File exceeds 225 lines after edits.
+
 ## Code Examples
 
 ### Complete Event Subscription Setup
@@ -418,33 +499,32 @@ public async Task<Fin<JsonElement>> DispatchCommandAsync(
 // https://github.com/gtalarico/apidocs.samples/.../SampleCsEventHandlers.cs
 // Verified against official RhinoDoc events list (35 events)
 
-// EventSubscriber.cs -- subscribes to all phase-relevant RhinoDoc events
+// EventSubscriber.cs -- subscribes to 15 phase-relevant RhinoDoc events
 public sealed class EventSubscriber {
-    private readonly Channel<RawDocEvent> _channel;
+    private readonly EventAggregator _aggregator;
+
+    public EventSubscriber(EventAggregator aggregator) => _aggregator = aggregator;
 
     public void Subscribe() {
-        // Object events
+        // Object events (5)
         RhinoDoc.AddRhinoObject += OnAddObject;
         RhinoDoc.DeleteRhinoObject += OnDeleteObject;
         RhinoDoc.UndeleteRhinoObject += OnUndeleteObject;
         RhinoDoc.ReplaceRhinoObject += OnReplaceObject;
         RhinoDoc.ModifyObjectAttributes += OnModifyAttributes;
-        // Selection events
+        // Selection events (3)
         RhinoDoc.SelectObjects += OnSelectObjects;
         RhinoDoc.DeselectObjects += OnDeselectObjects;
         RhinoDoc.DeselectAllObjects += OnDeselectAll;
-        // Table events
+        // Table events (6)
         RhinoDoc.LayerTableEvent += OnLayerTable;
         RhinoDoc.MaterialTableEvent += OnMaterialTable;
         RhinoDoc.DimensionStyleTableEvent += OnDimensionStyleTable;
         RhinoDoc.InstanceDefinitionTableEvent += OnInstanceDefinitionTable;
         RhinoDoc.LightTableEvent += OnLightTable;
         RhinoDoc.GroupTableEvent += OnGroupTable;
-        // Document events
+        // Document events (1)
         RhinoDoc.DocumentPropertiesChanged += OnDocPropertiesChanged;
-        // Command events
-        Command.UndoRedo += OnUndoRedo;
-        Command.EndCommand += OnEndCommand;
     }
 
     public void Unsubscribe() {
@@ -463,47 +543,33 @@ public sealed class EventSubscriber {
         RhinoDoc.LightTableEvent -= OnLightTable;
         RhinoDoc.GroupTableEvent -= OnGroupTable;
         RhinoDoc.DocumentPropertiesChanged -= OnDocPropertiesChanged;
-        Command.UndoRedo -= OnUndoRedo;
-        Command.EndCommand -= OnEndCommand;
     }
+
+    // NOTE: Command.EndCommand is NOT subscribed here -- ScriptRunner handles it per-call
+    // NOTE: Command.UndoRedo is NOT subscribed here -- UndoObserver handles it
+    // Total subscriptions: EventSubscriber (15) + UndoObserver (1) = 16
 
     // Object event handlers -- fast channel write, no blocking
     private void OnAddObject(object sender, RhinoObjectEventArgs e) =>
-        _ = _channel.Writer.TryWrite(new RawDocEvent(
+        _aggregator.Enqueue(new RawDocEvent(
             Type: EventType.ObjectsChanged,
-            SubType: "added",
+            Subtype: EventSubtype.Added,
             ObjectId: Option<Guid>.Some(e.ObjectId),
-            ObjectType: e.TheObject.ObjectType.ToString(),
+            ObjectType: Option<string>.Some(e.TheObject.ObjectType.ToString()),
             IsUndoRedo: e.Document.UndoActive || e.Document.RedoActive));
 
     private void OnDeleteObject(object sender, RhinoObjectEventArgs e) =>
-        _ = _channel.Writer.TryWrite(new RawDocEvent(
+        _aggregator.Enqueue(new RawDocEvent(
             Type: EventType.ObjectsChanged,
-            SubType: "deleted",
+            Subtype: EventSubtype.Deleted,
             ObjectId: Option<Guid>.Some(e.ObjectId)));
 
     private void OnReplaceObject(object sender, RhinoReplaceObjectEventArgs e) =>
-        _ = _channel.Writer.TryWrite(new RawDocEvent(
+        _aggregator.Enqueue(new RawDocEvent(
             Type: EventType.ObjectsChanged,
-            SubType: "replaced",
+            Subtype: EventSubtype.Replaced,
             ObjectId: Option<Guid>.Some(e.ObjectId),
             OldObjectId: Option<Guid>.Some(e.OldRhinoObject.Id)));
-
-    private void OnUndoRedo(object sender, UndoRedoEventArgs e) {
-        // Only emit on completion events, not begin events
-        (bool isEnd, string subType) = (e.IsEndUndo, e.IsEndRedo) switch {
-            (true, _) => (true, "undo"),
-            (_, true) => (true, "redo"),
-            _ => (false, string.Empty),
-        };
-        _ = isEnd switch {
-            true => _channel.Writer.TryWrite(new RawDocEvent(
-                Type: EventType.UndoRedo,
-                SubType: subType,
-                UndoSerial: Option<uint>.Some(e.UndoSerialNumber))),
-            false => false,
-        };
-    }
 }
 ```
 
@@ -513,7 +579,7 @@ public sealed class EventSubscriber {
 // Source: https://developer.rhino3d.com/api/rhinocommon/rhino.docobjects.tables.objecttable
 
 // DocumentApi.cs -- typed facade over RhinoDoc.Objects and RhinoDoc.Layers
-public Fin<Guid> CreateObject(RhinoDoc doc, GeometryBase geometry, ObjectAttributes attributes) {
+public static Fin<Guid> CreateObject(RhinoDoc doc, GeometryBase geometry, ObjectAttributes attributes) {
     Guid id = doc.Objects.Add(geometry, attributes);
     return (id == Guid.Empty) switch {
         true => Fin.Fail<Guid>(Error.New("Failed to add object to document.")),
@@ -521,40 +587,19 @@ public Fin<Guid> CreateObject(RhinoDoc doc, GeometryBase geometry, ObjectAttribu
     };
 }
 
-public Fin<Unit> DeleteObject(RhinoDoc doc, Guid objectId, bool quiet) {
-    bool deleted = doc.Objects.Delete(objectId, quiet);
-    return deleted switch {
-        true => Fin.Succ(unit),
-        false => Fin.Fail<Unit>(Error.New($"Failed to delete object {objectId}.")),
+public static Fin<Guid> AddPoint(RhinoDoc doc, double x, double y, double z) {
+    Guid id = doc.Objects.AddPoint(new Point3d(x, y, z));
+    return (id == Guid.Empty) switch {
+        true => Fin.Fail<Guid>(Error.New("Failed to add point to document.")),
+        false => Fin.Succ(id),
     };
 }
 
-public Fin<RhinoObject[]> QueryByLayer(RhinoDoc doc, string layerName) {
-    RhinoObject[] objects = doc.Objects.FindByLayer(layerName);
-    return Fin.Succ(objects ?? Array.Empty<RhinoObject>());
-}
-
-public Fin<RhinoObject> QueryById(RhinoDoc doc, Guid objectId) {
+public static Fin<RhinoObject> FindById(RhinoDoc doc, Guid objectId) {
     RhinoObject obj = doc.Objects.FindId(objectId);
     return obj switch {
         null => Fin.Fail<RhinoObject>(Error.New($"Object {objectId} not found.")),
         _ => Fin.Succ(obj),
-    };
-}
-
-public Fin<bool> ModifyAttributes(RhinoDoc doc, Guid objectId, ObjectAttributes newAttributes) {
-    bool modified = doc.Objects.ModifyAttributes(objectId, newAttributes, quiet: true);
-    return modified switch {
-        true => Fin.Succ(true),
-        false => Fin.Fail<bool>(Error.New($"Failed to modify attributes of object {objectId}.")),
-    };
-}
-
-public Fin<Guid> TransformObject(RhinoDoc doc, Guid objectId, Transform transform, bool deleteOriginal) {
-    Guid newId = doc.Objects.Transform(objectId, transform, deleteOriginal);
-    return (newId == Guid.Empty) switch {
-        true => Fin.Fail<Guid>(Error.New($"Failed to transform object {objectId}.")),
-        false => Fin.Succ(newId),
     };
 }
 ```
@@ -576,12 +621,6 @@ RhinoApp.RunScript("_-Box 0,0,0 10,20,30", echo: true);
 
 // Boolean union with pre-selected objects:
 RhinoApp.RunScript("_-BooleanUnion _Enter", echo: true);
-
-// Set material to specific layer:
-RhinoApp.RunScript("_-Layer _Material \"Default\" _Enter", echo: true);
-
-// Export to specific format (scripted file path):
-RhinoApp.RunScript("_-Export \"/path/to/output.stl\" _Enter", echo: true);
 ```
 
 ### Event Batch Summary Format
@@ -652,6 +691,12 @@ Drill-down: harness sends a `read.events.detail` command with category filter to
    - Recommendation: Use undo serial number tracking. Before RunScript, read `doc.UndoRecordCount` or track the serial number from the subsequent `Command.UndoRedo` event. Maintain a harness-side map of `undoSerialNumber -> agentStateSnapshot`. When `Command.UndoRedo` fires with `IsEndUndo`/`IsEndRedo`, harness looks up the serial number to restore/advance agent state.
    - Confidence: MEDIUM -- serial number tracking is architecturally sound, but requires harness-side bookkeeping rather than Rhino-native undo integration.
 
+5. **WebSocketHost HttpListener vs TcpListener discrepancy**
+   - What we know: Phase 1 research recommended `TcpListener` + manual HTTP upgrade + `WebSocket.CreateFromStream`. Phase 1 implementation used `HttpListener` instead (WebSocketHost.cs uses `HttpListener` with `AcceptWebSocketAsync`).
+   - What's unclear: Whether the `HttpListener` approach has any macOS-specific issues. The implementation works on the development machine.
+   - Recommendation: Accept the `HttpListener` implementation as-is for Phase 2. The `MessageDispatcher` delegate signature change for two-phase ack is the only WebSocketHost modification needed. If macOS issues emerge, the WebSocket accept mechanism is encapsulated in WebSocketHost and can be swapped without affecting Phase 2 code.
+   - Confidence: HIGH -- HttpListener is working; no reason to change transport for this phase.
+
 ## Discretion Recommendations
 
 1. **Read-only tool calls and undo records:** Do NOT create undo records for read operations. Reads (`doc.Objects.FindId`, `doc.Objects.FindByLayer`, scene summary queries) do not modify the document. Creating empty undo records pollutes the undo stack.
@@ -668,11 +713,30 @@ Drill-down: harness sends a `read.events.detail` command with category filter to
 
 5. **Event summary format:** Tagged counts with drill-down capability. See Code Examples section for JSON format. Drill-down via `read.events.detail` command with category filter.
 
+## Implementation Sequencing
+
+The existing plans (02-01-PLAN.md, 02-02-PLAN.md) define a clean two-wave implementation:
+
+**Plan 02-01 (Wave 1):** Protocol contracts extension + command execution engine
+- Extends ProtocolEnums, ProtocolModels, ProtocolValueObjects with execution-specific types
+- Creates CommandExecutor (undo-wrapped direct API), ScriptRunner (RunScript + EndCommand), DocumentApi (typed facades)
+- Requirements covered: EXEC-01, EXEC-02, EXEC-04, EXEC-05
+
+**Plan 02-02 (Wave 2):** Event observation pipeline + dispatch wiring
+- Creates EventSubscriber (15 RhinoDoc events), EventAggregator (Channel + Timer), UndoObserver (Command.UndoRedo)
+- Creates ObservationLifecycle to keep KargadanPlugin under 225-line cap
+- Wires execution dispatch into KargadanPlugin with two-phase ack and per-command timeout
+- Updates WebSocketHost MessageDispatcher delegate for sendAckAsync
+- Requirements covered: EXEC-03
+
+**Dependencies:** Plan 02-02 depends on Plan 02-01 (needs execution types and CommandExecutor for dispatch routing).
+
 ## Sources
 
 ### Primary (HIGH confidence)
 - [RhinoCommon API - RhinoDoc class](https://developer.rhino3d.com/api/rhinocommon/rhino.rhinodoc) -- 35 events verified, BeginUndoRecord/EndUndoRecord/AddCustomUndoEvent methods, UndoActive/RedoActive properties
 - [RhinoCommon API - ObjectTable class](https://developer.rhino3d.com/api/rhinocommon/rhino.docobjects.tables.objecttable) -- 40+ Add methods, Delete/Replace/Transform/Find/ModifyAttributes/AllObjectsSince methods
+- [RhinoCommon API - ObjectTable.AllObjectsSince](https://developer.rhino3d.com/api/rhinocommon/rhino.docobjects.tables.objecttable/allobjectssince) -- Returns IEnumerable<RhinoObject>; replaced objects have different serial numbers; deleted objects in undo list maintain serial numbers
 - [RhinoCommon API - CommandEventArgs](https://developer.rhino3d.com/api/rhinocommon/rhino.commands.commandeventargs) -- CommandResult, CommandEnglishName, CommandId, Document, DocumentRuntimeSerialNumber
 - [RhinoCommon API - Commands.Result enum](https://developer.rhino3d.com/api/rhinocommon/rhino.commands.result) -- Success(0), Cancel(1), Nothing(2), Failure(3), UnknownCommand(4), CancelModelessDialog(5), ExitRhino(0x0FFFFFFF)
 - [RhinoCommon API - Command.UndoRedo event](https://developer.rhino3d.com/api/rhinocommon/rhino.commands.command/undoredo) -- UndoRedoEventArgs with IsBeginUndo/IsEndUndo/IsBeginRedo/IsEndRedo/IsPurgeRecord/UndoSerialNumber
@@ -681,6 +745,10 @@ Drill-down: harness sends a `read.events.detail` command with category filter to
 - [SampleCsEventWatcher](https://github.com/gtalarico/apidocs.samples/blob/master/repos/rhinocommon/mcneel/rhino-developer-samples/rhinocommon/cs/SampleCsEventWatcher/SampleCsEventHandlers.cs) -- Complete event subscription reference implementation
 - [Official Custom Undo Sample](https://developer.rhino3d.com/en/samples/rhinocommon/custom-undo/) -- AddCustomUndoEvent callback pattern with redo re-registration
 - [Run Rhino Command from Plugin Guide](https://developer.rhino3d.com/guides/rhinocommon/run-rhino-command-from-plugin/) -- RunScript usage, ScriptRunner attribute, object reference invalidation warning
+- [Microsoft Learn - BoundedChannelOptions](https://learn.microsoft.com/en-us/dotnet/api/system.threading.channels.boundedchanneloptions?view=net-9.0) -- DropOldest, SingleWriter, SingleReader options
+- [Microsoft Learn - Channels in .NET](https://learn.microsoft.com/en-us/dotnet/core/extensions/channels) -- Producer-consumer pattern with backpressure
+- [RhinoCommon API - RhinoDoc.AddRhinoObject event](https://developer.rhino3d.com/api/rhinocommon/rhino.rhinodoc/addrhinoobject) -- RhinoObjectEventArgs with ObjectId, TheObject
+- [RhinoCommon API - RhinoDoc.DeleteRhinoObject event](https://developer.rhino3d.com/api/rhinocommon/rhino.rhinodoc/deleterhinoobject) -- RhinoObjectEventArgs
 
 ### Secondary (MEDIUM confidence)
 - [McNeel Forum - AddCustomUndoEvent outside commands](https://discourse.mcneel.com/t/can-addcustomundoevent-be-used-outside-of-a-rhino-command/141123) -- Dale Fugier confirms works outside commands when bracketed by BeginUndoRecord/EndUndoRecord
@@ -691,20 +759,27 @@ Drill-down: harness sends a `read.events.detail` command with category filter to
 - [McNeel Forum - RunScript in a thread](https://discourse.mcneel.com/t/runscript-in-a-thread/11683) -- RunScript returns false from background threads; succeeds via UI dispatcher
 - [McNeel Forum - Document modification in undo callback](https://discourse.mcneel.com/t/updating-document-in-customundo-callback-method/106281) -- Dale Fugier advises against document modification in callback; use RhinoApp.Idle for deferred updates
 - [McNeel Forum - Undo inside commands](https://discourse.mcneel.com/t/undo-record-insid-command/87894) -- Dale Fugier: "it is not possible to create an undo record inside of a command"
+- [McNeel Forum - Managing ReplaceRhinoObject event](https://discourse.mcneel.com/t/managing-replacerhinoobject-event/8975) -- UndoActive/RedoActive behavior during replace: if false, DeleteObject then AddObject follows; if true, DeleteObject then UndeleteObject follows
+- [McNeel Forum - Programmatically pressing Escape in Rhino 8](https://discourse.mcneel.com/t/programatically-pressing-escape-key-in-rhino-8/171060) -- SendKeys approach had issues transitioning from Rhino 7 to 8; unreliable
+- [RhinoCommon API - RhinoApp.RunScript](https://developer.rhino3d.com/api/RhinoCommon/html/M_Rhino_RhinoApp_RunScript.htm) -- Official method signature
+- [RhinoCommon API - RhinoApp.InvokeOnUiThread](https://developer.rhino3d.com/api/RhinoCommon/html/M_Rhino_RhinoApp_InvokeOnUiThread.htm) -- Thread marshaling API
 
 ### Tertiary (LOW confidence)
 - [McNeel Forum - Undo/Redo on RhinoCommon](https://discourse.mcneel.com/t/undo-redo-on-rhinocommon/127353) -- General discussion; Dale Fugier advises against custom undo handling for document objects
 - [McNeel Forum - Rhino 9 WIP](https://discourse.mcneel.com/t/rhino-9-wip-available-now/180749) -- Rhino 9 WIP released April 2024; no specific SDK breaking changes documented for execution/undo APIs
+- [Rhino Developer Guide - Event Watchers](https://developer.rhino3d.com/guides/rhinocommon/event-watchers/) -- General guide on event subscription patterns
+- [Rhino Developer Guide - Canceling Long Processes](https://developer.rhino3d.com/guides/cpp/canceling-long-processes-with-esc/) -- C++ approach using EscapeKeyPressed; not directly applicable to C# plugin dispatch model
 
 ## Metadata
 
 **Confidence breakdown:**
 - Standard stack: HIGH -- RhinoCommon is the only option; all APIs verified from source or official docs
 - Architecture (undo system): MEDIUM-HIGH -- API signatures verified, McNeel engineer confirmations for BeginUndoRecord outside commands and AddCustomUndoEvent with bracket requirement. Bifurcated strategy for RunScript is MEDIUM (no direct McNeel confirmation of conflict, but inferred from "do not create undo record inside command" guidance).
-- Architecture (event system): HIGH -- 35 events documented on official RhinoDoc page, event args verified from source, SampleCsEventWatcher reference implementation available, UndoActive/RedoActive confirmed as boolean properties
+- Architecture (event system): HIGH -- 35 events documented on official RhinoDoc page, event args verified from source, SampleCsEventWatcher reference implementation available, UndoActive/RedoActive confirmed as boolean properties, ReplaceRhinoObject behavior documented with undo/redo flag
 - Architecture (command execution): MEDIUM-HIGH -- RunScript limitations well-documented, result detection via EndCommand confirmed, Commands.Result enum verified with all 7 values. Synchronous behavior from InvokeOnUiThread context is MEDIUM (inferred, not explicitly confirmed).
+- Codebase state: HIGH -- All 15 existing C# files and 10 existing TS files read and analyzed; exact integration points identified; plans verified as unexecuted
 - Pitfalls: HIGH -- Multiple McNeel engineer statements about common mistakes, verified across multiple forum threads
-- Cancellation: HIGH -- Confirmed absence of programmatic cancellation by Dale Fugier in multiple threads
+- Cancellation: HIGH -- Confirmed absence of programmatic cancellation by Dale Fugier in multiple threads; SendKeystrokes unreliability confirmed across Rhino 8+ versions
 
 **Research date:** 2026-02-22
 **Valid until:** 2026-04-22 (RhinoCommon API is stable; Rhino 9 WIP may add APIs but unlikely to remove or change execution/undo APIs)
