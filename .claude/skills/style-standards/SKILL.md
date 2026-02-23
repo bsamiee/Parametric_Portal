@@ -79,16 +79,16 @@ Applies to documentation and comments. Scope: tone, list semantics, ordering pri
 - `Ordering` - [CRITICAL] Primacy effects peak at 150-200 instructions; 5.79× attention for early items.
   - **Critical-First** - Highest-priority constraints at sequence start.
   - **Middle Burial** - Middle positions suffer U-shaped attention loss.
-- `Comments` - Front-load architectural decisions where attention peaks.
+- `Comments` - Front-load architectural decisions where attention peaks. Start doc comments with action verb.
 - `Density` - Tables: >2 entities, >2 dimensions. Diagrams: >3 steps or >2 hierarchy levels.
 
 **Best-Practices:**<br>
-- **Comments** - Incorrect: 78% accuracy loss—omit if uncertain. *Why > What*: intent = signal, logic = noise.
+- **Comments** - Incorrect: 78% accuracy loss—omit if uncertain. *Why > What*: intent = signal, logic = noise. Language-specific doc format per `code-documentation-standards.md` §3.
 - **Constraints** - 6+ simultaneous: <25% satisfaction. Max 3-5 per level.
 - **Delimiters** - Consistency over choice. 18-29% variance per change.
 - **Stopwords** - Remove `the`, `a`, `an`, `please`, `kindly`.
 - **Tone** - Actions: imperative. Context/facts: declarative.
-- **Naming** - Prohibited: `utils`, `helpers`, `misc`, `config`, `cfg`, `opts`, `params`, `Data`, `Info`, `Manager`, `Service`.
+- **Naming** - Prohibited: `utils`, `helpers`, `misc`, `config`, `cfg`, `opts`, `params`, `Data`, `Info`, `Manager`.
 
 [REFERENCE]: [→voice.md](./references/voice.md) — Grammar, ordering, comments, constraints, naming, density
 
@@ -108,7 +108,7 @@ Separators encode hierarchy. Whitespace: semantic, not cosmetic. Patterns enable
 - `Separators` - Use `---` for hard boundaries (H2 → H2, H3 → H3). Use `<br>` for soft transitions (H2 → H3).
 - `Spacing` - Place 1 blank after header. Place none after `---`. Place none between list items.
 - `Dividers` - Pad code separators `// --- [LABEL] ---` to column 80.
-- `Language` - Canonical code divider order is language-scoped: use TS canonical for `.ts/.tsx`, C# canonical for `.cs`.
+- `Language` - Canonical code divider order is archetype-scoped: use TS_ENTITY/TS_SERVICE/TS_UTILITY for `.ts/.tsx`, C# canonical for `.cs`.
 - `Tables` - Include `[INDEX]` first column. Format headers as `[HEADER]` sigil. Align: center index, right numeric, left prose.
 
 **Best-Practices:**<br>

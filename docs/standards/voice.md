@@ -157,11 +157,11 @@ Universal standards for LLM-optimized context, documentation, and agentic instru
 1.  [ALWAYS] **Why > What:** Explaining *logic* (Redundant) = Noise. Explaining *intent* (Grounding) = Signal.
     -   *Noise:* `// Increment i`
     -   *Signal:* `// Optimization: Bitshift faster`
-2.  [ALWAYS] **Anchor-First:** Start JSDoc with **Action Verb**.
+2.  [ALWAYS] **Anchor-First:** Start doc comments with **Action Verb**.
 3.  [ALWAYS] **Mechanical Voice:** Domain-specific, no hedging.
 
 [CRITICAL]:
-- [NEVER] **Type-Lite:** Duplicate TS types in comments (e.g., `@param {string} name`). Type system is single source of truth.
+- [NEVER] **Type-Restating:** Restate type information in doc comments (e.g., `@param name The name string`). Type system is single source of truth.
 - [NEVER] **Obvious:** Comment only when code cannot express intent.
 
 ```typescript
@@ -170,23 +170,22 @@ const normalizedHue = ((h % 360) + 360) % 360;
 ```
 
 ---
-### [4.2][JSDOC]
+### [4.2][DOC_COMMENTS]
 
-```typescript
-/**
- * [Imperative_Verb] [Outcome].
- * [Grounding]: [Why_this_exists].
- */
-```
+Doc comment structure applies across languages. Language-specific format (XML, Google, TSDoc) defined in `code-documentation-standards.md` §3.
 
-| [INDEX] | [COMPONENT] | [REQUIREMENT]                    |
-| :-----: | ----------- | -------------------------------- |
-|   [1]   | Verb        | Start with imperative verb.      |
-|   [2]   | Object      | State what is acted upon.        |
-|   [3]   | Mechanism   | Include domain context.          |
-|   [4]   | Details     | Mechanical behavior, not intent. |
+| [INDEX] | [COMPONENT]  | [REQUIREMENT]                                                     |
+| :-----: | ------------ | ----------------------------------------------------------------- |
+|   [1]   | **Verb**     | Start with imperative verb — state operation, not implementation. |
+|   [2]   | **Object**   | State what is acted upon — domain entity, not code artifact.      |
+|   [3]   | **Context**  | Include domain invariants, guard conditions, failure semantics.   |
+|   [4]   | **Channels** | Effect-returning functions: document both success and failure.    |
 
-**Tag Order:** `@param` → `@returns` → `@throws` → `@example`
+[CRITICAL]:
+- [NEVER] Include type annotations in doc comments — type system is single source of truth.
+- [NEVER] Use JSDoc `{type}` syntax in TypeScript — TSDoc omits inline types.
+
+[REFERENCE] Language-specific formats: [→code-documentation-standards.md§3](code-documentation-standards.md#3structure)
 
 ---
 ## [5][KEYWORDS]
@@ -238,7 +237,7 @@ const normalizedHue = ((h % 360) + 360) % 360;
 - [NEVER] `utils`, `helpers`, `misc`—too vague.
 - [NEVER] `config` as variable—conflicts with `B` pattern.
 - [NEVER] Abbreviations: `cfg`, `opts`, `params`.
-- [NEVER] Generic suffixes: `Data`, `Info`, `Manager`, `Service`.
+- [NEVER] Generic suffixes: `Data`, `Info`, `Manager`.
 
 ---
 ## [7][CONSTRAINTS]

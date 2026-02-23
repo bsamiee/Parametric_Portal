@@ -57,13 +57,23 @@ Place at file bottom. Each version links to its comparison diff.
 
 ### [2.1][TRANSFORMATION_RULES]
 
-| [INDEX] | [COMMIT_MESSAGE]                           | [CHANGELOG_ENTRY]                                                            | [CATEGORY] |
-| :-----: | ------------------------------------------ | ---------------------------------------------------------------------------- | :--------: |
-|   [1]   | `feat: add bulk import endpoint`           | Bulk import endpoint: upload CSV to create up to 10,000 records per request. |   Added    |
-|   [2]   | `fix: resolve null pointer in UserService` | User profile retrieval no longer fails when optional fields are absent.      |   Fixed    |
-|   [3]   | `feat!: migrate auth to JWT`               | Authentication migrated from session cookies to JWT. See migration guide.    |  Changed   |
-|   [4]   | `chore: update dependencies`               | *(omit — no user-observable behavior change)*                                |     —      |
-|   [5]   | `fix: patch XSS in comment renderer`       | Comment rendering sanitizes HTML input to prevent script injection.          |  Security  |
+Transform developer shorthand into user-observable behavior. Each example shows commit → entry transformation:
+
+| [INDEX] | [COMMIT]                        | [CATEGORY] |
+| :-----: | ------------------------------- | :--------: |
+|   [1]   | `feat: add bulk import`         |   Added    |
+|   [2]   | `fix: null pointer UserService` |   Fixed    |
+|   [3]   | `feat!: migrate auth to JWT`    |  Changed   |
+|   [4]   | `chore: update dependencies`    |    Omit    |
+|   [5]   | `fix: patch XSS in comments`    |  Security  |
+
+**Transformed entries:**
+
+**[1]** Bulk import endpoint: upload CSV to create up to 10,000 records per request.<br>
+**[2]** User profile retrieval no longer fails when optional fields are absent.<br>
+**[3]** Authentication migrated from session cookies to JWT. See migration guide.<br>
+**[4]** *(omit — no user-observable behavior change)*<br>
+**[5]** Comment rendering sanitizes HTML input to prevent script injection.
 
 ---
 ### [2.2][COMMIT_PARSING_STRATEGY]

@@ -101,14 +101,14 @@
 
 [IMPORTANT]:
 1.  [ALWAYS] **Why > What:** *Logic* = Noise. *Intent* = Signal.
-2.  [ALWAYS] **Anchor-First:** Start JSDoc with **Action Verb**.
+2.  [ALWAYS] **Anchor-First:** Start doc comments with **Action Verb**.
 
 [CRITICAL]:
-- [NEVER] Duplicate TS types in comments (e.g., `@param {string} name`).
-- [NEVER] Comment obvious logic -- only when code cannot express intent.
+- [NEVER] Restate type information in doc comments (e.g., `@param name The name string`).
+- [NEVER] Comment obvious logic — only when code cannot express intent.
 
-**JSDoc Template:** `/** [Verb] [Outcome]. [Grounding]: [Why]. */`<br>
-**Tag Order:** `@param` -> `@returns` -> `@throws` -> `@example`
+**Doc Comment Template:** `/** [Verb] [Outcome]. [Grounding]: [Why]. */`<br>
+**Tag Order:** Language-specific per `code-documentation-standards.md` §3.
 
 ---
 ## [7][CONSTRAINTS]
@@ -158,7 +158,7 @@
 - [NEVER] `utils`, `helpers`, `misc` -- too vague.
 - [NEVER] `config` as variable -- conflicts with `B` pattern.
 - [NEVER] Abbreviations: `cfg`, `opts`, `params`.
-- [NEVER] Generic suffixes: `Data`, `Info`, `Manager`, `Service`.
+- [NEVER] Generic suffixes: `Data`, `Info`, `Manager`.
 
 ---
 ## [9][DENSITY]
