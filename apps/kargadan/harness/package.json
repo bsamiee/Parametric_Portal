@@ -12,6 +12,7 @@
         "typecheck": "tsc --project tsconfig.json --noEmit"
     },
     "dependencies": {
+        "@effect/ai": "catalog:",
         "@effect/experimental": "catalog:",
         "@effect/platform": "catalog:",
         "@effect/platform-node": "catalog:",
