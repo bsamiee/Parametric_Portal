@@ -15,7 +15,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 1: Plugin Transport Foundation** - WebSocket bridge between CLI harness and Rhino plugin on localhost with reconnection and heartbeat (completed 2026-02-22)
 - [x] **Phase 2: RhinoDoc Execution and Events** - Command execution, direct API access, event subscriptions, and undo integration inside Rhino (completed 2026-02-23)
 - [ ] **Phase 3: Schema Redesign and Topology** - Delete legacy schemas, extract universal concepts to packages/, isolate app-specific protocol in apps/kargadan
-- [ ] **Phase 4: Session Persistence and Knowledge Base** - PostgreSQL-backed session store replacing in-memory trace, plus Rhino command knowledge base for RAG
+- [x] **Phase 4: Session Persistence and Knowledge Base** - PostgreSQL-backed session store replacing in-memory trace, plus Rhino command knowledge base for RAG (completed 2026-02-23)
 - [ ] **Phase 5: Agent Core and Provider Abstraction** - Generic agent loop in packages/ai with tool orchestration, RAG discovery, multi-provider support, and fallback chains
 - [ ] **Phase 6: Scene Representation and Context Management** - Layered scene summary, context compaction, Architect/Editor model split, and Tool Search Tool integration
 - [ ] **Phase 7: Verification, Workflows, and Grasshopper** - Unified verification pipeline, durable multi-step workflows with compensation, and Grasshopper 1 programmatic access
@@ -170,7 +170,7 @@ Note: Phases 6, 7, and 8 all depend on Phase 5 but not on each other. They can b
 | 1. Plugin Transport Foundation | 2/2 | Complete   | 2026-02-22 |
 | 2. RhinoDoc Execution and Events | 2/2 | Complete | 2026-02-23 |
 | 3. Schema Redesign and Topology | 2/2 | Complete | 2026-02-23 |
-| 4. Session Persistence and Knowledge Base | 1/2 | In Progress | - |
+| 4. Session Persistence and Knowledge Base | 1/2 | Complete    | 2026-02-23 |
 | 5. Agent Core and Provider Abstraction | 0/3 | Not started | - |
 | 6. Scene Representation and Context Management | 0/2 | Not started | - |
 | 7. Verification, Workflows, and Grasshopper | 0/3 | Not started | - |
