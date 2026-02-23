@@ -9,7 +9,7 @@ export default defineConfig(
     Effect.runSync(
         createConfig({
             entry: './src/harness.ts',
-            external: ['@parametric-portal/types'],
+            external: [],
             mode: 'server',
             name: 'KargadanHarness',
             port: 4010,
