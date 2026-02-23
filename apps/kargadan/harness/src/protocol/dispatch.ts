@@ -6,9 +6,9 @@ import { Data, Duration, Effect, Match, Ref } from 'effect';
 import { HarnessConfig } from '../config';
 import { KargadanSocketClient } from '../socket';
 import {
-    CommandEnvelopeSchema, EnvelopeIdentitySchema, EventEnvelopeSchema, FailureReasonSchema,
-    HandshakeEnvelopeSchema, HeartbeatEnvelopeSchema, InboundEnvelopeSchema, OutboundEnvelopeSchema,
-    ResultEnvelopeSchema, TelemetryContextSchema,
+    CommandAckSchema, CommandEnvelopeSchema, EnvelopeIdentitySchema, EventEnvelopeSchema,
+    FailureReasonSchema, HandshakeEnvelopeSchema, HeartbeatEnvelopeSchema,
+    InboundEnvelopeSchema, OutboundEnvelopeSchema, ResultEnvelopeSchema, TelemetryContextSchema,
 } from './schemas';
 
 // --- [TYPES] -----------------------------------------------------------------
@@ -83,7 +83,7 @@ class CommandDispatchError extends Data.TaggedError('CommandDispatchError')<{
 class CommandDispatch extends Effect.Service<CommandDispatch>()('kargadan/CommandDispatch', {
     effect: Effect.gen(function* () {
         const [session, socket] = yield* Effect.all([SessionSupervisor, KargadanSocketClient]);
-        const _request = Effect.fn('CommandDispatch.request')((envelope: typeof OutboundEnvelopeSchema.Type) =>
+        const _request = Effect.fn('CommandDispatch.request')((envelope: Extract<typeof OutboundEnvelopeSchema.Type, { readonly identity: unknown }>) =>
             socket.write.request(envelope).pipe(
                 Effect.catchTag('SocketClientError', (error) =>
                     Match.value(error.issue).pipe(
@@ -178,7 +178,7 @@ class CommandDispatch extends Effect.Service<CommandDispatch>()('kargadan/Comman
 // --- [EXPORT] ----------------------------------------------------------------
 
 export {
-    type CommandAckSchema, CommandDispatch, CommandDispatchError, CommandEnvelopeSchema,
+    CommandAckSchema, CommandDispatch, CommandDispatchError, CommandEnvelopeSchema,
     EnvelopeIdentitySchema, EventEnvelopeSchema, FailureReasonSchema,
     HandshakeEnvelopeSchema, HeartbeatEnvelopeSchema, InboundEnvelopeSchema,
     OutboundEnvelopeSchema, ResultEnvelopeSchema, SessionSupervisor, SessionTransition,

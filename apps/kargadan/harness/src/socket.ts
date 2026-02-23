@@ -100,7 +100,7 @@ class KargadanSocketClient extends Effect.Service<KargadanSocketClient>()('karga
             Ref.getAndSet(pending, HashMap.empty<string, Deferred.Deferred<typeof InboundEnvelopeSchema.Type>>()).pipe(
                 Effect.flatMap((old) => Effect.forEach(HashMap.values(old), (d) => Deferred.die(d, new SocketClientError({ issue: _SocketClientIssue.Disconnected({ reason }) })).pipe(Effect.ignore), { discard: true })),
             );
-        const _request = Effect.fn('kargadan.socket.request')((envelope: typeof OutboundEnvelopeSchema.Type) => {
+        const _request = Effect.fn('kargadan.socket.request')((envelope: Extract<typeof OutboundEnvelopeSchema.Type, { readonly identity: unknown }>) => {
             const requestId = envelope.identity.requestId;
             return Effect.gen(function* () {
                 const timeoutMs = yield* HarnessConfig.commandDeadlineMs;
