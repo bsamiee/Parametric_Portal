@@ -20,7 +20,7 @@ class SocketClientError extends Data.TaggedError('SocketClientError')<{ readonly
 
 // --- [FUNCTIONS] -------------------------------------------------------------
 
-const readPortFile = Effect.fn('kargadan.portDiscovery.read')(function* () {
+const _readPortFile = Effect.fn('kargadan.portDiscovery.read')(function* () {
     const fs = yield* FileSystem.FileSystem;
     const portFilePath = join(homedir(), '.kargadan', 'port');
     const content = yield* fs.readFileString(portFilePath).pipe(
@@ -50,7 +50,7 @@ class ReconnectionSupervisor extends Effect.Service<ReconnectionSupervisor>()('k
             Schedule.upTo(Duration.millis(reconnectBackoffMaxMs)),
             Schedule.intersect(Schedule.recurs(reconnectMaxAttempts)),
             Schedule.tapInput(() =>
-                readPortFile().pipe(
+                _readPortFile().pipe(
                     Effect.tap((info) => Ref.set(connectionState, 'reconnecting').pipe(Effect.zipRight(Effect.log('kargadan.reconnect: retrying', { pid: info.pid, port: info.port })))),
                     Effect.catchTag('SocketClientError', (error) =>
                         Effect.log('kargadan.reconnect: port file unavailable, continuing retry', { issue: error.issue }),
@@ -69,7 +69,7 @@ class ReconnectionSupervisor extends Effect.Service<ReconnectionSupervisor>()('k
         const _supervise = Effect.fn('kargadan.reconnect.supervise')(
             <A, E, R>(connectOnce: (port: number) => Effect.Effect<A, E, R>) =>
                 Effect.gen(function* () {
-                    const portInfo = yield* readPortFile();
+                    const portInfo = yield* _readPortFile();
                     yield* Ref.set(connectionState, 'connected');
                     yield* Effect.log('kargadan.reconnect: connected', { pid: portInfo.pid, port: portInfo.port });
                     return yield* connectOnce(portInfo.port).pipe(
@@ -81,7 +81,6 @@ class ReconnectionSupervisor extends Effect.Service<ReconnectionSupervisor>()('k
         return { control: { requireConnected: _requireConnected, supervise: _supervise } } as const;
     }),
 }) {}
-
 class KargadanSocketClient extends Effect.Service<KargadanSocketClient>()('kargadan/SocketClient', {
     effect: Effect.gen(function* () {
         const socket = yield* Socket.Socket;
@@ -155,7 +154,7 @@ class KargadanSocketClient extends Effect.Service<KargadanSocketClient>()('karga
 // --- [LAYERS] ----------------------------------------------------------------
 
 const KargadanSocketClientLive = Layer.unwrapEffect(
-    readPortFile().pipe(
+    _readPortFile().pipe(
         Effect.map((portInfo) => Layer.provide(
             KargadanSocketClient.Default,
             Layer.mergeAll(Socket.layerWebSocketConstructorGlobal, Socket.layerWebSocket(`ws://127.0.0.1:${portInfo.port}`)),
@@ -165,4 +164,4 @@ const KargadanSocketClientLive = Layer.unwrapEffect(
 
 // --- [EXPORT] ----------------------------------------------------------------
 
-export { KargadanSocketClient, KargadanSocketClientLive, ReconnectionSupervisor, SocketClientError };
+export { KargadanSocketClient, KargadanSocketClientLive, ReconnectionSupervisor };

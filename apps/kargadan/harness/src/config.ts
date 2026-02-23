@@ -8,7 +8,7 @@ const _splitCsv = (s: string) => s.split(',').map((v) => v.trim()).filter(Boolea
 // --- [CONSTANTS] -------------------------------------------------------------
 
 const HarnessConfig = {
-    checkpointDatabaseUrl:   Config.string('KARGADAN_CHECKPOINT_DATABASE_URL'),
+    checkpointDatabaseUrl:   Config.redacted('KARGADAN_CHECKPOINT_DATABASE_URL'),
     commandDeadlineMs:       Config.integer('KARGADAN_COMMAND_DEADLINE_MS').pipe(Config.withDefault(5_000)),
     correctionCycles:        Config.integer('KARGADAN_CORRECTION_MAX_CYCLES').pipe(Config.withDefault(1)),
     heartbeatIntervalMs:     Config.integer('KARGADAN_HEARTBEAT_INTERVAL_MS').pipe(Config.withDefault(5_000)),

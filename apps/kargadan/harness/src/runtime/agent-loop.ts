@@ -1,7 +1,7 @@
 import { Duration, Effect, Fiber, Match, Option, Ref, Schema as S, pipe } from 'effect';
 import type { EnvelopeSchema, OperationSchema } from '../protocol/schemas';
 import { HarnessConfig } from '../config';
-import { PersistenceService, hashCanonicalState } from '../persistence/checkpoint';
+import { PersistenceService } from '../persistence/checkpoint';
 import type { KargadanCheckpoint } from '../persistence/models';
 import { CommandDispatch, CommandDispatchError } from '../protocol/dispatch';
 
@@ -14,7 +14,7 @@ type LoopState = { readonly attempt: number; readonly command: Command | undefin
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
-const writeOperations = new Set<typeof OperationSchema.Type>(['write.annotation.update', 'write.layer.update', 'write.object.create', 'write.object.delete', 'write.object.update', 'write.viewport.update']);
+const _writeOperations = new Set<typeof OperationSchema.Type>(['write.annotation.update', 'write.layer.update', 'write.object.create', 'write.object.delete', 'write.object.update', 'write.viewport.update']);
 
 // --- [FUNCTIONS] -------------------------------------------------------------
 
@@ -31,18 +31,17 @@ const _buildCheckpoint = (state: LoopState, sequence: number): typeof KargadanCh
     sceneSummary: Option.none(),
     sequence,
     sessionId: state.identityBase.sessionId,
-    stateHash: hashCanonicalState({ attempt: state.attempt, operations: state.operations, sequence: state.sequence, status: state.status }),
 } as unknown as typeof KargadanCheckpoint.insert.Type);
 
 const _elapsed = (start: number) => Math.max(0, Math.round(performance.now() - start));
 
-const planCommand = (input: { readonly deadline: number; readonly state: LoopState; readonly writeObjectRef: NonNullable<Command['objectRefs']>[number] }) =>
+const _planCommand = (input: { readonly deadline: number; readonly hash: (state: unknown) => string; readonly state: LoopState; readonly writeObjectRef: NonNullable<Command['objectRefs']>[number] }) =>
     pipe(
         Option.fromNullable(input.state.command),
         Option.map((command) => ({ ...command, attempt: input.state.attempt }) satisfies Command),
         Option.orElse(() => Option.fromNullable(input.state.operations[0]).pipe(Option.map((operation) => {
             const { identityBase: base, sequence } = input.state;
-            const isWrite = writeOperations.has(operation);
+            const isWrite = _writeOperations.has(operation);
             const payload = isWrite
                 ? ({ operationId: `${base.runId}:${sequence}`, patch: { layer: 'default', name: 'phase-3' } } as const)
                 : ({ includeAttributes: true, scope: 'active' } as const);
@@ -51,7 +50,7 @@ const planCommand = (input: { readonly deadline: number; readonly state: LoopSta
                 ...base,
                 attempt: input.state.attempt,
                 deadlineMs: input.deadline,
-                idempotency: isWrite ? { idempotencyKey: `run:${base.runId.slice(0, 8)}:seq:${String(sequence).padStart(4, '0')}`, payloadHash: hashCanonicalState(payload) } : undefined,
+                idempotency: isWrite ? { idempotencyKey: `run:${base.runId.slice(0, 8)}:seq:${String(sequence).padStart(4, '0')}`, payloadHash: input.hash(payload) } : undefined,
                 objectRefs: [input.writeObjectRef],
                 operation,
                 payload,
@@ -92,7 +91,6 @@ class AgentLoop extends Effect.Service<AgentLoop>()('kargadan/AgentLoop', {
                         sceneSummary: Option.none(),
                         sequence,
                         sessionId: eventEnvelope.sessionId,
-                        stateHash: hashCanonicalState({ eventType: eventEnvelope.eventType, sequence }),
                     } as unknown as typeof KargadanCheckpoint.insert.Type,
                     toolCall: {
                         durationMs: _elapsed(start),
@@ -179,7 +177,7 @@ class AgentLoop extends Effect.Service<AgentLoop>()('kargadan/AgentLoop', {
         const plan = (state: LoopState): Effect.Effect<LoopState, unknown, never> =>
             Effect.gen(function* () {
                 const start = performance.now();
-                const command = yield* planCommand({ deadline: commandDeadlineMs, state, writeObjectRef });
+                const command = yield* _planCommand({ deadline: commandDeadlineMs, hash: persistence.hash, state, writeObjectRef });
                 yield* persistence.persist({
                     chatJson: '',
                     checkpoint: _buildCheckpoint(state, state.sequence + 1),
@@ -226,5 +224,8 @@ class AgentLoop extends Effect.Service<AgentLoop>()('kargadan/AgentLoop', {
 
 // --- [EXPORT] ----------------------------------------------------------------
 
+namespace AgentLoop {
+    export type IdentityBase = { readonly appId: string; readonly runId: string; readonly sessionId: string; readonly traceId: string };
+}
+
 export { AgentLoop };
-export type { LoopState };

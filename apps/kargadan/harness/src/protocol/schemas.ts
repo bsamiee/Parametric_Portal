@@ -56,4 +56,4 @@ const EnvelopeSchema =  S.Union(
 
 // --- [EXPORT] ----------------------------------------------------------------
 
-export { EnvelopeSchema, FailureReasonSchema, ObjectRefSchema, OperationSchema };
+export { EnvelopeSchema, ObjectRefSchema, OperationSchema };

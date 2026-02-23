@@ -1,14 +1,14 @@
 import { Data, Duration, Effect, Match, Ref } from 'effect';
 import { HarnessConfig } from '../config';
 import { KargadanSocketClient } from '../socket';
-import type { EnvelopeSchema, FailureReasonSchema } from './schemas';
+import type { EnvelopeSchema } from './schemas';
 
 // --- [ERRORS] ----------------------------------------------------------------
 
 class CommandDispatchError extends Data.TaggedError('CommandDispatchError')<{
     readonly reason: 'disconnected' | 'protocol' | 'rejected' | 'transport';
     readonly details?: unknown;
-    readonly failureClass?: typeof FailureReasonSchema.fields.failureClass.Type;
+    readonly failureClass?: 'compensatable' | 'correctable' | 'fatal' | 'retryable';
 }> {
     override get message() {
         const prefix = `CommandDispatch/${this.reason}`;

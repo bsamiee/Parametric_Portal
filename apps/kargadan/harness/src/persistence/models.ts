@@ -8,9 +8,8 @@ import { Schema as S } from 'effect';
 
 // --- [SCHEMA] ----------------------------------------------------------------
 
-const SessionStatusSchema = S.Literal('running', 'completed', 'failed', 'interrupted');
+const SessionStatusSchema =  S.Literal('running', 'completed', 'failed', 'interrupted');
 const ToolCallStatusSchema = S.Literal('ok', 'error');
-
 class KargadanSession extends Model.Class<KargadanSession>('KargadanSession')({
     endedAt:       Model.FieldOption(S.DateFromSelf),
     error:         Model.FieldOption(S.String),
@@ -21,7 +20,6 @@ class KargadanSession extends Model.Class<KargadanSession>('KargadanSession')({
     toolCallCount: S.Int,
     updatedAt:     Model.DateTimeUpdateFromDate,
 }) {}
-
 class KargadanToolCall extends Model.Class<KargadanToolCall>('KargadanToolCall')({
     createdAt:  Model.Generated(S.DateFromSelf),
     durationMs: S.Int,
@@ -35,7 +33,6 @@ class KargadanToolCall extends Model.Class<KargadanToolCall>('KargadanToolCall')
     sessionId:  S.UUID,
     status:     ToolCallStatusSchema,
 }) {}
-
 class KargadanCheckpoint extends Model.Class<KargadanCheckpoint>('KargadanCheckpoint')({
     chatJson:     S.String,
     loopState:    S.Unknown,
@@ -48,4 +45,4 @@ class KargadanCheckpoint extends Model.Class<KargadanCheckpoint>('KargadanCheckp
 
 // --- [EXPORT] ----------------------------------------------------------------
 
-export { KargadanCheckpoint, KargadanSession, KargadanToolCall, SessionStatusSchema, ToolCallStatusSchema };
+export { KargadanCheckpoint, KargadanSession, KargadanToolCall };
