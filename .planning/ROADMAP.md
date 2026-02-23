@@ -86,12 +86,11 @@ Plans:
   3. Every tool call is logged with parameters, result, duration, and failure status — queryable after the fact
   4. Past agent sessions can be listed and their full execution trace replayed from the audit trail
   5. The Rhino command knowledge base is seeded with command descriptions, parameters, and examples — and returns relevant results for natural language queries via pgvector search
-**Plans**: TBD
+**Plans**: 2 plans
 
 Plans:
-- [ ] 04-01: TBD
-- [ ] 04-02: TBD
-- [ ] 04-03: TBD
+- [ ] 04-01-PLAN.md -- Model.Class definitions, PostgreSQL migration, PersistenceService with atomic checkpoint+tool-call writes, session listing/replay, migrator layer, harness rewire
+- [ ] 04-02-PLAN.md -- Rhino command manifest schema with sample data, KB seeder service with pgvector embeddings via existing search infrastructure
 
 ### Phase 5: Agent Core and Provider Abstraction
 **Goal**: The agent accepts natural language input, discovers relevant Rhino commands via RAG, generates and executes tool calls through the bridge, and works across multiple AI providers
@@ -171,7 +170,7 @@ Note: Phases 6, 7, and 8 all depend on Phase 5 but not on each other. They can b
 | 1. Plugin Transport Foundation | 2/2 | Complete   | 2026-02-22 |
 | 2. RhinoDoc Execution and Events | 2/2 | Complete | 2026-02-23 |
 | 3. Schema Redesign and Topology | 0/2 | Ready | - |
-| 4. Session Persistence and Knowledge Base | 0/2 | Not started | - |
+| 4. Session Persistence and Knowledge Base | 0/2 | Ready | - |
 | 5. Agent Core and Provider Abstraction | 0/3 | Not started | - |
 | 6. Scene Representation and Context Management | 0/2 | Not started | - |
 | 7. Verification, Workflows, and Grasshopper | 0/3 | Not started | - |
