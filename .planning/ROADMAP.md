@@ -49,11 +49,11 @@ Plans:
   3. Document changes (add/delete/modify objects, layer changes, undo/redo) push to the harness as batched events within 200ms
   4. Pressing Cmd+Z after an AI action undoes the entire action atomically — not individual sub-operations
   5. Agent state snapshots are stored in the undo stack so undo/redo keeps the agent's internal model consistent with the document
-**Plans**: TBD
+**Plans**: 2 plans
 
 Plans:
-- [ ] 02-01: TBD
-- [ ] 02-02: TBD
+- [ ] 02-01-PLAN.md -- Protocol contracts extension + command execution engine (CommandExecutor, ScriptRunner, DocumentApi) with bifurcated undo strategy
+- [ ] 02-02-PLAN.md -- Event observation pipeline (EventSubscriber, EventAggregator, UndoObserver) + KargadanPlugin dispatch wiring
 
 ### Phase 3: Schema Redesign and Topology
 **Goal**: Monorepo topology is clean — universal concepts live in packages/, app-specific protocol lives in apps/kargadan, and public API surface is minimal
