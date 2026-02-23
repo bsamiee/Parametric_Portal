@@ -10,18 +10,18 @@ See: .planning/PROJECT.md (updated 2026-02-22)
 ## Current Position
 
 Phase: 3 of 8 (Schema Redesign and Topology)
-Plan: 1 of 2 in current phase
-Status: Phase 03 Plan 01 complete; Plan 02 next
-Last activity: 2026-02-23 -- Completed schema deletion and root group definition
+Plan: 2 of 2 in current phase
+Status: Phase 03 complete; Phase 04 next
+Last activity: 2026-02-23 -- Completed consumer rewiring and typecheck gate
 
-Progress: [████░░░░░░] 31.3%
+Progress: [████░░░░░░] 37.5%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 5
-- Average duration: ~16min
-- Total execution time: ~1.4 hours
+- Total plans completed: 6
+- Average duration: ~15min
+- Total execution time: ~1.5 hours
 
 **By Phase:**
 
@@ -29,10 +29,10 @@ Progress: [████░░░░░░] 31.3%
 |-------|-------|-------|----------|
 | 01 | 2 | 57min | ~29min |
 | 02 | 2 | 19min | ~10min |
-| 03 | 1 | 4min | ~4min |
+| 03 | 2 | 13min | ~7min |
 
 **Recent Trend:**
-- Last 5 plans: 01-02 (12min), 02-01 (8min), 02-02 (11min), 03-01 (4min)
+- Last 5 plans: 02-01 (8min), 02-02 (11min), 03-01 (4min), 03-02 (9min)
 - Trend: accelerating
 
 *Updated after each plan completion*
@@ -43,6 +43,7 @@ Progress: [████░░░░░░] 31.3%
 | Phase 02 P01 | 8min | 2 tasks | 4 files |
 | Phase 02 P02 | 11min | 2 tasks | 4 files |
 | Phase 03 P01 | 4min | 2 tasks | 4 files |
+| Phase 03 P02 | 9min | 2 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -71,6 +72,9 @@ Recent decisions affecting current work:
 - [03-01]: All literal types inlined into parent S.Struct -- no standalone S.Literal schemas at module level
 - [03-01]: Persistence schemas private to checkpoint.ts -- consumed locally, not exported
 - [03-01]: CommandAckSchema retained despite research deletion note -- member of OutboundEnvelopeSchema decoded by socket.ts
+- [03-02]: Extracted 12 protocol schemas into protocol/schemas.ts -- biome noImportCycles detected bidirectional cycles between dispatch.ts <-> config.ts and dispatch.ts <-> socket.ts
+- [03-02]: Narrowed _request parameter type via Extract -- CommandAckSchema lacks identity field, accessing envelope.identity was unsound on full union
+- [03-02]: Inline EventBatchSummarySchema at decode site and RunStatus literal union in LoopState -- no module-level schema consts needed for single-use types
 
 ### Pending Todos
 
@@ -84,5 +88,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-02-23
-Stopped at: Completed 03-01-PLAN.md
-Resume file: .planning/phases/03-schema-redesign-and-topology/03-02-PLAN.md
+Stopped at: Completed 03-02-PLAN.md (Phase 03 complete)
+Resume file: .planning/phases/04-persistence-and-state-machine/04-01-PLAN.md
