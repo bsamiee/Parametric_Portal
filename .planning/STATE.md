@@ -10,28 +10,28 @@ See: .planning/PROJECT.md (updated 2026-02-22)
 ## Current Position
 
 Phase: 2 of 8 (RhinoDoc Execution and Events)
-Plan: 1 of 2 in current phase
-Status: Plan 02-01 complete
-Last activity: 2026-02-23 -- Completed 02-01 (protocol contracts extension and command execution engine)
+Plan: 2 of 2 in current phase
+Status: Phase 02 complete
+Last activity: 2026-02-23 -- Completed 02-02 (event observation pipeline and execution dispatch wiring)
 
-Progress: [██░░░░░░░░] 18.8%
+Progress: [███░░░░░░░] 25.0%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 3
-- Average duration: ~22min
-- Total execution time: ~1.1 hours
+- Total plans completed: 4
+- Average duration: ~19min
+- Total execution time: ~1.3 hours
 
 **By Phase:**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
 | 01 | 2 | 57min | ~29min |
-| 02 | 1 | 8min | 8min |
+| 02 | 2 | 19min | ~10min |
 
 **Recent Trend:**
-- Last 5 plans: 01-01 (45min), 01-02 (12min), 02-01 (8min)
+- Last 5 plans: 01-01 (45min), 01-02 (12min), 02-01 (8min), 02-02 (11min)
 - Trend: accelerating
 
 *Updated after each plan completion*
@@ -40,6 +40,7 @@ Progress: [██░░░░░░░░] 18.8%
 |------|----------|-------|-------|
 | Phase 01 P01 | 45min | 3 tasks | 5 files |
 | Phase 02 P01 | 8min | 2 tasks | 4 files |
+| Phase 02 P02 | 11min | 2 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -60,6 +61,10 @@ Recent decisions affecting current work:
 - [02-01]: CA1508 false positive on event-handler-mutated variables -- suppress with pragma and explanatory comment
 - [02-01]: RhinoObject.NextRuntimeSerialNumber is static property (not on ObjectTable) -- used for new-object tracking across RunScript
 - [02-01]: FindByLayer uses string overload directly instead of two-step FindByFullPath + index lookup
+- [02-02]: RhinoObjectEventArgs lacks Document property -- used RhinoDoc.ActiveDoc for UndoActive/RedoActive detection
+- [02-02]: DimensionStyleTableEventArgs does not exist in SDK -- used base EventArgs
+- [02-02]: OnBatchFlushed extracted to static method to avoid nested lambda type inference in Atom.Swap
+- [02-02]: Individual operation handlers use stub Fin.Fail responses -- ScriptRun is the fully wired critical path
 
 ### Pending Todos
 
@@ -67,12 +72,11 @@ None yet.
 
 ### Blockers/Concerns
 
-- [Research]: Phase 2 needs verification of macOS ActiveDocumentChanged event ordering before implementation
 - [Research]: Phase 5/6 needs verification of Anthropic Tool Search Tool beta API contract before AiToolkit design
 - [Research]: Phase 7 needs re-verification of @effect/workflow 0.16.0 alpha stability before committing to durable workflows
 
 ## Session Continuity
 
 Last session: 2026-02-23
-Stopped at: Completed 02-01-PLAN.md (protocol contracts extension and command execution engine)
-Resume file: .planning/phases/02-rhinodoc-execution-and-events/02-01-SUMMARY.md
+Stopped at: Completed 02-02-PLAN.md (event observation pipeline and execution dispatch wiring)
+Resume file: .planning/phases/02-rhinodoc-execution-and-events/02-02-SUMMARY.md
