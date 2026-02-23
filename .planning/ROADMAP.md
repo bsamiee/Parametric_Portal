@@ -52,8 +52,8 @@ Plans:
 **Plans**: 2 plans
 
 Plans:
-- [ ] 02-01-PLAN.md -- Protocol contracts extension + command execution engine (CommandExecutor, ScriptRunner, DocumentApi) with bifurcated undo strategy
-- [ ] 02-02-PLAN.md -- Event observation pipeline (EventSubscriber, EventAggregator, UndoObserver) + KargadanPlugin dispatch wiring
+- [ ] 02-01-PLAN.md -- Protocol contracts extension + CommandExecutor with bifurcated undo strategy (direct API undo wrapping, RunScript result tracking, RhinoCommon facades)
+- [ ] 02-02-PLAN.md -- ObservationPipeline (15 events + undo detection + batched flush), WebSocketHost two-phase ack, KargadanPlugin execution/observation wiring, TS schema sync
 
 ### Phase 3: Schema Redesign and Topology
 **Goal**: Monorepo topology is clean — universal concepts live in packages/, app-specific protocol lives in apps/kargadan, and public API surface is minimal
