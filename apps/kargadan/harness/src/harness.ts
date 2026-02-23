@@ -4,6 +4,7 @@ import * as PgClient from '@effect/sql-pg/PgClient';
 import { PgMigrator } from '@effect/sql-pg';
 import { Config, Effect, Layer, Option } from 'effect';
 import { HarnessConfig } from './config';
+import { KBSeeder } from './knowledge/seeder';
 import { PersistenceService, hashCanonicalState, verifySceneState } from './persistence/checkpoint';
 import { CommandDispatch } from './protocol/dispatch';
 import { AgentLoop, type LoopState } from './runtime/agent-loop';
@@ -96,6 +97,7 @@ const ServicesLayer = Layer.mergeAll(
     AgentLoop.Default,
     ReconnectionSupervisor.Default,
     PersistenceService.Default,
+    KBSeeder.Default,
 ).pipe(
     Layer.provideMerge(KargadanMigratorLive),
     Layer.provideMerge(PgClientLayer),
