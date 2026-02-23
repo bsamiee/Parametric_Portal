@@ -5,22 +5,22 @@
 See: .planning/PROJECT.md (updated 2026-02-22)
 
 **Core value:** The agent can execute any operation a human can perform in Rhino 9 through natural language, with reliable state persistence and verification — without hardcoding individual commands.
-**Current focus:** Phase 4 - Session Persistence and Knowledge Base
+**Current focus:** Phase 5 - Agent Intelligence Pipeline
 
 ## Current Position
 
-Phase: 4 of 8 (Session Persistence and Knowledge Base)
-Plan: 1 of 2 in current phase
-Status: Plan 04-01 complete; Plan 04-02 next
-Last activity: 2026-02-23 -- Replaced CheckpointService with PersistenceService, added migrator and session lifecycle
+Phase: 5 of 8 (Agent Intelligence Pipeline)
+Plan: 0 of ? in current phase
+Status: Phase 04 complete; Phase 05 next
+Last activity: 2026-02-23 -- Rhino command manifest and KB seeder service for pgvector semantic search
 
-Progress: [████▓░░░░░] 43.8%
+Progress: [█████░░░░░] 50.0%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 7
-- Average duration: ~13min
+- Total plans completed: 8
+- Average duration: ~12min
 - Total execution time: ~1.6 hours
 
 **By Phase:**
@@ -30,10 +30,10 @@ Progress: [████▓░░░░░] 43.8%
 | 01 | 2 | 57min | ~29min |
 | 02 | 2 | 19min | ~10min |
 | 03 | 2 | 13min | ~7min |
-| 04 | 1 (of 2) | 5min | ~5min |
+| 04 | 2 | 8min | ~4min |
 
 **Recent Trend:**
-- Last 5 plans: 02-02 (11min), 03-01 (4min), 03-02 (9min), 04-01 (5min)
+- Last 5 plans: 03-01 (4min), 03-02 (9min), 04-01 (5min), 04-02 (3min)
 - Trend: accelerating
 
 *Updated after each plan completion*
@@ -46,6 +46,7 @@ Progress: [████▓░░░░░] 43.8%
 | Phase 03 P01 | 4min | 2 tasks | 4 files |
 | Phase 03 P02 | 9min | 2 tasks | 6 files |
 | Phase 04 P01 | 5min | 2 tasks | 6 files |
+| Phase 04 P02 | 3min | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -81,6 +82,8 @@ Recent decisions affecting current work:
 - [04-01]: KargadanMigratorLive uses separate kargadan_migrations table to avoid collision with platform migrations
 - [04-01]: KargadanToolCall.createdAt uses Model.Generated (DB DEFAULT now()) not DateTimeInsertFromDate -- excludes from insert variant
 - [04-01]: chatJson is empty string placeholder until Phase 5 wires Chat.exportJson
+- [04-02]: Deterministic UUID from command ID via SHA-256 namespace hashing -- search_documents.entity_id requires UUID but manifest uses string IDs
+- [04-02]: Embedding function injected as parameter to seed() -- keeps seeder decoupled from server-side AiRuntime dependencies
 
 ### Pending Todos
 
@@ -94,5 +97,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-02-23
-Stopped at: Completed 04-01-PLAN.md
-Resume file: .planning/phases/04-session-persistence-and-knowledge-base/04-02-PLAN.md
+Stopped at: Completed 04-02-PLAN.md (Phase 04 complete)
+Resume file: Phase 05 planning
