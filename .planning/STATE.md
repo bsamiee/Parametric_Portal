@@ -10,18 +10,18 @@ See: .planning/PROJECT.md (updated 2026-02-22)
 ## Current Position
 
 Phase: 3 of 8 (Schema Redesign and Topology)
-Plan: 0 of 2 in current phase
-Status: Phase 02 complete; Phase 03 ready
-Last activity: 2026-02-23 -- Marked Phase 2 complete and synchronized planning artifacts
+Plan: 1 of 2 in current phase
+Status: Phase 03 Plan 01 complete; Plan 02 next
+Last activity: 2026-02-23 -- Completed schema deletion and root group definition
 
-Progress: [███░░░░░░░] 25.0%
+Progress: [████░░░░░░] 31.3%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 4
-- Average duration: ~19min
-- Total execution time: ~1.3 hours
+- Total plans completed: 5
+- Average duration: ~16min
+- Total execution time: ~1.4 hours
 
 **By Phase:**
 
@@ -29,9 +29,10 @@ Progress: [███░░░░░░░] 25.0%
 |-------|-------|-------|----------|
 | 01 | 2 | 57min | ~29min |
 | 02 | 2 | 19min | ~10min |
+| 03 | 1 | 4min | ~4min |
 
 **Recent Trend:**
-- Last 5 plans: 01-01 (45min), 01-02 (12min), 02-01 (8min), 02-02 (11min)
+- Last 5 plans: 01-02 (12min), 02-01 (8min), 02-02 (11min), 03-01 (4min)
 - Trend: accelerating
 
 *Updated after each plan completion*
@@ -41,6 +42,7 @@ Progress: [███░░░░░░░] 25.0%
 | Phase 01 P01 | 45min | 3 tasks | 5 files |
 | Phase 02 P01 | 8min | 2 tasks | 4 files |
 | Phase 02 P02 | 11min | 2 tasks | 4 files |
+| Phase 03 P01 | 4min | 2 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -65,6 +67,10 @@ Recent decisions affecting current work:
 - [02-02]: DimensionStyleTableEventArgs does not exist in SDK -- used base EventArgs
 - [02-02]: Event batch flush publishes through EventPublisher via boundary wiring instead of log-only callback
 - [02-02]: Direct API object write routes execute through CommandExecutor (no `not yet implemented` stubs)
+- [03-01]: Deleted centralized kargadan-schemas.ts barrel -- app-specific schemas must not live in packages/
+- [03-01]: All literal types inlined into parent S.Struct -- no standalone S.Literal schemas at module level
+- [03-01]: Persistence schemas private to checkpoint.ts -- consumed locally, not exported
+- [03-01]: CommandAckSchema retained despite research deletion note -- member of OutboundEnvelopeSchema decoded by socket.ts
 
 ### Pending Todos
 
@@ -78,5 +84,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-02-23
-Stopped at: Phase 2 completed and documented
-Resume file: .planning/ROADMAP.md
+Stopped at: Completed 03-01-PLAN.md
+Resume file: .planning/phases/03-schema-redesign-and-topology/03-02-PLAN.md

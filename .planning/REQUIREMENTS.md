@@ -78,12 +78,12 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### Schema
 
-- [ ] **SCHM-01**: Delete packages/types/src/kargadan/kargadan-schemas.ts and redesign from scratch — app-specific schemas move to apps/kargadan, universal concepts graduate to appropriate packages
+- [x] **SCHM-01**: Delete packages/types/src/kargadan/kargadan-schemas.ts and redesign from scratch — app-specific schemas move to apps/kargadan, universal concepts graduate to appropriate packages
 - [ ] **SCHM-02**: Universal concepts (protocol version, telemetry context, failure taxonomy, idempotency) extracted to packages/ as reusable schemas
 - [ ] **SCHM-03**: apps/kargadan consumes packages/ai for all LLM interaction — no app-specific AI orchestration logic outside the app
-- [ ] **SCHM-04**: Minimal schema surface — one canonical schema per entity with pick/omit/partial derivation at call site; no struct/type proliferation
+- [x] **SCHM-04**: Minimal schema surface — one canonical schema per entity with pick/omit/partial derivation at call site; no struct/type proliferation
 - [ ] **SCHM-05**: Consistent semantics across boundaries — same field names, parameter signatures, and return shapes between TS harness and C# plugin; mapping isolated at boundary adapters only
-- [ ] **SCHM-06**: Internal logic is private — public API surface is minimal; composition and orchestration internalized within services following packages/server patterns
+- [x] **SCHM-06**: Internal logic is private — public API surface is minimal; composition and orchestration internalized within services following packages/server patterns
 
 ## v2 Requirements
 
@@ -173,12 +173,12 @@ Which phases cover which requirements. Updated during roadmap creation.
 | CLI-04 | Phase 8 | Pending |
 | CLI-05 | Phase 8 | Pending |
 | CLI-06 | Phase 8 | Pending |
-| SCHM-01 | Phase 3 | Pending |
+| SCHM-01 | Phase 3 | Complete |
 | SCHM-02 | Phase 3 | Pending |
 | SCHM-03 | Phase 3 | Pending |
-| SCHM-04 | Phase 3 | Pending |
+| SCHM-04 | Phase 3 | Complete |
 | SCHM-05 | Phase 3 | Pending |
-| SCHM-06 | Phase 3 | Pending |
+| SCHM-06 | Phase 3 | Complete |
 
 **Coverage:**
 - v1 requirements: 51 total
