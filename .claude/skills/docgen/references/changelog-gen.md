@@ -3,7 +3,7 @@
 
 <br>
 
-Generation-specific instructions for changelog entries and release notes. Follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) with Semantic Versioning.
+Generation-specific instructions for changelog entries and release notes. Follows [Keep Changelog](https://keepachangelog.com/en/1.1.0/) with Semantic Versioning.
 
 ---
 ## [1][FORMAT]
@@ -16,7 +16,7 @@ Generation-specific instructions for changelog entries and release notes. Follow
 ```markdown
 # Changelog
 
-All notable changes to this project are documented in this file.
+Notable changes documented in this file.
 
 ## [Unreleased]
 
@@ -30,9 +30,9 @@ All notable changes to this project are documented in this file.
 ```
 
 [IMPORTANT]:
-1. [ALWAYS] **Unreleased section:** Exists at top. Accumulates entries between releases.
+1. [ALWAYS] **Unreleased section:** Positioned at top; accumulates entries between releases.
 2. [ALWAYS] **Version heading:** `[MAJOR.MINOR.PATCH] - YYYY-MM-DD` format.
-3. [ALWAYS] **Category order:** Added → Changed → Deprecated → Removed → Fixed → Security.
+3. [ALWAYS] **Category order:** Added, Changed, Deprecated, Removed, Fixed, Security.
 
 [CRITICAL]:
 - [NEVER] Empty categories — omit categories with no entries.
@@ -65,6 +65,7 @@ Place at file bottom. Each version links to its comparison diff.
 |   [4]   | `chore: update dependencies`               | *(omit — no user-observable behavior change)*                                |     —      |
 |   [5]   | `fix: patch XSS in comment renderer`       | Comment rendering sanitizes HTML input to prevent script injection.          |  Security  |
 
+---
 ### [2.2][COMMIT_PARSING_STRATEGY]
 
 When generating entries from commit history:
@@ -77,13 +78,14 @@ When generating entries from commit history:
 |   [4]   | **File diff scope** |    Low     | Changed files indicate affected module for scope tag. |
 
 **Filtering heuristics:**
-- `feat:`, `feat!:` → Include. Route per §3[CATEGORY_ROUTING].
-- `fix:` → Include. Route to Fixed or Security based on content.
+- `feat:`, `feat!:` → Include; route per §3[CATEGORY_ROUTING].
+- `fix:` → Include; route to Fixed or Security based on content.
 - `docs:`, `chore:`, `ci:`, `style:`, `refactor:`, `test:`, `build:` → Omit unless user-observable side effect.
 - Merge commits → Omit (PR title already captured).
 
-**Grouping:** Cluster related commits into single entries. Three commits fixing the same feature → one changelog entry describing the net behavior change.
+**Grouping:** Cluster related commits into single entries. Three commits fixing the same feature become one changelog entry describing the net behavior change.
 
+---
 ### [2.3][WRITING_DISCIPLINE]
 
 [IMPORTANT]:

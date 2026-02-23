@@ -3,7 +3,7 @@
 
 <br>
 
-Produces one README file at the appropriate scope level. Section selection determined by `readme-gen.md` §3[SCOPE_ROUTING]. Content requirements per section defined in `readme-gen.md` §2[SECTION_CATALOG].
+Produces one README file at appropriate scope level. Section selection determined by `readme-gen.md` §3[SCOPE_ROUTING]. `readme-gen.md` §2[SECTION_CATALOG] defines content requirements per section.
 
 **Density:** Root READMEs target 80-200 lines; package/module READMEs target 40-100 lines. Below 40 lines signals missing sections; above 200 signals scope creep.<br>
 **References:** `readme-gen.md` (exploration, section catalog, scope routing), `readme-standards.md` (canonical structure, audience tiers), `validation.md` §1 (compliance checklist), `patterns.md` [1][5][6][7] (TROPHY_README, STALE_DOCS, PSEUDOCODE_EXAMPLE, AUDIENCE_MIXING).<br>
@@ -102,9 +102,9 @@ ${ContributingLink}
 ---
 **Guidance**
 
-*Scope Selection* — Before filling this template, determine the README scope per `readme-gen.md` §3.2. Root scope uses all sections above. Package scope omits Architecture and Contributing. Module scope retains only Title, Description, Architecture, and API. Directory hub scope replaces all content sections with a navigation index table. Filling the wrong scope produces AUDIENCE_MIXING (patterns.md [7]).<br>
+*Scope Selection* — Before filling this template, determine README scope per `readme-gen.md` §3.2. Root scope uses all sections above. Package scope omits Architecture and Contributing. Module scope retains only Title, Description, Architecture, and API. Directory hub scope replaces all content sections with navigation index table. Filling wrong scope produces AUDIENCE_MIXING (patterns.md [7]).<br>
 *Exploration Before Generation* — Every placeholder value derives from project artifacts, not assumptions. `${InstallCommand}` comes from `package.json` scripts or `*.csproj` build targets. `${RuntimeVersion}` comes from CI configuration or engine fields. Filling placeholders from memory produces STALE_DOCS (patterns.md [5]).<br>
-*Example Viability* — The `${UsageExample}` placeholder must expand to compilable, importable, executable code. Truncated snippets or pseudocode trigger PSEUDOCODE_EXAMPLE (patterns.md [6]). Test the example against the current API surface before committing.
+*Example Viability* — `${UsageExample}` must expand to compilable, importable, executable code. Truncated snippets or pseudocode trigger PSEUDOCODE_EXAMPLE (patterns.md [6]). Test example against current API surface before committing.
 
 ---
 **Post-Scaffold Checklist**

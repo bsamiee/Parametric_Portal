@@ -2,13 +2,13 @@
 name: docgen
 description: >-
   Generates and validates project documentation: READMEs, ADRs, changelogs,
-  and code documentation. Use when creating, updating, or reviewing any
-  non-code markdown artifact, README file, architecture decision record,
-  CHANGELOG entry, or code documentation (docstrings, XML docs, TSDoc).
-  Activates for: (1) scaffolding README, CHANGELOG, ADR, CONTRIBUTING, or
-  SECURITY files; (2) writing or reviewing doc comments on exported APIs;
-  (3) auditing documentation coverage or staleness; (4) generating release
-  notes from commit history.
+  ARCHITECTURE.md, and code documentation. Use when creating, updating, or
+  reviewing any non-code markdown artifact, README file, architecture decision
+  record, ARCHITECTURE document, CHANGELOG entry, or code documentation
+  (docstrings, XML docs, TSDoc). Activates for: (1) scaffolding README,
+  CHANGELOG, ADR, CONTRIBUTING, ARCHITECTURE, or SECURITY files; (2) writing
+  or reviewing doc comments on exported APIs; (3) auditing documentation
+  coverage or staleness; (4) generating release notes from commit history.
 metadata:
   token_estimates:
     entry_point: 2800
@@ -21,7 +21,7 @@ metadata:
 
 <br>
 
-Single authority on documentation structure, content requirements, and generation workflow. Routes to task-specific references by document type. Code examples in references align with csharp-standards, python-standards, and ts-standards — those skills remain the authority on code discipline; this skill governs documentation discipline.
+Single authority on documentation structure, content requirements, and generation workflow. Routes to task-specific references by document type. Code examples in references align with csharp-standards, python-standards, and ts-standards — those skills remain authority on code discipline; this skill governs documentation discipline.
 
 ---
 ## [1][LOAD_SEQUENCE]
@@ -45,13 +45,15 @@ Single authority on documentation structure, content requirements, and generatio
 |   [5]   | `code-docs.md`        | Code documentation (any language) |
 |   [6]   | `changelog-gen.md`    | Changelog or release notes        |
 |   [7]   | `contributing-gen.md` | CONTRIBUTING.md creation          |
+|   [8]   | `architecture-gen.md` | ARCHITECTURE.md creation or update |
 
 **Step 3 — Template (scaffolding only)**
 
-| [INDEX] | [TEMPLATE]           | [ARCHETYPE] |
-| :-----: | :------------------- | :---------: |
-|   [8]   | `readme.template.md` |   README    |
-|   [9]   | `adr.template.md`    |     ADR     |
+| [INDEX] | [TEMPLATE]                 | [ARCHETYPE]    |
+| :-----: | :------------------------- | :------------: |
+|   [9]   | `readme.template.md`       | README         |
+|  [10]   | `adr.template.md`          | ADR            |
+|  [11]   | `architecture.template.md` | ARCHITECTURE   |
 
 ---
 ## [2][CONTRACTS]
@@ -60,13 +62,13 @@ Single authority on documentation structure, content requirements, and generatio
 <br>
 
 **Content discipline**
-- **Documentation completes the type signature** — encode intent, constraints, failure semantics, domain invariants. Never restate what types and names already communicate.
+- **Documentation completes type signature** — encode intent, constraints, failure semantics, domain invariants. Never restate what types and names already communicate.
 - **Every document targets one Diátaxis quadrant:** Tutorial (learning), How-To (task), Reference (information), Explanation (understanding). Mixing quadrants produces documents that serve no audience well.
 
 **Generation discipline**
-- **Exploration before generation:** Read the project structure, dependencies, and existing documentation before producing new content. Generated documentation that contradicts existing artifacts is worse than no documentation.
+- **Exploration before generation:** Read project structure, dependencies, existing documentation before producing new content. Generated documentation contradicting existing artifacts is worse than no documentation.
 - **Code examples are compilable/runnable** — never pseudocode, never truncated. For libraries: importable. For services: `curl` with expected response. For CLIs: exact invocation with output.
-- **Audience-first structure:** Content organized by reader need, not by implementation topology.
+- **Audience-first structure:** Organize content by reader need, not by implementation topology.
 
 **Density discipline**
 - **Standards docs** (`docs/standards/*.md`): canonical truth about document types. 125-200 LOC.
@@ -86,10 +88,12 @@ Single authority on documentation structure, content requirements, and generatio
 |   [3]   | **ADR creation**          | adr.md              | adr.template.md    | adr-standards.md                |
 |   [4]   | **ADR review**            | adr.md              | —                  | adr-standards.md                |
 |   [5]   | **Code documentation**    | code-docs.md        | —                  | code-documentation-standards.md |
-|   [6]   | **Changelog entry**       | changelog-gen.md    | —                  | —                               |
-|   [7]   | **Release notes**         | changelog-gen.md    | —                  | —                               |
-|   [8]   | **CONTRIBUTING creation** | contributing-gen.md | —                  | —                               |
-|   [9]   | **Doc validation/audit**  | validation.md       | —                  | (all applicable)                |
+|   [6]   | **CONTRIBUTING creation** | contributing-gen.md | —                        | —                               |
+|   [7]   | **ARCHITECTURE creation** | architecture-gen.md | architecture.template.md | architecture-standards.md       |
+|   [8]   | **ARCHITECTURE update**   | architecture-gen.md | —                        | architecture-standards.md       |
+|   [9]   | **Changelog entry**       | changelog-gen.md    | —                        | changelog-standards.md          |
+|  [10]   | **Release notes**         | changelog-gen.md    | —                        | changelog-standards.md          |
+|  [11]   | **Doc validation/audit**  | validation.md       | —                        | (all applicable)                |
 
 ---
 ## [4][DECISION_TREES]
@@ -108,7 +112,8 @@ Single authority on documentation structure, content requirements, and generatio
 |   [5]   | Version release, feature completion          |    Changelog     |
 |   [6]   | New/modified exported API surface            |     Code-Doc     |
 |   [7]   | New project accepting external contributions |   CONTRIBUTING   |
-|   [8]   | Existing documentation accuracy concern      |    Validation    |
+|   [8]   | System with 10k+ LOC needing structural docs | ARCHITECTURE    |
+|   [9]   | Existing documentation accuracy concern      |    Validation    |
 
 **README scope routing:**
 
@@ -160,7 +165,7 @@ Summary table — full examples in `patterns.md`.
 
 <br>
 
-[VERIFY] Per-task completion — select checklist from `validation.md` matching document type.
+[VERIFY]: Per-task completion — select checklist from `validation.md` matching document type.
 
 [IMPORTANT]:
 1. [ALWAYS] Load `validation.md` before marking any documentation task complete.

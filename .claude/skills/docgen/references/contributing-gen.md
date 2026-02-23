@@ -11,7 +11,7 @@ Generation-specific instructions for creating CONTRIBUTING.md files. Covers oper
 
 <br>
 
-Before generating, gather:
+Before generating, gather information from:
 
 | [INDEX] | [SOURCE]                                                | [EXTRACTS]                                    |
 | :-----: | ------------------------------------------------------- | --------------------------------------------- |
@@ -45,8 +45,9 @@ pnpm test
 ```
 ```
 
-Include: fork vs. direct clone policy, required environment variables, database setup if applicable.
+Include fork vs. direct clone policy, required environment variables, database setup if applicable.
 
+---
 ### [2.2][WORKFLOW]
 
 Branch naming, commit conventions, PR process:
@@ -54,15 +55,16 @@ Branch naming, commit conventions, PR process:
 ```markdown
 ## Workflow
 
-1. Create a branch from `main`: `feat/short-description` or `fix/short-description`.
+1. Create branch from `main`: `feat/short-description` or `fix/short-description`.
 2. Commit using Conventional Commits: `feat:`, `fix:`, `docs:`, `refactor:`.
-3. Push and open a PR against `main`.
-4. Address review feedback. All CI checks pass before merge.
+3. Push; open PR against `main`.
+4. Address review feedback; all CI checks pass before merge.
 ```
 
+---
 ### [2.3][CODE_STANDARDS]
 
-Link to language-specific standards (do not inline them):
+Link to language-specific standards; do not inline them:
 
 ```markdown
 ## Code Standards
@@ -72,6 +74,7 @@ Link to language-specific standards (do not inline them):
 - Python: See [python-standards](./docs/standards/python-standards.md)
 ```
 
+---
 ### [2.4][TESTING]
 
 Commands and coverage expectations:
@@ -82,9 +85,10 @@ Commands and coverage expectations:
 Run all tests: `pnpm test`
 Run with coverage: `pnpm test:coverage`
 
-Coverage threshold: 80% line coverage. PRs below threshold fail CI.
+Coverage threshold: 80% line coverage; PRs below threshold fail CI.
 ```
 
+---
 ### [2.5][ISSUE_REPORTING]
 
 Link to issue templates. State what constitutes a valid bug report vs. feature request.
@@ -110,8 +114,8 @@ Link to issue templates. State what constitutes a valid bug report vs. feature r
 <br>
 
 [VERIFY]:
-- [ ] Development setup commands produce a passing test suite from a clean clone.
-- [ ] Branch naming convention matches what CI enforces.
-- [ ] Commit convention matches what changelog generation expects.
-- [ ] PR template matches what code review actually evaluates.
+- [ ] Development setup commands produce passing test suite from clean clone.
+- [ ] Branch naming convention matches CI enforcement.
+- [ ] Commit convention matches changelog generation expectations.
+- [ ] PR template matches code review evaluation criteria.
 - [ ] No aspirational workflow steps that CI does not enforce.

@@ -15,7 +15,7 @@ description: Structural specification for Architecture Decision Records
 
 <br>
 
-Markdown Any Decision Record (MADR) structure. Seven sections in fixed order.
+Markdown Any Decision Record (MADR) structure. Use seven sections in fixed order.
 
 | [INDEX] | [SECTION]              | [REQUIRED] | [CONTENT]                                                 |
 | :-----: | ---------------------- | :--------: | --------------------------------------------------------- |
@@ -29,7 +29,7 @@ Markdown Any Decision Record (MADR) structure. Seven sections in fixed order.
 
 ### [1.1][NUMBERING]
 
-Sequential four-digit: `ADR-0001`, `ADR-0002`. Gaps permitted (deleted ADRs leave gaps). Numbers never reused.
+Use sequential four-digit numbering: `ADR-0001`, `ADR-0002`. Gaps permitted (deleted ADRs leave gaps). Numbers are never reused.
 
 ### [1.2][STATUS_TAXONOMY]
 
@@ -67,7 +67,7 @@ Sequential four-digit: `ADR-0001`, `ADR-0002`. Gaps permitted (deleted ADRs leav
 
 ### [3.1][CONTEXT]
 
-State current facts. Describe constraints. Identify unknowns explicitly. No chronological narrative — the reader needs the situation, not the story.
+State current facts. Describe constraints. Identify unknowns explicitly. No chronological narrative—readers need situation, not story.
 
 [IMPORTANT]:
 1. [ALWAYS] **Bullet-point facts:** Each fact is independently verifiable.
@@ -79,27 +79,27 @@ State current facts. Describe constraints. Identify unknowns explicitly. No chro
 
 ### [3.2][DECISION_DRIVERS]
 
-Ranked by impact. Each driver is a force (technical constraint, business requirement, team capability, timeline) that pushes toward or against options.
+Rank by impact. Each driver is force (technical constraint, business requirement, team capability, timeline) pushing toward or against options.
 
 ### [3.3][CONSIDERED_OPTIONS]
 
-Minimum 2 options. "Do nothing" is a valid option when applicable. Per option:
-- One-paragraph description of the approach.
+Minimum 2 options. "Do nothing" is valid when applicable. Per option:
+- Describe approach in one paragraph.
 - Pros: concrete benefits (measurable where possible).
 - Cons: concrete costs (measurable where possible).
-- Neutral: trade-offs that are neither clearly positive nor negative.
+- Neutral: trade-offs that are neither positive nor negative.
 
 ### [3.4][CONSEQUENCES]
 
-Three categories — all required: `Positive:`, `Negative:`, `Neutral:`.
+Include three categories—all required: `Positive:`, `Negative:`, `Neutral:`.
 
 [IMPORTANT]:
 1. [ALWAYS] **Mitigation for negatives:** Each negative consequence includes a mitigation strategy — the specific action, timeline, or architectural guard that reduces impact.
 2. [ALWAYS] **Measurable where possible:** Consequences state observable outcomes, not vague concerns.
 
 [CRITICAL]:
-- [NEVER] Omit negative consequences — this is the most common ADR failure. Every architectural choice has trade-offs.
-- [NEVER] State "no significant downsides" — this signals incomplete analysis, not a superior option.
+- [NEVER] Omit negative consequences—this is most common ADR failure. Every architectural choice has trade-offs.
+- [NEVER] State "no significant downsides"—this signals incomplete analysis, not superior option.
 
 ---
 ## [4][LIFECYCLE]
@@ -119,11 +119,11 @@ Three categories — all required: `Positive:`, `Negative:`, `Neutral:`.
 ### [4.2][STALENESS_DETECTION]
 
 An ADR is stale when:
-- The technology it selects is no longer in the dependency graph.
-- The constraint it addresses no longer exists.
-- 3+ engineers cannot explain why the decision was made.
+- Selected technology no longer exists in dependency graph.
+- Addressed constraint no longer exists.
+- 3+ engineers cannot explain why decision was made.
 
-Stale ADRs transition to Deprecated with a note explaining why.
+Mark stale ADRs as Deprecated with note explaining why.
 
 ---
 ## [5][VALIDATION]

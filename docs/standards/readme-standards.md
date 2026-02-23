@@ -7,7 +7,7 @@ description: Structural specification for README documents
 
 <br>
 
-[CRITICAL] README is the single entry point for every audience. Structure encodes progressive disclosure — each audience tier inherits prior tiers.
+[CRITICAL] README is the single entry point for every audience. Structure encodes progressive disclosure—each audience tier inherits prior tiers.
 
 ---
 ## [1][ANATOMY]
@@ -15,7 +15,7 @@ description: Structural specification for README documents
 
 <br>
 
-Standard-README specification. Section order is fixed — never reorder.
+Standard-README specification. Section order is fixed—never reorder.
 
 | [INDEX] | [SECTION]             | [REQUIRED]  | [CONTENT]                                                          |
 | :-----: | --------------------- | :---------: | ------------------------------------------------------------------ |
@@ -57,27 +57,27 @@ Standard-README specification. Section order is fixed — never reorder.
 
 ### [3.1][DESCRIPTION]
 
-One paragraph. Three components: what it does, what problem it solves, what distinguishes it from alternatives. No feature lists — feature lists belong in Usage or API.
+One paragraph. Three components: what it does, what problem it solves, what distinguishes it from alternatives. No feature lists—feature lists belong in Usage or API.
 
 ### [3.2][INSTALL]
 
-Exact shell commands for each supported environment. Prerequisites table: runtime version, required system dependencies, environment variables. Verification command proving successful installation.
+Exact shell commands for each supported environment. Prerequisites table: runtime version, required system dependencies, environment variables. Verification command proves successful installation.
 
 ### [3.3][USAGE]
 
-Minimum viable example: the smallest working invocation that demonstrates primary value. Runnable — not pseudocode, not truncated. For libraries: importable code block. For services: `curl` or CLI command with expected output. For CLIs: help output + primary command.
+Minimum viable example: smallest working invocation demonstrating primary value. Runnable—not pseudocode, not truncated. For libraries: importable code block. For services: `curl` or CLI command with expected output. For CLIs: help output + primary command.
 
 ### [3.4][ARCHITECTURE]
 
-System context diagram (C4 Level 1): the project as a single box with external dependencies and consumers. Component overview: 3-7 primary modules with one-line responsibility descriptions. Dependency direction: arrows show data flow, not import direction.
+System context diagram (C4 Level 1): project as single box with external dependencies and consumers. Component overview: 3-7 primary modules with one-line responsibility descriptions. Dependency direction: arrows show data flow, not import direction.
 
 [IMPORTANT]:
-- [ALWAYS] **Concrete over abstract:** Exact module names, exact file paths.
-- [ALWAYS] **Diagram reference:** Mermaid inline or link to rendered diagram.
+- [ALWAYS] **Concrete over abstract:** Use exact module names, exact file paths.
+- [ALWAYS] **Diagram reference:** Include Mermaid inline or link to rendered diagram.
 
 [CRITICAL]:
-- [NEVER] Implementation details in Architecture — Architecture shows structure, not logic.
-- [NEVER] Class diagrams — use component or container diagrams.
+- [NEVER] Add implementation details in Architecture—Architecture shows structure, not logic.
+- [NEVER] Use class diagrams—use component or container diagrams instead.
 
 ---
 ## [4][PROJECT_TYPE_ROUTING]

@@ -1,5 +1,5 @@
 # [H1][CODE_DOCS]
->**Dictum:** *Code documentation generation encodes what the type system cannot express.*
+>**Dictum:** *Code documentation generation encodes what type systems cannot express.*
 
 <br>
 
@@ -11,11 +11,11 @@ Generation-specific instructions for code documentation across C#, Python, TypeS
 
 <br>
 
-1. **Survey the module:** Read all exported symbols — functions, types, error types, constants. Identify the public API surface.
-2. **Identify effect types:** Map every function returning `Fin<T>`, `Result[T,E]`, `Effect<A,E>`, or equivalent. These require dual-channel documentation (success + failure).
-3. **Check existing docs:** Preserve accurate existing documentation. Update stale content. Never regenerate from scratch.
-4. **Apply signal hierarchy:** For each symbol, determine what information the type signature already communicates. Document only the additive layer.
-5. **Validate coverage:** Cross-reference against §3[COVERAGE_MATRIX]. Every required target documented; no prohibited target documented.
+1. **Survey the module:** Read all exported symbols—functions, types, error types, constants—to identify public API surface.
+2. **Identify effect types:** Map every function returning `Fin<T>`, `Result[T,E]`, `Effect<A,E>`, or equivalent; these require dual-channel documentation (success + failure).
+3. **Check existing docs:** Preserve accurate existing documentation; update stale content. Never regenerate from scratch.
+4. **Apply signal hierarchy:** For each symbol, determine what information the type signature already communicates. Document only additive layer.
+5. **Validate coverage:** Cross-reference against §3[COVERAGE_MATRIX]; every required target documented, no prohibited target documented.
 
 ---
 ## [2][LANGUAGE_SPECIFICS]
@@ -28,8 +28,8 @@ Generation-specific instructions for code documentation across C#, Python, TypeS
 Tag order: `<summary>` → `<param>` → `<returns>` → `<exception>` → `<example>` → `<remarks>`.
 
 **`<summary>` generation:**
-- State the domain operation and guard conditions.
-- Omit the return type — `<returns>` handles that.
+- State domain operation and guard conditions.
+- Omit return type — `<returns>` handles that.
 
 **`<param>` generation:**
 - State constraint, origin, or semantic meaning.
@@ -57,8 +57,8 @@ Pattern: Name the effect type → state success semantics → state failure sema
 Section order: one-line summary → extended description → Args → Returns → Raises → Example → Note.
 
 **One-line summary generation:**
-- Imperative mood. No period. Fits one line.
-- State the operation, not the implementation.
+- Imperative mood; no period; fits one line.
+- State operation, not implementation.
 
 **Args generation:**
 - Each parameter: name, then constraint/semantic on indented continuation.
@@ -88,7 +88,7 @@ Tag order: description block → `@param` → `@returns` → `@throws` → `@exa
 - Subsequent paragraphs: extended description (guard conditions, domain invariants).
 
 **`@param` generation:**
-- Hyphen separator after name. Constraint or semantic meaning.
+- Hyphen separator after name; constraint or semantic meaning.
 
 **`@returns` generation on effect types:**
 
@@ -155,7 +155,7 @@ Pattern: Name the Effect → state success channel → state error channel → n
 
 <br>
 
-1. **Identify changed symbols:** Diff the module against prior version. List added, modified, removed exports.
-2. **Update changed docs:** Modify documentation for changed symbols only. Preserve unchanged documentation verbatim.
-3. **Verify coverage:** Run §3[COVERAGE_MATRIX] against the updated module. Flag any new gaps.
-4. **Check staleness:** Confirm all existing docs still describe current behavior. Mark stale docs for update.
+1. **Identify changed symbols:** Diff module against prior version; list added, modified, removed exports.
+2. **Update changed docs:** Modify documentation for changed symbols only; preserve unchanged documentation verbatim.
+3. **Verify coverage:** Run §3[COVERAGE_MATRIX] against updated module; flag new gaps.
+4. **Check staleness:** Confirm all existing docs still describe current behavior; mark stale docs for update.

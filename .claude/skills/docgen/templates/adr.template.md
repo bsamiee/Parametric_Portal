@@ -3,7 +3,7 @@
 
 <br>
 
-Produces one Architecture Decision Record in MADR format. Status transitions and content discipline defined in `adr.md`. Canonical structure defined in `docs/standards/adr-standards.md`.
+Produces one Architecture Decision Record in MADR format. `adr.md` defines status transitions and content discipline. `docs/standards/adr-standards.md` defines canonical structure.
 
 **Density:** ADRs target 60-150 lines. Below 60 signals missing consequences or evaluation; above 150 signals scope creep into design documentation.<br>
 **References:** `adr.md` (generation workflow, status transitions, evaluation criteria), `adr-standards.md` (format, decision types, lifecycle), `validation.md` §2 (compliance checklist), `patterns.md` [3] (WALL_OF_TEXT_ADR).<br>
@@ -101,7 +101,7 @@ Justification: ${Justification}
 ---
 **Guidance**
 
-*Context as Facts* — Each context bullet must be independently verifiable: a measurement, a constraint, a business requirement, or an explicitly labeled unknown. Narrative history ("We started by...", "The team discussed...") triggers WALL_OF_TEXT_ADR (patterns.md [3]). Context answers "What is true right now?" not "How did we get here?".<br>
+*Context as Facts* — Each context bullet must be independently verifiable: a measurement, constraint, business requirement, or explicitly labeled unknown. Narrative history ("We started by...", "The team discussed...") triggers WALL_OF_TEXT_ADR (patterns.md [3]). Context answers "What is true right now?" not "How did we get here?".<br>
 *Driver-Option Mapping* — Every pro and con in Considered Options must reference a specific Decision Driver by name. Unanchored evaluations ("this is simpler") lack traceability. The Decision Outcome justification must demonstrate that the chosen option satisfies the highest-ranked drivers.<br>
 *Negative Consequence Honesty* — Omitting or minimizing negative consequences invalidates the decision record. Each negative outcome includes a mitigation strategy: the specific action, timeline, or architectural guard that reduces its impact. "No significant downsides" is almost always a documentation failure, not an engineering truth.
 

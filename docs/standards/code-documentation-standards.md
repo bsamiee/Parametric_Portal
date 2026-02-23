@@ -7,7 +7,7 @@ description: Structural specification for code documentation across C#, Python, 
 
 <br>
 
-[CRITICAL] Document what the type system cannot express. Types encode structure; documentation encodes intent, constraints, failure semantics, and domain invariants.
+[CRITICAL] Document what the type system cannot express. Types encode structure; documentation encodes intent, constraints, failure semantics; domain invariants.
 
 ---
 ## [1][SIGNAL_HIERARCHY]
@@ -29,7 +29,7 @@ description: Structural specification for code documentation across C#, Python, 
 [CRITICAL]:
 - [NEVER] Restate return type: `/// <returns>Returns a Fin of OrderId</returns>` on `Fin<OrderId>`.
 - [NEVER] Restate parameter type: `@param name the name string` on `name: str`.
-- [NEVER] Describe control flow: "First validates, then processes..." — the code shows sequence.
+- [NEVER] Describe control flow: "First validates, then processes..."—code shows sequence.
 
 ---
 ## [2][FORMATS]
@@ -51,7 +51,7 @@ description: Structural specification for code documentation across C#, Python, 
 
 ### [3.1][CSHARP]
 
-Tags in canonical order: `<summary>`, `<param>`, `<returns>`, `<exception>`, `<example>`, `<remarks>`.
+Order tags canonically: `<summary>`, `<param>`, `<returns>`, `<exception>`, `<example>`, `<remarks>`.
 
 ```csharp
 /// <summary>
@@ -69,13 +69,13 @@ public static Fin<OrderId> Create(long candidate, long maxBound)
 ```
 
 [IMPORTANT]:
-1. [ALWAYS] **`<summary>`:** State the domain operation and its guard conditions.
-2. [ALWAYS] **`<param>`:** State the constraint, origin, or semantic meaning — not the type.
-3. [ALWAYS] **`<returns>`:** State both success and failure semantics of the effect type.
+1. [ALWAYS] **`<summary>`:** State domain operation and guard conditions.
+2. [ALWAYS] **`<param>`:** State constraint, origin, semantic meaning—not type.
+3. [ALWAYS] **`<returns>`:** State both success and failure semantics of effect type.
 
 ### [3.2][PYTHON]
 
-Google Style sections in order: one-line summary, extended description (optional), Args, Returns, Raises, Example (optional), Note (optional).
+Order Google Style sections: one-line summary, extended description (optional), Args, Returns, Raises, Example (optional), Note (optional).
 
 ```python
 def create_order_id(
@@ -103,14 +103,14 @@ def create_order_id(
 ```
 
 [IMPORTANT]:
-1. [ALWAYS] **One-line summary:** Imperative mood, no period, fits on one line.
-2. [ALWAYS] **Args:** State constraint or semantic meaning per parameter. Indent continuation lines.
+1. [ALWAYS] **One-line summary:** Use imperative mood, no period, fits on one line.
+2. [ALWAYS] **Args:** State constraint or semantic meaning per parameter; indent continuation lines.
 3. [ALWAYS] **Returns:** State both success and failure semantics.
-4. [ALWAYS] **Raises:** Explicitly state `Never raises` when the function is total.
+4. [ALWAYS] **Raises:** Explicitly state `Never raises` when function is total.
 
 ### [3.3][TYPESCRIPT]
 
-TSDoc tags in order: description block, `@param`, `@returns`, `@throws`, `@example`, `@remarks`.
+Order TSDoc tags: description block, `@param`, `@returns`, `@throws`, `@example`, `@remarks`.
 
 ```typescript
 /**
@@ -131,8 +131,8 @@ export const createOrderId = (
 ```
 
 [IMPORTANT]:
-1. [ALWAYS] **Description block:** First paragraph is the summary. Subsequent paragraphs are extended description.
-2. [ALWAYS] **`@param`:** Hyphen separator after name. State constraint or semantic meaning.
+1. [ALWAYS] **Description block:** First paragraph is summary. Subsequent paragraphs are extended description.
+2. [ALWAYS] **`@param`:** Use hyphen separator after name. State constraint or semantic meaning.
 3. [ALWAYS] **`@returns`:** State both success and error channel semantics.
 
 ---
@@ -169,13 +169,13 @@ export const createOrderId = (
 <br>
 
 [IMPORTANT]:
-1. [ALWAYS] **WHY comments:** Explain the business reason, constraint, or non-obvious invariant.
+1. [ALWAYS] **WHY comments:** Explain business reason, constraint, non-obvious invariant.
 2. [ALWAYS] **Boundary annotations:** Mark where external contracts impose requirements.
 
 [CRITICAL]:
-- [NEVER] WHAT comments: `// increment counter` above `counter += 1`.
-- [NEVER] TODO without ticket: `// TODO: fix this` — link to issue tracker or remove.
-- [NEVER] Commented-out code: version control preserves history.
+- [NEVER] Write WHAT comments: `// increment counter` above `counter += 1`.
+- [NEVER] Add TODO without ticket: `// TODO: fix this`—link to issue tracker or remove.
+- [NEVER] Leave commented-out code—version control preserves history.
 
 ---
 ## [6][VALIDATION]
