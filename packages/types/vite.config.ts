@@ -16,7 +16,6 @@ const config = Effect.runSync(
             async: './src/async.ts',
             files: './src/files.ts',
             icons: './src/icons.ts',
-            kargadan: './src/kargadan/kargadan-schemas.ts',
             svg: './src/svg.ts',
             types: './src/types.ts',
             ui: './src/ui.ts',
