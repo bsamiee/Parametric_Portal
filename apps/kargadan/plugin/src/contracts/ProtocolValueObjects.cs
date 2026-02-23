@@ -118,3 +118,14 @@ public readonly partial struct PayloadHash {
             typeName: nameof(PayloadHash),
             pattern: Require.Patterns.PayloadHash);
 }
+
+// --- [UINT_VALUE_OBJECTS] ----------------------------------------------------
+
+[ValueObject<uint>(KeyMemberName = "Value")]
+public readonly partial struct UndoRecordId {
+    static partial void ValidateFactoryArguments(ref ValidationError? validationError, ref uint value) =>
+        validationError = (value == 0) switch {
+            true => new ValidationError($"{nameof(UndoRecordId)} must be greater than zero."),
+            false => null
+        };
+}

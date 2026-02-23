@@ -125,3 +125,54 @@ public readonly record struct ExecutionMetadata {
 // --- [RECORDS] ---------------------------------------------------------------
 
 public sealed record DedupeMetadata(DedupeDecision Decision, RequestId OriginalRequestId);
+
+// --- [EXECUTION_MODELS] ------------------------------------------------------
+
+[StructLayout(LayoutKind.Auto)]
+public readonly record struct ScriptResult {
+    public string CommandName { get; }
+    public int CommandResult { get; }
+    public int ObjectsCreatedCount { get; }
+    private ScriptResult(string commandName, int commandResult, int objectsCreatedCount) {
+        CommandName = commandName;
+        CommandResult = commandResult;
+        ObjectsCreatedCount = objectsCreatedCount;
+    }
+    public static Fin<ScriptResult> Create(string commandName, int commandResult, int objectsCreatedCount) =>
+        (string.IsNullOrWhiteSpace(commandName), commandResult is < 0 or > 6, objectsCreatedCount < 0) switch {
+            (true, _, _) => Fin.Fail<ScriptResult>(Error.New(message: "CommandName must not be empty.")),
+            (_, true, _) => Fin.Fail<ScriptResult>(Error.New(message: "CommandResult must be in 0-6 range.")),
+            (_, _, true) => Fin.Fail<ScriptResult>(Error.New(message: "ObjectsCreatedCount must be non-negative.")),
+            _ => Fin.Succ(new ScriptResult(
+                commandName: commandName,
+                commandResult: commandResult,
+                objectsCreatedCount: objectsCreatedCount))
+        };
+}
+[StructLayout(LayoutKind.Auto)]
+public readonly record struct RawDocEvent(
+    EventType Type,
+    EventSubtype Subtype,
+    Option<Guid> ObjectId,
+    Option<Guid> OldObjectId,
+    Option<string> ObjectType,
+    bool IsUndoRedo);
+[StructLayout(LayoutKind.Auto)]
+public readonly record struct EventBatchSummary(
+    int TotalCount,
+    Seq<CategoryCount> Categories,
+    bool ContainsUndoRedo,
+    int BatchWindowMs);
+[StructLayout(LayoutKind.Auto)]
+public readonly record struct CategoryCount(
+    EventType Category,
+    int Count,
+    Seq<SubtypeCount> Subtypes);
+[StructLayout(LayoutKind.Auto)]
+public readonly record struct SubtypeCount(
+    EventSubtype Subtype,
+    int Count);
+[StructLayout(LayoutKind.Auto)]
+public readonly record struct AgentUndoState(
+    RequestId RequestId,
+    uint UndoSerial);

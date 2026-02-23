@@ -74,6 +74,7 @@ public sealed partial class CommandOperation {
     public static readonly CommandOperation LayerUpdate = new("write.layer.update");
     public static readonly CommandOperation ViewportUpdate = new("write.viewport.update");
     public static readonly CommandOperation AnnotationUpdate = new("write.annotation.update");
+    public static readonly CommandOperation ScriptRun = new("script.run");
 
     // --- [CAPABILITIES] -------------------------------------------------------
 
@@ -92,7 +93,8 @@ public sealed partial class CommandOperation {
             ObjectDelete,
             LayerUpdate,
             ViewportUpdate,
-            AnnotationUpdate).Map(static (CommandOperation operation) => operation.Key);
+            AnnotationUpdate,
+            ScriptRun).Map(static (CommandOperation operation) => operation.Key);
     public static bool SupportsCapability(string capability) =>
         SupportedCapabilityLookup.Value.Contains(item: capability);
 }
@@ -125,4 +127,36 @@ public sealed partial class EventType {
     public static readonly EventType UndoRedo = new("undo.redo");
     public static readonly EventType SessionLifecycle = new("session.lifecycle");
     public static readonly EventType StreamCompacted = new("stream.compacted");
+    public static readonly EventType SelectionChanged = new("selection.changed");
+    public static readonly EventType MaterialChanged = new("material.changed");
+    public static readonly EventType PropertiesChanged = new("properties.changed");
+    public static readonly EventType TablesChanged = new("tables.changed");
+}
+[SmartEnum<string>]
+public sealed partial class CommandExecutionMode {
+    public static readonly CommandExecutionMode DirectApi = new("direct_api");
+    public static readonly CommandExecutionMode Script = new("script");
+}
+[SmartEnum<string>]
+public sealed partial class CommandCategory {
+    public static readonly CommandCategory Read = new("read");
+    public static readonly CommandCategory Write = new("write");
+    public static readonly CommandCategory Geometric = new("geometric");
+    public int DefaultDeadlineMs =>
+        Map(
+            read: 5_000,
+            write: 30_000,
+            geometric: 120_000);
+}
+[SmartEnum<string>]
+public sealed partial class EventSubtype {
+    public static readonly EventSubtype Added = new("added");
+    public static readonly EventSubtype Deleted = new("deleted");
+    public static readonly EventSubtype Replaced = new("replaced");
+    public static readonly EventSubtype Modified = new("modified");
+    public static readonly EventSubtype Undeleted = new("undeleted");
+    public static readonly EventSubtype Selected = new("selected");
+    public static readonly EventSubtype Deselected = new("deselected");
+    public static readonly EventSubtype DeselectAll = new("deselect_all");
+    public static readonly EventSubtype PropertiesChanged = new("properties_changed");
 }
