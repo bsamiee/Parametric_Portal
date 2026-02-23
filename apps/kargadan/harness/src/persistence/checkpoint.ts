@@ -1,31 +1,24 @@
 /**
- * PostgreSQL-backed checkpoint persistence + in-memory transition trace for Kargadan harness recovery.
- * Owns hashing, replay, snapshot, and checkpoint CRUD in one service surface.
+ * PostgreSQL-backed PersistenceService with write-through Ref cache.
+ * Atomic tool call + checkpoint writes per invocation. Silent resume
+ * with corruption fallback. Session listing and replay queries.
  */
 import { createHash } from 'node:crypto';
-import * as SqlClient from '@effect/sql/SqlClient';
+import { SqlClient, SqlSchema } from '@effect/sql';
 import { Effect, Match, Option, Ref, Schema as S } from 'effect';
+import { KargadanCheckpoint, KargadanSession, KargadanToolCall } from './models';
 
 // --- [TYPES] -----------------------------------------------------------------
 
-type TransitionRecord = { readonly appId: string; readonly eventId?: string; readonly eventType: string; readonly payload: unknown; readonly requestId?: string; readonly runId: string; readonly sequence: number; readonly sessionId: string };
+type HydrateResult =
+    | { readonly fresh: true }
+    | { readonly chatJson: string; readonly fresh: false; readonly sequence: number; readonly state: unknown };
 
-// --- [CONSTANTS] -------------------------------------------------------------
-
-const _table = 'kargadan_checkpoints' as const;
-
-// --- [SCHEMA] ----------------------------------------------------------------
-
-const _rowSchema = S.Struct({
-    conversationHistory: S.Array(S.Unknown),
-    createdAt:           S.DateFromString,
-    loopState:           S.Struct({ attemptCount: S.Int, pendingOperations: S.Int, stage: S.String }),
-    sceneSummary:        S.NullOr(S.Unknown),
-    sequence:            S.Int,
-    sessionId:           S.String,
-    stateHash:           S.String,
-    updatedAt:           S.DateFromString,
-});
+type SessionFilter = {
+    readonly after?: Date | undefined;
+    readonly before?: Date | undefined;
+    readonly status?: ReadonlyArray<string> | undefined;
+};
 
 // --- [FUNCTIONS] -------------------------------------------------------------
 
@@ -42,64 +35,127 @@ const verifySceneState = (storedHash: string, candidateHash: string) => ({ diver
 
 // --- [SERVICES] --------------------------------------------------------------
 
-class CheckpointService extends Effect.Service<CheckpointService>()('kargadan/CheckpointService', {
+class PersistenceService extends Effect.Service<PersistenceService>()('kargadan/PersistenceService', {
     effect: Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient;
-        const store = yield* Ref.make({ events: [] as ReadonlyArray<TransitionRecord> });
-        const appendTransition = Effect.fn('kargadan.checkpoint.append')((input: TransitionRecord) =>
-            Ref.update(store, (c) => ({ ...c, events: [...c.events, input] })),
+        const store = yield* Ref.make<ReadonlyArray<typeof KargadanToolCall.Type>>([]);
+
+        const persist = Effect.fn('kargadan.persistence.persist')((input: {
+            readonly chatJson: string;
+            readonly checkpoint: typeof KargadanCheckpoint.insert.Type;
+            readonly toolCall: typeof KargadanToolCall.insert.Type;
+        }) =>
+            Effect.gen(function* () {
+                yield* sql.withTransaction(
+                    Effect.all([
+                        SqlSchema.void({
+                            execute: (row) => sql`INSERT INTO kargadan_tool_calls ${sql.insert(row)}`,
+                            Request: KargadanToolCall.insert,
+                        })(input.toolCall),
+                        SqlSchema.void({
+                            execute: (row) => sql`
+                                INSERT INTO kargadan_checkpoints ${sql.insert(row)}
+                                ON CONFLICT (session_id) DO UPDATE SET
+                                    loop_state = EXCLUDED.loop_state,
+                                    chat_json = EXCLUDED.chat_json,
+                                    state_hash = EXCLUDED.state_hash,
+                                    scene_summary = EXCLUDED.scene_summary,
+                                    sequence = EXCLUDED.sequence,
+                                    updated_at = NOW()`,
+                            Request: KargadanCheckpoint.insert,
+                        })(input.checkpoint),
+                    ], { discard: true }),
+                );
+                yield* Ref.update(store, (current) => [...current, input.toolCall as unknown as typeof KargadanToolCall.Type]);
+            }),
         );
-        const replay = Effect.fn('kargadan.checkpoint.replay')(
-            (input: { readonly expectedHash?: string; readonly runId: string }) =>
-                Ref.get(store).pipe(Effect.map((current) => {
-                    const events = current.events.filter((e) => e.runId === input.runId).toSorted((a, b) => a.sequence - b.sequence);
-                    const stateHash = hashCanonicalState(events.map((e) => ({ eventType: e.eventType, payload: e.payload, sequence: e.sequence })));
-                    return { events, matchesExpected: input.expectedHash === undefined || input.expectedHash === stateHash, stateHash } as const;
+
+        const hydrate = Effect.fn('kargadan.persistence.hydrate')((sessionId: string) =>
+            SqlSchema.findOne({
+                execute: (sid) => sql`SELECT * FROM kargadan_checkpoints WHERE session_id = ${sid}`,
+                Request: S.String,
+                Result: KargadanCheckpoint,
+            })(sessionId).pipe(
+                Effect.flatMap(Option.match({
+                    onNone: () => Effect.succeed({ fresh: true } as HydrateResult),
+                    onSome: (row) =>
+                        S.decodeUnknown(S.Unknown)(row.loopState).pipe(
+                            Effect.map((loopState) => ({ chatJson: row.chatJson, fresh: false, sequence: row.sequence, state: loopState } as HydrateResult)),
+                            Effect.catchAll((decodeError) =>
+                                Effect.logWarning('kargadan.checkpoint.corrupt', { error: String(decodeError), sessionId }).pipe(
+                                    Effect.as({ fresh: true } as HydrateResult),
+                                ),
+                            ),
+                        ),
                 })),
-        );
-        const save = Effect.fn('kargadan.checkpoint.save')((input: {
-            readonly conversationHistory: ReadonlyArray<unknown>;
-            readonly loopState: { readonly attemptCount: number; readonly pendingOperations: number; readonly stage: string };
-            readonly sceneSummary?: unknown;
-            readonly sequence: number;
-            readonly sessionId: string;
-        }) => {
-            const stateHash = hashCanonicalState({ conversationHistory: input.conversationHistory, loopState: input.loopState });
-            const now = new Date().toISOString();
-            const historyJson = JSON.stringify(input.conversationHistory);
-            const loopStateJson = JSON.stringify(input.loopState);
-            const sceneSummaryJson = input.sceneSummary === undefined ? null : JSON.stringify(input.sceneSummary);
-            return sql`
-                INSERT INTO ${sql(_table)} (session_id, conversation_history, loop_state, state_hash, scene_summary, sequence, created_at, updated_at)
-                VALUES (${input.sessionId}, ${historyJson}::jsonb, ${loopStateJson}::jsonb, ${stateHash}, ${sceneSummaryJson}::jsonb, ${input.sequence}, ${now}::timestamptz, ${now}::timestamptz)
-                ON CONFLICT (session_id) DO UPDATE SET
-                    conversation_history = ${historyJson}::jsonb,
-                    loop_state = ${loopStateJson}::jsonb,
-                    state_hash = ${stateHash},
-                    scene_summary = ${sceneSummaryJson}::jsonb,
-                    sequence = ${input.sequence},
-                    updated_at = ${now}::timestamptz
-            `.pipe(Effect.asVoid);
-        });
-        const restore = Effect.fn('kargadan.checkpoint.restore')((sessionId: string) =>
-            sql`
-                SELECT session_id AS "sessionId", conversation_history AS "conversationHistory", loop_state AS "loopState",
-                    state_hash AS "stateHash", scene_summary AS "sceneSummary", sequence, created_at AS "createdAt", updated_at AS "updatedAt"
-                FROM ${sql(_table)} WHERE session_id = ${sessionId}
-            `.pipe(
-                Effect.flatMap((rows) => rows.length === 0
-                    ? Effect.succeed(Option.none())
-                    : S.decodeUnknown(_rowSchema)(rows[0]).pipe(Effect.map(Option.some)),
-                ),
             ),
         );
-        const remove = Effect.fn('kargadan.checkpoint.remove')((sessionId: string) =>
-            sql`DELETE FROM ${sql(_table)} WHERE session_id = ${sessionId}`.pipe(Effect.asVoid),
+
+        const createSession = Effect.fn('kargadan.persistence.createSession')((input: typeof KargadanSession.insert.Type) =>
+            SqlSchema.void({
+                execute: (row) => sql`INSERT INTO kargadan_sessions ${sql.insert(row)}`,
+                Request: KargadanSession.insert,
+            })(input),
         );
-        return { appendTransition, remove, replay, restore, save } as const;
+
+        const completeSession = Effect.fn('kargadan.persistence.completeSession')((input: {
+            readonly endedAt: Date;
+            readonly error?: string | undefined;
+            readonly sessionId: string;
+            readonly status: 'completed' | 'failed';
+            readonly toolCallCount: number;
+        }) =>
+            sql`UPDATE kargadan_sessions
+                SET status = ${input.status},
+                    ended_at = ${input.endedAt.toISOString()}::timestamptz,
+                    tool_call_count = ${input.toolCallCount},
+                    error = ${input.error ?? null},
+                    updated_at = NOW()
+                WHERE id = ${input.sessionId}::uuid`.pipe(Effect.asVoid),
+        );
+
+        const listSessions = Effect.fn('kargadan.persistence.listSessions')((filter: SessionFilter) =>
+            SqlSchema.findAll({
+                execute: () => {
+                    const statusClause = filter.status !== undefined && filter.status.length > 0
+                        ? sql` AND status IN ${sql.in(filter.status as ReadonlyArray<string>)}`
+                        : sql``;
+                    const afterClause = filter.after !== undefined
+                        ? sql` AND started_at >= ${filter.after.toISOString()}::timestamptz`
+                        : sql``;
+                    const beforeClause = filter.before !== undefined
+                        ? sql` AND started_at <= ${filter.before.toISOString()}::timestamptz`
+                        : sql``;
+                    return sql`SELECT * FROM kargadan_sessions WHERE TRUE${statusClause}${afterClause}${beforeClause} ORDER BY started_at DESC`;
+                },
+                Request: S.Void,
+                Result: KargadanSession,
+            })(undefined as void),
+        );
+
+        const sessionTrace = Effect.fn('kargadan.persistence.sessionTrace')((sessionId: string) =>
+            SqlSchema.findAll({
+                execute: (sid) => sql`SELECT * FROM kargadan_tool_calls WHERE session_id = ${sid}::uuid ORDER BY sequence ASC`,
+                Request: S.String,
+                Result: KargadanToolCall,
+            })(sessionId),
+        );
+
+        const findResumable = Effect.fn('kargadan.persistence.findResumable')(() =>
+            SqlSchema.findOne({
+                execute: () => sql`SELECT id FROM kargadan_sessions WHERE status IN ('running', 'interrupted') ORDER BY started_at DESC LIMIT 1`,
+                Request: S.Void,
+                Result: S.Struct({ id: S.UUID }),
+            })(undefined as void).pipe(
+                Effect.map(Option.map((row) => row.id)),
+            ),
+        );
+
+        return { completeSession, createSession, findResumable, hydrate, listSessions, persist, sessionTrace } as const;
     }),
 }) {}
 
 // --- [EXPORT] ----------------------------------------------------------------
 
-export { CheckpointService, hashCanonicalState, verifySceneState };
+export { PersistenceService, hashCanonicalState, verifySceneState };
+export type { HydrateResult, SessionFilter };

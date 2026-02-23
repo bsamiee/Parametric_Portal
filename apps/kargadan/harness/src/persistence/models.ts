@@ -23,7 +23,7 @@ class KargadanSession extends Model.Class<KargadanSession>('KargadanSession')({
 }) {}
 
 class KargadanToolCall extends Model.Class<KargadanToolCall>('KargadanToolCall')({
-    createdAt:  Model.DateTimeInsertFromDate,
+    createdAt:  Model.Generated(S.DateFromSelf),
     durationMs: S.Int,
     error:      Model.FieldOption(S.String),
     id:         Model.Generated(S.UUID),
