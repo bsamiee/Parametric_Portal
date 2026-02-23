@@ -27,7 +27,7 @@ Produces one Architecture Decision Record in MADR format. Status transitions and
 |  [11]   | `${OptionBName}`     | `Session cookies with Redis`                   |
 |  [12]   | `${ChosenOption}`    | `Option A: JWT with RS256`                     |
 |  [13]   | `${Justification}`   | `Satisfies Driver 1 and Driver 2.`             |
-|  [14]   | `${PositiveOutcome}`| `Auth verification reduced to <5ms.`           |
+|  [14]   | `${PositiveOutcome}` | `Auth verification reduced to <5ms.`           |
 |  [15]   | `${NegativeOutcome}` | `Token revocation requires blocklist service.` |
 |  [16]   | `${NeutralOutcome}`  | `Token payload size increases by ~400 bytes.`  |
 

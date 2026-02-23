@@ -12,21 +12,21 @@ Produces one README file at the appropriate scope level. Section selection deter
 ---
 **Placeholders**
 
-| [INDEX] | [PLACEHOLDER]          | [EXAMPLE]                                          |
-| :-----: | ---------------------- | -------------------------------------------------- |
-|   [1]   | `${ProjectName}`       | `Parametric Portal`                                |
-|   [2]   | `${OneLiner}`          | `Type-safe configuration management for .NET`      |
-|   [3]   | `${CIBadgeURL}`        | `https://github.com/org/repo/actions/...badge.svg` |
-|   [4]   | `${CoverageURL}`       | `https://codecov.io/gh/org/repo`                   |
-|   [5]   | `${LicenseType}`       | `MIT`                                              |
-|   [6]   | `${RuntimeVersion}`    | `Node.js >=20, pnpm >=9`                          |
-|   [7]   | `${SystemDeps}`        | `PostgreSQL 16+, Redis 7+`                         |
-|   [8]   | `${InstallCommand}`    | `pnpm add @parametric/core`                        |
-|   [9]   | `${VerifyCommand}`     | `pnpm exec parametric --version`                   |
-|  [10]   | `${UsageExample}`      | Import + function call + expected output           |
-|  [11]   | `${ArchDiagramNodes}`  | `Client, Gateway, Identity, Commerce`              |
-|  [12]   | `${ContributingLink}`  | `See [CONTRIBUTING.md](./CONTRIBUTING.md)`         |
-|  [13]   | `${LicenseSPDX}`       | `MIT`                                              |
+| [INDEX] | [PLACEHOLDER]         | [EXAMPLE]                                          |
+| :-----: | --------------------- | -------------------------------------------------- |
+|   [1]   | `${ProjectName}`      | `Parametric Portal`                                |
+|   [2]   | `${OneLiner}`         | `Type-safe configuration management for .NET`      |
+|   [3]   | `${CIBadgeURL}`       | `https://github.com/org/repo/actions/...badge.svg` |
+|   [4]   | `${CoverageURL}`      | `https://codecov.io/gh/org/repo`                   |
+|   [5]   | `${LicenseType}`      | `MIT`                                              |
+|   [6]   | `${RuntimeVersion}`   | `Node.js >=20, pnpm >=9`                           |
+|   [7]   | `${SystemDeps}`       | `PostgreSQL 16+, Redis 7+`                         |
+|   [8]   | `${InstallCommand}`   | `pnpm add @parametric/core`                        |
+|   [9]   | `${VerifyCommand}`    | `pnpm exec parametric --version`                   |
+|  [10]   | `${UsageExample}`     | Import + function call + expected output           |
+|  [11]   | `${ArchDiagramNodes}` | `Client, Gateway, Identity, Commerce`              |
+|  [12]   | `${ContributingLink}` | `See [CONTRIBUTING.md](./CONTRIBUTING.md)`         |
+|  [13]   | `${LicenseSPDX}`      | `MIT`                                              |
 
 ---
 <!-- Scope: Project root — full 12-section structure. -->

@@ -106,12 +106,12 @@ Each decision type requires specific evaluation criteria in the Considered Optio
 
 The ADR index is a markdown table with four columns:
 
-| [INDEX] | [COLUMN]   | [CONTENT]                                  |
-| :-----: | ---------- | ------------------------------------------ |
+| [INDEX] | [COLUMN]   | [CONTENT]                                        |
+| :-----: | ---------- | ------------------------------------------------ |
 |   [1]   | **ADR**    | Relative link: `[ADR-NNNN](./ADR-NNNN-title.md)` |
-|   [2]   | **Title**  | Decision title as noun phrase              |
-|   [3]   | **Status** | Current status (Accepted, Proposed, etc.)  |
-|   [4]   | **Date**   | ISO 8601 date of last status change        |
+|   [2]   | **Title**  | Decision title as noun phrase                    |
+|   [3]   | **Status** | Current status (Accepted, Proposed, etc.)        |
+|   [4]   | **Date**   | ISO 8601 date of last status change              |
 
 ---
 ## [5][SUPERSESSION_MECHANICS]

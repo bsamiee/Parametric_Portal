@@ -51,7 +51,7 @@ Per-environment installation with exact commands. Four required elements:
 
 | [INDEX] | [ELEMENT]                | [EXAMPLE]                          |
 | :-----: | ------------------------ | ---------------------------------- |
-|   [1]   | **Runtime prerequisite** | `Node.js >=20, pnpm >=9`          |
+|   [1]   | **Runtime prerequisite** | `Node.js >=20, pnpm >=9`           |
 |   [2]   | **Install command**      | `pnpm add @parametric/core`        |
 |   [3]   | **Verification command** | `pnpm exec parametric --version`   |
 |   [4]   | **Expected output**      | Version string or success sentinel |
