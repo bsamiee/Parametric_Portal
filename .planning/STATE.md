@@ -5,39 +5,41 @@
 See: .planning/PROJECT.md (updated 2026-02-22)
 
 **Core value:** The agent can execute any operation a human can perform in Rhino 9 through natural language, with reliable state persistence and verification — without hardcoding individual commands.
-**Current focus:** Phase 1 - Plugin Transport Foundation
+**Current focus:** Phase 2 - RhinoDoc Execution and Events
 
 ## Current Position
 
-Phase: 1 of 8 (Plugin Transport Foundation)
-Plan: 2 of 2 in current phase
-Status: Plan 01-02 complete
-Last activity: 2026-02-22 -- Completed 01-02 (harness reconnection and checkpoint persistence)
+Phase: 2 of 8 (RhinoDoc Execution and Events)
+Plan: 1 of 2 in current phase
+Status: Plan 02-01 complete
+Last activity: 2026-02-23 -- Completed 02-01 (protocol contracts extension and command execution engine)
 
-Progress: [█░░░░░░░░░] 12.5%
+Progress: [██░░░░░░░░] 18.8%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 2
-- Average duration: ~29min
-- Total execution time: ~1.0 hours
+- Total plans completed: 3
+- Average duration: ~22min
+- Total execution time: ~1.1 hours
 
 **By Phase:**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
 | 01 | 2 | 57min | ~29min |
+| 02 | 1 | 8min | 8min |
 
 **Recent Trend:**
-- Last 5 plans: 01-01 (45min), 01-02 (12min)
-- Trend: baseline
+- Last 5 plans: 01-01 (45min), 01-02 (12min), 02-01 (8min)
+- Trend: accelerating
 
 *Updated after each plan completion*
 
 | Plan | Duration | Tasks | Files |
 |------|----------|-------|-------|
 | Phase 01 P01 | 45min | 3 tasks | 5 files |
+| Phase 02 P01 | 8min | 2 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -54,6 +56,10 @@ Recent decisions affecting current work:
 - [01-02]: DisconnectedError propagated via catchTag in dispatch, mapped to CommandDispatchError('disconnected')
 - [Phase 01]: Kept net10.0 target -- LanguageExt.Core 5.0.0-beta-77 requires net10.0 System.Runtime; net9.0 override impossible without breaking existing v5 code
 - [Phase 01]: MessageDispatcher delegate decouples WebSocketHost from KargadanPlugin -- enables isolated testing and future transport swaps
+- [02-01]: Thinktecture ValueObject KeyMember accessor is non-public -- use implicit conversion operators (e.g., (string)scope) instead of .Value
+- [02-01]: CA1508 false positive on event-handler-mutated variables -- suppress with pragma and explanatory comment
+- [02-01]: RhinoObject.NextRuntimeSerialNumber is static property (not on ObjectTable) -- used for new-object tracking across RunScript
+- [02-01]: FindByLayer uses string overload directly instead of two-step FindByFullPath + index lookup
 
 ### Pending Todos
 
@@ -67,6 +73,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-02-22
-Stopped at: Completed 01-02-PLAN.md (harness reconnection and checkpoint persistence)
-Resume file: .planning/phases/01-plugin-transport-foundation/01-02-SUMMARY.md
+Last session: 2026-02-23
+Stopped at: Completed 02-01-PLAN.md (protocol contracts extension and command execution engine)
+Resume file: .planning/phases/02-rhinodoc-execution-and-events/02-01-SUMMARY.md

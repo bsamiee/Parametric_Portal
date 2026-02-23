@@ -18,11 +18,11 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### Execution
 
-- [ ] **EXEC-01**: Plugin wraps `RhinoApp.RunScript(commandString, echo)` for executing arbitrary Rhino commands by string — enabling the agent to invoke any command a human can type
-- [ ] **EXEC-02**: Plugin provides direct RhinoCommon API access for precise geometry operations (create, modify, query objects via `RhinoDoc.Objects`, `RhinoDoc.Layers`, etc.)
+- [x] **EXEC-01**: Plugin wraps `RhinoApp.RunScript(commandString, echo)` for executing arbitrary Rhino commands by string — enabling the agent to invoke any command a human can type
+- [x] **EXEC-02**: Plugin provides direct RhinoCommon API access for precise geometry operations (create, modify, query objects via `RhinoDoc.Objects`, `RhinoDoc.Layers`, etc.)
 - [ ] **EXEC-03**: Plugin subscribes to RhinoDoc events (AddRhinoObject, DeleteRhinoObject, ModifyObjectAttributes, LayerTableEvent, UndoRedo) and pushes them to the harness with 200ms debounce batching
-- [ ] **EXEC-04**: Each logical AI action wraps in a single `BeginUndoRecord`/`EndUndoRecord` pair so Cmd+Z undoes the entire action atomically
-- [ ] **EXEC-05**: Agent state snapshots are stored via `AddCustomUndoEvent` so undo/redo keeps the agent's internal model consistent with the document
+- [x] **EXEC-04**: Each logical AI action wraps in a single `BeginUndoRecord`/`EndUndoRecord` pair so Cmd+Z undoes the entire action atomically
+- [x] **EXEC-05**: Agent state snapshots are stored via `AddCustomUndoEvent` so undo/redo keeps the agent's internal model consistent with the document
 - [ ] **EXEC-06**: Plugin provides Grasshopper 1 programmatic access via the stable GH1 C# SDK — loading definitions, setting parameters, solving, and extracting outputs
 
 ### Agent
@@ -134,11 +134,11 @@ Which phases cover which requirements. Updated during roadmap creation.
 | TRAN-04 | Phase 1 | Complete |
 | TRAN-05 | Phase 1 | Complete |
 | TRAN-06 | Phase 1 | Complete |
-| EXEC-01 | Phase 2 | Pending |
-| EXEC-02 | Phase 2 | Pending |
+| EXEC-01 | Phase 2 | Complete |
+| EXEC-02 | Phase 2 | Complete |
 | EXEC-03 | Phase 2 | Pending |
-| EXEC-04 | Phase 2 | Pending |
-| EXEC-05 | Phase 2 | Pending |
+| EXEC-04 | Phase 2 | Complete |
+| EXEC-05 | Phase 2 | Complete |
 | EXEC-06 | Phase 7 | Pending |
 | AGNT-01 | Phase 5 | Pending |
 | AGNT-02 | Phase 5 | Pending |
