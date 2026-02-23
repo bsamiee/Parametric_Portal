@@ -14,63 +14,60 @@ import { ReconnectionSupervisor } from './transport/reconnect';
 
 // --- [FUNCTIONS] -------------------------------------------------------------
 
-const main = Effect.fn('kargadan.harness.main')(() =>
-    Effect.gen(function* () {
-        const [dispatch, loop, checkpoint, reconnect, protocolVersion, token] = yield* Effect.all([
-            CommandDispatch,
-            AgentLoop,
-            CheckpointService,
-            ReconnectionSupervisor,
-            HarnessConfig.protocolVersion,
-            HarnessConfig.sessionToken,
-        ]);
-        const traceId = crypto.randomUUID().replaceAll('-', '');
-        const identityBase = {
-            appId:     crypto.randomUUID(),
-            protocolVersion,
-            runId:     crypto.randomUUID(),
-            sessionId: crypto.randomUUID(),
-            traceId,
-        } as const satisfies LoopState.IdentityBase;
-
-        const outcome = yield* reconnect.control.supervise((port) =>
-            Effect.gen(function* () {
-                yield* Effect.log('kargadan.harness: connecting', { port, sessionId: identityBase.sessionId });
-
-                const existing = yield* checkpoint.restore(identityBase.sessionId);
-                yield* Option.match(existing, {
-                    onNone: () => Effect.log('kargadan.harness: no checkpoint found, starting fresh'),
-                    onSome: (row) => Effect.log('kargadan.harness: checkpoint restored', {
-                        sequence: row.sequence,
-                        stage: row.loopState.stage,
-                    }),
-                });
-
-                yield* Effect.forkScoped(dispatch.transport.start());
-                const result = yield* loop.handle({ identityBase, token });
-
-                yield* checkpoint.save({
-                    conversationHistory: [],
-                    loopState: {
-                        attemptCount: result.state.attempt,
-                        pendingOperations: result.state.operations.length,
-                        stage: result.state.status,
-                    },
-                    sequence: result.state.sequence,
-                    sessionId: identityBase.sessionId,
-                });
-
-                yield* Effect.log('Harness loop complete', {
-                    outcome: result,
-                    runId: identityBase.runId,
-                });
-                return result;
-            }),
-        );
-
-        return outcome;
-    }),
-);
+const main = Effect.gen(function* () {
+    const [dispatch, loop, checkpoint, reconnect, protocolVersion, token] = yield* Effect.all([
+        CommandDispatch,
+        AgentLoop,
+        CheckpointService,
+        ReconnectionSupervisor,
+        HarnessConfig.protocolVersion,
+        HarnessConfig.sessionToken,
+    ]);
+    const [appId, runId, sessionId, traceId] = yield* Effect.all([
+        Effect.sync(() => crypto.randomUUID()),
+        Effect.sync(() => crypto.randomUUID()),
+        Effect.sync(() => crypto.randomUUID()),
+        Effect.sync(() => crypto.randomUUID().replaceAll('-', '')),
+    ]);
+    const identityBase = {
+        appId,
+        protocolVersion,
+        runId,
+        sessionId,
+        traceId,
+    } as const satisfies LoopState['identityBase'];
+    const outcome = yield* reconnect.control.supervise((port) =>
+        Effect.gen(function* () {
+            yield* Effect.log('kargadan.harness: connecting', { port, sessionId: identityBase.sessionId });
+            const existing = yield* checkpoint.restore(identityBase.sessionId);
+            yield* Option.match(existing, {
+                onNone: () => Effect.log('kargadan.harness: no checkpoint found, starting fresh'),
+                onSome: (row) => Effect.log('kargadan.harness: checkpoint restored', {
+                    sequence: row.sequence,
+                    stage:    row.loopState.stage,
+                }),
+            });
+            yield* Effect.forkScoped(dispatch.transport.start());
+            const result = yield* loop.handle({ identityBase, token });
+            yield* checkpoint.save({
+                conversationHistory: [],
+                loopState: {
+                    attemptCount:      result.state.attempt,
+                    pendingOperations: result.state.operations.length,
+                    stage:             result.state.status,
+                },
+                sequence:  result.state.sequence,
+                sessionId: identityBase.sessionId,
+            });
+            yield* Effect.log('Harness loop complete', {
+                outcome: result,
+                runId:   identityBase.runId,
+            });
+            return result;
+        }),
+    );
+    return outcome;
+}).pipe(Effect.withSpan('kargadan.harness.main'));
 
 // --- [LAYERS] ----------------------------------------------------------------
 
@@ -80,7 +77,6 @@ const PgClientLayer = PgClient.layerConfig({
     maxConnections: Config.succeed(5),
     url:            HarnessConfig.checkpointDatabaseUrl.pipe(Config.map((urlString) => urlString as never)),
 });
-
 const ServicesLayer = Layer.mergeAll(
     KargadanSocketClientLive,
     SessionSupervisor.Default,
@@ -88,9 +84,7 @@ const ServicesLayer = Layer.mergeAll(
     AgentLoop.Default,
     ReconnectionSupervisor.Default,
     CheckpointService.Default,
-).pipe(
-    Layer.provideMerge(PgClientLayer),
-);
+).pipe(Layer.provideMerge(PgClientLayer),);
 
 // --- [EXPORT] ----------------------------------------------------------------
 

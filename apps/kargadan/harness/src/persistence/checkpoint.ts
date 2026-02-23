@@ -1,69 +1,86 @@
 /**
- * PostgreSQL-backed checkpoint service for persisting conversation history and agent loop state across reconnections.
- * Composes in-memory trace (appendTransition, snapshot, replay) with durable PostgreSQL checkpoint storage.
- * Replaces PersistenceTrace as the single service for loop state tracking and session recovery.
+ * PostgreSQL-backed checkpoint persistence + in-memory transition trace for Kargadan harness recovery.
+ * Owns hashing, replay, snapshot, and checkpoint CRUD in one service surface.
  */
+import { createHash } from 'node:crypto';
 import * as SqlClient from '@effect/sql/SqlClient';
-import { Effect, Option, Ref, Schema as S } from 'effect';
 import { Kargadan } from '@parametric-portal/types/kargadan';
-import { hashCanonicalState } from '../runtime/persistence-trace';
-import { CheckpointRowSchema, _tableName } from './schema';
+import { Effect, Match, Option, Ref, Schema as S } from 'effect';
 
-// --- [TYPES] -----------------------------------------------------------------
+// --- [CONSTANTS] -------------------------------------------------------------
 
-type CheckpointInput = {
-    readonly conversationHistory: ReadonlyArray<unknown>;
-    readonly loopState:           { readonly attemptCount: number; readonly pendingOperations: number; readonly stage: string };
-    readonly sceneSummary?:       unknown;
-    readonly sequence:            number;
-    readonly sessionId:           string;
-};
-
-type SceneVerification = {
-    readonly checkpoint: Option.Option<typeof CheckpointRowSchema.Type>;
-    readonly diverged:   boolean;
-};
+const _checkpoint = (() => {
+    const _loopStateSchema = S.Struct({
+        attemptCount:      S.Int,
+        pendingOperations: S.Int,
+        stage:             S.String,
+    });
+    const _rowSchema = S.Struct({
+        conversationHistory: S.Array(S.Unknown),
+        createdAt:           S.DateFromString,
+        loopState:           _loopStateSchema,
+        sceneSummary:        S.NullOr(S.Unknown),
+        sequence:            S.Int,
+        sessionId:           S.String,
+        stateHash:           S.String,
+        updatedAt:           S.DateFromString,
+    });
+    const _canonicalStateForHash = (input: unknown): unknown =>
+        Match.value(input).pipe(
+            Match.when(Match.instanceOf(Array), (values) => values.map(_canonicalStateForHash)),
+            Match.when(
+                (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null,
+                (value) =>
+                    Object.fromEntries(
+                        Object.entries(value)
+                            .toSorted(([left], [right]) => left.localeCompare(right))
+                            .map(([key, nested]) => [key, _canonicalStateForHash(nested)]),
+                    ),
+            ),
+            Match.orElse((value) => value),
+        );
+    return {
+        hashCanonicalState: (state: unknown) =>
+            createHash('sha256')
+                .update(JSON.stringify(_canonicalStateForHash(state)))
+                .digest('hex'),
+        rowSchema: _rowSchema,
+        table:     'kargadan_checkpoints' as const,
+    } as const;
+})();
+const hashCanonicalState = _checkpoint.hashCanonicalState;
 
 // --- [SERVICES] --------------------------------------------------------------
 
 class CheckpointService extends Effect.Service<CheckpointService>()('kargadan/CheckpointService', {
     effect: Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient;
-
-        // Why: in-memory trace store preserves existing appendTransition/snapshot/replay API for agent loop compatibility
-        const store = yield* Ref.make<{
-            readonly artifacts: ReadonlyArray<Kargadan.RetrievalArtifact>;
-            readonly events:    ReadonlyArray<Kargadan.RunEvent>;
-            readonly snapshots: ReadonlyArray<Kargadan.RunSnapshot>;
-        }>({
-            artifacts: [],
-            events:    [],
-            snapshots: [],
+        const _store = yield* Ref.make({
+            artifacts: [] as ReadonlyArray<Kargadan.RetrievalArtifact>,
+            events:    [] as ReadonlyArray<Kargadan.RunEvent>,
+            snapshots: [] as ReadonlyArray<Kargadan.RunSnapshot>,
         });
-
-        const appendArtifact = Effect.fn('kargadan.checkpoint.append.artifact')((input: unknown) =>
+        const _appendArtifact = Effect.fn('kargadan.checkpoint.append.artifact')((input: unknown) =>
             S.decodeUnknown(Kargadan.RetrievalArtifactSchema)(input).pipe(
                 Effect.flatMap((decoded) =>
-                    Ref.update(store, (current) => ({
+                    Ref.update(_store, (current) => ({
                         ...current,
                         artifacts: [...current.artifacts, decoded],
                     })),
                 ),
             ),
         );
-
-        const appendTransition = Effect.fn('kargadan.checkpoint.append.transition')((input: unknown) =>
+        const _appendTransition = Effect.fn('kargadan.checkpoint.append.transition')((input: unknown) =>
             S.decodeUnknown(Kargadan.RunEventSchema)(input).pipe(
                 Effect.flatMap((decoded) =>
-                    Ref.update(store, (current) => ({
+                    Ref.update(_store, (current) => ({
                         ...current,
                         events: [...current.events, decoded],
                     })),
                 ),
             ),
         );
-
-        const snapshot = Effect.fn('kargadan.checkpoint.snapshot')(
+        const _snapshot = Effect.fn('kargadan.checkpoint.snapshot')(
             (input: {
                 readonly appId:    string;
                 readonly runId:    string;
@@ -79,17 +96,16 @@ class CheckpointService extends Effect.Service<CheckpointService>()('kargadan/Ch
                     state:        input.state,
                 }).pipe(
                     Effect.flatMap((decoded) =>
-                        Ref.update(store, (current) => ({
+                        Ref.update(_store, (current) => ({
                             ...current,
                             snapshots: [...current.snapshots, decoded],
                         })),
                     ),
                 ),
         );
-
-        const replay = Effect.fn('kargadan.checkpoint.replay')(
+        const _replay = Effect.fn('kargadan.checkpoint.replay')(
             (input: { readonly runId: string; readonly expectedHash?: string | undefined }) =>
-                Ref.get(store).pipe(
+                Ref.get(_store).pipe(
                     Effect.map((current) => {
                         const events = current.events
                             .filter((event) => event.runId === input.runId)
@@ -111,26 +127,30 @@ class CheckpointService extends Effect.Service<CheckpointService>()('kargadan/Ch
                             matchesExpected: expectedHash === undefined || expectedHash === stateHash,
                             snapshotHash,
                             stateHash,
-                        } satisfies CheckpointService.ReplayResult;
+                        } as const;
                     }),
                 ),
         );
-
-        const listArtifacts = Effect.fn('kargadan.checkpoint.listArtifacts')((runId: string) =>
-            Ref.get(store).pipe(Effect.map((current) => current.artifacts.filter((artifact) => artifact.runId === runId))),
+        const _listArtifacts = Effect.fn('kargadan.checkpoint.listArtifacts')((runId: string) =>
+            Ref.get(_store).pipe(Effect.map((current) => current.artifacts.filter((artifact) => artifact.runId === runId))),
         );
-
-        const save = Effect.fn('kargadan.checkpoint.save')((input: CheckpointInput) => {
+        const _save = Effect.fn('kargadan.checkpoint.save')((input: {
+            readonly conversationHistory: ReadonlyArray<unknown>;
+            readonly loopState: { readonly attemptCount: number; readonly pendingOperations: number; readonly stage: string };
+            readonly sceneSummary?: unknown;
+            readonly sequence: number;
+            readonly sessionId: string;
+        }) => {
             const stateHash = hashCanonicalState({
                 conversationHistory: input.conversationHistory,
-                loopState: input.loopState,
+                loopState:           input.loopState,
             });
             const now = new Date().toISOString();
             const historyJson = JSON.stringify(input.conversationHistory);
             const loopStateJson = JSON.stringify(input.loopState);
             const sceneSummaryJson = input.sceneSummary === undefined ? null : JSON.stringify(input.sceneSummary);
             return sql`
-                INSERT INTO ${sql(_tableName)} (session_id, conversation_history, loop_state, state_hash, scene_summary, sequence, created_at, updated_at)
+                INSERT INTO ${sql(_checkpoint.table)} (session_id, conversation_history, loop_state, state_hash, scene_summary, sequence, created_at, updated_at)
                 VALUES (${input.sessionId}, ${historyJson}::jsonb, ${loopStateJson}::jsonb, ${stateHash}, ${sceneSummaryJson}::jsonb, ${input.sequence}, ${now}::timestamptz, ${now}::timestamptz)
                 ON CONFLICT (session_id) DO UPDATE SET
                     conversation_history = ${historyJson}::jsonb,
@@ -141,71 +161,58 @@ class CheckpointService extends Effect.Service<CheckpointService>()('kargadan/Ch
                     updated_at = ${now}::timestamptz
             `.pipe(Effect.asVoid);
         });
-
-        const restore = Effect.fn('kargadan.checkpoint.restore')((sessionId: string) =>
-            sql`SELECT session_id, conversation_history, loop_state, state_hash, scene_summary, sequence, created_at, updated_at FROM ${sql(_tableName)} WHERE session_id = ${sessionId}`.pipe(
+        const _restore = Effect.fn('kargadan.checkpoint.restore')((sessionId: string) =>
+            sql`
+                SELECT
+                    session_id AS "sessionId",
+                    conversation_history AS "conversationHistory",
+                    loop_state AS "loopState",
+                    state_hash AS "stateHash",
+                    scene_summary AS "sceneSummary",
+                    sequence,
+                    created_at AS "createdAt",
+                    updated_at AS "updatedAt"
+                FROM ${sql(_checkpoint.table)}
+                WHERE session_id = ${sessionId}
+            `.pipe(
                 Effect.flatMap((rows) =>
                     rows.length === 0
                         ? Effect.succeed(Option.none())
-                        : S.decodeUnknown(CheckpointRowSchema)({
-                            conversationHistory: (rows[0] as Record<string, unknown>)['conversation_history'],
-                            createdAt:           (rows[0] as Record<string, unknown>)['created_at'],
-                            loopState:           (rows[0] as Record<string, unknown>)['loop_state'],
-                            sceneSummary:        (rows[0] as Record<string, unknown>)['scene_summary'],
-                            sequence:            (rows[0] as Record<string, unknown>)['sequence'],
-                            sessionId:           (rows[0] as Record<string, unknown>)['session_id'],
-                            stateHash:           (rows[0] as Record<string, unknown>)['state_hash'],
-                            updatedAt:           (rows[0] as Record<string, unknown>)['updated_at'],
-                        }).pipe(Effect.map(Option.some)),
+                        : S.decodeUnknown(_checkpoint.rowSchema)(rows[0]).pipe(Effect.map(Option.some)),
                 ),
             ),
         );
-
-        const verifySceneState = Effect.fn('kargadan.checkpoint.verifySceneState')(
+        const _verifySceneState = Effect.fn('kargadan.checkpoint.verifySceneState')(
             (sessionId: string, currentSceneHash: string) =>
-                restore(sessionId).pipe(
+                _restore(sessionId).pipe(
                     Effect.map((checkpoint) =>
                         Option.match(checkpoint, {
-                            onNone: () => ({ checkpoint: Option.none(), diverged: false }) satisfies SceneVerification,
+                            onNone: () => ({ checkpoint: Option.none(), diverged: false }),
                             onSome: (row) => ({
                                 checkpoint: Option.some(row),
                                 diverged: row.stateHash !== currentSceneHash,
-                            }) satisfies SceneVerification,
+                            }),
                         }),
                     ),
                 ),
         );
-
-        const remove = Effect.fn('kargadan.checkpoint.delete')((sessionId: string) =>
-            sql`DELETE FROM ${sql(_tableName)} WHERE session_id = ${sessionId}`.pipe(Effect.asVoid),
+        const _remove = Effect.fn('kargadan.checkpoint.delete')((sessionId: string) =>
+            sql`DELETE FROM ${sql(_checkpoint.table)} WHERE session_id = ${sessionId}`.pipe(Effect.asVoid),
         );
-
         return {
-            appendArtifact,
-            appendTransition,
-            listArtifacts,
-            remove,
-            replay,
-            restore,
-            save,
-            snapshot,
-            verifySceneState,
+            appendArtifact:   _appendArtifact,
+            appendTransition: _appendTransition,
+            listArtifacts:    _listArtifacts,
+            remove:           _remove,
+            replay:           _replay,
+            restore:          _restore,
+            save:             _save,
+            snapshot:         _snapshot,
+            verifySceneState: _verifySceneState,
         } as const;
     }),
 }) {}
 
-// --- [NAMESPACE] -------------------------------------------------------------
-
-namespace CheckpointService {
-    export type ReplayResult = {
-        readonly events:          ReadonlyArray<Kargadan.RunEvent>;
-        readonly expectedHash:    string | undefined;
-        readonly matchesExpected: boolean;
-        readonly snapshotHash:    string | undefined;
-        readonly stateHash:       string;
-    };
-}
-
 // --- [EXPORT] ----------------------------------------------------------------
 
-export { CheckpointService };
+export { CheckpointService, hashCanonicalState };

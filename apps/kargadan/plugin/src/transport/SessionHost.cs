@@ -40,84 +40,74 @@ public sealed class SessionHost {
     private readonly Lock _gate = new();
     private Option<SessionSnapshot> _current = None;
     // --- [INTERFACE] ---------------------------------------------------------
-    public Fin<SessionSnapshot> Activate(HandshakeEnvelope.Ack ack, Instant now) =>
-        WithinGate(() =>
-            BindCurrent(
-                project: snapshot =>
-                    TransitionFromMutablePhase(
-                        snapshot: snapshot,
-                        now: now,
-                        nextPhase: new SessionPhase.Active(Ack: ack),
-                        operation: "activate"),
-                missingError: SessionNotOpen));
-    public Fin<SessionSnapshot> Beat(Instant now) =>
-        WithinGate(() =>
-            BindCurrent(
-                project: snapshot =>
-                    UpdateActiveHeartbeat(
-                        snapshot: snapshot,
-                        now: now),
-                missingError: SessionNotOpen));
-    public Fin<SessionSnapshot> Close(string reason, Instant now) =>
-        WithinGate(() =>
-            BindCurrent(
-                project: snapshot =>
-                    TransitionFromMutablePhase(
-                        snapshot: snapshot,
-                        now: now,
-                        nextPhase: new SessionPhase.Terminal(
-                            StateTag: SessionLifecycleState.Closed,
-                            Failure: None),
-                        operation: "close"),
-                missingError: Error.New(message: $"Session close failed: {reason}")));
+    public Fin<SessionSnapshot> Activate(HandshakeEnvelope.Ack ack, Instant now) {
+        using Lock.Scope _ = _gate.EnterScope();
+        return _current.ToFin(SessionNotOpen).Bind(snapshot =>
+            TransitionFromMutablePhase(
+                snapshot: snapshot,
+                now: now,
+                nextPhase: new SessionPhase.Active(Ack: ack),
+                operation: "activate"));
+    }
+    public Fin<SessionSnapshot> Beat(Instant now) {
+        using Lock.Scope _ = _gate.EnterScope();
+        return _current.ToFin(SessionNotOpen).Bind(snapshot =>
+            UpdateActiveHeartbeat(
+                snapshot: snapshot,
+                now: now));
+    }
+    public Fin<SessionSnapshot> Close(string reason, Instant now) {
+        using Lock.Scope _ = _gate.EnterScope();
+        return _current.ToFin(Error.New(message: $"Session close failed: {reason}")).Bind(snapshot =>
+            TransitionFromMutablePhase(
+                snapshot: snapshot,
+                now: now,
+                nextPhase: new SessionPhase.Terminal(
+                    StateTag: SessionLifecycleState.Closed,
+                    Failure: None),
+                operation: "close"));
+    }
     public Fin<SessionSnapshot> Open(
         EnvelopeIdentity identity,
         Duration heartbeatInterval,
         Duration heartbeatTimeout,
-        Instant now) =>
-        WithinGate(() =>
-            (heartbeatInterval > Duration.Zero, heartbeatTimeout > Duration.Zero) switch {
-                (true, true) => ApplyState(snapshot: new SessionSnapshot(
-                    Identity: identity,
-                    Phase: new SessionPhase.Connected(),
-                    OpenedAt: now,
-                    LastHeartbeatAt: now,
-                    HeartbeatInterval: heartbeatInterval,
-                    HeartbeatTimeout: heartbeatTimeout,
-                    TerminatedAt: None)),
-                _ => Fin.Fail<SessionSnapshot>(
-                    Error.New(
-                        message: "Heartbeat interval/timeout must be positive.")),
-            });
-    public Fin<SessionSnapshot> Reject(FailureReason reason, Instant now) =>
-        WithinGate(() =>
-            BindCurrent(
-                project: snapshot =>
+        Instant now) {
+        using Lock.Scope _ = _gate.EnterScope();
+        return (heartbeatInterval > Duration.Zero, heartbeatTimeout > Duration.Zero) switch {
+            (true, true) => ApplyState(snapshot: new SessionSnapshot(
+                Identity: identity,
+                Phase: new SessionPhase.Connected(),
+                OpenedAt: now,
+                LastHeartbeatAt: now,
+                HeartbeatInterval: heartbeatInterval,
+                HeartbeatTimeout: heartbeatTimeout,
+                TerminatedAt: None)),
+            _ => Fin.Fail<SessionSnapshot>(
+                Error.New(
+                    message: "Heartbeat interval/timeout must be positive.")),
+        };
+    }
+    public Fin<SessionSnapshot> Reject(FailureReason reason, Instant now) {
+        using Lock.Scope _ = _gate.EnterScope();
+        return Optional(reason)
+            .ToFin(Error.New(message: "Session reject reason is required."))
+            .Bind(reasonValue =>
+                _current.ToFin(FailureMapping.ToError(reasonValue)).Bind(snapshot =>
                     TransitionFromMutablePhase(
                         snapshot: snapshot,
                         now: now,
                         nextPhase: new SessionPhase.Terminal(
                             StateTag: SessionLifecycleState.Rejected,
-                            Failure: Some(reason)),
-                        operation: "reject"),
-                missingError: FailureMapping.ToError(reason)));
-    public Fin<SessionSnapshot> Timeout(Instant now) =>
-        WithinGate(() =>
-            BindCurrent(
-                project: snapshot =>
-                    TimeoutIfNeeded(
-                        snapshot: snapshot,
-                        now: now),
-                missingError: Error.New(message: "Session timeout requested while no session is active.")));
-    // --- [INTERNAL] ----------------------------------------------------------
-    private Fin<TValue> WithinGate<TValue>(Func<Fin<TValue>> operation) {
-        using Lock.Scope _ = _gate.EnterScope();
-        return operation();
+                            Failure: Some(reasonValue)),
+                        operation: "reject")));
     }
-    private Fin<SessionSnapshot> BindCurrent(
-        Func<SessionSnapshot, Fin<SessionSnapshot>> project,
-        Error missingError) =>
-        _current.ToFin(missingError).Bind(project);
+    public Fin<SessionSnapshot> Timeout(Instant now) {
+        using Lock.Scope _ = _gate.EnterScope();
+        return _current.ToFin(Error.New(message: "Session timeout requested while no session is active.")).Bind(snapshot =>
+            TimeoutIfNeeded(
+                snapshot: snapshot,
+                now: now));
+    }
     // --- [TRANSITIONS] -------------------------------------------------------
     private Fin<SessionSnapshot> TransitionFromMutablePhase(
         SessionSnapshot snapshot,
@@ -132,7 +122,6 @@ public sealed class SessionHost {
             }),
             SessionPhase.Terminal terminal => Fin.Fail<SessionSnapshot>(
                 Error.New(message: $"Cannot {operation}; session is already terminal in state '{terminal.StateTag.Key}'.")),
-
             _ => Fin.Fail<SessionSnapshot>(UnexpectedSessionPhase(operation: operation, phase: snapshot.Phase)),
         };
     private Fin<SessionSnapshot> UpdateActiveHeartbeat(SessionSnapshot snapshot, Instant now) =>

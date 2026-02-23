@@ -27,6 +27,12 @@ public sealed class KargadanPlugin : PlugIn {
         EventPublisher EventPublisher,
         SessionHost SessionHost,
         WebSocketHost WebSocketHost);
+    private readonly record struct LifecycleEventPayload(
+        EnvelopeIdentity Identity,
+        int SourceRevision,
+        RequestId RequestId,
+        JsonElement Delta,
+        TelemetryContext TelemetryContext);
     // --- [CONSTANTS] ---------------------------------------------------------
     private static readonly Duration HandshakeHeartbeatInterval = Duration.FromSeconds(5);
     private static readonly Duration HandshakeHeartbeatTimeout = Duration.FromSeconds(15);
@@ -46,13 +52,13 @@ public sealed class KargadanPlugin : PlugIn {
     public static Fin<KargadanPlugin> Instance =>
         _instance.Value.ToFin(Error.New(message: "KargadanPlugin has not been loaded."));
     public Fin<EventPublisher> EventPublisher =>
-        ReadState().Map(static state => state.EventPublisher);
+        ReadState().Map(static (BoundaryState state) => state.EventPublisher);
     public Fin<SessionHost> SessionHost =>
-        ReadState().Map(static state => state.SessionHost);
+        ReadState().Map(static (BoundaryState state) => state.SessionHost);
     public Fin<Seq<PublishedEvent>> DrainPublishedEvents() =>
-        ReadState().Map(static state => state.EventPublisher.Drain());
+        ReadState().Map(static (BoundaryState state) => state.EventPublisher.Drain());
     public Fin<HandshakeEnvelope> HandleHandshake(HandshakeEnvelope.Init init) =>
-        ReadState().Bind(state => {
+        ReadState().Bind((BoundaryState state) => {
             Instant now = Instant.FromDateTimeOffset(_timeProvider.GetUtcNow());
             Fin<SessionSnapshot> opened = state.SessionHost.Open(
                 identity: init.Identity,
@@ -67,59 +73,29 @@ public sealed class KargadanPlugin : PlugIn {
                     RhinoVersion: VersionString.Create(RhinoApp.Version.ToString()),
                     PluginRevision: VersionString.Create(Version.ToString())),
                 now: now);
-            return opened.Bind(_ =>
+            return opened.Bind((_) =>
                 negotiated.Switch(
-                    init: _ => Fin.Fail<HandshakeEnvelope>(
+                    init: (_) => Fin.Fail<HandshakeEnvelope>(
                         Error.New(message: "Handshake negotiation cannot return init envelope.")),
-                    ack: ack => state.SessionHost.Activate(ack, now).Map(_ => negotiated),
-                    reject: reject => state.SessionHost.Reject(reject.Reason, now).Map(_ => negotiated)));
+                    ack: (HandshakeEnvelope.Ack ack) => state.SessionHost.Activate(ack, now).Map((_) => negotiated),
+                    reject: (HandshakeEnvelope.Reject reject) => state.SessionHost.Reject(reject.Reason, now).Map((_) => negotiated)));
         });
     public Fin<CommandResultEnvelope> HandleCommand(
         JsonElement envelope,
         EnvelopeIdentity sessionIdentity,
         Func<CommandEnvelope, Fin<CommandResultEnvelope>> onCommand) =>
-        ReadState().Bind(state =>
+        ReadState().Bind((BoundaryState state) =>
             CommandRouter.Decode(
                 envelope: envelope,
-                sessionIdentity: sessionIdentity).Bind(onCommand).Bind(result => {
-                    Instant publishedAt = Instant.FromDateTimeOffset(_timeProvider.GetUtcNow());
-                    Fin<EventId> eventId = DomainBridge.ParseValueObject<EventId, Guid>(Guid.NewGuid());
-                    return eventId.Bind(lifecycleEventId =>
-                        result.Switch(
-                            success: success =>
-                                EventEnvelope.Create(
-                                    eventId: lifecycleEventId,
-                                    eventType: EventType.SessionLifecycle,
-                                    identity: success.Identity,
-                                    sourceRevision: success.Execution.SourceRevision,
-                                    causationRequestId: Some(success.Identity.RequestId),
-                                    delta: JsonSerializer.SerializeToElement(new {
-                                        dedupeDecision = success.Dedupe.Decision.Key,
-                                        status = CommandResultStatus.Ok.Key,
-                                    }),
-                                    telemetryContext: success.TelemetryContext),
-                            failure: failure =>
-                                EventEnvelope.Create(
-                                    eventId: lifecycleEventId,
-                                    eventType: EventType.SessionLifecycle,
-                                    identity: failure.Identity,
-                                    sourceRevision: failure.Execution.SourceRevision,
-                                    causationRequestId: Some(failure.Identity.RequestId),
-                                    delta: JsonSerializer.SerializeToElement(new {
-                                        errorCode = failure.Error.Reason.Code.Key,
-                                        failureClass = failure.Error.Reason.FailureClass.Key,
-                                        status = CommandResultStatus.Error.Key,
-                                    }),
-                                    telemetryContext: failure.TelemetryContext)).Bind(eventEnvelope => {
-                                        _ = state.EventPublisher.Publish(eventEnvelope, publishedAt);
-                                        return Fin.Succ(result);
-                                    }));
-                }));
+                sessionIdentity: sessionIdentity)
+            .Bind(onCommand)
+            .Bind((CommandResultEnvelope result) =>
+                PublishLifecycleEvent(state: state, result: result).Map((_) => result)));
     public Fin<HeartbeatEnvelope> HandleHeartbeat(HeartbeatEnvelope heartbeat) =>
-        ReadState().Bind(state => {
+        ReadState().Bind((BoundaryState state) => {
             Instant now = Instant.FromDateTimeOffset(_timeProvider.GetUtcNow());
-            return state.SessionHost.Timeout(now).Bind(_ =>
-                state.SessionHost.Beat(now).Bind(_ =>
+            return state.SessionHost.Timeout(now).Bind((_) =>
+                state.SessionHost.Beat(now).Bind((_) =>
                     heartbeat.Mode.Map(
                         ping: Fin.Succ(new HeartbeatEnvelope(
                             Identity: heartbeat.Identity,
@@ -128,16 +104,62 @@ public sealed class KargadanPlugin : PlugIn {
                             TelemetryContext: heartbeat.TelemetryContext)),
                         pong: Fin.Succ(heartbeat))));
         });
+    // --- [FUNCTIONS] ---------------------------------------------------------
+    // why: consolidates success/failure lifecycle event publishing — both arms share
+    // identical EventEnvelope.Create structure, differing only in delta payload
+    private Fin<Unit> PublishLifecycleEvent(BoundaryState state, CommandResultEnvelope result) {
+        Instant publishedAt = Instant.FromDateTimeOffset(_timeProvider.GetUtcNow());
+        Fin<EventId> eventId = DomainBridge.ParseValueObject<EventId, Guid>(Guid.NewGuid());
+        return eventId.Bind((EventId lifecycleEventId) =>
+            BuildLifecycleEventDelta(result: result).Bind((LifecycleEventPayload payload) =>
+                EventEnvelope.Create(
+                    eventId: lifecycleEventId,
+                    eventType: EventType.SessionLifecycle,
+                    identity: payload.Identity,
+                    sourceRevision: payload.SourceRevision,
+                    causationRequestId: Some(payload.RequestId),
+                    delta: payload.Delta,
+                    telemetryContext: payload.TelemetryContext).Bind((EventEnvelope eventEnvelope) => {
+                        _ = state.EventPublisher.Publish(eventEnvelope, publishedAt);
+                        return Fin.Succ(unit);
+                    })));
+    }
+    private static Fin<LifecycleEventPayload>
+        BuildLifecycleEventDelta(CommandResultEnvelope result) =>
+        result.Switch(
+            success: (CommandResultEnvelope.Success success) => Fin.Succ(
+                new LifecycleEventPayload(
+                    Identity: success.Identity,
+                    SourceRevision: success.Execution.SourceRevision,
+                    RequestId: success.Identity.RequestId,
+                    Delta: JsonSerializer.SerializeToElement(new {
+                        dedupeDecision = success.Dedupe.Decision.Key,
+                        status = CommandResultStatus.Ok.Key,
+                    }),
+                    TelemetryContext: success.TelemetryContext)),
+            failure: (CommandResultEnvelope.Failure failure) => Fin.Succ(
+                new LifecycleEventPayload(
+                    Identity: failure.Identity,
+                    SourceRevision: failure.Execution.SourceRevision,
+                    RequestId: failure.Identity.RequestId,
+                    Delta: JsonSerializer.SerializeToElement(new {
+                        errorCode = failure.Error.Reason.Code.Key,
+                        failureClass = failure.Error.Reason.FailureClass.Key,
+                        status = CommandResultStatus.Error.Key,
+                    }),
+                    TelemetryContext: failure.TelemetryContext)));
     // --- [DISPATCH] ----------------------------------------------------------
+    // why: typed smart-enum dispatch keeps protocol tags explicit at the adapter seam and
+    // avoids stringly routing branches while preserving transport behavior.
     private async Task<Fin<JsonElement>> DispatchMessageAsync(
-        string tag,
+        TransportMessageTag tag,
         JsonElement message,
         CancellationToken cancellationToken) =>
         tag switch {
-            "handshake.init" => await DispatchHandshakeAsync(message: message, cancellationToken: cancellationToken).ConfigureAwait(false),
-            "command" => await DispatchCommandAsync(message: message, cancellationToken: cancellationToken).ConfigureAwait(false),
-            "heartbeat" => SerializeHeartbeat(message: message),
-            _ => Fin.Fail<JsonElement>(Error.New(message: $"Unknown message tag: {tag}")),
+            _ when tag.Equals(TransportMessageTag.HandshakeInit) => await DispatchHandshakeAsync(message: message, cancellationToken: cancellationToken).ConfigureAwait(false),
+            _ when tag.Equals(TransportMessageTag.Command) => await DispatchCommandAsync(message: message, cancellationToken: cancellationToken).ConfigureAwait(false),
+            _ when tag.Equals(TransportMessageTag.Heartbeat) => SerializeHeartbeat(message: message),
+            _ => Fin.Fail<JsonElement>(Error.New(message: $"Unknown message tag: {tag.Key}")),
         };
     // [BOUNDARY ADAPTER -- async dispatch to UI thread via ThreadMarshaler for RhinoDoc safety]
     private async Task<Fin<JsonElement>> DispatchHandshakeAsync(
@@ -150,7 +172,7 @@ public sealed class KargadanPlugin : PlugIn {
                 null => Fin.Fail<JsonElement>(
                     Error.New(message: "Failed to deserialize handshake init envelope.")),
                 _ => HandleHandshake(init: init).Map(
-                    envelope => JsonSerializer.SerializeToElement(value: envelope, options: JsonOptions)),
+                    (HandshakeEnvelope envelope) => JsonSerializer.SerializeToElement(value: envelope, options: JsonOptions)),
             };
         }).WaitAsync(cancellationToken).ConfigureAwait(false);
         return result;
@@ -159,15 +181,15 @@ public sealed class KargadanPlugin : PlugIn {
         JsonElement message,
         CancellationToken cancellationToken) {
         Fin<JsonElement> result = await ThreadMarshaler.RunOnUiThreadAsync(() =>
-            ReadState().Bind(state => {
+            ReadState().Bind((BoundaryState state) => {
                 Instant now = Instant.FromDateTimeOffset(_timeProvider.GetUtcNow());
-                return state.SessionHost.Timeout(now).Bind(snapshot =>
+                return state.SessionHost.Timeout(now).Bind((SessionSnapshot snapshot) =>
                     HandleCommand(
                         envelope: message,
                         sessionIdentity: snapshot.Identity,
-                        onCommand: static _ => Fin.Fail<CommandResultEnvelope>(
+                        onCommand: static (_) => Fin.Fail<CommandResultEnvelope>(
                             Error.New(message: "Command execution not yet implemented."))
-                    ).Map(envelope =>
+                    ).Map((CommandResultEnvelope envelope) =>
                         JsonSerializer.SerializeToElement(value: envelope, options: JsonOptions)));
             })
         ).WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -180,15 +202,15 @@ public sealed class KargadanPlugin : PlugIn {
             null => Fin.Fail<JsonElement>(
                 Error.New(message: "Failed to deserialize heartbeat envelope.")),
             _ => HandleHeartbeat(heartbeat: heartbeat).Map(
-                envelope => JsonSerializer.SerializeToElement(value: envelope, options: JsonOptions)),
+                (HeartbeatEnvelope envelope) => JsonSerializer.SerializeToElement(value: envelope, options: JsonOptions)),
         };
     }
     // --- [INTERNAL] ----------------------------------------------------------
     private Fin<BoundaryState> ReadState() =>
         _state.Value.ToFin(Error.New(message: "Plugin boundary state is unavailable before plugin load."));
     protected override LoadReturnCode OnLoad(ref string errorMessage) {
-        _ = _instance.Swap(_ => Some(this));
-        _ = _state.Swap(_ => {
+        _ = _instance.Swap((_) => Some(this));
+        _ = _state.Swap((_) => {
             WebSocketHost webSocketHost = new(dispatcher: DispatchMessageAsync);
             BoundaryState boundaryState = new(
                 EventPublisher: new EventPublisher(),
@@ -201,12 +223,12 @@ public sealed class KargadanPlugin : PlugIn {
     }
     protected override void OnShutdown() {
         Instant now = Instant.FromDateTimeOffset(_timeProvider.GetUtcNow());
-        _ = ReadState().Bind(state => {
+        _ = ReadState().Bind((BoundaryState state) => {
             state.WebSocketHost.Dispose();
-            return state.SessionHost.Close(reason: "plugin-shutdown", now: now).Map(_ => unit);
+            return state.SessionHost.Close(reason: "plugin-shutdown", now: now).Map((_) => unit);
         });
-        _ = _state.Swap(static _ => None);
-        _ = _instance.Swap(static _ => None);
+        _ = _state.Swap(static (_) => None);
+        _ = _instance.Swap(static (_) => None);
         base.OnShutdown();
     }
 }

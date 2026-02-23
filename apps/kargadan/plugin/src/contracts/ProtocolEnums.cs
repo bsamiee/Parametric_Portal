@@ -39,6 +39,13 @@ public sealed partial class FailureClass {
     public static readonly FailureClass Compensatable = new("compensatable");
 }
 [SmartEnum<string>]
+public sealed partial class TransportMessageTag {
+    public static readonly TransportMessageTag HandshakeInit = new("handshake.init");
+    public static readonly TransportMessageTag Command = new("command");
+    public static readonly TransportMessageTag Heartbeat = new("heartbeat");
+    public static readonly TransportMessageTag Error = new("error");
+}
+[SmartEnum<string>]
 public sealed partial class HeartbeatMode {
     public static readonly HeartbeatMode Ping = new("ping");
     public static readonly HeartbeatMode Pong = new("pong");

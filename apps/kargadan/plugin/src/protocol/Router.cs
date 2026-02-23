@@ -49,10 +49,16 @@ public static class CommandRouter {
         Fin<CommandEnvelope> DecodeObject(
             JsonElement envelope,
             EnvelopeIdentity sessionIdentity) {
-            string observedTag = envelope.TryGetProperty(JsonFields.Tag, out JsonElement tagElement) switch {
-                true when tagElement.ValueKind == JsonValueKind.String => tagElement.GetString() ?? string.Empty,
-                true => $"<{tagElement.ValueKind}>",
-                false => "<missing>",
+            Fin<TransportMessageTag> transportTag = envelope.TryGetProperty(JsonFields.Tag, out JsonElement tagElement) switch {
+                true when tagElement.ValueKind == JsonValueKind.String =>
+                    DomainBridge.ParseSmartEnum<TransportMessageTag, string>(
+                        candidate: tagElement.GetString() ?? string.Empty).MapFail(
+                        (Error _) => Error.New(
+                            message: $"Envelope {JsonFields.Tag} must be 'command'; observed '{tagElement.GetString() ?? string.Empty}'.")),
+                true => Fin.Fail<TransportMessageTag>(
+                    Error.New(message: $"Envelope {JsonFields.Tag} must be 'command'; observed '<{tagElement.ValueKind}>'.")),
+                false => Fin.Fail<TransportMessageTag>(
+                    Error.New(message: $"Envelope {JsonFields.Tag} must be 'command'; observed '<missing>'.")),
             };
             Fin<string> operationKey = RequireStringProperty(
                 parent: envelope,
@@ -68,8 +74,7 @@ public static class CommandRouter {
                 true => payloadElement,
                 false => EmptyJsonElement,
             };
-            return observedTag switch {
-                "command" =>
+            Fin<CommandEnvelope> decodedCommand =
                     from operationKeyValue in operationKey
                     from deadlineMsValue in deadlineMs
                     from operationTag in DomainBridge.ParseSmartEnum<CommandOperation, string>(operationKeyValue)
@@ -85,10 +90,13 @@ public static class CommandRouter {
                         UndoScope: undoScope,
                         Payload: payload,
                         TelemetryContext: telemetryContext,
-                        DeadlineMs: deadlineMsValue),
-                _ => Fin.Fail<CommandEnvelope>(
-                    Error.New(message: $"Envelope {JsonFields.Tag} must be 'command'; observed '{observedTag}'.")),
-            };
+                        DeadlineMs: deadlineMsValue);
+            return transportTag.Bind((TransportMessageTag tag) =>
+                tag.Equals(TransportMessageTag.Command) switch {
+                    true => decodedCommand,
+                    false => Fin.Fail<CommandEnvelope>(
+                        Error.New(message: $"Envelope {JsonFields.Tag} must be 'command'; observed '{tag.Key}'.")),
+                });
         }
     }
     private static Fin<TelemetryContext> DecodeTelemetryContext(JsonElement envelope) =>

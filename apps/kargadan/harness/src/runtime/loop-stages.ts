@@ -7,23 +7,31 @@ import { Data, Effect, Match, Option, pipe } from 'effect';
 import type { LoopState } from './agent-loop';
 import { CommandDispatchError } from '../protocol/dispatch';
 import type { CheckpointService } from '../persistence/checkpoint';
-import { hashCanonicalState } from './persistence-trace';
+import { hashCanonicalState } from '../persistence/checkpoint';
 
-// --- [ALGEBRAS] --------------------------------------------------------------
+// --- [TYPES] -----------------------------------------------------------------
 
-// biome-ignore lint/correctness/noUnusedVariables: const+namespace merge pattern
-const Verification = Data.taggedEnum<Verification.Type>();
-namespace Verification {
-    export type Type = Data.TaggedEnum<{
-        // biome-ignore lint/complexity/noBannedTypes: Data.TaggedEnum empty variant requires {} — Record<string, never> breaks the _tag constraint
-        Verified: {};
-        Failed:   { readonly error: Kargadan.FailureReason & { readonly details?: unknown }; };
-    }>;
-}
+type _Verification = Data.TaggedEnum<{
+    // biome-ignore lint/complexity/noBannedTypes: Data.TaggedEnum empty variant requires {} — Record<string, never> breaks the _tag constraint
+    Verified: {};
+    Failed: { readonly error: Kargadan.FailureReason & { readonly details?: unknown }; };
+}>;
+const _Verification = Data.taggedEnum<_Verification>();
+
+// --- [CONSTANTS] -------------------------------------------------------------
+
+const _writeOperations = new Set<Kargadan.CommandOperation>([
+    'write.annotation.update',
+    'write.layer.update',
+    'write.object.create',
+    'write.object.delete',
+    'write.object.update',
+    'write.viewport.update',
+]);
 
 // --- [FUNCTIONS] -------------------------------------------------------------
 
-const planCommand = (input: { readonly deadline: number; readonly state: LoopState.Type }) =>
+const planCommand = (input: { readonly deadline: number; readonly state: LoopState }) =>
     pipe(
         Option.fromNullable(input.state.command),
         Option.map(
@@ -51,7 +59,7 @@ const planCommand = (input: { readonly deadline: number; readonly state: LoopSta
                         spanId: identity.requestId.replaceAll('-', ''),
                         traceId: input.state.identityBase.traceId,
                     } as const satisfies Kargadan.TelemetryContext;
-                    const isWrite = operation.startsWith('write.');
+                    const isWrite = _writeOperations.has(operation);
                     const payload = isWrite
                         ? ({
                             operationId: `${input.state.identityBase.runId}:${input.state.sequence}`,
@@ -98,12 +106,12 @@ const handleDecision = (input: {
         readonly correctionMax: number;
         readonly retryMax:      number;
     };
-    readonly state:        LoopState.Type;
-    readonly verification: Verification.Type;
+    readonly state:        LoopState;
+    readonly verification: _Verification;
 }) =>
-    Verification.$match(input.verification, {
+    _Verification.$match(input.verification, {
         Failed: ({ error }) => {
-            const failedState = { ...input.state, status: 'Failed' } satisfies LoopState.Type;
+            const failedState = { ...input.state, status: 'Failed' } satisfies LoopState;
             const nextAttemptCommand = {
                 ...input.command,
                 identity: { ...input.command.identity, issuedAt: new Date() },
@@ -141,7 +149,7 @@ const handleDecision = (input: {
                                 command: nextAttemptCommand,
                                 correctionCycles: input.state.correctionCycles + 1,
                                 status:  'Planning',
-                            } satisfies  LoopState.Type)
+                            } satisfies  LoopState)
                         : failedState,
                     ),
                 ),
@@ -169,7 +177,7 @@ const handleDecision = (input: {
                                 attempt: input.state.attempt + 1,
                                 command: nextAttemptCommand,
                                 status:  'Planning',
-                            } satisfies LoopState.Type)
+                            } satisfies LoopState)
                         : failedState,
                     ),
                 ),
@@ -185,7 +193,7 @@ const handleDecision = (input: {
                         command: undefined,
                         operations: [],
                         status: 'Completed',
-                    } satisfies LoopState.Type)
+                    } satisfies LoopState)
                     : ({
                         ...input.state,
                         attempt:    1,
@@ -193,14 +201,14 @@ const handleDecision = (input: {
                         correctionCycles: 0,
                         operations: remaining,
                         status:     'Planning',
-                    } satisfies LoopState.Type),
+                    } satisfies LoopState),
             );
         },
     });
-const verifyResult = (result: Kargadan.ResultEnvelope): Verification.Type =>
+const verifyResult = (result: Kargadan.ResultEnvelope): _Verification =>
     result.status === 'ok'
-        ? Verification.Verified()
-        : Verification.Failed({
+        ? _Verification.Verified()
+        : _Verification.Failed({
             error:
                 result.error === undefined
                     ? {
@@ -216,4 +224,4 @@ const verifyResult = (result: Kargadan.ResultEnvelope): Verification.Type =>
 
 // --- [EXPORT] ----------------------------------------------------------------
 
-export { handleDecision, planCommand, Verification, verifyResult };
+export { handleDecision, planCommand, verifyResult };

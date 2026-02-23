@@ -4,58 +4,41 @@
  */
 import { Data, Effect, Match, Ref } from 'effect';
 
+// --- [TYPES] -----------------------------------------------------------------
+
+type _SessionTransition = Data.TaggedEnum<{
+    Activate:     { readonly at:        Date   };
+    Authenticate: { readonly at:        Date   };
+    Beat:         { readonly at:        Date   };
+    Close:        { readonly reason?:   string };
+    Connect:      { readonly sessionId: string };
+    Reap:         { readonly reason:    string };
+    Reject:       { readonly reason:    string };
+    Timeout:      { readonly reason:    string };
+}>;
+type _SessionState = {
+    readonly heartbeatAt: Date | undefined;
+    readonly phase: 'idle' | 'connected' | 'authenticated' | 'active' | 'closed' | 'timed_out' | 'reaped' | 'rejected';
+    readonly reason:      string | undefined;
+    readonly sessionId:   string | undefined;
+};
+
 // --- [CONSTANTS] -------------------------------------------------------------
 
-// biome-ignore lint/correctness/noUnusedVariables: const+namespace merge pattern
-const SessionTransition = Data.taggedEnum<SessionTransition.Type>();
-// biome-ignore lint/correctness/noUnusedVariables: const+namespace merge pattern
-const SessionState = {
-    initial: {
-        heartbeatAt: undefined,
-        phase:       'idle',
-        reason:      undefined,
-        sessionId:   undefined,
-    } satisfies SessionState.Type,
-} as const;
-
-// --- [NAMESPACE] -------------------------------------------------------------
-
-namespace SessionTransition {
-    export type Type = Data.TaggedEnum<{
-        Activate:     { readonly at: Date };
-        Authenticate: { readonly at: Date };
-        Beat:         { readonly at: Date };
-        Close:        { readonly reason?: string };
-        Connect:      { readonly sessionId: string };
-        Reap:         { readonly reason: string };
-        Reject:       { readonly reason: string };
-        Timeout:      { readonly reason: string };
-    }>;
-}
-namespace SessionState {
-    export type Phase =
-        | 'idle'
-        | 'connected'
-        | 'authenticated'
-        | 'active'
-        | 'closed'
-        | 'timed_out'
-        | 'reaped'
-        | 'rejected';
-    export type Type = {
-        readonly heartbeatAt: Date | undefined;
-        readonly phase:       Phase;
-        readonly reason:      string | undefined;
-        readonly sessionId:   string | undefined;
-    };
-}
+const SessionTransition = Data.taggedEnum<_SessionTransition>();
+const _initialState = {
+    heartbeatAt: undefined,
+    phase:       'idle',
+    reason:      undefined,
+    sessionId:   undefined,
+} satisfies _SessionState;
 
 // --- [SERVICES] --------------------------------------------------------------
 
 class SessionSupervisor extends Effect.Service<SessionSupervisor>()('kargadan/SessionSupervisor', {
     effect: Effect.gen(function* () {
-        const state = yield* Ref.make<SessionState.Type>(SessionState.initial);
-        const transition = Effect.fn('kargadan.session.transition')((event: SessionTransition.Type) =>
+        const state = yield* Ref.make<_SessionState>(_initialState);
+        const _transition = Effect.fn('kargadan.session.transition')((event: _SessionTransition) =>
             Ref.update(state, (current) => ({
                 ...current,
                 ...Match.valueTags(event, {
@@ -70,8 +53,8 @@ class SessionSupervisor extends Effect.Service<SessionSupervisor>()('kargadan/Se
                 }),
             })),
         );
-        const snapshot = Effect.fn('kargadan.session.snapshot')(() => Ref.get(state));
-        return { read: { snapshot }, transition } as const;
+        const _snapshot = Effect.fn('kargadan.session.snapshot')(() => Ref.get(state));
+        return { read: { snapshot: _snapshot }, transition: _transition } as const;
     }),
 }) {}
 
