@@ -11,8 +11,8 @@
 - NEVER use inline exports; declare first, export at file end
 - NEVER write comments describing what; reserve for why
 - NEVER hand-roll utilities that exist in external libs
-- NEVER duplicate type definitions; derive from schema/tables
-- NEVER declare module-level types separately from schemas; derive via `typeof XSchema.Type`
+- NEVER duplicate type definitions; derive from runtime values
+- NEVER declare module-level type aliases that duplicate runtime values; derive via `typeof`, `ReturnType`, `Parameters`. Use `typeof XSchema.Type` when schema exists.
 - NEVER use `if` (including bare guards), `else if`, `switch` — use `Match.type`, `$match`, `Option.match`, `Effect.filterOrFail`
 - NEVER create helper/utility files or functions (`helpers.ts`, `*Helper`, `*Util`); colocate logic in domain module
 - NEVER proliferate functions — consolidate into fewer, polymorphic solutions
@@ -26,7 +26,7 @@
 - Replace `let`/`var` with `const`
 - Replace default exports with named exports (exception: `*.config.ts`)
 - Replace all `if` (including bare guards), `else if`, `switch` with `Match.type`, `$match`, `Option.match`, or `Effect.filterOrFail`
-- Derive types from schemas: `type X = typeof XSchema.Type`
+- Derive types from runtime values: `typeof` for schemas, configs, and constants. `typeof XSchema.Type` when schema exists; `typeof _CONFIG` when plain object.
 - Use `as const` for immutable config objects
 - Decode at boundaries; treat external data as `unknown`
 
@@ -50,25 +50,25 @@
 
 Data crossing system boundaries follows 3-level model:
 
-| [INDEX] | [LEVEL]     | [SEMANTICS]                           | [LOCATION]           |
-| :-----: | ----------- | ------------------------------------- | -------------------- |
-|   [1]   | Encoded     | Wire format, might be malformed       | Boundary adapters    |
-|   [2]   | Validated   | Runtime-checked, safe to operate on   | After Schema.decode  |
-|   [3]   | Domain      | Branded primitives, semantic aliases  | Core business logic  |
+| [INDEX] | [LEVEL]   | [SEMANTICS]                          | [LOCATION]          |
+| :-----: | --------- | ------------------------------------ | ------------------- |
+|   [1]   | Encoded   | Wire format, might be malformed      | Boundary adapters   |
+|   [2]   | Validated | Runtime-checked, safe to operate on  | After Schema.decode |
+|   [3]   | Domain    | Branded primitives, semantic aliases | Core business logic |
 
 [CRITICAL]: Domain code accepts branded primitives, never raw `string`/`number`.
 
 ---
 ## [3][CODE_STANDARDS]
 
-**[CORE]**: Schema-first types. Effect for orchestration. Pure functions for computation. Match for exhaustive handling.
+**[CORE]**: Minimal-surface types. Schema when codec/validation requires it; plain objects + typeof otherwise. Effect for orchestration. Pure functions for computation. Match for exhaustive handling.
 
 **[COMPOSITION]**: Functional core computes; effectful shell orchestrates IO/errors/dependencies.
 
 ---
-### [3.1][SCHEMA_FIRST]
+### [3.1][MINIMAL_SURFACE]
 
-[IMPORTANT] Single source of truth for types and validation.
+[IMPORTANT] Schema when serialization, validation, or Hash/Equal requires it. Plain objects + typeof inference otherwise.
 
 ```typescript
 // Branded primitives: IIFE companion with schema + operations
@@ -91,6 +91,12 @@ class User extends Model.Class<User>('User')({
     updatedAt: Model.DateTimeUpdateFromDate,
 }) {}
 // Auto-derives: User.select, User.insert, User.update, User.json
+```
+
+```typescript
+// Internal config: plain object + typeof (no schema needed)
+const _CONFIG = { retries: 3, timeout: 5000, backoffMs: 1000 } as const;
+type Config = typeof _CONFIG;
 ```
 
 ---
@@ -287,16 +293,16 @@ const AppRuntime = ManagedRuntime.make(AppLayer);
 
 **Canonical Sections [TS_EFFECT]** (omit unused):
 
-| [INDEX] | [SECTION]      | [CONTAINS]                                    |
-| :-----: | -------------- | --------------------------------------------- |
-|   [1]   | `[TYPES]`      | Type aliases, inferred types, unions          |
-|   [2]   | `[SCHEMA]`     | Schema definitions, branded types             |
-|   [3]   | `[CONSTANTS]`  | Immutable config with `as const`              |
-|   [4]   | `[ERRORS]`     | Data.TaggedError definitions                  |
-|   [5]   | `[SERVICES]`   | Effect.Service definitions                    |
-|   [6]   | `[FUNCTIONS]`  | Pure functions + Effect pipelines             |
-|   [7]   | `[LAYERS]`     | Layer composition                             |
-|   [8]   | `[EXPORT]`     | Named exports                                 |
+| [INDEX] | [SECTION]     | [CONTAINS]                           |
+| :-----: | ------------- | ------------------------------------ |
+|   [1]   | `[TYPES]`     | Type aliases, inferred types, unions |
+|   [2]   | `[SCHEMA]`    | Schema definitions, branded types    |
+|   [3]   | `[CONSTANTS]` | Immutable config with `as const`     |
+|   [4]   | `[ERRORS]`    | Data.TaggedError definitions         |
+|   [5]   | `[SERVICES]`  | Effect.Service definitions           |
+|   [6]   | `[FUNCTIONS]` | Pure functions + Effect pipelines    |
+|   [7]   | `[LAYERS]`    | Layer composition                    |
+|   [8]   | `[EXPORT]`    | Named exports                        |
 
 **Domain Extensions [TS_EFFECT]**:
 - Database: `[TABLES]` after SCHEMA, `[REPOSITORIES]` after SERVICES
@@ -304,12 +310,12 @@ const AppRuntime = ManagedRuntime.make(AppLayer);
 
 **Canonical Sections [CSHARP]** (choose archetype):
 
-| [INDEX] | [ARCHETYPE]               | [SECTION_ORDER]                                                                 |
-| :-----: | ------------------------- | ------------------------------------------------------------------------------- |
+| [INDEX] | [ARCHETYPE]               | [SECTION_ORDER]                                                                                                             |
+| :-----: | ------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
 |   [1]   | Boundary Adapter          | `[ADAPTER]` -> `[TYPES]` -> `[CONSTANTS]` -> `[STATE]` -> `[LIFECYCLE]` -> `[INTERFACE]` -> `[INTERNAL]` -> `[TRANSITIONS]` |
-|   [2]   | Stateless Helper          | `[FUNCTIONS]` -> `[INTERNAL]`                                                   |
-|   [3]   | Contracts/Models          | `[VALUE_OBJECTS]` -> `[ENUMS]` -> `[RECORDS]` -> `[ENVELOPES]` -> `[BRIDGE]` -> `[VALIDATION]` -> `[PATTERNS]` |
-|   [4]   | Analyzer / RuleSet Module | `[ANALYZER]` or `[<RULESET>_RULES]` -> `[CONSTANTS]` -> grouped rule sections -> `[REPORTS]` -> `[PRIVATE_FUNCTIONS]` |
+|   [2]   | Stateless Helper          | `[FUNCTIONS]` -> `[INTERNAL]`                                                                                               |
+|   [3]   | Contracts/Models          | `[VALUE_OBJECTS]` -> `[ENUMS]` -> `[RECORDS]` -> `[ENVELOPES]` -> `[BRIDGE]` -> `[VALIDATION]` -> `[PATTERNS]`              |
+|   [4]   | Analyzer / RuleSet Module | `[ANALYZER]` or `[<RULESET>_RULES]` -> `[CONSTANTS]` -> grouped rule sections -> `[REPORTS]` -> `[PRIVATE_FUNCTIONS]`       |
 
 **FORBIDDEN labels**: `Helpers`, `Handlers`, `Utils`, `Config`, `Dispatch_Tables`, `Namespace_Objects`.
 
@@ -318,9 +324,9 @@ const AppRuntime = ManagedRuntime.make(AppLayer);
 
 >**Dictum:** *Packages export mechanisms; apps define values.*
 
-| [INDEX] | [LAYER]      | [OWNS]                                              |
-| :-----: | ------------ | --------------------------------------------------- |
+| [INDEX] | [LAYER]      | [OWNS]                                               |
+| :-----: | ------------ | ---------------------------------------------------- |
 |   [1]   | `packages/*` | Types, schemas, factories, pure functions, CSS slots |
-|   [2]   | `apps/*`     | CSS values, factory invocations, visual overrides   |
+|   [2]   | `apps/*`     | CSS values, factory invocations, visual overrides    |
 
 **FORBIDDEN**: Color/font/spacing literals in `packages/*`.

@@ -12,12 +12,8 @@
         "typecheck": "tsc --project tsconfig.json --noEmit"
     },
     "dependencies": {
-        "@effect/ai": "catalog:",
-        "@effect/experimental": "catalog:",
         "@effect/platform": "catalog:",
-        "@effect/platform-node": "catalog:",
-        "@effect/sql": "catalog:",
-        "@effect/sql-pg": "catalog:",
+        "@parametric-portal/database": "catalog:",
         "@parametric-portal/types": "workspace:*",
         "effect": "catalog:"
     },

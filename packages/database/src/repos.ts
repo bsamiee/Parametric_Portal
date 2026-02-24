@@ -5,8 +5,19 @@
 import { SqlClient } from '@effect/sql';
 import { Clock, Effect, Option, Record as R, Schema as S } from 'effect';
 import { repo, routine, Update } from './factory.ts';
-import { ApiKey, App, AppSettingsDefaults, Asset, AuditLog, type AuditOperationSchema, Job, JobDlq, KvStore, MfaSecret, Notification, OauthAccount, Permission, Session, User, WebauthnCredential, AppSettingsSchema } from './models.ts';
+import {
+    AgentCheckpoint, AgentSession, AgentToolCall, ApiKey, App, AppSettingsDefaults, AppSettingsSchema, Asset, AuditLog, type AuditOperationSchema,
+    Job, JobDlq, KvStore, MfaSecret, Notification, OauthAccount, Permission, Session, User, WebauthnCredential,
+} from './models.ts';
 import { SearchRepo } from './search.ts';
+
+// --- [SCHEMA] ----------------------------------------------------------------
+
+const _ObservabilitySectionSchema = S.Struct({
+    name:    S.String,
+    options: S.optional(S.Record({ key: S.String, value: S.Unknown })),
+});
+const _ObservabilitySectionsSchema = S.Array(_ObservabilitySectionSchema);
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
@@ -100,8 +111,14 @@ const makeWebauthnCredentialRepo = Effect.gen(function* () {
     };
 });
 const makeJobRepo = Effect.gen(function* () {
-    const repository = yield* repo(Job, 'jobs', { pk: { column: 'job_id' }, scoped: 'appId' });
+    const repository = yield* repo(Job, 'jobs', {
+        pk: { column: 'job_id' },
+        resolve: { byBatch: { field: 'batchKey', many: true }, byDedupe: 'dedupeKey' },
+        scoped: 'appId',
+    });
+    const _activeStatuses = ['queued', 'processing'] as const;
     return { ...repository,
+        byActiveDedupe: (dedupe: string) => repository.one([{ field: 'dedupeKey', value: dedupe }, { field: 'status', op: 'in', values: [..._activeStatuses] }]),
         countByStatuses: (...statuses: readonly string[]) => repository.count([{ field: 'status', op: 'in', values: [...statuses] }]),
     };
 });
@@ -115,8 +132,10 @@ const makeJobDlqRepo = Effect.gen(function* () {
     };
 });
 const makeNotificationRepo = Effect.gen(function* () {
-    const repository = yield* repo(Notification, 'notifications', { scoped: 'appId' });
+    const repository = yield* repo(Notification, 'notifications', { resolve: { byDedupe: 'dedupeKey', byJob: { field: 'jobKey', many: true } }, scoped: 'appId' });
+    const _activeStatuses = ['queued', 'sending'] as const;
     return { ...repository,
+        byActiveDedupe: (dedupe: string) => repository.one([{ field: 'dedupeKey', value: dedupe }, { field: 'status', op: 'in', values: [..._activeStatuses] }]),
         transition: (id: string, updates: { status: S.Schema.Type<typeof Notification.fields.status>; delivery?: S.Schema.Type<typeof Notification.fields.delivery>; correlation?: S.Schema.Type<typeof Notification.fields.correlation>; retryCurrent?: S.Schema.Type<typeof Notification.fields.retryCurrent>; retryMax?: S.Schema.Type<typeof Notification.fields.retryMax> }, whenStatus?: S.Schema.Type<typeof Notification.fields.status>) =>
             repository.set(
                 id,
@@ -131,6 +150,23 @@ const makeNotificationRepo = Effect.gen(function* () {
                 ),
             ),
     };
+});
+const makeAgentSessionRepo = Effect.gen(function* () {
+    const repository = yield* repo(AgentSession, 'agent_sessions', { resolve: { byRunId: 'runId', byUser: { field: 'userId', many: true } }, scoped: 'appId' });
+    return repository;
+});
+const makeAgentToolCallRepo = Effect.gen(function* () {
+    const repository = yield* repo(AgentToolCall, 'agent_tool_calls', { resolve: { byRunId: { field: 'runId', many: true }, bySession: { field: 'sessionId', many: true } }, scoped: 'appId' });
+    return repository;
+});
+const makeAgentCheckpointRepo = Effect.gen(function* () {
+    const repository = yield* repo(AgentCheckpoint, 'agent_checkpoints', {
+        conflict: { keys: ['sessionId'], only: ['chatJson', 'loopState', 'sceneSummary', 'sequence', 'stateHash'] },
+        pk: { column: 'session_id' },
+        resolve: { bySession: 'sessionId' },
+        scoped: 'appId',
+    });
+    return repository;
 });
 const makeKvStoreRepo = Effect.gen(function* () {
     const repository = yield* repo(KvStore, 'kv_store', {
@@ -158,7 +194,7 @@ const makeSystemRepo = Effect.gen(function* () {
             query_db_observability: {
                 args: [{ cast: 'jsonb', field: 'sections' }, 'limit'],
                 mode: 'typed',
-                params: S.Struct({ limit: S.Number, sections: S.String }),
+                params: S.Struct({ limit: S.Number, sections: S.parseJson(_ObservabilitySectionsSchema) }),
                 schema: S.Record({ key: S.String, value: S.Unknown }),
             },
         },
@@ -177,10 +213,10 @@ const makeSystemRepo = Effect.gen(function* () {
         outboxCount: () => repository.fn<number>('outbox_count', {}),
         query: (input: {
             limit?: number | undefined;
-            sections: readonly { name: string; options?: Record<string, unknown> | undefined }[];
+            sections: readonly S.Schema.Type<typeof _ObservabilitySectionSchema>[];
         }) => repository.fn<Record<string, unknown>>('query_db_observability', {
             limit: input.limit ?? _LIMITS.defaultPage,
-            sections: JSON.stringify(input.sections),
+            sections: input.sections,
         }),
         tenantPurge: (appId: string) => repository.fn<number>('purge_tenant', { appId }),
     };
@@ -192,11 +228,15 @@ class DatabaseService extends Effect.Service<DatabaseService>()('database/Databa
     dependencies: [SearchRepo.Default],
     effect: Effect.gen(function* () {
         const [searchRepo, sqlClient] = yield* Effect.all([SearchRepo, SqlClient.SqlClient]);
-        const [users, permissions, apps, sessions, apiKeys, oauthAccounts, assets, audit, mfaSecrets, webauthnCredentials, jobs, jobDlq, notifications, kvStore, system] = yield* Effect.all([
+        const [users, permissions, apps, sessions, apiKeys, oauthAccounts, assets, audit, mfaSecrets, webauthnCredentials, jobs, jobDlq, notifications, agentSessions, agentToolCalls, agentCheckpoints, kvStore, system] = yield* Effect.all([
             makeUserRepo, makePermissionRepo, makeAppRepo, makeSessionRepo, makeApiKeyRepo,
-            makeOauthAccountRepo, makeAssetRepo, makeAuditRepo, makeMfaSecretRepo, makeWebauthnCredentialRepo, makeJobRepo, makeJobDlqRepo, makeNotificationRepo, makeKvStoreRepo, makeSystemRepo,
+            makeOauthAccountRepo, makeAssetRepo, makeAuditRepo, makeMfaSecretRepo, makeWebauthnCredentialRepo,
+            makeJobRepo, makeJobDlqRepo, makeNotificationRepo,
+            makeAgentSessionRepo, makeAgentToolCallRepo, makeAgentCheckpointRepo,
+            makeKvStoreRepo, makeSystemRepo,
         ]);
         return {
+            agentCheckpoints, agentSessions, agentToolCalls,
             apiKeys, apps, assets, audit, jobDlq, jobs, kvStore, mfaSecrets, notifications, oauthAccounts, observability: system, permissions, search: searchRepo, sessions,
             users, webauthnCredentials, withTransaction: sqlClient.withTransaction,
         };

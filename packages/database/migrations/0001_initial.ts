@@ -228,16 +228,20 @@ export default Effect.gen(function* () {
             payload JSONB NOT NULL, output JSONB, history JSONB NOT NULL,
             retry_current INTEGER NOT NULL DEFAULT 0 CHECK (retry_current >= 0),
             retry_max INTEGER NOT NULL CHECK (retry_max > 0),
-            scheduled_at TIMESTAMPTZ, correlation JSONB, completed_at TIMESTAMPTZ,
+            scheduled_at TIMESTAMPTZ, correlation JSONB,
+            dedupe_key TEXT GENERATED ALWAYS AS (NULLIF(trim(correlation->>'dedupe'), '')) STORED,
+            batch_key TEXT GENERATED ALWAYS AS (NULLIF(trim(correlation->>'batch'), '')) STORED,
+            completed_at TIMESTAMPTZ,
             updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
             CONSTRAINT jobs_type_not_empty CHECK (length(trim(type)) > 0),
-            CONSTRAINT jobs_history_array CHECK (jsonb_typeof(history) = 'array')
+            CONSTRAINT jobs_history_array CHECK (jsonb_typeof(history) = 'array'),
+            CONSTRAINT jobs_correlation_shape CHECK (correlation IS NULL OR jsonb_typeof(correlation) = 'object')
         ) WITH (fillfactor = 70, autovacuum_vacuum_scale_factor = 0.02, autovacuum_analyze_scale_factor = 0.01, autovacuum_vacuum_cost_delay = 2);
         CREATE INDEX idx_jobs_app_status ON jobs(app_id, status) INCLUDE (type, priority, retry_current, retry_max);
         CREATE INDEX idx_jobs_app_type ON jobs(app_id, type) INCLUDE (status, priority);
         CREATE INDEX idx_jobs_app_updated ON jobs(app_id, updated_at DESC) INCLUDE (status, type);
-        CREATE UNIQUE INDEX idx_jobs_dedupe_active ON jobs(app_id, (correlation->>'dedupe')) WHERE correlation->>'dedupe' IS NOT NULL AND status IN ('queued', 'processing');
-        CREATE INDEX idx_jobs_batch ON jobs((correlation->>'batch')) WHERE correlation->>'batch' IS NOT NULL;
+        CREATE UNIQUE INDEX idx_jobs_dedupe_active ON jobs(app_id, dedupe_key) WHERE dedupe_key IS NOT NULL AND status IN ('queued', 'processing');
+        CREATE INDEX idx_jobs_batch ON jobs(batch_key) WHERE batch_key IS NOT NULL;
         CREATE INDEX idx_jobs_app_status_type_gin ON jobs USING GIN (app_id, status, type) WITH (parallel_workers = 4);
         ALTER TABLE jobs ALTER COLUMN type SET STATISTICS 500, ALTER COLUMN status SET STATISTICS 500;
         ALTER TABLE jobs ALTER COLUMN payload SET STORAGE MAIN, ALTER COLUMN history SET STORAGE MAIN;
@@ -251,19 +255,74 @@ export default Effect.gen(function* () {
             payload JSONB NOT NULL, delivery JSONB,
             retry_current INTEGER NOT NULL DEFAULT 0 CHECK (retry_current >= 0),
             retry_max INTEGER NOT NULL DEFAULT 5 CHECK (retry_max > 0),
-            correlation JSONB, updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            correlation JSONB,
+            dedupe_key TEXT GENERATED ALWAYS AS (NULLIF(trim(correlation->>'dedupe'), '')) STORED,
+            job_key TEXT GENERATED ALWAYS AS (NULLIF(trim(correlation->>'job'), '')) STORED,
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            CONSTRAINT notifications_correlation_shape CHECK (correlation IS NULL OR jsonb_typeof(correlation) = 'object'),
             CONSTRAINT notifications_template_not_empty CHECK (length(trim(template)) > 0))
         PARTITION BY RANGE (id) WITH (fillfactor = 80, autovacuum_vacuum_scale_factor = 0.05, autovacuum_analyze_scale_factor = 0.02);
         CREATE TABLE notifications_default PARTITION OF notifications DEFAULT;
         CREATE INDEX idx_notifications_app_status ON notifications(app_id, status, id DESC) INCLUDE (channel, template, retry_current, retry_max);
         CREATE INDEX idx_notifications_app_user ON notifications(app_id, user_id, id DESC) INCLUDE (channel, status, template) WHERE user_id IS NOT NULL;
         CREATE INDEX idx_notifications_app_updated ON notifications(app_id, updated_at DESC) INCLUDE (channel, status, user_id);
-        CREATE INDEX idx_notifications_correlation_job ON notifications((correlation->>'job')) WHERE correlation->>'job' IS NOT NULL;
-        CREATE UNIQUE INDEX idx_notifications_dedupe_active ON notifications(app_id, (correlation->>'dedupe'))
-            WHERE correlation->>'dedupe' IS NOT NULL AND status IN ('queued', 'sending');
+        CREATE INDEX idx_notifications_correlation_job ON notifications(job_key) WHERE job_key IS NOT NULL;
+        CREATE UNIQUE INDEX idx_notifications_dedupe_active ON notifications(app_id, dedupe_key)
+            WHERE dedupe_key IS NOT NULL AND status IN ('queued', 'sending');
         ALTER TABLE notifications ALTER COLUMN status SET STATISTICS 500, ALTER COLUMN channel SET STATISTICS 500, ALTER COLUMN template SET STATISTICS 500;
         ALTER TABLE notifications ALTER COLUMN payload SET STORAGE MAIN;
-        CREATE STATISTICS stat_notifications_app_status_channel (ndistinct, dependencies, mcv) ON app_id, status, channel FROM notifications`);
+        CREATE STATISTICS stat_notifications_app_status_channel (ndistinct, dependencies, mcv) ON app_id, status, channel FROM notifications;
+        CREATE TABLE agent_sessions (
+            id UUID PRIMARY KEY DEFAULT uuidv7(),
+            app_id UUID NOT NULL REFERENCES apps(id) ON DELETE RESTRICT,
+            user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+            run_id UUID NOT NULL,
+            status TEXT NOT NULL DEFAULT 'running'
+                CHECK (status IN ('running', 'completed', 'failed', 'interrupted')),
+            tool_call_count INTEGER NOT NULL DEFAULT 0 CHECK (tool_call_count >= 0),
+            error TEXT,
+            metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+            started_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            ended_at TIMESTAMPTZ,
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            CONSTRAINT agent_sessions_metadata_shape CHECK (jsonb_typeof(metadata) = 'object'),
+            CONSTRAINT agent_sessions_ended_after_started CHECK (ended_at IS NULL OR ended_at >= started_at),
+            CONSTRAINT agent_sessions_run_unique UNIQUE (app_id, run_id)
+        );
+        CREATE INDEX idx_agent_sessions_app_status_started ON agent_sessions(app_id, status, started_at DESC) INCLUDE (id, user_id, tool_call_count);
+        CREATE INDEX idx_agent_sessions_app_user_started ON agent_sessions(app_id, user_id, started_at DESC) WHERE user_id IS NOT NULL;
+        CREATE TABLE agent_tool_calls (
+            id UUID PRIMARY KEY DEFAULT uuidv7(),
+            app_id UUID NOT NULL REFERENCES apps(id) ON DELETE RESTRICT,
+            session_id UUID NOT NULL REFERENCES agent_sessions(id) ON DELETE CASCADE,
+            run_id UUID NOT NULL,
+            sequence INTEGER NOT NULL CHECK (sequence >= 0),
+            operation TEXT NOT NULL CHECK (length(trim(operation)) > 0),
+            params JSONB NOT NULL DEFAULT '{}'::jsonb,
+            result JSONB,
+            duration_ms INTEGER NOT NULL DEFAULT 0 CHECK (duration_ms >= 0),
+            status TEXT NOT NULL DEFAULT 'ok'
+                CHECK (status IN ('ok', 'error')),
+            error TEXT,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            CONSTRAINT agent_tool_calls_params_shape CHECK (jsonb_typeof(params) = 'object')
+        );
+        CREATE UNIQUE INDEX idx_agent_tool_calls_session_sequence ON agent_tool_calls(session_id, sequence);
+        CREATE INDEX idx_agent_tool_calls_app_created ON agent_tool_calls(app_id, created_at DESC) INCLUDE (session_id, status, operation);
+        CREATE INDEX idx_agent_tool_calls_app_status_created ON agent_tool_calls(app_id, status, created_at DESC) INCLUDE (session_id, operation);
+        CREATE TABLE agent_checkpoints (
+            session_id UUID PRIMARY KEY REFERENCES agent_sessions(id) ON DELETE CASCADE,
+            app_id UUID NOT NULL REFERENCES apps(id) ON DELETE RESTRICT,
+            loop_state JSONB NOT NULL DEFAULT '{}'::jsonb,
+            chat_json TEXT NOT NULL DEFAULT '',
+            state_hash TEXT NOT NULL,
+            scene_summary JSONB,
+            sequence INTEGER NOT NULL DEFAULT 0 CHECK (sequence >= 0),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            CONSTRAINT agent_checkpoints_loop_state_shape CHECK (jsonb_typeof(loop_state) = 'object')
+        );
+        CREATE UNIQUE INDEX idx_agent_checkpoints_app_session ON agent_checkpoints(app_id, session_id);
+        CREATE INDEX idx_agent_checkpoints_app_updated ON agent_checkpoints(app_id, updated_at DESC) INCLUDE (session_id, sequence)`);
     // --- [PARTITIONS] ----------------------------------------------------------------
     yield* sql.unsafe(String.raw`DO $$ BEGIN
         PERFORM _register_monthly_partition('sessions', 'created_at', '30 days');
@@ -305,11 +364,15 @@ export default Effect.gen(function* () {
         FOREACH _pair SLICE 1 IN ARRAY ARRAY[
             ARRAY['sessions','user_id'], ARRAY['assets','user_id'],
             ARRAY['audit_logs','app_id'], ARRAY['audit_logs','user_id'],
-            ARRAY['notifications','user_id'], ARRAY['job_dlq','app_id']
+            ARRAY['notifications','user_id'], ARRAY['job_dlq','app_id'],
+            ARRAY['agent_sessions','app_id'], ARRAY['agent_sessions','user_id'],
+            ARRAY['agent_tool_calls','app_id'], ARRAY['agent_tool_calls','session_id'],
+            ARRAY['agent_checkpoints','app_id']
         ] LOOP EXECUTE format('CREATE INDEX idx_%s_%s_fk ON %I(%I)', _pair[1], _pair[2], _pair[1], _pair[2]); END LOOP;
         FOR _tbl IN SELECT unnest(ARRAY[
             'apps','users','permissions','api_keys','oauth_accounts','assets',
             'mfa_secrets','webauthn_credentials','jobs','notifications','kv_store',
+            'agent_sessions','agent_checkpoints',
             'search_documents','search_embeddings'
         ]) LOOP EXECUTE format(
             'CREATE TRIGGER %I BEFORE UPDATE ON %I '
@@ -356,7 +419,7 @@ export default Effect.gen(function* () {
             ALTER TABLE audit_logs DISABLE TRIGGER audit_logs_immutable;
             DELETE FROM audit_logs WHERE app_id = p_app_id; GET DIAGNOSTICS _count = ROW_COUNT; _total := _total + _count;
             ALTER TABLE audit_logs ENABLE TRIGGER audit_logs_immutable;
-            FOR _tbl IN SELECT unnest(ARRAY['jobs','job_dlq','assets']) LOOP
+            FOR _tbl IN SELECT unnest(ARRAY['jobs','job_dlq','assets','agent_tool_calls','agent_checkpoints','agent_sessions']) LOOP
                 EXECUTE format('DELETE FROM %I WHERE app_id = $1', _tbl) USING p_app_id; GET DIAGNOSTICS _count = ROW_COUNT; _total := _total + _count;
             END LOOP;
             IF _user_ids IS NOT NULL THEN
@@ -723,6 +786,7 @@ export default Effect.gen(function* () {
     DO $$ DECLARE _r record; BEGIN
         FOR _r IN SELECT * FROM (VALUES
             ('users','app'),('permissions','app'),('sessions','app'),('assets','app'),('audit_logs','app'),('jobs','app'),('notifications','app'),('job_dlq','app'),
+            ('agent_sessions','app'),('agent_tool_calls','app'),('agent_checkpoints','app'),
             ('api_keys','user'),('oauth_accounts','user'),('mfa_secrets','user'),('webauthn_credentials','user'),
             ('session_tokens','session'),('search_documents','scope'),('search_embeddings','scope'),('search_terms','scope')
         ) AS t(tbl text, kind text) LOOP

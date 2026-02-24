@@ -1,102 +1,182 @@
-# [H1][SERVICE_MODULE]
->**Dictum:** *Capability-grouped services centralize dependency, lifecycle, and composition.*
+# [H1][SERVICE_MODULE_TEMPLATE]
+>**Dictum:** *Capability-grouped services own lifecycle, dependencies, and traced methods.*
 
-<br>
+Use when building a domain service: scoped resource acquisition, traced capability methods, typed error algebra, and layer assembly. One service class per module; 225 LOC cap enforced.
 
-Produces one self-contained service module: dependency tag(s), scoped resource acquisition, traced methods, stream batch processing, retry policy, and a single layer assembly point.
+---
 
-**Budget:** 225 LOC cap per module. See SKILL.md section 2 for contracts.
-**References:** `services.md` (patterns), `errors.md` (failure algebra), `objects.md` (schema), `types.md` (const+namespace merge).
-**Workflow:** fill placeholders, remove guidance blocks, verify `pnpm exec nx run-many -t typecheck`.
+## Placeholders
 
-**Placeholders**
+| [INDEX] | [PLACEHOLDER]       | [EXAMPLE]                    | [NOTES]                                      |
+| :-----: | ------------------- | ---------------------------- | -------------------------------------------- |
+|   [1]   | `${Service}`        | `NotificationService`        | PascalCase service name                      |
+|   [2]   | `${namespace}`      | `domain/NotificationService` | Fully qualified service tag string           |
+|   [3]   | `${Resource}`       | `NotificationChannel`        | Managed resource type acquired at scope open |
+|   [4]   | `${openResource()}` | `openNotificationChannel()`  | Promise/Effect producing the resource handle |
+|   [5]   | `${table}`          | `notifications`              | Database table or domain noun                |
+|   [6]   | `${reasons}`        | `'persist', 'deliver', ...`  | Polymorphic error `reason` literals          |
 
-| [INDEX] | [PLACEHOLDER]           | [PURPOSE]                                                          |
-| :-----: | ----------------------- | ------------------------------------------------------------------ |
-|   [1]   | `${ServiceName}`        | PascalCase service class name                                      |
-|   [2]   | `${service-tag}`        | Fully qualified service tag string                                 |
-|   [3]   | `${DepTag}`             | Primary dependency context tag (PascalCase)                        |
-|   [4]   | `${dep-tag}`            | String identifier for dependency tag                               |
-|   [5]   | `${dep-interface}`      | Dependency interface fields (read/write capabilities)              |
-|   [6]   | `${resource-acquire}`   | Effect producing managed resource handle                           |
-|   [7]   | `${resource-release}`   | Finalizer effect consuming resource handle                         |
-|   [8]   | `${service-methods}`    | Traced method defs (`Effect.fn`); return as `{ read, write }`      |
-|   [9]   | `${stream-source-type}` | Type of elements in inbound stream                                 |
-|  [10]   | `${stream-process}`     | Element-to-Effect function for batch processing                    |
-|  [11]   | `${dep-layer}`          | Layer expression providing the dependency                          |
-|  [12]   | `${static-access}`      | Static delegate: name + `Effect.andThen` accessing instance method |
+---
 
 ```typescript
-import { Context, Data, Duration, Effect, Layer, Option, Schedule, STM, Stream, TMap, Schema as S } from 'effect';
-
+import { Data, Effect, Layer, Match, Option, Schedule, Stream, pipe } from 'effect';
+import { SqlClient } from '@effect/sql';
+import { EventBusService } from '../platform/event-bus';
+// --- [TYPES] -----------------------------------------------------------------
+type ${Resource} = {
+    readonly push:  (payload: unknown) => Effect.Effect<void>;
+    readonly close: Effect.Effect<void>;
+};
 // --- [ERRORS] ----------------------------------------------------------------
-
-class ${ServiceName}Error extends Data.TaggedError('${ServiceName}Error')<{
+// why: one polymorphic error -- reason field collapses operation-specific failures;
+//      from() wraps unknown causes while passing through known typed errors
+class ${Service}Error extends Data.TaggedError('${Service}Error')<{
     readonly operation: string;
-    readonly cause:     unknown;
-}> {}
-
-// --- [DEPENDENCY] ------------------------------------------------------------
-
-const ${DepTag} = Context.GenericTag<{${dep-interface}}>('${dep-tag}');
-
-// --- [SERVICE] ---------------------------------------------------------------
-
-class ${ServiceName} extends Effect.Service<${ServiceName}>()('${service-tag}', {
-    dependencies: [${DepTag}],
-    scoped: Effect.gen(function* () {
-        const store = yield* ${DepTag};
-        const resource = yield* Effect.acquireRelease(
-            ${resource-acquire},
-            (handle) => ${resource-release},
+    readonly reason:    ${reasons};
+    readonly details?:  string;
+    readonly cause?:    unknown;
+}> {
+    override get message() {
+        return `${Service}Error[${this.operation}/${this.reason}]${this.details ? `: ${this.details}` : ''}`;
+    }
+    static readonly from = (operation: string) => (cause: unknown): ${Service}Error =>
+        Match.value(cause).pipe(
+            Match.when(Match.instanceOf(${Service}Error), (e) => e),
+            Match.orElse((e) => new ${Service}Error({ cause: e, operation, reason: 'upstream' })),
         );
-        const state = yield* STM.commit(TMap.empty<string, unknown>());
-        ${service-methods}
-        const processBatch = (batch: Iterable<${stream-source-type}>) => Effect.forEach(batch, ${stream-process}, { concurrency: 12, discard: true });
-        const drain = Effect.fn('${ServiceName}.drain')(function* (source: Stream.Stream<${stream-source-type}>) {
-            yield* source.pipe(
-                Stream.groupedWithin(64, Duration.seconds(1)),
-                Stream.mapEffect(processBatch, { concurrency: 4 }),
-                Stream.runDrain,
-                Effect.retry({
-                    schedule: Schedule.exponential(Duration.millis(80), 2).pipe(
-                        Schedule.jittered,
-                        Schedule.intersect(Schedule.recurs(5)),
-                        Schedule.upTo(Duration.seconds(10)),
-                    ),
-                }),
-            );
-        });
-        yield* Effect.addFinalizer(() => Effect.log('${ServiceName} shutting down'));
-        yield* Effect.log('${ServiceName} initialized');
-        return { observe: { drain }, read: { /* destructure read methods */ }, write: { /* destructure write methods */ } } as const;
-    }),
-}) {
-    ${static-access}
 }
-
-// --- [LAYER] -----------------------------------------------------------------
-
-const ${ServiceName}Layer = ${ServiceName}.Default.pipe(Layer.provideMerge(${dep-layer}),);
-
-export { ${ServiceName}, ${ServiceName}Error };
+// --- [CONSTANTS] -------------------------------------------------------------
+const _RETRY = Schedule.exponential('100 millis', 2).pipe(
+    Schedule.jittered,
+    Schedule.intersect(Schedule.recurs(5)),
+    Schedule.upTo('30 seconds'),
+);
+// --- [SERVICES] --------------------------------------------------------------
+class ${Service} extends Effect.Service<${Service}>()(
+    '${namespace}',
+    {
+        dependencies: [EventBusService.Default],
+        scoped: Effect.gen(function* () {
+            const sql    = yield* SqlClient.SqlClient;
+            const events = yield* EventBusService;
+            // why: acquireRelease owns the resource lifecycle -- release on scope exit
+            const channel = yield* Effect.acquireRelease(
+                Effect.tryPromise({
+                    try:   () => ${openResource()},
+                    catch: ${Service}Error.from('channel.open'),
+                }),
+                (handle) => handle.close.pipe(Effect.orDie),
+            );
+            // --- write capabilities -----------------------------------------
+            const send = Effect.fn('${Service}.send')(
+                function* (recipientId: string, payload: unknown) {
+                    yield* sql`
+                        INSERT INTO ${table} (recipient_id, payload, sent_at)
+                        VALUES (${recipientId}, ${JSON.stringify(payload)}, NOW())
+                    `.pipe(Effect.mapError(${Service}Error.from('send.persist')));
+                    yield* channel.push(payload).pipe(
+                        Effect.retry(_RETRY),
+                        Effect.mapError(${Service}Error.from('send.deliver')),
+                    );
+                },
+            );
+            const sendBatch = Effect.fn('${Service}.sendBatch')(
+                (items: ReadonlyArray<{ recipientId: string; payload: unknown }>) =>
+                    Effect.forEach(
+                        items,
+                        (item) => send(item.recipientId, item.payload),
+                        { concurrency: 10 },
+                    ),
+            );
+            // --- read capabilities ------------------------------------------
+            const history = Effect.fn('${Service}.history')(
+                function* (recipientId: string, limit: number) {
+                    return yield* sql<{
+                        id: string; recipient_id: string; payload: string; sent_at: Date;
+                    }>`
+                        SELECT id, recipient_id, payload, sent_at
+                        FROM ${table}
+                        WHERE recipient_id = ${recipientId}
+                        ORDER BY sent_at DESC
+                        LIMIT ${limit}
+                    `.pipe(Effect.mapError(${Service}Error.from('history.query')));
+                },
+            );
+            // --- observe capabilities ----------------------------------------
+            const observe = Effect.fn('${Service}.observe')(
+                function* (recipientId: string) {
+                    return yield* pipe(
+                        events.subscribe(`${table}:${recipientId}`),
+                        Stream.mapEffect((raw) =>
+                            Effect.try({
+                                try:   () => JSON.parse(raw as string) as unknown,
+                                catch: ${Service}Error.from('observe.decode'),
+                            }),
+                        ),
+                        Effect.succeed,
+                    );
+                },
+            const drop = Effect.fn('${Service}.drop')(
+                function* (recipientId: string) {
+                    return yield* sql<{ count: number }>`
+                        DELETE FROM ${table}
+                        WHERE recipient_id = ${recipientId}
+                        RETURNING 1
+                    `.pipe(
+                        Effect.map((rows) => rows.length),
+                        Effect.mapError(${Service}Error.from('drop.execute')),
+                    );
+                },
+            );
+            return {
+                write:   { send, sendBatch, drop } as const,
+                read:    { history } as const,
+                observe: { observe } as const,
+            };
+            };
+        }),
+    },
+) {}
+// --- [LAYERS] ----------------------------------------------------------------
+const ${Service}Live: Layer.Layer<${Service}, never, SqlClient.SqlClient> = ${Service}.Default;
+// why: test double via Layer.succeed -- no mocks, real typed contract
+const ${Service}Test: Layer.Layer<${Service}> = Layer.succeed(
+    ${Service},
+    ${Service}.make({
+        write:   {
+            send:      (_recipientId, _payload) => Effect.void,
+            sendBatch: (_items) => Effect.void,
+        },
+        read:    {
+            history: (_recipientId, _limit) => Effect.succeed([]),
+        },
+        observe: {
+            observe: (_recipientId) => Effect.succeed(Stream.empty),
+            drop:    (_recipientId) => Effect.succeed(0),
+        },
+    }),
+);
+// --- [EXPORT] ----------------------------------------------------------------
+// biome-ignore lint/correctness/noUnusedVariables: namespace merge pattern -- type-only members
+namespace ${Service} {
+    // why: InstanceType exposes the yielded shape without re-declaring capability groups
+    export type Shape = InstanceType<typeof ${Service}>;
+}
+export { ${Service}Error, ${Service}, ${Service}Live, ${Service}Test };
 ```
 
-**Guidance: `${dep-interface}`**
-```typescript
-readonly findById: (id: string) => Effect.Effect<Option.Option<Record<string, unknown>>>;
-readonly persist:  (id: string, data: Record<string, unknown>) => Effect.Effect<void>;
-readonly remove:   (id: string) => Effect.Effect<void>;
-```
+---
 
-**Guidance: `${service-methods}`**
-```typescript
-const findOne = Effect.fn('${ServiceName}.findOne')(function* (id: string) {
-    const cached = yield* STM.commit(TMap.get(state, id));
-    return yield* Option.match(cached, { onNone: () => store.findById(id), onSome: Effect.succeed });
-});
-const save = Effect.fn('${ServiceName}.save')(function* (id: string, data: Record<string, unknown>) {
-    yield* store.persist(id, data);
-    yield* STM.commit(TMap.set(state, id, data));
-});
-```
+## Post-Scaffold Checklist
+
+- [ ] All `${...}` placeholders replaced with domain-specific values
+- [ ] `dependencies` array matches every `yield*` dep in `scoped`
+- [ ] `Effect.acquireRelease` wraps every external connection/handle
+- [ ] All methods traced via `Effect.fn('ServiceName.method')`
+- [ ] Capabilities returned as grouped `{ write, read, observe } as const`
+- [ ] Polymorphic error uses `reason` literal union with `from()` factory
+- [ ] No `if`/`else`/`switch` -- use `Match.type`, `Option.match`, `Effect.filterOrFail`
+- [ ] Namespace merge present on `${Service}` class -- exposes `Shape` type for consumers
+- [ ] Layer alias typed explicitly for consumer clarity
+- [ ] Test double uses `Layer.succeed(Tag, X.make({...}))` -- no mocks
+- [ ] `pnpm exec nx run-many -t typecheck` passes

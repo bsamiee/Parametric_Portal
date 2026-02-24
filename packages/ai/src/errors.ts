@@ -6,7 +6,7 @@ import { Data, Match } from 'effect';
 class AiError extends Data.TaggedError('AiError')<{
     readonly cause: unknown;
     readonly operation: string;
-    readonly reason: 'budget_exceeded' | 'rate_exceeded' | 'unknown';
+    readonly reason: 'budget_exceeded' | 'policy_denied' | 'rate_exceeded' | 'request_tokens_exceeded' | 'unknown';
 }> {
     override get message() {return `AiError[${this.operation}/${this.reason}]: ${String(this.cause)}`;}
     // why: boundary collapse — SDK errors pass through untouched; domain errors pass through; unknown causes wrap with operation context

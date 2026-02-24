@@ -6,11 +6,12 @@ import { PgClient } from '@effect/sql-pg';
 import { SqlClient } from '@effect/sql';
 import { readFileSync } from 'node:fs';
 import type { SecureVersion } from 'node:tls';
-import { Config, Duration, Effect, FiberRef, Function as F, Layer, Match, Option, Redacted, Schema as Sch, Stream, String as S } from 'effect';
+import { Config, Context, Data, Duration, Effect, FiberRef, Function as F, Layer, Match, Option, Redacted, Schema as Sch, Stream, String as S } from 'effect';
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
 const _CONFIG = {
+    capabilities: { serverVersionMin: 180000 },
     health: { timeout: Duration.seconds(5) },
     pgOptions: {
         extractPattern: /-c\s+[^ ]+/g,
@@ -29,6 +30,15 @@ const _CONFIG = {
     },
     tenant: {id: {system: '00000000-0000-7000-8000-000000000000', unspecified: '00000000-0000-7000-8000-ffffffffffff',} as const,},
 } as const;
+
+// --- [ERRORS] ----------------------------------------------------------------
+
+class ClientCapabilityError extends Data.TaggedError('ClientCapabilityError')<{
+    readonly hasVector: boolean;
+    readonly missingHnsw: readonly string[];
+    readonly serverVersion: string;
+    readonly serverVersionNum: number;
+}> {}
 
 // --- [FUNCTIONS] -------------------------------------------------------------
 
@@ -55,6 +65,31 @@ const _isValidTrigramThresholds = (values: {
     _isValidTrigramThreshold(values['similarity'])
     && _isValidTrigramThreshold(values['wordSimilarity'])
     && _isValidTrigramThreshold(values['strictWordSimilarity']);
+const _guardCapabilities = (db: SqlClient.SqlClient) =>
+    db<{ hasVector: boolean; missingHnsw: string[]; serverVersion: string; serverVersionNum: number }>`
+        SELECT
+            current_setting('server_version_num')::int AS server_version_num,
+            current_setting('server_version') AS server_version,
+            EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'vector') AS has_vector,
+            ARRAY(
+                SELECT setting_name
+                FROM unnest(ARRAY['hnsw.iterative_scan', 'hnsw.ef_search', 'hnsw.max_scan_tuples', 'hnsw.scan_mem_multiplier']) AS setting_name
+                WHERE current_setting(setting_name, true) IS NULL
+            ) AS missing_hnsw`
+        .pipe(
+            Effect.flatMap((rows) => Option.fromNullable(rows[0]).pipe(Option.match({
+                onNone: () => Effect.dieMessage('Capability guard query returned no rows'),
+                onSome: Effect.succeed,
+            }))),
+            Effect.filterOrFail(
+                (capability) =>
+                    capability.serverVersionNum >= _CONFIG.capabilities.serverVersionMin
+                    && capability.hasVector
+                    && capability.missingHnsw.length === 0,
+                (capability) => new ClientCapabilityError(capability),
+            ),
+            Effect.asVoid,
+        );
 
 // --- [LAYERS] ----------------------------------------------------------------
 
@@ -122,7 +157,9 @@ const layerFromConfig = (cfg: Record<string, unknown>) =>
                 transformQueryNames:  Config.succeed(S.camelToSnake),
                 transformResultNames: Config.succeed(S.snakeToCamel),
                 url:                  Config.succeed(Redacted.make(parsedUrl.toString())),
-            });
+            }).pipe(
+                Layer.tap((context) => _guardCapabilities(Context.get(context, SqlClient.SqlClient))),
+            );
         }),
     );
 

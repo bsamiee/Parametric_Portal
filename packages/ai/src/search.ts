@@ -13,7 +13,6 @@ import { AiRuntime } from './runtime.ts';
 const _CONFIG = {
     cron:   { embeddings: { concurrency: 5, name: 'refresh-embeddings', schedule: '0 3 * * *' } },
     labels: { embeddings: 'embeddings' },
-    text:   { joiner: ' ' },
     users:  { anonymous: 'anonymous', system: 'system' },
 } as const;
 
@@ -135,15 +134,7 @@ class SearchService extends Effect.Service<SearchService>()('ai/Search', {
                 const embeddings = yield* ai.embed(
                     A.map(
                         sources,
-                        (source) =>
-                            A.filter(
-                                [
-                                    source.displayText,
-                                    source.contentText ?? undefined,
-                                    source.metadata == null ? undefined : JSON.stringify(source.metadata),
-                                ],
-                                (value): value is string => value !== undefined && value !== '',
-                            ).join(_CONFIG.text.joiner),
+                        (source) => source.embeddingSource,
                     ),
                 ).pipe(
                     Effect.filterOrFail(

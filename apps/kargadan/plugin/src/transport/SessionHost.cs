@@ -83,7 +83,7 @@ public sealed class SessionHost {
                 HeartbeatInterval: heartbeatInterval,
                 HeartbeatTimeout: heartbeatTimeout,
                 TerminatedAt: None)),
-            _ => Fin.Fail<SessionSnapshot>(
+            _ => FinFail<SessionSnapshot>(
                 Error.New(
                     message: "Heartbeat interval/timeout must be positive.")),
         };
@@ -179,26 +179,26 @@ public sealed class SessionHost {
                 Phase = nextPhase,
                 TerminatedAt = nextPhase is SessionPhase.Terminal ? Some(now) : snapshot.TerminatedAt,
             }),
-            SessionPhase.Terminal terminal => Fin.Fail<SessionSnapshot>(
+            SessionPhase.Terminal terminal => FinFail<SessionSnapshot>(
                 Error.New(message: $"Cannot {operation}; session is already terminal in state '{terminal.StateTag.Key}'.")),
-            _ => Fin.Fail<SessionSnapshot>(UnexpectedSessionPhase(operation: operation, phase: snapshot.Phase)),
+            _ => FinFail<SessionSnapshot>(UnexpectedSessionPhase(operation: operation, phase: snapshot.Phase)),
         };
     private Fin<SessionSnapshot> UpdateActiveHeartbeat(SessionSnapshot snapshot, Instant now) =>
         snapshot.Phase switch {
             SessionPhase.Active => ApplyState(snapshot with {
                 LastHeartbeatAt = now,
             }),
-            SessionPhase.Connected => Fin.Fail<SessionSnapshot>(
+            SessionPhase.Connected => FinFail<SessionSnapshot>(
                 Error.New(message: "Cannot process heartbeat before handshake activation.")),
-            SessionPhase.Terminal terminal => Fin.Fail<SessionSnapshot>(
+            SessionPhase.Terminal terminal => FinFail<SessionSnapshot>(
                 Error.New(message: $"Cannot process heartbeat for terminal state '{terminal.StateTag.Key}'.")),
-            _ => Fin.Fail<SessionSnapshot>(UnexpectedSessionPhase(operation: "process heartbeat", phase: snapshot.Phase)),
+            _ => FinFail<SessionSnapshot>(UnexpectedSessionPhase(operation: "process heartbeat", phase: snapshot.Phase)),
         };
     private Fin<SessionSnapshot> TimeoutIfNeeded(SessionSnapshot snapshot, Instant now) =>
         snapshot.Phase switch {
-            SessionPhase.Terminal => Fin.Succ(snapshot),
+            SessionPhase.Terminal => FinSucc(snapshot),
             SessionPhase.Connected or SessionPhase.Active => EvaluateTimeout(snapshot: snapshot, now: now),
-            _ => Fin.Fail<SessionSnapshot>(UnexpectedSessionPhase(operation: "evaluate timeout", phase: snapshot.Phase)),
+            _ => FinFail<SessionSnapshot>(UnexpectedSessionPhase(operation: "evaluate timeout", phase: snapshot.Phase)),
         };
     private Fin<SessionSnapshot> EvaluateTimeout(SessionSnapshot snapshot, Instant now) =>
         ((now - snapshot.LastHeartbeatAt) > snapshot.HeartbeatTimeout) switch {
@@ -208,11 +208,11 @@ public sealed class SessionHost {
                     StateTag: SessionLifecycleState.TimedOut,
                     Failure: None),
             }),
-            false => Fin.Succ(snapshot),
+            false => FinSucc(snapshot),
         };
     private Fin<SessionSnapshot> ApplyState(SessionSnapshot snapshot) {
         _current = Some(snapshot);
-        return Fin.Succ(snapshot);
+        return FinSucc(snapshot);
     }
     private static Error UnexpectedSessionPhase(string operation, SessionPhase phase) =>
         Error.New(message: $"Unexpected session phase '{phase.GetType().FullName}' during '{operation}'.");

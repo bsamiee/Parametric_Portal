@@ -1,8 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
     <PropertyGroup>
-        <!-- Inherits net10.0 from Directory.Build.props; Rhino 9 WIP ships .NET 9
-             but LanguageExt.Core 5.0.0-beta-77 requires net10.0 System.Runtime.
-             Runtime target override deferred to packaging/deployment configuration. -->
+        <TargetFramework>net9.0</TargetFramework>
         <AssemblyName>ParametricPortal.Kargadan.Plugin</AssemblyName>
         <RootNamespace>ParametricPortal.Kargadan.Plugin</RootNamespace>
         <IsPackable>false</IsPackable>

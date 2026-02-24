@@ -52,6 +52,10 @@ const _snakeCase = (name: string) => name.replaceAll(/[A-Z]/g, (char) => `_${cha
 // --- [CLASSES] ---------------------------------------------------------------
 
 class SearchError extends Data.TaggedError('SearchError')<{ readonly cause: unknown; readonly operation: string }> {}
+class SearchEmbeddingDimensionsError extends Data.TaggedError('SearchEmbeddingDimensionsError')<{
+    readonly dimensions: number;
+    readonly maxDimensions: number;
+}> {}
 
 // --- [SERVICES] --------------------------------------------------------------
 
@@ -66,11 +70,18 @@ class SearchRepo extends Effect.Service<SearchRepo>()('database/Search', {
             return { entityFilter, scopeFilter: parameters.includeGlobal && parameters.scopeId ? sql`AND (${scopeMatch} OR ${col('scope_id')} IS NULL)` : sql`AND ${scopeMatch}` };
         };
         const _embeddingPayload = (input: EmbeddingInput) =>
-            S.decode(S.Array(S.Number).pipe(S.itemsCount(input.dimensions)))(input.vector).pipe(
-                Effect.map((vector) => {
-                    const pad = _CONFIG.embedding.maxDimensions - vector.length;
-                    return { dimensions: input.dimensions, embeddingJson: JSON.stringify(pad <= _CONFIG.embedding.padValue ? vector : [...vector, ...Array.from({ length: pad }, () => _CONFIG.embedding.padValue)]), model: input.model };
-                }),
+            S.decode(S.Int.pipe(S.positive(), S.lessThanOrEqualTo(_CONFIG.embedding.maxDimensions)))(input.dimensions).pipe(
+                Effect.mapError(() => new SearchEmbeddingDimensionsError({ dimensions: input.dimensions, maxDimensions: _CONFIG.embedding.maxDimensions })),
+                Effect.flatMap((dimensions) => S.decode(S.Array(S.Number).pipe(S.itemsCount(dimensions)))(input.vector).pipe(
+                    Effect.map((vector) => {
+                        const pad = _CONFIG.embedding.maxDimensions - vector.length;
+                        return {
+                            dimensions,
+                            embeddingJson: JSON.stringify(pad <= 0 ? vector : [...vector, ...Array.from({ length: pad }, () => _CONFIG.embedding.padValue)]),
+                            model: input.model,
+                        };
+                    }),
+                )),
             );
         const _trgmKnnOps = [
             { distExpr: (params: _CteParams) => sql`documents.normalized_text <-> ${params.normalizedTerm}`, name: 'trgmKnnSimilarity' },
@@ -249,13 +260,49 @@ class SearchRepo extends Effect.Service<SearchRepo>()('database/Search', {
         const executeEmbeddingSources = SqlSchema.findAll({
             execute: (parameters) => {
                 const { entityFilter, scopeFilter } = _filters(parameters, 'd');
-                return sql`SELECT d.entity_type, d.entity_id, d.scope_id, d.display_text, d.content_text, d.metadata, d.document_hash, d.updated_at
+                return sql`SELECT d.entity_type, d.entity_id, d.scope_id, d.display_text, d.content_text, d.metadata, d.document_hash, d.normalized_text, d.updated_at
                     FROM ${sql(_CONFIG.tables.documents)} d LEFT JOIN ${sql(_CONFIG.tables.embeddings)} e
                         ON e.entity_type = d.entity_type AND e.entity_id = d.entity_id AND e.hash = d.document_hash AND e.model = ${parameters.model} AND e.dimensions = ${parameters.dimensions}
                     WHERE true ${scopeFilter} ${entityFilter} AND e.entity_id IS NULL ORDER BY d.updated_at DESC LIMIT ${parameters.limit}`;
             },
             Request: S.Struct({ dimensions: S.Int, entityTypes: S.Array(S.String), includeGlobal: S.Boolean, limit: S.Int.pipe(S.positive(), S.lessThanOrEqualTo(_CONFIG.limits.embeddingBatch)), model: S.String, scopeId: S.NullOr(S.UUID) }),
-            Result:  S.Struct({ contentText: S.NullOr(S.String), displayText: S.String, documentHash: S.String, entityId: S.UUID, entityType: S.String, metadata: S.Unknown, scopeId: S.NullOr(S.UUID), updatedAt: S.DateFromSelf }),
+            Result:  S.Struct({ contentText: S.NullOr(S.String), displayText: S.String, documentHash: S.String, entityId: S.UUID, entityType: S.String, metadata: S.Unknown, normalizedText: S.String, scopeId: S.NullOr(S.UUID), updatedAt: S.DateFromSelf }),
+        });
+        const executeUpsertDocument = SqlSchema.single({
+            execute: (parameters) => sql`
+                INSERT INTO ${sql(_CONFIG.tables.documents)} (
+                    entity_type, entity_id, scope_id, display_text, content_text, metadata, normalized_text
+                )
+                VALUES (
+                    ${parameters.entityType},
+                    ${parameters.entityId},
+                    ${parameters.scopeId},
+                    ${parameters.displayText},
+                    ${parameters.contentText},
+                    jsonb_strip_nulls(${parameters.metadataJson}::jsonb, true),
+                    normalize_search_text(
+                        ${parameters.displayText},
+                        ${parameters.contentText},
+                        jsonb_strip_nulls(${parameters.metadataJson}::jsonb, true)
+                    )
+                )
+                ON CONFLICT (entity_type, entity_id) DO UPDATE SET
+                    scope_id = EXCLUDED.scope_id,
+                    display_text = EXCLUDED.display_text,
+                    content_text = EXCLUDED.content_text,
+                    metadata = EXCLUDED.metadata,
+                    normalized_text = EXCLUDED.normalized_text,
+                    updated_at = NOW()
+                RETURNING entity_type, entity_id, document_hash`,
+            Request: S.Struct({
+                contentText:  S.NullOr(S.String),
+                displayText:  S.String,
+                entityId:     S.UUID,
+                entityType:   S.String,
+                metadataJson: S.String,
+                scopeId:      S.NullOr(S.UUID),
+            }),
+            Result:  S.Struct({ documentHash: S.String, entityId: S.UUID, entityType: S.String }),
         });
         const executeUpsertEmbedding = SqlSchema.single({
             execute: (parameters) => sql`
@@ -272,7 +319,10 @@ class SearchRepo extends Effect.Service<SearchRepo>()('database/Search', {
                     dimensions: options.dimensions, entityTypes: options.entityTypes ?? [], includeGlobal: options.includeGlobal ?? false,
                     limit: Math.min(Math.max(options.limit ?? _CONFIG.limits.embeddingBatch, 1), _CONFIG.limits.embeddingBatch),
                     model: options.model, scopeId: options.scopeId ?? null,
-                }).pipe(Effect.mapError((cause) => new SearchError({ cause, operation: 'embeddingSources' }))),
+                }).pipe(
+                    Effect.map((sources) => sources.map((source) => ({ ...source, embeddingSource: source.normalizedText }))),
+                    Effect.mapError((cause) => new SearchError({ cause, operation: 'embeddingSources' })),
+                ),
             ),
             refresh: (() => {
                 const executeRefresh = SqlSchema.void({
@@ -320,6 +370,23 @@ class SearchRepo extends Effect.Service<SearchRepo>()('database/Search', {
                     prefix: options.prefix, scopeId: options.scopeId,
                 }).pipe(Effect.mapError((cause) => new SearchError({ cause, operation: 'suggest' }))),
             ),
+            upsertDocument: Effect.fn('SearchRepo.upsertDocument')((input: {
+                readonly contentText?: string | null | undefined;
+                readonly displayText: string;
+                readonly entityId: string;
+                readonly entityType: string;
+                readonly metadata?: unknown;
+                readonly scopeId: string | null;
+            }) =>
+                executeUpsertDocument({
+                    contentText:  input.contentText ?? null,
+                    displayText:  input.displayText,
+                    entityId:     input.entityId,
+                    entityType:   input.entityType,
+                    metadataJson: JSON.stringify(input.metadata ?? {}),
+                    scopeId:      input.scopeId,
+                }).pipe(Effect.mapError((cause) => new SearchError({ cause, operation: 'upsertDocument' }))),
+            ),
             upsertEmbedding: Effect.fn('SearchRepo.upsertEmbedding')((input: { readonly dimensions: number; readonly embedding: readonly number[]; readonly entityId: string; readonly entityType: string; readonly documentHash: string; readonly model: string; readonly scopeId: string | null }) =>
                 _embeddingPayload({ dimensions: input.dimensions, model: input.model, vector: input.embedding }).pipe(
                     Effect.andThen((payload) => executeUpsertEmbedding({ ...payload, documentHash: input.documentHash, entityId: input.entityId, entityType: input.entityType, scopeId: input.scopeId })),
@@ -335,10 +402,11 @@ class SearchRepo extends Effect.Service<SearchRepo>()('database/Search', {
             refresh: overrides.refresh ?? ((_scopeId, _includeGlobal) => Effect.void),
             search: overrides.search ?? ((_options, _pagination) => Effect.succeed({ cursor: null, facets: null, hasNext: false, hasPrev: false, items: [], total: 0 })),
             suggest: overrides.suggest ?? ((_options) => Effect.succeed([])),
+            upsertDocument: overrides.upsertDocument ?? ((_input) => Effect.succeed({ documentHash: '0', entityId: '00000000-0000-0000-0000-000000000000', entityType: 'app' as const })),
             upsertEmbedding: overrides.upsertEmbedding ?? ((_input) => Effect.succeed({ entityId: '00000000-0000-0000-0000-000000000000', entityType: 'app' as const, isNew: true })),
         } as SearchRepo);
 }
 
 // --- [EXPORT] ----------------------------------------------------------------
 
-export { SearchError, SearchRepo };
+export { SearchEmbeddingDimensionsError, SearchError, SearchRepo };

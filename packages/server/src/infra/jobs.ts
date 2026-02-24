@@ -269,13 +269,10 @@ const JobEntityLive = JobEntity.toLayer(Effect.gen(function* () {
             publish: (jobId: string, type: string, status: typeof JobStatusSchema.Type, tenantId: string, error?: string) => eventBus.publish({ aggregateId: jobId, payload: { _tag: 'job', action: 'status', error, jobId, status, tenantId, type }, tenantId }).pipe(Effect.asVoid, Effect.catchAllCause((cause) => Effect.logWarning('Job status EventBus publish failed', { cause: String(cause), jobId }))),
         },
     } as const;
-    const _findDuplicate = (jobId: string, tenantId: string, dedupeKey: string) => _runtime.db.run(
-        tenantId,
-        database.jobs.one([
-            { raw: sql`correlation->>'dedupe' = ${dedupeKey}` },
-            { field: 'status', op: 'in', values: ['queued', 'processing'] },
-        ]),
-    ).pipe(Effect.mapError((error) => JobError.from(jobId, 'Processing', error)));
+    const _findDuplicate = (jobId: string, tenantId: string, dedupeKey: string) =>
+        _runtime.db.run(tenantId, database.jobs.byActiveDedupe(dedupeKey)).pipe(
+            Effect.mapError((error) => JobError.from(jobId, 'Processing', error)),
+        );
     const _lifecycle = (status: Exclude<typeof JobStatusSchema.Type, 'queued'>, input: { readonly attempts?: number; readonly envelope: typeof JobPayload.Type; readonly error?: string; readonly extra?: (state: JobState) => Effect.Effect<void, unknown, unknown>; readonly jobId: string; readonly reason?: string; readonly result?: unknown; readonly timestamp: number }) =>
         _runtime.state.transition(input.jobId, input.envelope.tenantId, status, input.timestamp, { attempts: input.attempts, error: input.error, result: input.result }).pipe(
             Effect.flatMap((state) => Match.value(state.status).pipe(

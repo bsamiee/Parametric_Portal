@@ -20,7 +20,7 @@ public readonly record struct ProtocolVersion {
         (Require.NonNegative(value: major, field: "Major"),
          Require.NonNegative(value: minor, field: "Minor"))
             .Apply(static (int validMajor, int validMinor) =>
-                new ProtocolVersion(major: validMajor, minor: validMinor)).As();
+                new ProtocolVersion(major: validMajor, minor: validMinor));
 }
 [StructLayout(LayoutKind.Auto)]
 public readonly record struct TelemetryContext {
@@ -36,8 +36,8 @@ public readonly record struct TelemetryContext {
     }
     public static Fin<TelemetryContext> Create(TraceId traceId, SpanId spanId, OperationTag operationTag, int attempt) =>
         attempt switch {
-            < 1 => Fin.Fail<TelemetryContext>(Error.New(message: "Attempt must be >= 1.")),
-            _ => Fin.Succ(new TelemetryContext(
+            < 1 => FinFail<TelemetryContext>(Error.New(message: "Attempt must be >= 1.")),
+            _ => FinSucc(new TelemetryContext(
                 traceId: traceId,
                 spanId: spanId,
                 operationTag: operationTag,
@@ -68,8 +68,8 @@ public sealed record AuthToken {
     }
     public static Fin<AuthToken> Create(TokenValue token, Instant issuedAt, Instant expiresAt) =>
         (expiresAt <= issuedAt) switch {
-            true => Fin.Fail<AuthToken>(Error.New(message: "ExpiresAt must be after IssuedAt.")),
-            false => Fin.Succ(new AuthToken(token: token, issuedAt: issuedAt, expiresAt: expiresAt))
+            true => FinFail<AuthToken>(Error.New(message: "ExpiresAt must be after IssuedAt.")),
+            false => FinSucc(new AuthToken(token: token, issuedAt: issuedAt, expiresAt: expiresAt))
         };
 }
 public sealed record FailureReason(ErrorCode Code, string Message) {
@@ -86,12 +86,15 @@ public sealed record SceneObjectRef {
     }
     public static Fin<SceneObjectRef> Create(ObjectId objectId, int sourceRevision, SceneObjectType typeTag) =>
         Require.NonNegative(value: sourceRevision, field: "SourceRevision")
-            .ToFin()
-            .Map(validSourceRevision =>
-                new SceneObjectRef(
-                    objectId: objectId,
-                    sourceRevision: validSourceRevision,
-                    typeTag: typeTag));
+            .Match(
+                Succ: (int validSourceRevision) =>
+                    FinSucc(new SceneObjectRef(
+                        objectId: objectId,
+                        sourceRevision: validSourceRevision,
+                        typeTag: typeTag)),
+                Fail: static (Seq<Error> errors) =>
+                    FinFail<SceneObjectRef>(errors.HeadOrNone().IfNone(
+                        Error.New(message: "SourceRevision must be non-negative."))));
 }
 
 // --- [STRUCTS] ---------------------------------------------------------------
@@ -119,7 +122,7 @@ public readonly record struct ExecutionMetadata {
                 new ExecutionMetadata(
                     durationMs: dur,
                     pluginRevision: rev,
-                    sourceRevision: srcRev)).As();
+                    sourceRevision: srcRev));
 }
 
 // --- [RECORDS] ---------------------------------------------------------------
@@ -140,10 +143,10 @@ public readonly record struct ScriptResult {
     }
     public static Fin<ScriptResult> Create(string commandName, int commandResult, int objectsCreatedCount) =>
         (string.IsNullOrWhiteSpace(commandName), commandResult is < 0 or > 6, objectsCreatedCount < 0) switch {
-            (true, _, _) => Fin.Fail<ScriptResult>(Error.New(message: "CommandName must not be empty.")),
-            (_, true, _) => Fin.Fail<ScriptResult>(Error.New(message: "CommandResult must be in 0-6 range.")),
-            (_, _, true) => Fin.Fail<ScriptResult>(Error.New(message: "ObjectsCreatedCount must be non-negative.")),
-            _ => Fin.Succ(new ScriptResult(
+            (true, _, _) => FinFail<ScriptResult>(Error.New(message: "CommandName must not be empty.")),
+            (_, true, _) => FinFail<ScriptResult>(Error.New(message: "CommandResult must be in 0-6 range.")),
+            (_, _, true) => FinFail<ScriptResult>(Error.New(message: "ObjectsCreatedCount must be non-negative.")),
+            _ => FinSucc(new ScriptResult(
                 commandName: commandName,
                 commandResult: commandResult,
                 objectsCreatedCount: objectsCreatedCount))

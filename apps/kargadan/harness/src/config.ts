@@ -1,5 +1,5 @@
 import { Config, Duration, Effect, Schema as S } from 'effect';
-import { ObjectRefSchema, OperationSchema } from './protocol/schemas';
+import { DEFAULT_LOOP_OPERATIONS, ObjectRefSchema, OperationSchema } from './protocol/schemas';
 
 // --- [FUNCTIONS] -------------------------------------------------------------
 
@@ -27,7 +27,7 @@ const HarnessConfig = {
         required: Config.string('KARGADAN_CAP_REQUIRED').pipe(Config.withDefault('read.scene.summary,write.object.create'), Config.map(_splitCsv)),
     }),
     resolveLoopOperations: Config.string('KARGADAN_LOOP_OPERATIONS').pipe(
-        Config.withDefault('read.object.metadata,write.object.update'),
+        Config.withDefault(DEFAULT_LOOP_OPERATIONS.join(',')),
         Config.map(_splitCsv),
         Effect.flatMap(S.decodeUnknown(S.Array(OperationSchema))),
     ),

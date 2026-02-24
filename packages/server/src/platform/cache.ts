@@ -4,7 +4,7 @@ import * as PersistenceRedis from '@effect/experimental/Persistence/Redis';
 import { layer as rateLimiterLayer, layerStoreMemory, RateLimitExceeded, RateLimiter } from '@effect/experimental/RateLimiter';
 import { layerStore as layerStoreRedis } from '@effect/experimental/RateLimiter/Redis';
 import { HttpMiddleware, HttpServerRequest, HttpServerResponse } from '@effect/platform';
-import { Clock, Data, Duration, Effect, Layer, Match, Metric, Option, PrimaryKey, Redacted, Schedule, Schema as S, type Scope } from 'effect';
+import { Clock, Data, Duration, Effect, Layer, Match, Metric, Option, PrimaryKey, Redacted, Schedule, Schema as S, type Scope, Boolean as B } from 'effect';
 import { constant, flow } from 'effect/Function';
 import Redis, { type RedisOptions } from 'ioredis';
 import { Context } from '../context.ts';
@@ -63,10 +63,29 @@ const _makeKeyRegistry = () => {
     };
     return { refs, register, unregister } as const;
 };
+const _matchesWildcard = (pattern: string, key: string) =>
+    B.match(pattern.includes('*'), {
+        onFalse: () => key === pattern,
+        onTrue: () => {
+            const segments = pattern.split('*');
+            const start = segments[0] ?? '';
+            const end = segments.at(-1) ?? '';
+            const inOrderCursor = segments
+                .slice(1, -1)
+                .filter((segment) => segment !== '')
+                .reduce<number | undefined>(
+                    (cursor, segment) => cursor === undefined
+                        ? undefined
+                        : ((next) => next === -1 ? undefined : next + segment.length)(key.indexOf(segment, cursor)),
+                    start.length,
+                );
+            return key.startsWith(start) && key.endsWith(end) && inOrderCursor !== undefined && inOrderCursor <= key.length - end.length;
+        },
+    });
 const _invalidateLocal = (refs: Map<string, Map<string, number>>, reactivity: { readonly invalidate: (keys: ReadonlyArray<string>) => Effect.Effect<void> }, mode: 'key' | 'pattern', storeId: string, target: string) => {
     const keys = mode === 'key'
         ? [target]
-        : [...(refs.get(storeId)?.keys() ?? [])].filter((key) => new RegExp(`^${target.replaceAll(/[$()*+.?[\\\]^{|}]/g, String.raw`\$&`).replaceAll(String.raw`\*`, '.*')}$`).test(key)); // NOSONAR S3358
+        : [...(refs.get(storeId)?.keys() ?? [])].filter((key) => _matchesWildcard(target, key));
     return Effect.forEach(keys, (key) => reactivity.invalidate([`${storeId}:${key}`]), { discard: true }).pipe(Effect.as(keys.length));
 };
 

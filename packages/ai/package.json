@@ -13,20 +13,10 @@
             "import": "./src/runtime.ts",
             "default": "./src/runtime.ts"
         },
-        "./runtime-provider": {
-            "types": "./src/runtime-provider.ts",
-            "import": "./src/runtime-provider.ts",
-            "default": "./src/runtime-provider.ts"
-        },
         "./search": {
             "types": "./src/search.ts",
             "import": "./src/search.ts",
             "default": "./src/search.ts"
-        },
-        "./mcp": {
-            "types": "./src/mcp.ts",
-            "import": "./src/mcp.ts",
-            "default": "./src/mcp.ts"
         }
     },
     "scripts": {
@@ -44,7 +34,6 @@
         "@effect/platform": "catalog:",
         "@parametric-portal/database": "workspace:*",
         "@parametric-portal/server": "workspace:*",
-        "@parametric-portal/types": "workspace:*",
         "effect": "catalog:"
     },
     "devDependencies": {

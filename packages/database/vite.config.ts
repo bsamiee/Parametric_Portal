@@ -9,6 +9,7 @@ export default defineConfig(
     Effect.runSync(
         createConfig({
             entry: {
+                'agent-persistence': './src/agent-persistence.ts',
                 client: './src/client.ts',
                 factory: './src/factory.ts',
                 field: './src/field.ts',

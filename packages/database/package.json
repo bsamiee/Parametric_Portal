@@ -3,6 +3,11 @@
     "version": "2.0.1",
     "type": "module",
     "exports": {
+        "./agent-persistence": {
+            "types": "./src/agent-persistence.ts",
+            "import": "./src/agent-persistence.ts",
+            "default": "./src/agent-persistence.ts"
+        },
         "./client": {
             "types": "./src/client.ts",
             "import": "./src/client.ts",

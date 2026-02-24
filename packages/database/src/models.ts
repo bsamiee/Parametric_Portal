@@ -10,9 +10,20 @@ import { Schema as S } from 'effect';
 
 // --- [SCHEMA] ----------------------------------------------------------------
 
+const SearchSurfaceValues = ['app', 'user', 'asset', 'auditLog'] as const;
+const AgentPersistenceEntityValues = ['agentSession', 'agentToolCall', 'agentCheckpoint'] as const;
+const AgentSessionStatusValues = ['running', 'completed', 'failed', 'interrupted'] as const;
+const AgentToolCallStatusValues = ['ok', 'error'] as const;
+const SearchSurfaceSchema = S.Literal(...SearchSurfaceValues);
+const AgentPersistenceEntitySchema = S.Literal(...AgentPersistenceEntityValues);
+const AgentSessionStatusSchema = S.Literal(...AgentSessionStatusValues);
+const AgentToolCallStatusSchema = S.Literal(...AgentToolCallStatusValues);
 const RoleSchema =           S.Literal('owner', 'admin', 'member', 'viewer', 'guest');
 const OAuthProviderSchema =  S.Literal('apple', 'github', 'google', 'microsoft');
 const JobStatusSchema =      S.Literal('queued', 'processing', 'complete', 'failed', 'cancelled');
+const JobPrioritySchema =    S.Literal('critical', 'high', 'normal', 'low');
+const NotificationStatusSchema = S.Literal('queued', 'sending', 'delivered', 'failed', 'dlq');
+const NotificationChannelSchema = S.Literal('email', 'webhook', 'inApp');
 const AuditOperationSchema = S.Literal(
     'create', 'update', 'delete', 'read', 'list', 'status',
     'login', 'refresh', 'revoke', 'revokeByIp',
@@ -25,6 +36,26 @@ const AuditOperationSchema = S.Literal(
     'purge-job-dlq', 'purge-kv-store', 'purge-mfa-secrets', 'purge-oauth-accounts',
     'archive', 'purge-tenant',
 );
+const JobCorrelationSchema = S.Struct({
+    batch:  S.optional(S.NonEmptyTrimmedString),
+    dedupe: S.optional(S.NonEmptyTrimmedString),
+});
+const NotificationCorrelationSchema = S.Struct({
+    dedupe: S.optional(S.NonEmptyTrimmedString),
+    job:    S.optional(S.String),
+});
+const NotificationDeliveryErrorSchema = S.Struct({
+    deliveryId: S.optional(S.String),
+    message:    S.String,
+    provider:   S.optional(S.String),
+    tag:        S.String,
+});
+const NotificationDeliverySchema = S.Struct({
+    at:       S.optional(S.DateFromSelf),
+    error:    S.optional(S.Union(S.String, NotificationDeliveryErrorSchema)),
+    provider: S.optional(S.String),
+});
+const AgentMetadataSchema = S.Record({ key: S.String, value: S.Unknown });
 const PreferencesSchema = S.Struct({
     channels:   S.Struct({email: S.Boolean, inApp: S.Boolean, webhook: S.Boolean,}),
     mutedUntil: S.NullOr(S.String),
@@ -41,9 +72,21 @@ const FeatureFlagsSchema = S.Struct({
     enableRealtime:        S.optionalWith(S.Int.pipe(S.between(0, 100)), { default: () => 100 }),
     enableWebhooks:        S.optionalWith(S.Int.pipe(S.between(0, 100)), { default: () => 0 }),
 });
+const WebhookUrlSchema = S.String.pipe(
+    S.filter((value) => {
+        const parsed = URL.canParse(value) ? new URL(value) : null;
+        return parsed !== null
+            && parsed.protocol === 'https:'
+            && parsed.username === ''
+            && parsed.password === ''
+            && parsed.hostname !== ''
+            && !parsed.hostname.endsWith('.');
+    }, { message: () => 'Expected a valid https webhook URL without embedded credentials' }),
+    S.brand('WebhookUrl'),
+);
 const AppWebhookSchema = S.Struct({
     active:     S.Boolean,
-    endpoint:   S.Struct({secret: S.String.pipe(S.minLength(32)), timeout: S.optionalWith(S.Number, { default: () => 5000 }), url: S.String.pipe(S.pattern(/^https:\/\/[a-zA-Z0-9]/)),}),
+    endpoint:   S.Struct({secret: S.String.pipe(S.minLength(32)), timeout: S.optionalWith(S.Number, { default: () => 5000 }), url: WebhookUrlSchema,}),
     eventTypes: S.Array(S.String),
 });
 const AppSettingsSchema = S.Struct({
@@ -199,14 +242,16 @@ class Job extends Model.Class<Job>('Job')({
     appId:        S.UUID,
     type:         S.String,
     status:       JobStatusSchema,
-    priority:     S.Literal('critical', 'high', 'normal', 'low'),
+    priority:     JobPrioritySchema,
     payload:      S.Unknown,
     output:       Model.FieldOption(S.Struct({ result: S.optional(S.Unknown), progress: S.optional(S.Struct({ message: S.String, pct: S.Number })) })),
     history:      S.Array(S.extend(_TimestampSchema, S.Struct({ error: S.optional(S.String), status: JobStatusSchema }))),
     retryCurrent: S.Number,
     retryMax:     S.Number,
     scheduledAt:  Model.FieldOption(S.DateFromSelf),
-    correlation:  Model.FieldOption(S.Struct({ batch: S.optional(S.String), dedupe: S.optional(S.String) })),
+    correlation:  Model.FieldOption(JobCorrelationSchema),
+    dedupeKey:    Model.Generated(S.NullOr(S.String)),
+    batchKey:     Model.Generated(S.NullOr(S.String)),
     completedAt:  Model.FieldOption(S.DateFromSelf),
     updatedAt:    Model.DateTimeUpdateFromDate,
 }) {}
@@ -235,15 +280,60 @@ class Notification extends Model.Class<Notification>('Notification')({
     id:           Model.Generated(S.UUID),
     appId:        S.UUID,
     userId:       Model.FieldOption(S.UUID),
-    channel:      S.Literal('email', 'webhook', 'inApp'),
+    channel:      NotificationChannelSchema,
     template:     S.NonEmptyTrimmedString,
-    status:       S.Literal('queued', 'sending', 'delivered', 'failed', 'dlq'),
+    status:       NotificationStatusSchema,
     recipient:    Model.FieldOption(S.String),
     payload:      S.Unknown,
-    delivery:     Model.FieldOption(S.Struct({ error: S.optional(S.String), provider: S.optional(S.String), at: S.optional(S.DateFromSelf) })),
+    delivery:     Model.FieldOption(NotificationDeliverySchema),
     retryCurrent: S.Number,
     retryMax:     S.Number,
-    correlation:  Model.FieldOption(S.Struct({ job: S.optional(S.String), dedupe: S.optional(S.String) })),
+    correlation:  Model.FieldOption(NotificationCorrelationSchema),
+    dedupeKey:    Model.Generated(S.NullOr(S.String)),
+    jobKey:       Model.Generated(S.NullOr(S.String)),
+    updatedAt:    Model.DateTimeUpdateFromDate,
+}) {}
+
+// --- [AGENT: SESSION] --------------------------------------------------------
+class AgentSession extends Model.Class<AgentSession>('AgentSession')({
+    id:            Model.Generated(S.UUID),
+    appId:         S.UUID,
+    userId:        Model.FieldOption(S.UUID),
+    runId:         S.UUID,
+    status:        AgentSessionStatusSchema,
+    toolCallCount: S.Int,
+    error:         Model.FieldOption(S.String),
+    metadata:      AgentMetadataSchema,
+    startedAt:     Model.Generated(S.DateFromSelf),
+    endedAt:       Model.FieldOption(S.DateFromSelf),
+    updatedAt:     Model.DateTimeUpdateFromDate,
+}) {}
+
+// --- [AGENT: TOOL_CALL] ------------------------------------------------------
+class AgentToolCall extends Model.Class<AgentToolCall>('AgentToolCall')({
+    id:         Model.Generated(S.UUID),
+    appId:      S.UUID,
+    sessionId:  S.UUID,
+    runId:      S.UUID,
+    sequence:   S.Int,
+    operation:  S.NonEmptyTrimmedString,
+    params:     S.Unknown,
+    result:     Model.FieldOption(S.Unknown),
+    durationMs: S.Int,
+    status:     AgentToolCallStatusSchema,
+    error:      Model.FieldOption(S.String),
+    createdAt:  Model.Generated(S.DateFromSelf),
+}) {}
+
+// --- [AGENT: CHECKPOINT] -----------------------------------------------------
+class AgentCheckpoint extends Model.Class<AgentCheckpoint>('AgentCheckpoint')({
+    sessionId:    S.UUID,
+    appId:        S.UUID,
+    loopState:    S.Unknown,
+    chatJson:     S.String,
+    stateHash:    S.String,
+    sceneSummary: Model.FieldOption(S.Unknown),
+    sequence:     S.Int,
     updatedAt:    Model.DateTimeUpdateFromDate,
 }) {}
 
@@ -259,8 +349,10 @@ class KvStore extends Model.Class<KvStore>('KvStore')({
 // --- [EXPORT] ----------------------------------------------------------------
 
 export {
-    ApiKey, App, Asset, AuditLog, Job, JobDlq, JobStatusSchema, KvStore, MfaSecret, Notification,
+    AgentCheckpoint, AgentMetadataSchema, AgentPersistenceEntitySchema, AgentPersistenceEntityValues, AgentSession,
+    AgentSessionStatusSchema, AgentSessionStatusValues, AgentToolCall, AgentToolCallStatusSchema, AgentToolCallStatusValues,
+    ApiKey, App, AppWebhookSchema, Asset, AuditLog, Job, JobCorrelationSchema, JobDlq, JobPrioritySchema, JobStatusSchema, KvStore, MfaSecret, Notification, NotificationChannelSchema, NotificationCorrelationSchema, NotificationDeliveryErrorSchema, NotificationDeliverySchema, NotificationStatusSchema,
     AppSettingsDefaults, AppSettingsSchema, FeatureFlagsSchema,
-    AuditOperationSchema, PreferencesSchema, OAuthProviderSchema,
-    OauthAccount, Permission, RoleSchema, Session, User, WebauthnCredential,
+    AuditOperationSchema, PreferencesSchema, OAuthProviderSchema, SearchSurfaceSchema, SearchSurfaceValues,
+    OauthAccount, Permission, RoleSchema, Session, User, WebauthnCredential, WebhookUrlSchema,
 };

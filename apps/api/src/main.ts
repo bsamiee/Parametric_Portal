@@ -6,11 +6,10 @@ import { createServer } from 'node:http';
 import { HttpApiBuilder, HttpApiSwagger, HttpMiddleware, HttpServer, HttpServerResponse } from '@effect/platform';
 import { NodeFileSystem, NodeHttpServer, NodeRuntime } from '@effect/platform-node';
 import { AiRuntime } from '@parametric-portal/ai/runtime';
-import { AiRuntimeProvider } from '@parametric-portal/ai/runtime-provider';
 import { SearchService } from '@parametric-portal/ai/search';
 import { Client } from '@parametric-portal/database/client';
 import { DatabaseService } from '@parametric-portal/database/repos';
-import { ParametricApi } from '@parametric-portal/server/api';
+import { ParametricApi, TenantAsyncContextRoutePrefixes, TenantExemptRoutePrefixes } from '@parametric-portal/server/api';
 import { Middleware } from '@parametric-portal/server/middleware';
 import { Auth } from '@parametric-portal/server/domain/auth';
 import { FeatureService } from '@parametric-portal/server/domain/features';
@@ -74,8 +73,7 @@ const CoreServicesLayer = Layer.mergeAll(
     NotificationService.Default,
     StorageService.Default,
     TransferService.Default,
-    AiRuntime.Default,
-    AiRuntimeProvider.Server,
+    AiRuntime.Live,
     SearchService.Default,
     JobService.Default,
     PollingService.Default,
@@ -143,8 +141,8 @@ const ServerLayer = Layer.unwrapEffect(Effect.gen(function* () {
         sessionLookup: (hash) => auth.session.lookup(hash),
     });
     return HttpApiBuilder.serve((application) => Middleware.pipeline(database, {
-        tenantAsyncContextPrefixes: ['/api/v1/admin/events', '/api/v1/jobs/subscribe', '/api/v1/users/me/notifications/subscribe', '/api/v1/ws'] as const,
-        tenantExemptPrefixes: ['/api/health', '/api/v1/traces', '/api/v1/metrics', '/api/v1/logs', '/docs'] as const,
+        tenantAsyncContextPrefixes: TenantAsyncContextRoutePrefixes,
+        tenantExemptPrefixes: TenantExemptRoutePrefixes,
     })(application).pipe(
         CacheService.headers,
         HttpMiddleware.logger,

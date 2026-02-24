@@ -20,9 +20,9 @@ internal static class DomainBridge {
         where TValueObject : ITryCreateFactory<TValueObject, TKey>
         where TKey : notnull =>
         TValueObject.TryCreate(candidate, out TValueObject item, out ValidationError? validationError) switch {
-            true => Fin.Succ(item),
-            false when validationError is { Message: { } message } => Fin.Fail<TValueObject>(Error.New(message)),
-            _ => Fin.Fail<TValueObject>(
+            true => FinSucc(item),
+            false when validationError is { Message: { } message } => FinFail<TValueObject>(Error.New(message)),
+            _ => FinFail<TValueObject>(
                 Error.New($"{typeof(TValueObject).Name} validation failed for '{candidate}'."))
         };
     // --- [SMART_ENUMS] --------------------------------------------------------
@@ -30,7 +30,7 @@ internal static class DomainBridge {
         where TEnum : class, ISmartEnum<TKey, TEnum, ValidationError>
         where TKey : notnull =>
         TEnum.TryGet(candidate, out TEnum? item) switch {
-            true when item is { } value => Fin.Succ(value),
-            _ => Fin.Fail<TEnum>(Error.New($"Unknown {typeof(TEnum).Name} '{candidate}'."))
+            true when item is { } value => FinSucc(value),
+            _ => FinFail<TEnum>(Error.New($"Unknown {typeof(TEnum).Name} '{candidate}'."))
         };
 }

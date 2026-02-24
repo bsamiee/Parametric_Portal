@@ -1,123 +1,180 @@
-# [H1][ENTITY_MODULE]
->**Dictum:** *Entity-centric modules unify schema, command algebra, failure algebra, projections, and execution.*
+# [H1][ENTITY_MODULE_TEMPLATE]
+>**Dictum:** *One module. One schema. One execute. Zero imperative branching.*
 
-<br>
+Use for bounded domain entities that own state transitions, participate in serialization boundaries, or require codec/Hash/Equal derivation. Not for internal intermediates that never leave a module. Fill `${...}` placeholders, delete guidance comments, run `pnpm exec nx run-many -t typecheck`.
 
-Produces one self-contained domain module: schema, projections, command constructors, failure constructors, and a single polymorphic entrypoint (`execute`).
+---
 
-**Budget:** 225 LOC cap per module. See SKILL.md section 2 for contracts.
-**References:** `objects.md` (schema), `matching.md` (dispatch), `errors.md` (failure algebra), `types.md` (const+namespace merge).
-**Workflow:** fill placeholders, remove guidance blocks, verify `pnpm exec nx run-many -t typecheck`.
+## Placeholders
 
-**Placeholders**
+| [INDEX] | [PLACEHOLDER] | [EXAMPLE]              | [NOTES]                                         |
+| :-----: | ------------- | ---------------------- | ----------------------------------------------- |
+|   [1]   | `${Entity}`   | `Workspace`            | PascalCase entity name; used in namespace merge |
+|   [2]   | `${entity}`   | `workspace`            | Lowercase `_tag` for `S.TaggedClass`            |
+|   [3]   | `${EntityId}` | `WorkspaceId`          | Brand name for primary key                      |
+|   [4]   | `${OwnerId}`  | `UserId`               | Brand name for owning identity                  |
+|   [5]   | `${status}`   | `'active', 'archived'` | `S.Literal` variants for lifecycle              |
+|   [6]   | `${reasons}`  | `'not_found', ...`     | Polymorphic error `reason` literals             |
 
-| [INDEX] | [PLACEHOLDER]        | [EXAMPLE]                           |
-| :-----: | -------------------- | ----------------------------------- |
-|   [1]   | `${EntityName}`      | `Invoice`                           |
-|   [2]   | `${entity-tag}`      | `invoice`                           |
-|   [3]   | `${IdBrand}`         | `InvoiceId`                         |
-|   [4]   | `${state-literals}`  | `'draft', 'issued', 'paid', 'void'` |
-|   [5]   | `${domain-fields}`   | `amount: S.Positive, ...`           |
-|   [6]   | `${CommandVariants}` | See guidance below                  |
-|   [7]   | `${FailureVariants}` | See guidance below                  |
-|   [8]   | `${match-cases}`     | `$match` case object entries        |
+---
 
 ```typescript
-import { Data, Effect, HashMap, Option, Schema as S } from 'effect';
-
+import { Data, DateTime, Effect, Option, Schema as S, pipe } from 'effect';
+import { Model } from '@effect/sql';
+// --- [TYPES] -----------------------------------------------------------------
+const _${EntityId} = S.UUID.pipe(S.brand('${EntityId}'));
+const _${OwnerId}  = S.UUID.pipe(S.brand('${OwnerId}'));
 // --- [SCHEMA] ----------------------------------------------------------------
-
-const ${EntityName}Id = S.UUID.pipe(S.brand('${IdBrand}'));
-
-class ${EntityName}Schema extends S.TaggedClass<${EntityName}Schema>()('${entity-tag}', {
-    id:        ${EntityName}Id,
-    revision:  S.Int.pipe(S.nonNegative()),
-    state:     S.Literal(${state-literals}),
-    ${domain-fields}
-    retiredAt: S.OptionFromNullOr(S.DateTimeUtc),
+// why: TaggedClass -- entity crosses serialization boundary; _tag enables union dispatch
+class _${Entity}Schema extends S.TaggedClass<_${Entity}Schema>()(
+    '${entity}',
+    {
+        id:        _${EntityId},
+        name:      S.NonEmptyTrimmedString,
+        ownerId:   _${OwnerId},
+        status:    S.Literal(${status}),
+        createdAt: S.DateTimeUtc,
+        updatedAt: S.DateTimeUtc,
+    },
+) {}
+// Projections: derive inline -- never a separate class
+const _CreateInput = _${Entity}Schema.pipe(S.pick('name', 'ownerId'));
+const _UpdateInput = _${Entity}Schema.pipe(S.pick('name'), S.partial);
+// --- [TABLES] ----------------------------------------------------------------
+// why: Model.Class adds field modifiers for SQL generation; mirrors domain schema
+class _${Entity}Record extends Model.Class<_${Entity}Record>('${Entity}Record')({
+    id:        Model.Generated(_${EntityId}),
+    name:      S.NonEmptyTrimmedString,
+    ownerId:   _${OwnerId},
+    status:    S.Literal(${status}),
+    deletedAt: Model.FieldOption(S.DateFromSelf),
+    updatedAt: Model.DateTimeUpdateFromDate,
 }) {}
-
-// --- [PROJECTIONS] -----------------------------------------------------------
-
-const projection = {
-    create: ${EntityName}Schema.pipe(S.pick('state', 'revision'), S.mutable),
-    patch:  ${EntityName}Schema.pipe(S.pick('state', 'retiredAt'), S.partial),
-    read:   ${EntityName}Schema,
-} as const;
-const decode = {
-    create: S.decodeUnknown(projection.create),
-    patch:  S.decodeUnknown(projection.patch),
-    read:   S.decodeUnknown(projection.read),
-} as const;
-// Immutable index by id (Hash + Equal derived from TaggedClass)
-const byId = (entities: ReadonlyArray<typeof ${EntityName}Schema.Type>) => HashMap.fromIterable(entities.map((e) => [e.id, e] as const));
-
-// --- [FAILURES] --------------------------------------------------------------
-
-// Guidance: define 2–5 internal failures as Data.TaggedError classes.
-// Keep the union small; use reason literals on a single error when needed.
-
-class NotFound extends Data.TaggedError('NotFound')<{ readonly id: typeof ${EntityName}Id.Type }> {}
-class Stale extends Data.TaggedError('Stale')<{ readonly id: typeof ${EntityName}Id.Type; readonly expected: number; readonly actual: number }> {}
-${FailureVariants}
-
-const Failure = { NotFound, Stale } as const;
-
-// --- [COMMANDS] --------------------------------------------------------------
-
-// Guidance: generic A = id, generic B = entity.
-interface CommandDef extends Data.TaggedEnum.WithGenerics<2> {
-    readonly taggedEnum: {${CommandVariants}};
+// --- [CONSTANTS] -------------------------------------------------------------
+const _LIMITS = { nameMaxLength: 128 } as const;
+// --- [ERRORS] ----------------------------------------------------------------
+// why: one polymorphic error with reason field collapses 3-5 variants into one class;
+//      from() wraps unknown causes while passing through known typed errors
+class _${Entity}Error extends Data.TaggedError('${Entity}Error')<{
+    readonly operation: string;
+    readonly reason:    ${reasons};
+    readonly details?:  string;
+    readonly cause?:    unknown;
+}> {
+    override get message() {
+        return `${Entity}Error[${this.operation}/${this.reason}]${this.details ? `: ${this.details}` : ''}`;
+    }
+    static readonly from = (operation: string) => (cause: unknown): _${Entity}Error =>
+        cause instanceof _${Entity}Error
+            ? cause
+            : new _${Entity}Error({ cause, operation, reason: 'unknown' });
+    static readonly notFound  = (operation: string, details?: string) =>
+        new _${Entity}Error({ details, operation, reason: 'not_found' });
+    static readonly conflict  = (operation: string, details: string) =>
+        new _${Entity}Error({ details, operation, reason: 'conflict' });
+    static readonly forbidden = (operation: string, details: string) =>
+        new _${Entity}Error({ details, operation, reason: 'forbidden' });
 }
-const Command = Data.taggedEnum<CommandDef>();
-
-// --- [EXECUTION] -------------------------------------------------------------
-
-const execute = (
-    entity: typeof ${EntityName}Schema.Type,
-    command: Data.TaggedEnum.Value<CommandDef, [typeof ${EntityName}Id.Type, typeof ${EntityName}Schema.Type]>,
-): Effect.Effect<typeof ${EntityName}Schema.Type, InstanceType<(typeof Failure)[keyof typeof Failure]>> =>
-    Command.$match(command, {${match-cases}});
-
+// --- [FUNCTIONS] -------------------------------------------------------------
+// why: closed union via Data.TaggedEnum; $match exhausts all variants
+type _Command = Data.TaggedEnum<{
+    readonly Create:  { readonly name: string; readonly ownerId: typeof _${OwnerId}.Type };
+    readonly Rename:  { readonly name: string; readonly actorId: typeof _${OwnerId}.Type };
+    readonly Archive: { readonly actorId: typeof _${OwnerId}.Type };
+    readonly Restore: { readonly actorId: typeof _${OwnerId}.Type };
+}>;
+const _Command = Data.taggedEnum<_Command>();
+// why: single polymorphic entrypoint -- state + command -> next state or failure;
+//      $match enforces exhaustiveness at compile time; zero if/else/switch;
+//      Effect.fn provides automatic span for tracing without manual instrumentation
+const _execute = Effect.fn('${Entity}.execute')(function* (
+    entity: typeof _${Entity}Schema.Type,
+    command: _Command,
+) {
+    return yield* _Command.$match(command, {
+        Create: ({ name, ownerId }) =>
+            pipe(
+                Effect.succeed(name),
+                Effect.filterOrFail(
+                    (value) => value.length <= _LIMITS.nameMaxLength,
+                    () => _${Entity}Error.conflict('create', `name exceeds ${_LIMITS.nameMaxLength} chars`),
+                ),
+                Effect.map(() => ({ ...entity, name, ownerId, status: 'active' as const })),
+            ),
+        Rename: ({ name, actorId }) =>
+            pipe(
+                Effect.succeed(entity),
+                Effect.filterOrFail(
+                    (current) => current.ownerId === actorId,
+                    () => _${Entity}Error.forbidden('rename', 'only the owner may rename'),
+                ),
+                Effect.map((current) => ({ ...current, name, updatedAt: DateTime.unsafeNow() })),
+            ),
+        Archive: ({ actorId }) =>
+            pipe(
+                Effect.succeed(entity),
+                Effect.filterOrFail(
+                    (current) => current.ownerId === actorId,
+                    () => _${Entity}Error.forbidden('archive', 'only the owner may archive'),
+                ),
+                Effect.filterOrFail(
+                    (current) => current.status !== 'archived',
+                    () => _${Entity}Error.conflict('archive', 'already archived'),
+                ),
+                Effect.map((current) => ({
+                    ...current, status: 'archived' as const, updatedAt: DateTime.unsafeNow(),
+                })),
+            ),
+        Restore: ({ actorId }) =>
+            pipe(
+                Effect.succeed(entity),
+                Effect.filterOrFail(
+                    (current) => current.ownerId === actorId,
+                    () => _${Entity}Error.forbidden('restore', 'only the owner may restore'),
+                ),
+                Effect.map((current) => ({
+                    ...current, status: 'active' as const, updatedAt: DateTime.unsafeNow(),
+                })),
+            ),
+    });
+});
 // --- [EXPORT] ----------------------------------------------------------------
-
-export const ${EntityName} = {
-    Id: ${EntityName}Id, Schema: ${EntityName}Schema, projection, decode, byId,
-    Command, Failure, execute,
+// biome-ignore lint/correctness/noUnusedVariables: const+namespace merge pattern
+const ${Entity} = {
+    Id:          _${EntityId},
+    OwnerId:     _${OwnerId},
+    Schema:      _${Entity}Schema,
+    Record:      _${Entity}Record,
+    CreateInput: _CreateInput,
+    UpdateInput: _UpdateInput,
+    Command:     _Command,
+    Error:       _${Entity}Error,
+    execute:     _execute,
+    limits:      _LIMITS,
 } as const;
-
-export namespace ${EntityName} {
-    export type Id = typeof ${EntityName}Id.Type;
-    export type Type = typeof ${EntityName}Schema.Type;
-    export type Command = Data.TaggedEnum.Value<CommandDef, [Id, Type]>;
-    export type Failure = InstanceType<(typeof Failure)[keyof typeof Failure]>;
+namespace ${Entity} {
+    export type Id          = typeof _${EntityId}.Type;
+    export type OwnerId     = typeof _${OwnerId}.Type;
+    export type Type        = typeof _${Entity}Schema.Type;
+    export type Record      = typeof _${Entity}Record.Type;
+    export type CreateInput = typeof _CreateInput.Type;
+    export type UpdateInput = typeof _UpdateInput.Type;
+    export type Command     = _Command;
+    export type Error       = _${Entity}Error;
 }
+export { ${Entity} };
 ```
 
-**Guidance: `${CommandVariants}`**
-```typescript
-readonly Open:  { readonly id: this['A']; readonly entity: this['B'] };
-readonly Amend: { readonly id: this['A']; readonly revision: number; readonly delta: Record<string, unknown> };
-readonly Close: { readonly id: this['A']; readonly at: Date };
-```
+---
 
-**Guidance: `${FailureVariants}`**
-```typescript
-class Malformed extends Data.TaggedError('Malformed')<{ readonly issues: ReadonlyArray<string> }> {}
-// then add it to Failure map:
-// const Failure = { NotFound, Stale, Malformed } as const;
-```
+## Post-Scaffold Checklist
 
-**Guidance: `${match-cases}`**
-```typescript
-Open:  ({ entity }) => Effect.succeed({ ...entity, state: 'active' as const, retiredAt: Option.none() }),
-Close: ({ at }) => Effect.succeed({ ...entity, state: 'void' as const, retiredAt: Option.some(S.DateTimeUtcFromDate.make(at)) }),
-Amend: ({ id, revision, delta }) =>
-    Effect.succeed(entity).pipe(
-        Effect.filterOrFail(
-            (current) => current.revision < revision,
-            () => new Failure.Stale({ id, expected: entity.revision, actual: revision }),
-        ),
-        Effect.map((current) => ({ ...current, ...delta, revision })),
-    ),
-```
+- [ ] All `${...}` placeholders replaced with domain-specific values
+- [ ] `_tag` string in `S.TaggedClass` matches lowercase entity name
+- [ ] Projections derived via `S.pick`/`S.omit`/`S.partial` -- no separate schema classes
+- [ ] Polymorphic error uses `reason` literal union -- max 5 reasons per entity
+- [ ] `_execute` wrapped in `Effect.fn('${Entity}.execute')` for automatic span tracing
+- [ ] `_execute` uses `$match` exhaustively -- zero `if`/`else`/`switch`
+- [ ] Guard conditions use `Effect.filterOrFail` -- not ternary chains
+- [ ] Namespace types derived from `typeof` runtime values -- no manual declarations
+- [ ] `pnpm exec nx run-many -t typecheck` passes

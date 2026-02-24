@@ -7,7 +7,7 @@ import { Activity, Workflow } from '@effect/workflow';
 import { FetchHttpClient, HttpClient, HttpClientError, HttpClientRequest } from '@effect/platform';
 import { SqlClient } from '@effect/sql';
 import { Cause, Clock, Duration, Effect, Function as F, Layer, Match, Metric, Option, PrimaryKey, Array as Arr, Schema as S, STM, Stream, TMap } from 'effect';
-import type { JobDlq } from '@parametric-portal/database/models';
+import { type JobDlq, WebhookUrlSchema } from '@parametric-portal/database/models';
 import { DatabaseService } from '@parametric-portal/database/repos';
 import { Context } from '../context.ts';
 import { Env } from '../env.ts';
@@ -40,7 +40,7 @@ const _SCHEMA = {
 // --- [CLASSES] ---------------------------------------------------------------
 
 class WebhookPayload extends S.Class<WebhookPayload>('WebhookPayload')({ data: S.Unknown, id: S.String, schemaVersion: S.optionalWith(S.Int.pipe(S.between(1, 255)), { default: () => 1 }), timestamp: S.Number, type: S.String }) {}
-class WebhookEndpoint extends S.Class<WebhookEndpoint>('WebhookEndpoint')({ secret: S.String.pipe(S.minLength(32)), timeout: S.optionalWith(S.Number, { default: () => 5000 }), url: S.String.pipe(S.pattern(/^https:\/\/[a-zA-Z0-9]/), S.brand('WebhookUrl')) }) {}
+class WebhookEndpoint extends S.Class<WebhookEndpoint>('WebhookEndpoint')({ secret: S.String.pipe(S.minLength(32)), timeout: S.optionalWith(S.Number, { default: () => 5000 }), url: WebhookUrlSchema }) {}
 class WebhookError extends S.TaggedError<WebhookError>()('WebhookError', { cause: S.optional(S.Unknown), deliveryId: S.optional(S.String), reason: _SCHEMA.ErrorReason, statusCode: S.optional(S.Number) }) {
     static readonly _props = {
         InvalidResponse: { retryable: false, terminal: true }, MaxRetries:      { retryable: false, terminal: true },

@@ -23,6 +23,8 @@ internal delegate Task<Fin<JsonElement>> MessageDispatcher(
 internal delegate Seq<EventEnvelope> EventEnvelopeDrain();
 internal delegate Unit EventEnvelopeRequeue(Seq<EventEnvelope> envelopes);
 internal sealed class WebSocketHost : IDisposable {
+    private const string EnvelopeTagField = "_tag";
+    private const string EventEnvelopeTag = "event";
     private const int EventPumpIntervalMs = 25;
     private const int ReceiveBufferSize = 16_384;
     private static readonly TimeSpan KeepAliveInterval = TimeSpan.FromSeconds(5);
@@ -32,12 +34,6 @@ internal sealed class WebSocketHost : IDisposable {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
         WriteIndented = false,
     };
-    private static readonly string PortFilePath =
-        Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-            ".kargadan",
-            "port");
-    private static readonly string PortFileTempPath = PortFilePath + ".tmp";
     private readonly MessageDispatcher _dispatcher;
     private readonly EventEnvelopeDrain _drainPublishedEvents;
     private readonly EventEnvelopeRequeue _requeueEvents;
@@ -62,13 +58,13 @@ internal sealed class WebSocketHost : IDisposable {
         _listener.Prefixes.Add($"http://127.0.0.1:{port}/");
         _listener.Start();
         Port = port;
-        WritePortFile(port: Port);
+        WebSocketPortFile.Write(port: Port);
         RhinoApp.WriteLine($"[Kargadan] WebSocket server listening on 127.0.0.1:{Port}");
         _ = Task.Run(() => AcceptLoopAsync(cancellationToken: _cts.Token));
     }
     internal void Stop() {
         _cts.Cancel();
-        DeletePortFile();
+        WebSocketPortFile.Delete();
         _activeWebSocket?.Dispose();
         _listener?.Close();
         RhinoApp.WriteLine("[Kargadan] WebSocket server stopped.");
@@ -90,33 +86,6 @@ internal sealed class WebSocketHost : IDisposable {
         using TcpListener listener = new(localaddr: IPAddress.Loopback, port: 0);
         listener.Start();
         return ((IPEndPoint)listener.LocalEndpoint).Port;
-    }
-    private static void WritePortFile(int port) {
-        string directory = Path.GetDirectoryName(PortFilePath)!;
-        _ = Directory.CreateDirectory(directory);
-        PortFilePayload payload = new(
-            Port: port,
-            Pid: Environment.ProcessId,
-            StartedAt: DateTimeOffset.UtcNow);
-        string json = JsonSerializer.Serialize(
-            value: payload,
-            options: JsonOptions);
-        File.WriteAllText(
-            path: PortFileTempPath,
-            contents: json);
-        File.Move(
-            sourceFileName: PortFileTempPath,
-            destFileName: PortFilePath,
-            overwrite: true);
-    }
-    private static void DeletePortFile() {
-        try {
-            File.Delete(PortFilePath);
-        } catch (IOException) {
-            // why: best-effort cleanup on shutdown
-        } catch (UnauthorizedAccessException) {
-            // why: best-effort cleanup on shutdown
-        }
     }
     private async Task AcceptLoopAsync(CancellationToken cancellationToken) {
         while (!cancellationToken.IsCancellationRequested) {
@@ -339,11 +308,11 @@ internal sealed class WebSocketHost : IDisposable {
                         cancellationToken: cancellationToken).ConfigureAwait(false);
                 } catch (WebSocketException exception) {
                     RhinoApp.WriteLine($"[Kargadan] Event send failed: {exception.Message}");
-                    _ = _requeueEvents(Seq(current) + remaining);
+                    _ = _requeueEvents(Seq1(current) + remaining);
                     return;
                 } catch (IOException exception) {
                     RhinoApp.WriteLine($"[Kargadan] Event send failed: {exception.Message}");
-                    _ = _requeueEvents(Seq(current) + remaining);
+                    _ = _requeueEvents(Seq1(current) + remaining);
                     return;
                 }
             }
@@ -378,20 +347,20 @@ internal sealed class WebSocketHost : IDisposable {
                 cancellationToken: cancellationToken).ConfigureAwait(false);
         } catch (JsonException exception) {
             RhinoApp.WriteLine($"[Kargadan] Message parse error: {exception.Message}");
-            return Fin.Fail<JsonElement>(Error.New(message: exception.Message));
+            return FinFail<JsonElement>(Error.New(message: exception.Message));
         }
     }
-    private Task<Fin<JsonElement>> DispatchByTagAsync(
+    private async Task<Fin<JsonElement>> DispatchByTagAsync(
         WebSocket webSocket,
         JsonElement message,
         CancellationToken cancellationToken) =>
-        ParseTransportTag(message: message).Match(
+        await ParseTransportTag(message: message).Match(
             Succ: tag => _dispatcher(
                 tag: tag,
                 message: message,
                 sendAckAsync: ackPayload => SendAckAsync(webSocket: webSocket, ackPayload: ackPayload),
                 cancellationToken: cancellationToken),
-            Fail: static error => Task.FromResult(Fin.Fail<JsonElement>(error)));
+            Fail: static error => Task.FromResult(FinFail<JsonElement>(error))).ConfigureAwait(false);
     private Task SendAckAsync(WebSocket webSocket, JsonElement ackPayload) =>
         SendBytesAsync(
             webSocket: webSocket,
@@ -432,7 +401,7 @@ internal sealed class WebSocketHost : IDisposable {
     private static byte[] SerializeEvent(EventEnvelope envelope) =>
         envelope.CausationRequestId.Match(
             Some: causationRequestId => JsonSerializer.SerializeToUtf8Bytes(new {
-                _tag = "event",
+                _tag = EventEnvelopeTag,
                 causationRequestId = (Guid)causationRequestId,
                 delta = envelope.Delta,
                 eventId = (Guid)envelope.EventId,
@@ -442,7 +411,7 @@ internal sealed class WebSocketHost : IDisposable {
                 telemetryContext = envelope.TelemetryContext,
             }, options: JsonOptions),
             None: () => JsonSerializer.SerializeToUtf8Bytes(new {
-                _tag = "event",
+                _tag = EventEnvelopeTag,
                 delta = envelope.Delta,
                 eventId = (Guid)envelope.EventId,
                 eventType = envelope.EventType.Key,
@@ -451,14 +420,13 @@ internal sealed class WebSocketHost : IDisposable {
                 telemetryContext = envelope.TelemetryContext,
             }, options: JsonOptions));
     private static Fin<TransportMessageTag> ParseTransportTag(JsonElement message) =>
-        message.TryGetProperty("_tag", out JsonElement tagElement) switch {
+        message.TryGetProperty(EnvelopeTagField, out JsonElement tagElement) switch {
             true when tagElement.ValueKind == JsonValueKind.String =>
                 DomainBridge.ParseSmartEnum<TransportMessageTag, string>(
                     candidate: (tagElement.GetString() ?? string.Empty).Trim()),
-            true => Fin.Fail<TransportMessageTag>(
-                Error.New(message: "Envelope _tag must be a string.")),
-            false => Fin.Fail<TransportMessageTag>(
-                Error.New(message: "Envelope _tag is required.")),
+            true => FinFail<TransportMessageTag>(
+                Error.New(message: $"Envelope {EnvelopeTagField} must be a string.")),
+            false => FinFail<TransportMessageTag>(
+                Error.New(message: $"Envelope {EnvelopeTagField} is required.")),
         };
-    private sealed record PortFilePayload(int Port, int Pid, DateTimeOffset StartedAt);
 }

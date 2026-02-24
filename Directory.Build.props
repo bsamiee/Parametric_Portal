@@ -53,6 +53,10 @@
         <RhinoTestingVersion>9.0.5-beta</RhinoTestingVersion>
     </PropertyGroup>
 
+    <PropertyGroup Condition="'$(MSBuildProjectName)' == 'ParametricPortal.Kargadan.Plugin'">
+        <LanguageExtCoreVersion>4.4.9</LanguageExtCoreVersion>
+    </PropertyGroup>
+
     <ItemGroup Label="Global Libraries" Condition="'$(IsLocalCSharpAnalyzerProject)' != 'true'">
         <PackageReference Include="LanguageExt.Core" Version="$(LanguageExtCoreVersion)" />
         <PackageReference Include="FluentValidation" Version="$(FluentValidationVersion)" />
@@ -82,6 +86,11 @@
         <Using Include="LanguageExt.Pretty" />
         <Using Include="LanguageExt.Traits.Domain" />
         <Using Include="LanguageExt.Prelude" Static="true" />
+    </ItemGroup>
+
+    <ItemGroup Label="Plugin LanguageExt Using Overrides" Condition="'$(MSBuildProjectName)' == 'ParametricPortal.Kargadan.Plugin'">
+        <Using Remove="LanguageExt.Traits" />
+        <Using Remove="LanguageExt.Traits.Domain" />
     </ItemGroup>
 
     <ItemGroup Label="Analyzer Packages" Condition="'$(IsLocalCSharpAnalyzerProject)' != 'true'">

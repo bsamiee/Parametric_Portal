@@ -13,8 +13,25 @@ using Rhino.Geometry;
 using static LanguageExt.Prelude;
 namespace ParametricPortal.Kargadan.Plugin.src.execution;
 
-internal delegate void AgentStateCallback(AgentUndoState state, bool isUndo);
+internal delegate Fin<Unit> AgentStateCallback(AgentUndoState state, bool isUndo);
 internal static class CommandExecutor {
+    private static class JsonFields {
+        internal const string From = "from";
+        internal const string LayerIndex = "layerIndex";
+        internal const string Line = "line";
+        internal const string Name = "name";
+        internal const string Point = "point";
+        internal const string Script = "script";
+        internal const string To = "to";
+        internal const string Translation = "translation";
+    }
+    private static class TextValues {
+        internal const string AgentAction = "Agent Action";
+        internal const string AgentStateSnapshot = "Agent State Snapshot";
+        internal const string AttributesModified = "attributes-modified";
+        internal const string Deleted = "deleted";
+        internal const string Transformed = "transformed";
+    }
     private static readonly Error ScriptNotExecuted =
         Error.New(message: "Rhino did not execute the script.");
     private static Error ScriptCancelled(string commandName) =>
@@ -59,14 +76,14 @@ internal static class CommandExecutor {
     private static Fin<JsonElement> ExecuteScriptOperation(
         RhinoDoc doc,
         JsonElement payload) {
-        string script = payload.TryGetProperty("script", out JsonElement scriptElement) switch {
+        string script = payload.TryGetProperty(JsonFields.Script, out JsonElement scriptElement) switch {
             true when scriptElement.ValueKind == JsonValueKind.String =>
                 (scriptElement.GetString() ?? string.Empty).Trim(),
             _ => string.Empty,
         };
         return script.Length switch {
-            0 => Fin.Fail<JsonElement>(
-                Error.New(message: "Payload 'script' property must be a non-empty string.")),
+            0 => FinFail<JsonElement>(
+                Error.New(message: $"Payload '{JsonFields.Script}' property must be a non-empty string.")),
             _ => ExecuteScript(
                 doc: doc,
                 commandScript: script,
@@ -78,7 +95,7 @@ internal static class CommandExecutor {
     private static Fin<JsonElement> ReadSceneSummary(
         RhinoDoc doc,
         CommandEnvelope envelope) =>
-        Fin.Succ(JsonSerializer.SerializeToElement(new {
+        FinSucc(JsonSerializer.SerializeToElement(new {
             activeView = doc.Views.ActiveView?.ActiveViewport.Name ?? string.Empty,
             layerCount = doc.Layers.Count,
             objectCount = doc.Objects.Count,
@@ -115,7 +132,7 @@ internal static class CommandExecutor {
     private static Fin<JsonElement> ReadLayerState(
         RhinoDoc doc,
         CommandEnvelope envelope) =>
-        Fin.Succ(JsonSerializer.SerializeToElement(new {
+        FinSucc(JsonSerializer.SerializeToElement(new {
             layers = doc.Layers
                 .Select(static layer => new {
                     index = layer.Index,
@@ -127,7 +144,7 @@ internal static class CommandExecutor {
     private static Fin<JsonElement> ReadViewState(
         RhinoDoc doc,
         CommandEnvelope envelope) =>
-        Fin.Succ(JsonSerializer.SerializeToElement(new {
+        FinSucc(JsonSerializer.SerializeToElement(new {
             activeView = doc.Views.ActiveView?.ActiveViewport.Name ?? string.Empty,
             viewports = doc.Views
                 .Select(static view => view.ActiveViewport.Name)
@@ -136,7 +153,7 @@ internal static class CommandExecutor {
     private static Fin<JsonElement> ReadToleranceUnits(
         RhinoDoc doc,
         CommandEnvelope envelope) =>
-        Fin.Succ(JsonSerializer.SerializeToElement(new {
+        FinSucc(JsonSerializer.SerializeToElement(new {
             absoluteTolerance = doc.ModelAbsoluteTolerance,
             angleToleranceRadians = doc.ModelAngleToleranceRadians,
             unitSystem = doc.ModelUnitSystem.ToString(),
@@ -146,8 +163,8 @@ internal static class CommandExecutor {
         OperationHandlers.TryGetValue(
             envelope.Operation.Key,
             out Func<RhinoDoc, CommandEnvelope, Fin<JsonElement>>? handler) switch {
-                true when handler is not null => Fin.Succ(handler),
-                _ => Fin.Fail<Func<RhinoDoc, CommandEnvelope, Fin<JsonElement>>>(
+                true when handler is not null => FinSucc(handler),
+                _ => FinFail<Func<RhinoDoc, CommandEnvelope, Fin<JsonElement>>>(
                     UnsupportedOperation(operation: envelope.Operation.Key)),
             };
     private static JsonElement SerializeObjectResult(Guid objectId, Option<string> status) =>
@@ -175,12 +192,12 @@ internal static class CommandExecutor {
             doc: doc,
             attributes: attributes,
             payload: envelope.Payload)
-        .Bind((_) => envelope.Payload.TryGetProperty("point", out JsonElement pointElement) switch {
+        .Bind((_) => envelope.Payload.TryGetProperty(JsonFields.Point, out JsonElement pointElement) switch {
             true => ParsePoint3d(pointElement).Map(static (Point3d point) => (GeometryBase)new Point(point)),
-            _ => envelope.Payload.TryGetProperty("line", out JsonElement lineElement) switch {
+            _ => envelope.Payload.TryGetProperty(JsonFields.Line, out JsonElement lineElement) switch {
                 true => ParseLine(lineElement).Map(static (Line line) => (GeometryBase)new LineCurve(line)),
-                _ => Fin.Fail<GeometryBase>(
-                    Error.New(message: "write.object.create requires payload.point or payload.line.")),
+                _ => FinFail<GeometryBase>(
+                    Error.New(message: $"write.object.create requires payload.{JsonFields.Point} or payload.{JsonFields.Line}.")),
             },
         })
         .Bind((GeometryBase geometry) =>
@@ -199,12 +216,12 @@ internal static class CommandExecutor {
                     doc: doc,
                     objectId: objectId),
                 objectId: objectId,
-                status: "deleted"));
+                status: TextValues.Deleted));
     private static Fin<JsonElement> HandleObjectUpdate(
         RhinoDoc doc,
         CommandEnvelope envelope) =>
         GetPrimaryObjectId(envelope: envelope).Bind((Guid objectId) =>
-            envelope.Payload.TryGetProperty("translation", out JsonElement translationElement) switch {
+            envelope.Payload.TryGetProperty(JsonFields.Translation, out JsonElement translationElement) switch {
                 true => ParseVector3d(translationElement).Bind((Vector3d translation) =>
                     MapObjectStatus(
                         operation: TransformObject(
@@ -212,7 +229,7 @@ internal static class CommandExecutor {
                             objectId: objectId,
                             transform: Transform.Translation(translation)),
                         objectId: objectId,
-                        status: "transformed")),
+                        status: TextValues.Transformed)),
                 _ => FindById(
                     doc: doc,
                     objectId: objectId).Bind((RhinoObject found) => {
@@ -222,36 +239,36 @@ internal static class CommandExecutor {
                             attributes: attributes,
                             payload: envelope.Payload)
                         .Bind((_) => MapObjectStatus(
-                            operation: ModifyAttributes(
-                                doc: doc,
-                                objectId: objectId,
-                                attributes: attributes),
+                                operation: ModifyAttributes(
+                                    doc: doc,
+                                    objectId: objectId,
+                                    attributes: attributes),
                             objectId: objectId,
-                            status: "attributes-modified"));
+                            status: TextValues.AttributesModified));
                     }),
             });
     private static Fin<Unit> ApplyAttributesFromPayload(
         RhinoDoc doc,
         ObjectAttributes attributes,
         JsonElement payload) {
-        Fin<Unit> layerResult = payload.TryGetProperty("layerIndex", out JsonElement layerElement) switch {
+        Fin<Unit> layerResult = payload.TryGetProperty(JsonFields.LayerIndex, out JsonElement layerElement) switch {
             true when layerElement.TryGetInt32(out int layerIndex) =>
                 (layerIndex >= 0 && layerIndex < doc.Layers.Count) switch {
                     true => SetLayerIndex(
                         attributes: attributes,
                         layerIndex: layerIndex),
-                    false => Fin.Fail<Unit>(
-                        Error.New(message: $"layerIndex {layerIndex} is out of range [0, {doc.Layers.Count}).")),
+                    false => FinFail<Unit>(
+                        Error.New(message: $"{JsonFields.LayerIndex} {layerIndex} is out of range [0, {doc.Layers.Count}).")),
                 },
-            _ => Fin.Succ(unit),
+            _ => FinSucc(unit),
         };
         return layerResult.Bind((_) =>
-            payload.TryGetProperty("name", out JsonElement nameElement) switch {
+            payload.TryGetProperty(JsonFields.Name, out JsonElement nameElement) switch {
                 true when nameElement.ValueKind == JsonValueKind.String =>
-                    Fin.Succ(SetName(
+                    FinSucc(SetName(
                         attributes: attributes,
                         name: nameElement.GetString() ?? string.Empty)),
-                _ => Fin.Succ(unit),
+                _ => FinSucc(unit),
             });
     }
     private static Unit SetName(ObjectAttributes attributes, string name) {
@@ -269,21 +286,21 @@ internal static class CommandExecutor {
         AgentStateCallback onUndoRedo) {
         string description = envelope.UndoScope
             .Map(static (UndoScope scope) => (string)scope)
-            .IfNone(noneValue: "Agent Action");
+            .IfNone(noneValue: TextValues.AgentAction);
         uint undoSerial = doc.BeginUndoRecord(description: description);
         Fin<JsonElement> result = handler(doc, envelope);
         _ = doc.AddCustomUndoEvent(
-            description: "Agent State Snapshot",
+            description: TextValues.AgentStateSnapshot,
             handler: MakeUndoHandler(onUndoRedo: onUndoRedo),
             tag: new AgentUndoState(
                 RequestId: envelope.Identity.RequestId,
                 UndoSerial: undoSerial));
         _ = doc.EndUndoRecord(undoRecordSerialNumber: undoSerial);
         return result.Match(
-            Succ: Fin.Succ,
+            Succ: FinSucc,
             Fail: (Error error) => {
                 _ = doc.Undo();
-                return Fin.Fail<JsonElement>(error);
+                return FinFail<JsonElement>(error);
             });
     }
     [BoundaryImperativeExemption(
@@ -309,7 +326,7 @@ internal static class CommandExecutor {
         RhinoObject[]? objectsSince = doc.Objects.AllObjectsSince(runtimeSerialNumber: serialBefore);
         int objectsCreatedCount = objectsSince?.Length ?? 0;
         return ran switch {
-            false => Fin.Fail<ScriptResult>(ScriptNotExecuted),
+            false => FinFail<ScriptResult>(ScriptNotExecuted),
             true => captured
                 .ToFin(Error.New(message: "RunScript completed without Command.EndCommand result."))
                 .Bind((CommandEventArgs commandArgs) =>
@@ -318,9 +335,9 @@ internal static class CommandExecutor {
                             commandName: commandArgs.CommandEnglishName,
                             commandResult: (int)commandArgs.CommandResult,
                             objectsCreatedCount: objectsCreatedCount),
-                        Result.Cancel => Fin.Fail<ScriptResult>(
+                        Result.Cancel => FinFail<ScriptResult>(
                             ScriptCancelled(commandName: commandArgs.CommandEnglishName)),
-                        _ => Fin.Fail<ScriptResult>(
+                        _ => FinFail<ScriptResult>(
                             Error.New(message: $"Command '{commandArgs.CommandEnglishName}' failed: {commandArgs.CommandResult}")),
                     }),
         };
@@ -331,39 +348,39 @@ internal static class CommandExecutor {
         ObjectAttributes attributes) {
         Guid objectId = doc.Objects.Add(geometry: geometry, attributes: attributes);
         return (objectId == Guid.Empty) switch {
-            true => Fin.Fail<Guid>(DirectApiOperationFailed(operation: "AddObject")),
-            false => Fin.Succ(objectId),
+            true => FinFail<Guid>(DirectApiOperationFailed(operation: "AddObject")),
+            false => FinSucc(objectId),
         };
     }
     internal static Fin<Unit> DeleteObject(
         RhinoDoc doc,
         Guid objectId) =>
         doc.Objects.Delete(objectId: objectId, quiet: true) switch {
-            true => Fin.Succ(unit),
-            false => Fin.Fail<Unit>(ObjectNotFound(objectId: objectId)),
+            true => FinSucc(unit),
+            false => FinFail<Unit>(ObjectNotFound(objectId: objectId)),
         };
     internal static Fin<Unit> TransformObject(
         RhinoDoc doc,
         Guid objectId,
         Transform transform) =>
         (doc.Objects.Transform(objectId: objectId, xform: transform, deleteOriginal: true) == Guid.Empty) switch {
-            true => Fin.Fail<Unit>(ObjectNotFound(objectId: objectId)),
-            false => Fin.Succ(unit),
+            true => FinFail<Unit>(ObjectNotFound(objectId: objectId)),
+            false => FinSucc(unit),
         };
     internal static Fin<RhinoObject> FindById(
         RhinoDoc doc,
         Guid objectId) =>
         doc.Objects.FindId(objectId) switch {
-            null => Fin.Fail<RhinoObject>(ObjectNotFound(objectId: objectId)),
-            RhinoObject found => Fin.Succ(found),
+            null => FinFail<RhinoObject>(ObjectNotFound(objectId: objectId)),
+            RhinoObject found => FinSucc(found),
         };
     internal static Fin<Unit> ModifyAttributes(
         RhinoDoc doc,
         Guid objectId,
         ObjectAttributes attributes) =>
         doc.Objects.ModifyAttributes(objectId: objectId, newAttributes: attributes, quiet: true) switch {
-            true => Fin.Succ(unit),
-            false => Fin.Fail<Unit>(ObjectNotFound(objectId: objectId)),
+            true => FinSucc(unit),
+            false => FinFail<Unit>(ObjectNotFound(objectId: objectId)),
         };
     [BoundaryImperativeExemption(
         ruleId: "CSP0001",
@@ -375,32 +392,33 @@ internal static class CommandExecutor {
         (object? sender, CustomUndoEventArgs args) => {
             AgentUndoState state = (AgentUndoState)args.Tag;
             _ = args.Document.AddCustomUndoEvent(
-                description: "Agent State Snapshot",
+                description: TextValues.AgentStateSnapshot,
                 handler: MakeUndoHandler(onUndoRedo: onUndoRedo),
                 tag: state);
             bool isUndo = !args.CreatedByRedo;
-            onUndoRedo(state: state, isUndo: isUndo);
+            _ = onUndoRedo(state: state, isUndo: isUndo)
+                .IfFail(error => RhinoApp.WriteLine($"UndoRedo publish failed: {error.Message}"));
         };
     private static Fin<Guid> GetPrimaryObjectId(CommandEnvelope envelope) =>
-        envelope.ObjectRefs.Head
+        envelope.ObjectRefs.HeadOrNone()
             .ToFin(Error.New(message: $"Operation '{envelope.Operation.Key}' requires at least one object reference."))
             .Map(static (SceneObjectRef sceneObjectRef) => (Guid)sceneObjectRef.ObjectId);
     private static Fin<Point3d> ParsePoint3d(JsonElement element) =>
         element.ValueKind switch {
             JsonValueKind.Array when element.GetArrayLength() == 3 =>
                 (element[0].TryGetDouble(out double x), element[1].TryGetDouble(out double y), element[2].TryGetDouble(out double z)) switch {
-                    (true, true, true) => Fin.Succ(new Point3d(x, y, z)),
-                    _ => Fin.Fail<Point3d>(Error.New(message: "Point array values must be numeric.")),
+                    (true, true, true) => FinSucc(new Point3d(x, y, z)),
+                    _ => FinFail<Point3d>(Error.New(message: "Point array values must be numeric.")),
                 },
-            _ => Fin.Fail<Point3d>(Error.New(message: "Point must be a 3-item numeric array.")),
+            _ => FinFail<Point3d>(Error.New(message: "Point must be a 3-item numeric array.")),
         };
     private static Fin<Vector3d> ParseVector3d(JsonElement element) =>
         ParsePoint3d(element).Map((Point3d point) => new Vector3d(point));
     private static Fin<Line> ParseLine(JsonElement element) =>
-        element.TryGetProperty("from", out JsonElement fromElement)
-            && element.TryGetProperty("to", out JsonElement toElement)
+        element.TryGetProperty(JsonFields.From, out JsonElement fromElement)
+            && element.TryGetProperty(JsonFields.To, out JsonElement toElement)
             ? ParsePoint3d(fromElement).Bind((Point3d from) =>
                 ParsePoint3d(toElement).Map((Point3d to) =>
                     new Line(from, to)))
-            : Fin.Fail<Line>(Error.New(message: "Line must include from/to point arrays."));
+            : FinFail<Line>(Error.New(message: $"Line must include {JsonFields.From}/{JsonFields.To} point arrays."));
 }

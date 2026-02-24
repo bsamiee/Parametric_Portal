@@ -38,26 +38,28 @@ public static class CommandRouter {
                     sessionIdentity: sessionIdentity)));
     private static Fin<JsonElement> EnsureEnvelopeObject(JsonElement envelope) =>
         envelope.ValueKind switch {
-            JsonValueKind.Object => Fin.Succ(envelope),
-            _ => Fin.Fail<JsonElement>(
+            JsonValueKind.Object => FinSucc(envelope),
+            _ => FinFail<JsonElement>(
                 Error.New(message: $"Envelope root must be an object; observed {envelope.ValueKind}.")),
         };
     private static Fin<Unit> EnsureCommandTag(JsonElement envelope) =>
         envelope.TryGetProperty(JsonFields.Tag, out JsonElement tagElement) switch {
-            false => Fin.Fail<Unit>(
+            false => FinFail<Unit>(
                 Error.New(message: $"Envelope {JsonFields.Tag} must be 'command'; observed '<missing>'.")),
             true when tagElement.ValueKind != JsonValueKind.String =>
-                Fin.Fail<Unit>(
+                FinFail<Unit>(
                     Error.New(message: $"Envelope {JsonFields.Tag} must be 'command'; observed '<{tagElement.ValueKind}>'.")),
             true =>
                 DomainBridge.ParseSmartEnum<TransportMessageTag, string>(
                     candidate: (tagElement.GetString() ?? string.Empty).Trim())
-                .MapFail((Error _) => Error.New(
-                    message: $"Envelope {JsonFields.Tag} must be 'command'; observed '{(tagElement.GetString() ?? string.Empty).Trim()}'."))
+                .BiMap(
+                    Succ: static (TransportMessageTag tag) => tag,
+                    Fail: (Error _) => Error.New(
+                        message: $"Envelope {JsonFields.Tag} must be 'command'; observed '{(tagElement.GetString() ?? string.Empty).Trim()}'."))
                 .Bind((TransportMessageTag tag) =>
                     tag.Equals(TransportMessageTag.Command) switch {
-                        true => Fin.Succ(unit),
-                        _ => Fin.Fail<Unit>(
+                        true => FinSucc(unit),
+                        _ => FinFail<Unit>(
                             Error.New(message: $"Envelope {JsonFields.Tag} must be 'command'; observed '{tag.Key}'.")),
                     }),
         };
@@ -88,17 +90,19 @@ public static class CommandRouter {
             errorMessage: "Command operation field must be a string and is required.")
         from operation in DomainBridge.ParseSmartEnum<CommandOperation, string>(
             candidate: operationKey)
-            .MapFail((Error _) => Error.New(
-                message: $"Unsupported operation '{operationKey}' on command envelope."))
+            .BiMap(
+                Succ: static (CommandOperation operation) => operation,
+                Fail: (Error _) => Error.New(
+                    message: $"Unsupported operation '{operationKey}' on command envelope."))
         select operation;
     private static Fin<int> DecodeDeadlineMs(
         JsonElement envelope,
         CommandOperation operation) =>
         envelope.TryGetProperty(JsonFields.DeadlineMs, out JsonElement deadlineElement) switch {
-            false => Fin.Succ(operation.Category.DefaultDeadlineMs),
+            false => FinSucc(operation.Category.DefaultDeadlineMs),
             true when deadlineElement.TryGetInt32(out int parsedDeadlineMs) =>
-                Fin.Succ(Math.Max(MinimumDeadlineMs, parsedDeadlineMs)),
-            true => Fin.Fail<int>(Error.New(message: "deadlineMs must be an integer when provided.")),
+                FinSucc(Math.Max(MinimumDeadlineMs, parsedDeadlineMs)),
+            true => FinFail<int>(Error.New(message: "deadlineMs must be an integer when provided.")),
         };
     private static JsonElement DecodePayload(JsonElement envelope) =>
         envelope.TryGetProperty(JsonFields.Payload, out JsonElement payloadElement) switch {
@@ -138,9 +142,9 @@ public static class CommandRouter {
         select context;
     private static Fin<Option<IdempotencyToken>> DecodeIdempotency(JsonElement envelope) =>
         envelope.TryGetProperty(JsonFields.Idempotency, out JsonElement idempotencyElement) switch {
-            false => Fin.Succ<Option<IdempotencyToken>>(None),
+            false => FinSucc<Option<IdempotencyToken>>(None),
             true when idempotencyElement.ValueKind != JsonValueKind.Object =>
-                Fin.Fail<Option<IdempotencyToken>>(Error.New(message: "idempotency must be an object when provided.")),
+                FinFail<Option<IdempotencyToken>>(Error.New(message: "idempotency must be an object when provided.")),
             true =>
                 from idempotencyKeyRaw in RequireStringProperty(
                     parent: idempotencyElement,
@@ -158,12 +162,15 @@ public static class CommandRouter {
         };
     private static Fin<Seq<SceneObjectRef>> DecodeObjectRefs(JsonElement envelope) =>
         envelope.TryGetProperty(JsonFields.ObjectRefs, out JsonElement objectRefsElement) switch {
-            false => Fin.Succ(Seq<SceneObjectRef>()),
+            false => FinSucc(Seq<SceneObjectRef>()),
             true when objectRefsElement.ValueKind == JsonValueKind.Array =>
                 toSeq(objectRefsElement.EnumerateArray())
-                    .Traverse(DecodeSceneObjectRef)
-                    .As(),
-            _ => Fin.Fail<Seq<SceneObjectRef>>(Error.New(message: "objectRefs must be an array when provided.")),
+                    .Fold(
+                        state: FinSucc(Seq<SceneObjectRef>()),
+                        folder: static (Fin<Seq<SceneObjectRef>> aggregate, JsonElement current) =>
+                            aggregate.Bind((Seq<SceneObjectRef> parsed) =>
+                                DecodeSceneObjectRef(current).Map((SceneObjectRef item) => parsed.Add(item)))),
+            _ => FinFail<Seq<SceneObjectRef>>(Error.New(message: "objectRefs must be an array when provided.")),
         };
     private static Fin<SceneObjectRef> DecodeSceneObjectRef(JsonElement element) =>
         element.ValueKind switch {
@@ -181,8 +188,8 @@ public static class CommandRouter {
                     propertyName: JsonFields.SourceRevision,
                     errorMessage: "objectRefs entries require sourceRevision as an integer.")
                 from objectIdGuid in Guid.TryParse(objectIdRaw, out Guid parsedObjectId) switch {
-                    true => Fin.Succ(parsedObjectId),
-                    _ => Fin.Fail<Guid>(Error.New(message: "objectId must be a valid GUID.")),
+                    true => FinSucc(parsedObjectId),
+                    _ => FinFail<Guid>(Error.New(message: "objectId must be a valid GUID.")),
                 }
                 from objectId in DomainBridge.ParseValueObject<ObjectId, Guid>(candidate: objectIdGuid)
                 from typeTag in DomainBridge.ParseSmartEnum<SceneObjectType, string>(candidate: typeTagRaw)
@@ -191,16 +198,16 @@ public static class CommandRouter {
                     sourceRevision: sourceRevision,
                     typeTag: typeTag)
                 select sceneObjectRef,
-            _ => Fin.Fail<SceneObjectRef>(Error.New(message: "objectRefs entries must be objects.")),
+            _ => FinFail<SceneObjectRef>(Error.New(message: "objectRefs entries must be objects.")),
         };
     private static Fin<Option<UndoScope>> DecodeUndoScope(JsonElement envelope) =>
         envelope.TryGetProperty(JsonFields.UndoScope, out JsonElement undoScopeElement) switch {
-            false => Fin.Succ<Option<UndoScope>>(None),
+            false => FinSucc<Option<UndoScope>>(None),
             true when undoScopeElement.ValueKind == JsonValueKind.String =>
                 from undoScope in DomainBridge.ParseValueObject<UndoScope, string>(
                     candidate: undoScopeElement.GetString() ?? string.Empty)
                 select Some(undoScope),
-            true => Fin.Fail<Option<UndoScope>>(Error.New(message: "undoScope must be a string when provided.")),
+            true => FinFail<Option<UndoScope>>(Error.New(message: "undoScope must be a string when provided.")),
         };
     private static Fin<JsonElement> RequireObjectProperty(
         JsonElement parent,
@@ -208,10 +215,10 @@ public static class CommandRouter {
         string missingMessage,
         string invalidMessage) =>
         parent.TryGetProperty(propertyName, out JsonElement propertyElement) switch {
-            false => Fin.Fail<JsonElement>(Error.New(message: missingMessage)),
+            false => FinFail<JsonElement>(Error.New(message: missingMessage)),
             true when propertyElement.ValueKind != JsonValueKind.Object =>
-                Fin.Fail<JsonElement>(Error.New(message: invalidMessage)),
-            _ => Fin.Succ(propertyElement),
+                FinFail<JsonElement>(Error.New(message: invalidMessage)),
+            _ => FinSucc(propertyElement),
         };
     private static Fin<string> RequireStringProperty(
         JsonElement parent,
@@ -219,16 +226,16 @@ public static class CommandRouter {
         string errorMessage) =>
         parent.TryGetProperty(propertyName, out JsonElement propertyElement) switch {
             true when propertyElement.ValueKind == JsonValueKind.String =>
-                Fin.Succ((propertyElement.GetString() ?? string.Empty).Trim()),
-            _ => Fin.Fail<string>(Error.New(message: errorMessage)),
+                FinSucc((propertyElement.GetString() ?? string.Empty).Trim()),
+            _ => FinFail<string>(Error.New(message: errorMessage)),
         };
     private static Fin<int> RequireInt32Property(
         JsonElement parent,
         string propertyName,
         string errorMessage) =>
         parent.TryGetProperty(propertyName, out JsonElement propertyElement) switch {
-            true when propertyElement.TryGetInt32(out int propertyValue) => Fin.Succ(propertyValue),
-            _ => Fin.Fail<int>(Error.New(message: errorMessage)),
+            true when propertyElement.TryGetInt32(out int propertyValue) => FinSucc(propertyValue),
+            _ => FinFail<int>(Error.New(message: errorMessage)),
         };
 }
 internal static class FailureMapping {

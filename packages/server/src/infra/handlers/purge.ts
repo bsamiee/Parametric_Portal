@@ -4,7 +4,7 @@
  */
 import { DatabaseService } from '@parametric-portal/database/repos';
 import { SqlClient } from '@effect/sql';
-import { Array as A, Cron, Effect, Layer, Match, Metric, Option, Record as R } from 'effect';
+import { Array as A, Cron, Data, Effect, Either, Layer, Match, Metric, Option, Record as R } from 'effect';
 import { AuditService } from '../../observe/audit.ts';
 import { MetricsService } from '../../observe/metrics.ts';
 import { Telemetry } from '../../observe/telemetry.ts';
@@ -13,6 +13,14 @@ import { JobService } from '../jobs.ts';
 import { Context } from '../../context.ts';
 import { Env } from '../../env.ts';
 import { ClusterService } from '../cluster.ts';
+
+// --- [ERRORS] ----------------------------------------------------------------
+
+class CronParseError extends Data.TaggedError('CronParseError')<{
+    readonly job: string;
+    readonly expression: string;
+    readonly cause: unknown;
+}> {}
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
@@ -27,6 +35,20 @@ const _JOBS = {
     'purge-sessions':       { cron: '0 1 * * *',    days: 30,   repo: 'sessions' as const,      scope: 'tenant' as const, strategy: 'db-only' as const        },
     'purge-tenant-data':    { cron: null as unknown as string,  days: 0, repo: 'apps' as const, scope: 'manual' as const, strategy: 'cascade-tenant' as const },
 } as const;
+type _RuntimeEnv = ReturnType<typeof Env.runtime>;
+const _jobConfig = (env: _RuntimeEnv, name: keyof typeof _JOBS) =>
+    Match.value(name).pipe(
+        Match.when('purge-api-keys', () => env.purge.jobs.purgeApiKeys),
+        Match.when('purge-assets', () => env.purge.jobs.purgeAssets),
+        Match.when('purge-event-journal', () => env.purge.jobs.purgeEventJournal),
+        Match.when('purge-job-dlq', () => env.purge.jobs.purgeJobDlq),
+        Match.when('purge-kv-store', () => env.purge.jobs.purgeKvStore),
+        Match.when('purge-mfa-secrets', () => env.purge.jobs.purgeMfaSecrets),
+        Match.when('purge-oauth-accounts', () => env.purge.jobs.purgeOauthAccounts),
+        Match.when('purge-sessions', () => env.purge.jobs.purgeSessions),
+        Match.when('purge-tenant-data', () => ({ cron: 'manual', days: 0 }) as const),
+        Match.exhaustive,
+    );
 const _batchRemoveS3 = (assets: ReadonlyArray<{ storageRef: string | null }>, storage: typeof StorageService.Service, s3Config: { readonly batchSize: number; readonly concurrency: number }, label: string) =>
     Effect.gen(function* () {
         const chunks = A.chunksOf(A.filterMap(assets, (asset) => Option.fromNullable(asset.storageRef)), s3Config.batchSize);
@@ -80,17 +102,7 @@ class PurgeService extends Effect.Service<PurgeService>()('server/Purge', {
     static readonly _execute = (name: keyof typeof _JOBS, database: DatabaseService.Type, storage: typeof StorageService.Service, audit: typeof AuditService.Service, metrics: MetricsService) =>
         Env.Service.pipe(Effect.flatMap((env) => {
             const jobDef = _JOBS[name];
-            const jobCfg = {
-                'purge-api-keys': env.purge.jobs.purgeApiKeys,
-                'purge-assets': env.purge.jobs.purgeAssets,
-                'purge-event-journal': env.purge.jobs.purgeEventJournal,
-                'purge-job-dlq': env.purge.jobs.purgeJobDlq,
-                'purge-kv-store': env.purge.jobs.purgeKvStore,
-                'purge-mfa-secrets': env.purge.jobs.purgeMfaSecrets,
-                'purge-oauth-accounts': env.purge.jobs.purgeOauthAccounts,
-                'purge-sessions': env.purge.jobs.purgeSessions,
-                'purge-tenant-data': { cron: 'manual', days: 0 },
-            }[name];
+            const jobCfg = _jobConfig(env, name);
             const s3Config = { batchSize: env.purge.s3BatchSize, concurrency: env.purge.s3Concurrency };
             const labels = MetricsService.label({ job_name: name });
             const logPurgeResult = (details: { readonly dbPurged: number; readonly s3Deleted: number; readonly s3Failed: number }) => Match.value(details.dbPurged + details.s3Deleted).pipe(
@@ -106,40 +118,34 @@ class PurgeService extends Effect.Service<PurgeService>()('server/Purge', {
         }));
     static readonly _scheduledJobs = R.keys(_JOBS).filter((name) => name !== 'purge-tenant-data');
     static readonly Crons = Layer.unwrapEffect(
-        Env.Service.pipe(Effect.map((env) => {
-            const jobsConfig = {
-                'purge-api-keys': env.purge.jobs.purgeApiKeys,
-                'purge-assets': env.purge.jobs.purgeAssets,
-                'purge-event-journal': env.purge.jobs.purgeEventJournal,
-                'purge-job-dlq': env.purge.jobs.purgeJobDlq,
-                'purge-kv-store': env.purge.jobs.purgeKvStore,
-                'purge-mfa-secrets': env.purge.jobs.purgeMfaSecrets,
-                'purge-oauth-accounts': env.purge.jobs.purgeOauthAccounts,
-                'purge-sessions': env.purge.jobs.purgeSessions,
-            } as const;
-            return PurgeService._scheduledJobs
-                .map((name) => ClusterService.Schedule.cron({
-                    cron: Cron.unsafeParse(jobsConfig[name].cron),
-                    execute: Effect.gen(function* () {
-                        const [jobs, database] = yield* Effect.all([JobService, DatabaseService]);
-                        const submitTenant = (tenantId: string) => Context.Request.withinSync(
-                            tenantId,
-                            jobs.submit(name, null),
-                            Context.Request.system(),
-                        ).pipe(Effect.asVoid);
-                        const submitAllApps = database.apps.find([]).pipe(
-                            Effect.map(A.map((app) => app.id)),
-                            Effect.andThen(Effect.forEach(submitTenant, { discard: true }))
-                        );
-                        return yield* Match.value(_JOBS[name].scope).pipe(
-                            Match.when('global', () => submitTenant(Context.Request.Id.system)),
-                            Match.orElse(() => Context.Request.withinSync(Context.Request.Id.system, submitAllApps, Context.Request.system())),
-                        );
-                    }),
-                    name,
-                }))
-                .reduce((accumulator, layer) => Layer.merge(accumulator, layer), Layer.empty);
-        })),
+        Env.Service.pipe(Effect.flatMap((env) =>
+            Effect.forEach(PurgeService._scheduledJobs, (name) => {
+                const expression = _jobConfig(env, name).cron;
+                return Either.match(Cron.parse(expression), {
+                    onLeft: (cause) => Effect.fail(new CronParseError({ cause, expression, job: name })),
+                    onRight: (cron) => Effect.succeed(ClusterService.Schedule.cron({
+                        cron,
+                        execute: Effect.gen(function* () {
+                            const [jobs, database] = yield* Effect.all([JobService, DatabaseService]);
+                            const submitTenant = (tenantId: string) => Context.Request.withinSync(
+                                tenantId,
+                                jobs.submit(name, null),
+                                Context.Request.system(),
+                            ).pipe(Effect.asVoid);
+                            const submitAllApps = database.apps.find([]).pipe(
+                                Effect.map(A.map((app) => app.id)),
+                                Effect.andThen(Effect.forEach(submitTenant, { discard: true }))
+                            );
+                            return yield* Match.value(_JOBS[name].scope).pipe(
+                                Match.when('global', () => submitTenant(Context.Request.Id.system)),
+                                Match.orElse(() => Context.Request.withinSync(Context.Request.Id.system, submitAllApps, Context.Request.system())),
+                            );
+                        }),
+                        name,
+                    })),
+                });
+            }).pipe(Effect.map((layers) => layers.reduce((accumulator, layer) => Layer.merge(accumulator, layer), Layer.empty))),
+        )),
     );
     static readonly SweepCron = ClusterService.Schedule.cron({
         cron: Cron.unsafeParse('0 3 * * *'),

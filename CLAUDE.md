@@ -75,11 +75,12 @@ If reviewing, refining, editing, creating, or modifying X file type, use skill Y
 - [ALWAYS] Use `Effect.gen` for 3+ dependent operations; `pipe` for linear flows.
 - [NEVER] Wrap pure `A → B` functions in Effect—Effect orchestrates, domain computes.
 
-[IMPORTANT]: **Schema-First** — Single source of truth for types.
-- [ALWAYS] Derive types from schemas: `type X = typeof XSchema.Type`.
-- [ALWAYS] Define domain primitives as branded types via `Schema.brand()`.
-- [ALWAYS] Decode at boundaries immediately—treat external data as `unknown`.
-- [NEVER] Declare types separately from their schema—extract, don't duplicate.
+[IMPORTANT]: **Minimal-Surface Discipline** — Use Schema only when necessary.
+- [ALWAYS] Use Schema (S.Class, S.TaggedClass, Model.Class) when: parsing external input, codec required, Hash/Equal derivation needed, or validation pipeline warranted.
+- [ALWAYS] Use plain objects + `typeof` inference for internal config, intermediate state, and values that never cross serialization boundaries.
+- [ALWAYS] Derive types from runtime values: `typeof`, `ReturnType`, `Parameters`, `typeof XSchema.Type`.
+- [NEVER] Schema-wrap internal config, state objects, or intermediates that never serialize.
+- [NEVER] Manually redeclare types the compiler already infers.
 
 [IMPORTANT]: **Typed Errors** — Errors are values, not exceptions.
 - [ALWAYS] Use `Data.TaggedError` for domain errors (recoverable, ergonomic `catchTag`).
@@ -146,16 +147,18 @@ If reviewing, refining, editing, creating, or modifying X file type, use skill Y
 - [NEVER] Mix `async/await` with Effect—use `Effect.promise` for interop.
 - [NEVER] Ignore effects in `flatMap` chains—all must contribute to result.
 
-| [INDEX] | [FUNCTION]       | [WHEN_TO_USE]                                              |
-| :-----: | ---------------- | ---------------------------------------------------------- |
-|   [1]   | `Effect.map`     | Sync transform of success value                            |
-|   [2]   | `Effect.flatMap` | Chain Effect-returning functions                           |
-|   [3]   | `Effect.andThen` | Mixed input types (value, Promise, Effect, Option, Either) |
-|   [4]   | `Effect.tap`     | Side effects without changing value                        |
-|   [5]   | `Effect.all`     | Aggregate independent effects into struct/tuple            |
-|   [6]   | `Effect.gen`     | Complex sequential logic with control flow                 |
-|   [7]   | `Effect.fn`      | Named function with automatic tracing span                 |
-|   [8]   | `Match.type`     | Exhaustive pattern matching on discriminated unions        |
+| [INDEX] | [FUNCTION/PATTERN]         | [WHEN_TO_USE]                                               |
+| :-----: | -------------------------- | ----------------------------------------------------------- |
+|   [1]   | `Effect.gen`               | Monadic composition (3+ dependent operations, control flow) |
+|   [2]   | `Effect.fn('name')`        | Traced function with automatic span for metrics             |
+|   [3]   | `Effect.Service` + `Layer` | Scoped service with managed lifecycle + DI                  |
+|   [4]   | `Effect.acquireRelease`    | Resource lifecycle (acquire → use → release)                |
+|   [5]   | `Stream.groupedWithin`     | Microbatch aggregation with time/count bounds               |
+|   [6]   | `Schedule.exponential`     | Algebraic retry policies with backoff strategy              |
+|   [7]   | `FiberRef`                 | Scoped context propagation (tenant, request ID)             |
+|   [8]   | `STM`/`TMap`               | Software transactional memory for concurrent state          |
+|   [9]   | `Layer.scoped`             | Managed resource DI with lifecycle hooks                    |
+|  [10]   | `Match.valueTags`/`type`   | Exhaustive structural dispatch on unions/variants           |
 
 ---
 ## [3.2][TYPE_DISCIPLINE]
@@ -164,8 +167,7 @@ If reviewing, refining, editing, creating, or modifying X file type, use skill Y
 <br>
 
 [IMPORTANT]:
-- [ALWAYS] Derive types from schemas: `type X = typeof XSchema.Type`.
-- [ALWAYS] Derive table types: `type User = typeof users.$inferSelect`.
+- [ALWAYS] Derive types from runtime values: `typeof`, `ReturnType`, `Parameters`. Use `typeof XSchema.Type` when schema exists; use `typeof _CONFIG` when plain object.
 - [ALWAYS] Use `satisfies` to validate shape while preserving literals.
 - [ALWAYS] Use `as const` for immutable config objects.
 
@@ -186,12 +188,20 @@ If reviewing, refining, editing, creating, or modifying X file type, use skill Y
 - [ALWAYS] Quarantine ts-toolbelt computation in `types/internal/`.
 - [ALWAYS] Check catalog (`pnpm-workspace.yaml`) before adding dependencies.
 
-| [INDEX] | [LIBRARY]              | [KEY_UTILITIES]            | [USE_WHEN]                            |
-| :-----: | ---------------------- | -------------------------- | ------------------------------------- |
-|   [1]   | `ts-toolbelt`          | `O.Merge`, `L.Concat`      | Type-level ops (quarantine in types/) |
-|   [2]   | `ts-essentials`        | `XOR`, `DeepReadonly`      | Exclusive unions, deep immutability   |
-|   [3]   | `type-fest`            | `Simplify`, `LiteralUnion` | Public API readability                |
-|   [4]   | `@effect/experimental` | `Machine`, `VariantSchema` | Server-side patterns (behind service) |
+| [INDEX] | [LIBRARY]               | [KEY_UTILITIES]                   | [USE_WHEN]                                 |
+| :-----: | ----------------------- | --------------------------------- | ------------------------------------------ |
+|   [1]   | `@effect/sql`           | `Model.Class`, `SqlClient`        | Entity models, codecs, database access     |
+|   [2]   | `@effect/platform`      | `HttpApi`, `HttpApiGroup`         | HTTP server/client, Router contracts       |
+|   [3]   | `@effect/cluster`       | `Sharding`, `Entity`, `Singleton` | Distributed entity orchestration           |
+|   [4]   | `@effect/opentelemetry` | `NodeSdk`, `Tracer`               | Observability, tracing, span lifecycle     |
+|   [5]   | `@effect/rpc`           | `Rpc`, `RpcGroup`                 | Remote procedure call with typed contracts |
+|   [6]   | `@effect/workflow`      | `Workflow`, `Activity`            | Durable workflows, activity definitions    |
+|   [7]   | `@effect/ai`            | `AiChat`                          | AI chat abstractions, protocol-agnostic    |
+|   [8]   | `@effect/ai-anthropic`  | `AnthropicProvider`               | Anthropic Claude integration               |
+|   [9]   | `ts-toolbelt`           | `O.Merge`, `L.Concat`             | Type-level ops (quarantine in types/)      |
+|  [10]   | `ts-essentials`         | `XOR`, `DeepReadonly`             | Exclusive unions, deep immutability        |
+|  [11]   | `type-fest`             | `Simplify`, `LiteralUnion`        | Public API readability                     |
+|  [12]   | `@effect/experimental`  | `Machine`, `VariantSchema`        | Server-side patterns (behind service)      |
 
 ---
 ## [4][OUTPUT]

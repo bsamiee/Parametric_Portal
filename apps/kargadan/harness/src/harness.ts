@@ -1,11 +1,7 @@
-import { fileURLToPath } from 'node:url';
-import { NodeContext } from '@effect/platform-node';
-import * as PgClient from '@effect/sql-pg/PgClient';
-import { PgMigrator } from '@effect/sql-pg';
+import { Client } from '@parametric-portal/database/client';
+import { AgentPersistenceLayer, AgentPersistenceService } from '@parametric-portal/database/agent-persistence';
 import { Effect, Layer, Option } from 'effect';
 import { HarnessConfig } from './config';
-import { KBSeeder } from './knowledge/seeder';
-import { PersistenceService } from './persistence/checkpoint';
 import { CommandDispatch } from './protocol/dispatch';
 import { AgentLoop } from './runtime/agent-loop';
 import { KargadanSocketClientLive, ReconnectionSupervisor } from './socket';
@@ -16,22 +12,26 @@ const main = Effect.gen(function* () {
     const [dispatch, loop, persistence, reconnect, token] = yield* Effect.all([
         CommandDispatch,
         AgentLoop,
-        PersistenceService,
+        AgentPersistenceService,
         ReconnectionSupervisor,
         HarnessConfig.sessionToken,
     ]);
     const runId = crypto.randomUUID();
     const traceId = crypto.randomUUID().replaceAll('-', '');
-    const resumableSessionId = yield* persistence.findResumable();
+    const appId = Client.tenant.Id.system;
+    const resumableSessionId = yield* persistence.findResumable(appId);
     const hydrationResult = yield* Option.match(resumableSessionId, {
         onNone: () => Effect.succeed(Option.none()),
-        onSome: (sessionId) => persistence.hydrate(sessionId).pipe(Effect.map(Option.some)),
+        onSome: (sessionId) => persistence.hydrate({ appId, sessionId }).pipe(Effect.map(Option.some)),
     });
-    const isResume = Option.isSome(hydrationResult) && !Option.getOrThrow(hydrationResult).fresh;
-    const sessionId = isResume
-        ? Option.getOrThrow(resumableSessionId)
-        : crypto.randomUUID();
-    const appId = crypto.randomUUID();
+    const isResume = Option.match(hydrationResult, {
+        onNone: () => false,
+        onSome: (result) => !result.fresh,
+    });
+    const sessionId = Option.match(resumableSessionId, {
+        onNone: () => crypto.randomUUID(),
+        onSome: (id) => isResume ? id : crypto.randomUUID(),
+    });
     yield* Option.match(hydrationResult, {
         onNone: () => Effect.log('kargadan.harness: no resumable session, starting fresh'),
         onSome: (result) => result.fresh
@@ -44,19 +44,26 @@ const main = Effect.gen(function* () {
     });
     yield* isResume
         ? Effect.void
-        : persistence.createSession({ runId, startedAt: new Date(), status: 'running', toolCallCount: 0 } as Parameters<typeof persistence.createSession>[0]);
+        : persistence.createSession({ appId, runId, startedAt: new Date(), status: 'running', toolCallCount: 0 });
     const identityBase = { appId, runId, sessionId, traceId } satisfies AgentLoop.IdentityBase;
+    const resume = Option.match(hydrationResult, {
+        onNone: () => Option.none<AgentLoop.ResumeState>(),
+        onSome: (result) => result.fresh
+            ? Option.none<AgentLoop.ResumeState>()
+            : Option.some({ sequence: result.sequence, state: result.state } satisfies AgentLoop.ResumeState),
+    });
     const outcome = yield* reconnect.control.supervise((port) =>
         Effect.gen(function* () {
             yield* Effect.log('kargadan.harness: connecting', { port, sessionId: identityBase.sessionId });
             yield* Effect.forkScoped(dispatch.start());
-            const result = yield* loop.handle({ identityBase, token });
+            const result = yield* loop.handle({ identityBase, resume, token });
             yield* Effect.log('Harness loop complete', { outcome: result, runId: identityBase.runId });
             return result;
         }),
     );
     const finalStatus = outcome.state.status === 'Completed' ? 'completed' as const : 'failed' as const;
     yield* persistence.completeSession({
+        appId,
         endedAt: new Date(),
         error: finalStatus === 'failed' ? 'Loop terminated with Failed status' : undefined,
         sessionId,
@@ -68,29 +75,19 @@ const main = Effect.gen(function* () {
 
 // --- [LAYERS] ----------------------------------------------------------------
 
-const _PgClientLayer = PgClient.layerConfig({
+const _AgentPersistenceLayer = AgentPersistenceLayer({
     connectTimeout: HarnessConfig.pgConnectTimeout,
     idleTimeout:    HarnessConfig.pgIdleTimeout,
     maxConnections: HarnessConfig.pgMaxConnections,
     url:            HarnessConfig.checkpointDatabaseUrl,
 });
-const _KargadanMigratorLive = PgMigrator.layer({
-    loader: PgMigrator.fromFileSystem(fileURLToPath(new URL('../migrations', import.meta.url)),),
-    table: 'kargadan_migrations',
-}).pipe(
-    Layer.provide(_PgClientLayer),
-    Layer.provide(NodeContext.layer),
-);
 const ServicesLayer = Layer.mergeAll(
     KargadanSocketClientLive,
     CommandDispatch.Default,
     AgentLoop.Default,
     ReconnectionSupervisor.Default,
-    PersistenceService.Default,
-    KBSeeder.Default,
 ).pipe(
-    Layer.provideMerge(_KargadanMigratorLive),
-    Layer.provideMerge(_PgClientLayer),
+    Layer.provideMerge(_AgentPersistenceLayer),
 );
 
 // --- [EXPORT] ----------------------------------------------------------------

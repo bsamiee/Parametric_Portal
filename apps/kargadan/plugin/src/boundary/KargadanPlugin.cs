@@ -1,5 +1,4 @@
 using System;
-using System.Linq;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -20,8 +19,14 @@ namespace ParametricPortal.Kargadan.Plugin.src.boundary;
 
 [BoundaryAdapter]
 public sealed class KargadanPlugin : PlugIn {
+    private static class JsonFields {
+        internal const string CommandAckTag = "command.ack";
+        internal const string DeadlineMs = "deadlineMs";
+        internal const string Identity = "identity";
+        internal const string RequestId = "requestId";
+    }
     private readonly record struct BoundaryState(
-        EventPublisher EventPublisher,
+        SessionEventPublisher SessionEvents,
         SessionHost SessionHost,
         WebSocketHost WebSocketHost,
         ObservationPipeline ObservationPipeline);
@@ -56,11 +61,13 @@ public sealed class KargadanPlugin : PlugIn {
                     PluginRevision: VersionString.Create(Version.ToString())),
                 now: now);
             return opened.Bind((_) =>
-                negotiated.Switch(
-                    init: (_) => Fin.Fail<HandshakeEnvelope>(
+                negotiated switch {
+                    HandshakeEnvelope.Init => FinFail<HandshakeEnvelope>(
                         Error.New(message: "Handshake negotiation cannot return init envelope.")),
-                    ack: (HandshakeEnvelope.Ack ack) => state.SessionHost.Activate(ack, now).Map((_) => negotiated),
-                    reject: (HandshakeEnvelope.Reject reject) => state.SessionHost.Reject(reject.Reason, now).Map((_) => negotiated)));
+                    HandshakeEnvelope.Ack ack => state.SessionHost.Activate(ack, now).Map((_) => negotiated),
+                    HandshakeEnvelope.Reject reject => state.SessionHost.Reject(reject.Reason, now).Map((_) => negotiated),
+                    _ => FinFail<HandshakeEnvelope>(Error.New(message: "Unexpected handshake envelope variant.")),
+                });
         });
     public Fin<CommandResultEnvelope> HandleCommand(
         JsonElement envelope,
@@ -72,165 +79,20 @@ public sealed class KargadanPlugin : PlugIn {
                 sessionIdentity: sessionIdentity)
             .Bind(onCommand)
             .Bind((CommandResultEnvelope result) =>
-                PublishLifecycleEvent(state: state, result: result).Map((_) => result)));
+                state.SessionEvents.PublishLifecycleEvent(result: result).Map((_) => result)));
     public Fin<HeartbeatEnvelope> HandleHeartbeat(HeartbeatEnvelope heartbeat) =>
         ReadState().Bind((BoundaryState state) => {
             Instant now = Instant.FromDateTimeOffset(_timeProvider.GetUtcNow());
             return state.SessionHost.Timeout(now).Bind((_) =>
                 state.SessionHost.Beat(now).Bind((_) =>
                     heartbeat.Mode.Map(
-                        ping: Fin.Succ(new HeartbeatEnvelope(
+                        ping: FinSucc(new HeartbeatEnvelope(
                             Identity: heartbeat.Identity,
                             Mode: HeartbeatMode.Pong,
                             ServerTime: now,
                             TelemetryContext: heartbeat.TelemetryContext)),
-                        pong: Fin.Succ(heartbeat))));
+                        pong: FinSucc(heartbeat))));
         });
-    private Fin<Unit> PublishLifecycleEvent(BoundaryState state, CommandResultEnvelope result) {
-        Instant publishedAt = Instant.FromDateTimeOffset(_timeProvider.GetUtcNow());
-        return result.Switch(
-            success: (CommandResultEnvelope.Success success) =>
-                PublishEventEnvelope(
-                    eventPublisher: state.EventPublisher,
-                    eventType: EventType.SessionLifecycle,
-                    identity: success.Identity,
-                    sourceRevision: success.Execution.SourceRevision,
-                    causationRequestId: Some(success.Identity.RequestId),
-                    delta: JsonSerializer.SerializeToElement(new {
-                        dedupeDecision = success.Dedupe.Decision.Key,
-                        status = CommandResultStatus.Ok.Key,
-                    }),
-                    telemetryContext: success.TelemetryContext,
-                    publishedAt: publishedAt),
-            failure: (CommandResultEnvelope.Failure failure) =>
-                PublishEventEnvelope(
-                    eventPublisher: state.EventPublisher,
-                    eventType: EventType.SessionLifecycle,
-                    identity: failure.Identity,
-                    sourceRevision: failure.Execution.SourceRevision,
-                    causationRequestId: Some(failure.Identity.RequestId),
-                    delta: JsonSerializer.SerializeToElement(new {
-                        errorCode = failure.Error.Reason.Code.Key,
-                        failureClass = failure.Error.Reason.FailureClass.Key,
-                        status = CommandResultStatus.Error.Key,
-                    }),
-                    telemetryContext: failure.TelemetryContext,
-                    publishedAt: publishedAt));
-    }
-    private static Fin<Unit> PublishBatchEvent(
-        SessionHost sessionHost,
-        EventPublisher eventPublisher,
-        EventBatchSummary batch,
-        Instant flushedAt) =>
-        DomainBridge.ParseValueObject<RequestId, Guid>(Guid.NewGuid()).Bind((RequestId requestId) =>
-            PublishSessionEvent(
-                sessionHost: sessionHost,
-                eventPublisher: eventPublisher,
-                eventType: EventType.StreamCompacted,
-                requestId: requestId,
-                causationRequestId: None,
-                operationTag: "event.batch",
-                publishedAt: flushedAt,
-                buildDelta: _ => BuildBatchDelta(batch)));
-    private void EmitUndoEnvelope(
-        SessionHost sessionHost,
-        EventPublisher eventPublisher,
-        AgentUndoState undoState,
-        bool isUndo) {
-        Instant publishedAt = Instant.FromDateTimeOffset(_timeProvider.GetUtcNow());
-        _ = PublishSessionEvent(
-            sessionHost: sessionHost,
-            eventPublisher: eventPublisher,
-            eventType: EventType.UndoRedo,
-            requestId: undoState.RequestId,
-            causationRequestId: Some(undoState.RequestId),
-            operationTag: "undo.redo",
-            publishedAt: publishedAt,
-            buildDelta: _ => BuildUndoDelta(
-                undoState: undoState,
-                isUndo: isUndo));
-    }
-    private static Fin<Unit> PublishSessionEvent(
-        SessionHost sessionHost,
-        EventPublisher eventPublisher,
-        EventType eventType,
-        RequestId requestId,
-        Option<RequestId> causationRequestId,
-        string operationTag,
-        Instant publishedAt,
-        Func<SessionSnapshot, JsonElement> buildDelta) =>
-        sessionHost.Snapshot().Bind((SessionSnapshot snapshot) =>
-            BuildTelemetryContext(
-                requestId: requestId,
-                operationTag: operationTag).Bind((TelemetryContext telemetryContext) =>
-                PublishEventEnvelope(
-                    eventPublisher: eventPublisher,
-                    eventType: eventType,
-                    identity: snapshot.Identity with {
-                        RequestId = requestId,
-                        IssuedAt = publishedAt,
-                    },
-                    sourceRevision: 0,
-                    causationRequestId: causationRequestId,
-                    delta: buildDelta(snapshot),
-                    telemetryContext: telemetryContext,
-                    publishedAt: publishedAt)));
-    private static Fin<Unit> PublishEventEnvelope(
-        EventPublisher eventPublisher,
-        EventType eventType,
-        EnvelopeIdentity identity,
-        int sourceRevision,
-        Option<RequestId> causationRequestId,
-        JsonElement delta,
-        TelemetryContext telemetryContext,
-        Instant publishedAt) =>
-        DomainBridge.ParseValueObject<EventId, Guid>(Guid.NewGuid()).Bind((EventId eventId) =>
-            EventEnvelope.Create(
-                eventId: eventId,
-                eventType: eventType,
-                identity: identity,
-                sourceRevision: sourceRevision,
-                causationRequestId: causationRequestId,
-                delta: delta,
-                telemetryContext: telemetryContext)
-            .Map((EventEnvelope eventEnvelope) => {
-                _ = eventPublisher.Publish(eventEnvelope);
-                return unit;
-            }));
-    private static JsonElement BuildBatchDelta(EventBatchSummary batch) =>
-        JsonSerializer.SerializeToElement(new {
-            totalCount = batch.TotalCount,
-            containsUndoRedo = batch.ContainsUndoRedo,
-            batchWindowMs = batch.BatchWindowMs,
-            categories = batch.Categories.Select(category => new {
-                category = category.Category.Key,
-                count = category.Count,
-                subtypes = category.Subtypes.Select(sub => new {
-                    subtype = sub.Subtype.Key,
-                    count = sub.Count,
-                }).ToArray(),
-            }).ToArray(),
-        });
-    private static JsonElement BuildUndoDelta(AgentUndoState undoState, bool isUndo) =>
-        JsonSerializer.SerializeToElement(new {
-            requestId = (Guid)undoState.RequestId,
-            undoSerial = undoState.UndoSerial,
-            isUndo,
-        });
-    private static Fin<TelemetryContext> BuildTelemetryContext(
-        RequestId requestId,
-        string operationTag) {
-        Guid requestGuid = (Guid)requestId;
-        string idValue = requestGuid.ToString("N");
-        return DomainBridge.ParseValueObject<TraceId, string>(idValue).Bind((TraceId traceId) =>
-            DomainBridge.ParseValueObject<SpanId, string>(idValue).Bind((SpanId spanId) =>
-                DomainBridge.ParseValueObject<OperationTag, string>(operationTag).Bind((OperationTag parsedOperationTag) =>
-                    TelemetryContext.Create(
-                        traceId: traceId,
-                        spanId: spanId,
-                        operationTag: parsedOperationTag,
-                        attempt: 1))));
-    }
     private async Task<Fin<JsonElement>> DispatchMessageAsync(
         TransportMessageTag tag,
         JsonElement message,
@@ -240,7 +102,7 @@ public sealed class KargadanPlugin : PlugIn {
             _ when tag.Equals(TransportMessageTag.HandshakeInit) => await DispatchHandshakeAsync(message: message, cancellationToken: cancellationToken).ConfigureAwait(false),
             _ when tag.Equals(TransportMessageTag.Command) => await DispatchCommandAsync(message: message, sendAckAsync: sendAckAsync, cancellationToken: cancellationToken).ConfigureAwait(false),
             _ when tag.Equals(TransportMessageTag.Heartbeat) => SerializeHeartbeat(message: message),
-            _ => Fin.Fail<JsonElement>(Error.New(message: $"Unknown message tag: {tag.Key}")),
+            _ => FinFail<JsonElement>(Error.New(message: $"Unknown message tag: {tag.Key}")),
         };
     [BoundaryImperativeExemption(
         ruleId: "CSP0001",
@@ -270,7 +132,7 @@ public sealed class KargadanPlugin : PlugIn {
                 element: message,
                 options: JsonOptions);
             return init switch {
-                null => Fin.Fail<JsonElement>(
+                null => FinFail<JsonElement>(
                     Error.New(message: "Failed to deserialize handshake init envelope.")),
                 _ => HandleHandshake(init: init).Map(
                     (HandshakeEnvelope envelope) => JsonSerializer.SerializeToElement(value: envelope, options: JsonOptions)),
@@ -301,11 +163,11 @@ public sealed class KargadanPlugin : PlugIn {
                                     envelope: envelope))
                             .Map((CommandResultEnvelope resultEnvelope) =>
                                 JsonSerializer.SerializeToElement(value: resultEnvelope, options: JsonOptions)),
-                        SessionPhase.Connected => Fin.Fail<JsonElement>(
+                        SessionPhase.Connected => FinFail<JsonElement>(
                             Error.New(message: "Session is not active; handshake is not fully negotiated.")),
-                        SessionPhase.Terminal terminal => Fin.Fail<JsonElement>(
+                        SessionPhase.Terminal terminal => FinFail<JsonElement>(
                             Error.New(message: $"Session is not active; current state is '{terminal.StateTag.Key}'.")),
-                        _ => Fin.Fail<JsonElement>(
+                        _ => FinFail<JsonElement>(
                             Error.New(message: "Session is not active.")),
                     });
             })
@@ -317,34 +179,29 @@ public sealed class KargadanPlugin : PlugIn {
         CommandEnvelope envelope) {
         RhinoDoc? doc = RhinoDoc.ActiveDoc;
         return doc switch {
-            null => Fin.Fail<CommandResultEnvelope>(
+            null => FinFail<CommandResultEnvelope>(
                 Error.New(message: "No active Rhino document.")),
             _ => BuildCommandResult(
                 envelope: envelope,
                 executionResult: CommandExecutor.Execute(
                     doc: doc,
                     envelope: envelope,
-                    onUndoRedo: (AgentUndoState undoState, bool isUndo) =>
-                        EmitUndoEnvelope(
-                            sessionHost: state.SessionHost,
-                            eventPublisher: state.EventPublisher,
-                            undoState: undoState,
-                            isUndo: isUndo))),
+                    onUndoRedo: state.SessionEvents.EmitUndoEnvelope)),
         };
     }
     private static JsonElement ExtractAckPayload(JsonElement message) {
-        string requestId = message.TryGetProperty("identity", out JsonElement identity)
-            && identity.TryGetProperty("requestId", out JsonElement reqId)
+        string requestId = message.TryGetProperty(JsonFields.Identity, out JsonElement identity)
+            && identity.TryGetProperty(JsonFields.RequestId, out JsonElement reqId)
             && reqId.ValueKind == JsonValueKind.String
                 ? reqId.GetString() ?? string.Empty
                 : string.Empty;
         return JsonSerializer.SerializeToElement(new {
-            _tag = "command.ack",
+            _tag = JsonFields.CommandAckTag,
             requestId,
         });
     }
     private static int ExtractDeadlineMs(JsonElement message) =>
-        message.TryGetProperty("deadlineMs", out JsonElement deadlineElement)
+        message.TryGetProperty(JsonFields.DeadlineMs, out JsonElement deadlineElement)
             && deadlineElement.TryGetInt32(out int deadline)
             && deadline > 0
                 ? deadline
@@ -356,36 +213,39 @@ public sealed class KargadanPlugin : PlugIn {
             durationMs: 0,
             pluginRevision: VersionString.Create(Version.ToString()),
             sourceRevision: 0)
-        .ToFin()
-        .Bind((ExecutionMetadata metadata) =>
-            executionResult.Match(
-                Succ: (JsonElement payload) => Fin.Succ((CommandResultEnvelope)new CommandResultEnvelope.Success(
-                    Identity: envelope.Identity,
-                    Dedupe: new DedupeMetadata(
-                        Decision: DedupeDecision.Executed,
-                        OriginalRequestId: envelope.Identity.RequestId),
-                    Result: payload,
-                    Execution: metadata,
-                    TelemetryContext: envelope.TelemetryContext)),
-                Fail: (Error error) => Fin.Succ((CommandResultEnvelope)new CommandResultEnvelope.Failure(
-                    Identity: envelope.Identity,
-                    Dedupe: new DedupeMetadata(
-                        Decision: DedupeDecision.Executed,
-                        OriginalRequestId: envelope.Identity.RequestId),
-                    Result: JsonSerializer.SerializeToElement(new { error = error.Message }),
-                    Execution: metadata,
-                    Error: new CommandErrorEnvelope(
-                        Reason: new FailureReason(
-                            Code: ErrorCode.UnexpectedRuntime,
-                            Message: error.Message),
-                        Details: None),
-                    TelemetryContext: envelope.TelemetryContext))));
+        .Match(
+            Succ: (ExecutionMetadata metadata) =>
+                executionResult.Match(
+                    Succ: (JsonElement payload) => FinSucc((CommandResultEnvelope)new CommandResultEnvelope.Success(
+                        Identity: envelope.Identity,
+                        Dedupe: new DedupeMetadata(
+                            Decision: DedupeDecision.Executed,
+                            OriginalRequestId: envelope.Identity.RequestId),
+                        Result: payload,
+                        Execution: metadata,
+                        TelemetryContext: envelope.TelemetryContext)),
+                    Fail: (Error error) => FinSucc((CommandResultEnvelope)new CommandResultEnvelope.Failure(
+                        Identity: envelope.Identity,
+                        Dedupe: new DedupeMetadata(
+                            Decision: DedupeDecision.Executed,
+                            OriginalRequestId: envelope.Identity.RequestId),
+                        Result: JsonSerializer.SerializeToElement(new { error = error.Message }),
+                        Execution: metadata,
+                        Error: new CommandErrorEnvelope(
+                            Reason: new FailureReason(
+                                Code: ErrorCode.UnexpectedRuntime,
+                                Message: error.Message),
+                            Details: None),
+                        TelemetryContext: envelope.TelemetryContext))),
+            Fail: static (Seq<Error> errors) =>
+                FinFail<CommandResultEnvelope>(errors.HeadOrNone().IfNone(
+                    Error.New(message: "Execution metadata is invalid."))));
     private Fin<JsonElement> SerializeHeartbeat(JsonElement message) {
         HeartbeatEnvelope? heartbeat = JsonSerializer.Deserialize<HeartbeatEnvelope>(
             element: message,
             options: JsonOptions);
         return heartbeat switch {
-            null => Fin.Fail<JsonElement>(
+            null => FinFail<JsonElement>(
                 Error.New(message: "Failed to deserialize heartbeat envelope.")),
             _ => HandleHeartbeat(heartbeat: heartbeat).Map(
                 (HeartbeatEnvelope envelope) => JsonSerializer.SerializeToElement(value: envelope, options: JsonOptions)),
@@ -398,11 +258,13 @@ public sealed class KargadanPlugin : PlugIn {
         _ = _state.Swap((previousState) => {
             EventPublisher eventPublisher = new();
             SessionHost sessionHost = new();
+            SessionEventPublisher sessionEvents = new(
+                eventPublisher: eventPublisher,
+                sessionHost: sessionHost,
+                timeProvider: _timeProvider);
             ObservationPipeline observationPipeline = new(
                 onBatchFlushed: (EventBatchSummary batch, Instant flushedAt) =>
-                    _ = PublishBatchEvent(
-                        sessionHost: sessionHost,
-                        eventPublisher: eventPublisher,
+                    _ = sessionEvents.PublishBatchEvent(
                         batch: batch,
                         flushedAt: flushedAt),
                 timeProvider: _timeProvider);
@@ -411,7 +273,7 @@ public sealed class KargadanPlugin : PlugIn {
                 drainPublishedEvents: eventPublisher.Drain,
                 requeueEvents: eventPublisher.Requeue);
             BoundaryState boundaryState = new(
-                EventPublisher: eventPublisher,
+                SessionEvents: sessionEvents,
                 SessionHost: sessionHost,
                 WebSocketHost: webSocketHost,
                 ObservationPipeline: observationPipeline);

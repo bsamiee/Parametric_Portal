@@ -6,13 +6,58 @@
  * Per-endpoint addError() only for endpoint-specific errors (NotFound, Conflict, Validation).
  */
 import { HttpApi, HttpApiEndpoint, HttpApiGroup, HttpApiSchema, Multipart, OpenApi } from '@effect/platform';
-import {ApiKey, App, AppSettingsSchema, Asset, AuditOperationSchema, AuditLog, Job, JobDlq, Notification, OAuthProviderSchema, Permission, PreferencesSchema, RoleSchema, Session, User,} from '@parametric-portal/database/models';
+import {ApiKey, App, AppSettingsSchema, Asset, AuditOperationSchema, AuditLog, Job, JobDlq, Notification, OAuthProviderSchema, Permission, PreferencesSchema, RoleSchema, Session, User, WebhookUrlSchema} from '@parametric-portal/database/models';
 import { Url } from '@parametric-portal/types/types';
 import { Schema as S } from 'effect';
 import { HttpError } from './errors.ts';
 import { WebhookService } from './infra/webhooks.ts';
 import { FeatureService } from './domain/features.ts';
 import { Middleware } from './middleware.ts';
+
+// --- [CONSTANTS] ----------------------------------------------------------------
+
+const _ROUTE_PREFIX = {
+    api:  '/api',
+    docs: '/docs',
+    groups: {
+        admin:     '/v1/admin',
+        audit:     '/v1/audit',
+        auth:      '/v1/auth',
+        health:    '/health',
+        jobs:      '/v1/jobs',
+        search:    '/v1/search',
+        storage:   '/v1/storage',
+        telemetry: '/v1',
+        transfer:  '/v1/transfer',
+        users:     '/v1/users',
+        webhooks:  '/v1/webhooks',
+        websocket: '/v1/ws',
+    },
+} as const;
+const _ROUTE_PATH = {
+    adminEvents:                `${_ROUTE_PREFIX.groups.admin}/events`,
+    docs:                       _ROUTE_PREFIX.docs,
+    health:                     _ROUTE_PREFIX.groups.health,
+    jobsSubscribe:              `${_ROUTE_PREFIX.groups.jobs}/subscribe`,
+    telemetryLogs:              `${_ROUTE_PREFIX.groups.telemetry}/logs`,
+    telemetryMetrics:           `${_ROUTE_PREFIX.groups.telemetry}/metrics`,
+    telemetryTraces:            `${_ROUTE_PREFIX.groups.telemetry}/traces`,
+    usersNotificationSubscribe: `${_ROUTE_PREFIX.groups.users}/me/notifications/subscribe`,
+    websocket:                  _ROUTE_PREFIX.groups.websocket,
+} as const;
+const TenantAsyncContextRoutePrefixes = [
+    `${_ROUTE_PREFIX.api}${_ROUTE_PATH.adminEvents}`,
+    `${_ROUTE_PREFIX.api}${_ROUTE_PATH.jobsSubscribe}`,
+    `${_ROUTE_PREFIX.api}${_ROUTE_PATH.usersNotificationSubscribe}`,
+    `${_ROUTE_PREFIX.api}${_ROUTE_PATH.websocket}`,
+] as const;
+const TenantExemptRoutePrefixes = [
+    `${_ROUTE_PREFIX.api}${_ROUTE_PATH.health}`,
+    `${_ROUTE_PREFIX.api}${_ROUTE_PATH.telemetryTraces}`,
+    `${_ROUTE_PREFIX.api}${_ROUTE_PATH.telemetryMetrics}`,
+    `${_ROUTE_PREFIX.api}${_ROUTE_PATH.telemetryLogs}`,
+    _ROUTE_PATH.docs,
+] as const;
 
 // --- [SCHEMA] ----------------------------------------------------------------
 
@@ -80,11 +125,12 @@ const AuditLogWithDiff = S.extend(AuditLog.json, S.Struct({
 }));
 const SearchEntityType = S.Literal('app', 'asset', 'auditLog', 'user');
 const _TenantOAuthProviderRead = S.Struct({ clientId: S.NonEmptyTrimmedString, clientSecretSet: S.Boolean, enabled: S.Boolean, keyId: S.optional(S.NonEmptyTrimmedString), provider: OAuthProviderSchema, scopes: S.optional(S.Array(S.String)), teamId: S.optional(S.NonEmptyTrimmedString), tenant: S.optional(S.NonEmptyTrimmedString) });
+
 // --- [GROUPS] ----------------------------------------------------------------
 
 // Auth: mixed public/protected endpoints — per-endpoint middleware
 const _AuthGroup = HttpApiGroup.make('auth')
-    .prefix('/v1/auth')
+    .prefix(_ROUTE_PREFIX.groups.auth)
     .addError(HttpError.Conflict)
     .addError(HttpError.RateLimit)
     .add(HttpApiEndpoint.get('oauthStart', '/oauth/:provider')
@@ -241,7 +287,7 @@ const _AuthGroup = HttpApiGroup.make('auth')
 
 // Health: unauthenticated operational endpoints
 const _HealthGroup = HttpApiGroup.make('health')
-    .prefix('/health')
+    .prefix(_ROUTE_PREFIX.groups.health)
     .addError(HttpError.RateLimit)
     .add(HttpApiEndpoint.get('liveness', '/liveness').addSuccess(S.Struct({ latencyMs: S.Number, status: S.Literal('ok', 'degraded') })))
     .add(HttpApiEndpoint.get('readiness', '/readiness')
@@ -277,7 +323,7 @@ const _HealthGroup = HttpApiGroup.make('health')
 
 // Telemetry: unauthenticated OTLP ingest
 const _TelemetryGroup = HttpApiGroup.make('telemetry')
-    .prefix('/v1')
+    .prefix(_ROUTE_PREFIX.groups.telemetry)
     .add(HttpApiEndpoint.post('ingestTraces', '/traces')
             .addSuccess(S.Void)
             .addError(HttpError.RateLimit)
@@ -296,7 +342,7 @@ const _TelemetryGroup = HttpApiGroup.make('telemetry')
 
 // Users: group-level auth + common errors
 const _UsersGroup = HttpApiGroup.make('users')
-    .prefix('/v1/users')
+    .prefix(_ROUTE_PREFIX.groups.users)
     .middleware(Middleware)
     .addError(HttpError.Conflict)
     .addError(HttpError.Forbidden)
@@ -350,7 +396,7 @@ const _UsersGroup = HttpApiGroup.make('users')
 
 // Audit: group-level auth + common errors
 const _AuditGroup = HttpApiGroup.make('audit')
-    .prefix('/v1/audit')
+    .prefix(_ROUTE_PREFIX.groups.audit)
     .middleware(Middleware)
     .addError(HttpError.Conflict)
     .addError(HttpError.Forbidden)
@@ -373,7 +419,7 @@ const _AuditGroup = HttpApiGroup.make('audit')
 
 // Transfer: group-level auth + common errors
 const _TransferGroup = HttpApiGroup.make('transfer')
-    .prefix('/v1/transfer')
+    .prefix(_ROUTE_PREFIX.groups.transfer)
     .middleware(Middleware)
     .addError(HttpError.Forbidden)
     .addError(HttpError.Internal)
@@ -393,7 +439,7 @@ const _TransferGroup = HttpApiGroup.make('transfer')
 
 // Search: group-level auth + common errors
 const _SearchGroup = HttpApiGroup.make('search')
-    .prefix('/v1/search')
+    .prefix(_ROUTE_PREFIX.groups.search)
     .middleware(Middleware)
     .addError(HttpError.Conflict)
     .addError(HttpError.Forbidden)
@@ -442,7 +488,7 @@ const _SearchGroup = HttpApiGroup.make('search')
 
 // Jobs: group-level auth + common errors
 const _JobsGroup = HttpApiGroup.make('jobs')
-    .prefix('/v1/jobs')
+    .prefix(_ROUTE_PREFIX.groups.jobs)
     .middleware(Middleware)
     .addError(HttpError.Forbidden)
     .addError(HttpError.Internal)
@@ -454,7 +500,7 @@ const _JobsGroup = HttpApiGroup.make('jobs')
 
 // WebSocket: group-level auth + common errors
 const _WebSocketGroup = HttpApiGroup.make('websocket')
-    .prefix('/v1/ws')
+    .prefix(_ROUTE_PREFIX.groups.websocket)
     .middleware(Middleware)
     .addError(HttpError.Auth)
     .addError(HttpError.Forbidden)
@@ -467,7 +513,7 @@ const _WebSocketGroup = HttpApiGroup.make('websocket')
 
 // Storage: group-level auth + common errors
 const _StorageGroup = HttpApiGroup.make('storage')
-    .prefix('/v1/storage')
+    .prefix(_ROUTE_PREFIX.groups.storage)
     .middleware(Middleware)
     .addError(HttpError.Conflict)
     .addError(HttpError.Forbidden)
@@ -568,7 +614,7 @@ const _StorageGroup = HttpApiGroup.make('storage')
 
 // Webhooks: group-level auth + common errors
 const _WebhooksGroup = HttpApiGroup.make('webhooks')
-    .prefix('/v1/webhooks')
+    .prefix(_ROUTE_PREFIX.groups.webhooks)
     .middleware(Middleware)
     .addError(HttpError.Conflict)
     .addError(HttpError.Forbidden)
@@ -580,7 +626,7 @@ const _WebhooksGroup = HttpApiGroup.make('webhooks')
                 active: S.Boolean,
                 eventTypes: S.Array(S.String),
                 timeout: S.optionalWith(S.Number, { default: () => 5000 }),
-                url: S.String,
+                url: WebhookUrlSchema,
             })))
             .annotate(OpenApi.Summary, 'List registered webhooks'),
     )
@@ -590,7 +636,7 @@ const _WebhooksGroup = HttpApiGroup.make('webhooks')
                 eventTypes: S.Array(S.String),
                 secret: S.String.pipe(S.minLength(32)),
                 timeout: S.optionalWith(S.Number, { default: () => 5000 }),
-                url: S.String.pipe(S.pattern(/^https:\/\/[a-zA-Z0-9]/), S.brand('WebhookUrl')),
+                url: WebhookUrlSchema,
             }))
             .addSuccess(_Success)
             .addError(HttpError.Validation)
@@ -606,7 +652,7 @@ const _WebhooksGroup = HttpApiGroup.make('webhooks')
             .setPayload(S.Struct({
                 secret: S.String.pipe(S.minLength(32)),
                 timeout: S.optionalWith(S.Number, { default: () => 5000 }),
-                url: S.String.pipe(S.pattern(/^https:\/\/[a-zA-Z0-9]/), S.brand('WebhookUrl')),
+                url: WebhookUrlSchema,
             }))
             .addSuccess(S.Struct({ deliveredAt: S.Number, durationMs: S.Number, statusCode: S.Number }))
             .annotate(OpenApi.Summary, 'Test webhook delivery'),
@@ -618,7 +664,7 @@ const _WebhooksGroup = HttpApiGroup.make('webhooks')
             .annotate(OpenApi.Summary, 'Retry failed delivery'),
     )
     .add(HttpApiEndpoint.get('status', '/status')
-            .setUrlParams(S.Struct({ url: S.optional(HttpApiSchema.param('url', S.String)) }))
+            .setUrlParams(S.Struct({ url: S.optional(HttpApiSchema.param('url', WebhookUrlSchema)) }))
             .addSuccess(S.Array(WebhookService.DeliveryRecord))
             .annotate(OpenApi.Summary, 'Delivery status')
             .annotate(OpenApi.Description, 'Returns the latest delivery snapshot per endpoint URL.'),
@@ -626,7 +672,7 @@ const _WebhooksGroup = HttpApiGroup.make('webhooks')
 
 // Admin: group-level auth + common errors — excluded from OpenAPI
 const _AdminGroup = HttpApiGroup.make('admin')
-    .prefix('/v1/admin')
+    .prefix(_ROUTE_PREFIX.groups.admin)
     .middleware(Middleware)
     .addError(HttpError.Conflict)
     .addError(HttpError.Forbidden)
@@ -813,7 +859,7 @@ const ParametricApi = HttpApi.make('ParametricApi')
     .add(_UsersGroup)
     .add(_WebhooksGroup)
     .add(_WebSocketGroup)
-    .prefix('/api')
+    .prefix(_ROUTE_PREFIX.api)
     .annotate(OpenApi.Identifier, 'parametric-portal-api')
     .annotate(OpenApi.Title, 'Parametric Portal API')
     .annotate(OpenApi.Version, '1.1.0')
@@ -822,4 +868,4 @@ const ParametricApi = HttpApi.make('ParametricApi')
 
 // --- [EXPORT] ----------------------------------------------------------------
 
-export { AuthResponse, ParametricApi, Query, TransferQuery };
+export { AuthResponse, ParametricApi, Query, TenantAsyncContextRoutePrefixes, TenantExemptRoutePrefixes, TransferQuery };
