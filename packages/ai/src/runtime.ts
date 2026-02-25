@@ -7,11 +7,11 @@ import { AiRuntimeProvider } from './runtime-provider.ts';
 // --- [CONSTANTS] -------------------------------------------------------------
 
 const _OPERATIONS = {
-    chat:           { id: 'ai.chat',           kind: 'language',  telemetry: 'chat' },
+    chat:           { id: 'ai.chat',           kind: 'language',  telemetry: 'chat'       },
     embed:          { id: 'ai.embed',          kind: 'embedding', telemetry: 'embeddings' },
-    generateObject: { id: 'ai.generateObject', kind: 'language',  telemetry: 'chat' },
-    generateText:   { id: 'ai.generateText',   kind: 'language',  telemetry: 'chat' },
-    streamText:     { id: 'ai.streamText',     kind: 'language',  telemetry: 'chat' },
+    generateObject: { id: 'ai.generateObject', kind: 'language',  telemetry: 'chat'       },
+    generateText:   { id: 'ai.generateText',   kind: 'language',  telemetry: 'chat'       },
+    streamText:     { id: 'ai.streamText',     kind: 'language',  telemetry: 'chat'       },
 } as const;
 
 // --- [TYPES] -----------------------------------------------------------------
@@ -39,7 +39,6 @@ const _toolAllowedByPolicy = (policy: AiRegistry.Settings['policy']['tools'], na
         Match.when('allow', () => policy.names.length === 0 || policy.names.includes(name)),
         Match.orElse(() => !policy.names.includes(name)),
     );
-
 const _languageAnnotation = (appSettings: AiRegistry.Settings) => ({
     operation: { name: _OPERATIONS.chat.telemetry },
     request: {
@@ -194,19 +193,21 @@ class AiRuntime extends Effect.Service<AiRuntime>()('ai/Runtime', {
                             : Effect.succeed(toolChoice),
                     ),
                     Match.orElse((value) =>
-                        _isToolChoiceTool(value)
-                            ? Match.value(allowedNames.includes(value.tool)).pipe(
-                                Match.when(true, () => Effect.succeed(value)),
-                                Match.orElse(() =>
-                                    policyDenied(descriptor, context.tenantId, {
-                                        policy,
-                                        reason: 'tool_not_allowed',
-                                        requestedTool: value.tool,
-                                    })),
-                            )
-                            : _isToolChoiceOneOf(value)
-                                ? constrainOneOf(descriptor, context.tenantId, policy, value, allowedNames)
-                                : Effect.succeed(value),
+                        Match.value(value).pipe(
+                            Match.when(_isToolChoiceTool, (v) =>
+                                Match.value(allowedNames.includes(v.tool)).pipe(
+                                    Match.when(true, () => Effect.succeed(value)),
+                                    Match.orElse(() =>
+                                        policyDenied(descriptor, context.tenantId, {
+                                            policy,
+                                            reason: 'tool_not_allowed',
+                                            requestedTool: v.tool,
+                                        })),
+                                ),
+                            ),
+                            Match.when(_isToolChoiceOneOf, (v) => constrainOneOf(descriptor, context.tenantId, policy, v, allowedNames)),
+                            Match.orElse(() => Effect.succeed(value)),
+                        ),
                     ),
                 );
             return Option.fromNullable(options.toolkit).pipe(

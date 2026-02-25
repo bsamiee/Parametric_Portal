@@ -27,7 +27,7 @@ metadata:
 
 <br>
 
-This skill enforces a **single dense style** for C# 14 / .NET 10 modules: smart constructors via `Fin<T>`, discriminated unions via sealed abstract records, zero-branching monadic pipelines via `Eff<RT,T>`, applicative validation via `Validation<Error,T>`, higher-kinded abstraction via `K<F,A>`, and hardware-accelerated hot paths via `TensorPrimitives` / `Vector512<T>`.
+This skill enforces a **single dense style** for C# 14 / .NET 10 modules: smart constructors via `Fin<T>`, discriminated unions via sealed abstract records, zero-branching monadic pipelines via `Eff<RT,T>`, applicative validation via `Validation<Error,T>`, higher-kinded abstraction via `K<F,A>`, decorator-driven cross-cutting composition, and hardware-accelerated hot paths via `TensorPrimitives` / `Vector512<T>`.
 
 ---
 ## [1][LOAD_SEQUENCE]
@@ -128,6 +128,13 @@ result.Match(
 - **`K<F,A>`** for higher-kinded generic algorithms (`Fallible`, `Applicative`, `Monad` constraints).
 - **FluentValidation** for boundary-layer async rule sets (HTTP request DTOs, external payloads). Bridge to `Validation<Error,T>` via `ValidateAsync` before entering domain pipelines. See `validation.md` [2A].
 
+**Decorator discipline**
+- **Object-level cross-cutting is composition-root owned** -- default to interface/service decorators with Scrutor (`Decorate`/`TryDecorate`), ordered explicitly in registration.
+- **Method-level cross-cutting requires an explicit mechanism** -- plain attributes are metadata only; method interception needs compile-time/weaving AOP tooling (for example Metalama/PostSharp) or explicit delegate wrappers.
+- **No hidden decorator semantics** -- every decorator layer states ordering and effect surface (`trace`, `retry`, `cache`, `validate`, `authorize`) in code and docs.
+- **No ad-hoc in-method duplication** -- if behavior repeats across services, promote it into a decorator layer or typed wrapper combinator.
+- **Decorator contract guards are mandatory** -- preserve `CancellationToken`, avoid mutable shared state, and prevent double-decoration registration.
+
 **Surface minimization**
 - **`params ReadOnlySpan<T>`** for arity collapse. See `composition.md` [2].
 - **`SearchValues<char>` + `ContainsAnyExcept`/`IndexOfAnyExcept`** for fixed char-set validations (`length + allowed chars`) on hot paths; reserve `[GeneratedRegex]` for richer grammars. See `performance.md` [7A].
@@ -168,6 +175,7 @@ Core + foundation references are always loaded per [1]. The routing table select
 |  [17]   | Write/review tests            | `testing.md`                        | --                              |
 |  [18]   | Implement persistence layer   | `persistence.md`                    | --                              |
 |  [19]   | Refactor DI registration      | `scrutor.md`                        | --                              |
+|  [20]   | Refactor cross-cutting stack  | `scrutor.md` `observability.md`     | --                              |
 
 ---
 ## [4][DECISION_TREES]
@@ -258,7 +266,7 @@ Fin<int> x = Parse(input).Map((int value) => value + 1);
 **Surface-area violations**
 - **OVERLOAD_SPAM** -- three methods at different arities. `params ReadOnlySpan<T>` + algebraic constraint collapses them. See `composition.md` [2].
 - **API_SURFACE_INFLATION** -- `Get`/`GetMany`/`TryGet`/`GetOrDefault` is query algebra as method proliferation. One `Execute<R>(Query<K,V,R>)` entry point owns all variation.
-- **INTERFACE_POLLUTION** -- `IFooService` with exactly one implementation adds zero testability. Remove; use `Func<>` delegates or direct injection.
+- **INTERFACE_POLLUTION** -- `IFooService` with exactly one implementation adds zero testability. Remove; use `Func<>` delegates or direct injection. **Exception:** keep the interface when it is the explicit seam for Scrutor decorator topology.
 - **GOD_FUNCTION** -- giant switch handling all variants violates OCP. DU + exhaustive `Switch`/`Map` (Thinktecture) or `K<F,A>` abstraction makes extension additive.
 
 **Allocation violations**
@@ -320,3 +328,30 @@ Fin<int> x = Parse(input).Map((int value) => value + 1);
 - **Keys and attributes** -- use `WithServiceKey(...)` and `UsingAttributes()` (`ServiceDescriptorAttribute`) to encode variant routing in registration, not runtime branching.
 - **Decorator topology** -- use ordered `Decorate` chains; use `TryDecorate` for optional modules; capture `DecoratedService<T>` when underlying chain access matters.
 - **Analyzer integration** -- composition-root analyzers should enforce `Scan(...).UsingRegistrationStrategy(...)`; boundary hosts without container seams require explicit exemptions, not silent bypass.
+
+---
+## [10][DECORATOR_EQUIVALENTS]
+>**Dictum:** *C# has three valid decorator-equivalent layers; pick deliberately by scope.*
+
+<br>
+
+- **Layer A -- object/service decorators (default)**:
+  - Use Scrutor decorators for interface implementations and service instances.
+  - Scope is service/object level, not arbitrary single-method interception.
+- **Layer B -- method-level AOP aspects (explicit toolchain)**:
+  - Attributes alone do not execute behavior; they are metadata.
+  - If method-level interception is required, use an explicit aspect framework (for example Metalama/PostSharp) and document compile-time/runtime weaving semantics.
+  - Never present plain attribute annotations as executable policy.
+- **Layer C -- higher-order delegate wrappers (manual)**:
+  - Use typed `Func<...>`/`ValueTask<...>` wrappers when aspect tooling is unavailable or undesired.
+- **Layer C -- higher-order delegate wrappers (manual)**:
+  - Use typed `Func<..., T>` / `Func<..., ValueTask<T>>` wrappers when aspect tooling is unavailable or undesired.
+  - Keep wrappers strongly typed, compositional, and allocation-aware; avoid untyped object-based wrappers.
+  - idempotent registration/composition (no duplicate wrapping)
+  - deterministic ordering declaration
+  - cancellation/context propagation
+  - reentrancy-safe state model
+- **Selection rule**:
+  - Prefer Layer A for application service cross-cutting.
+  - Use Layer B only when method granularity is required and toolchain cost is justified.
+  - Use Layer C for local/explicit composition seams where DI decoration is not the right abstraction.

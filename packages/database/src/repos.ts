@@ -6,7 +6,7 @@ import { SqlClient } from '@effect/sql';
 import { Clock, Effect, Option, Record as R, Schema as S } from 'effect';
 import { repo, routine, Update } from './factory.ts';
 import {
-    AgentCheckpoint, AgentSession, AgentToolCall, ApiKey, App, AppSettingsDefaults, AppSettingsSchema, Asset, AuditLog, type AuditOperationSchema,
+    AgentJournal, ApiKey, App, AppSettingsDefaults, AppSettingsSchema, Asset, AuditLog, type AuditOperationSchema,
     Job, JobDlq, KvStore, MfaSecret, Notification, OauthAccount, Permission, Session, User, WebauthnCredential,
 } from './models.ts';
 import { SearchRepo } from './search.ts';
@@ -151,19 +151,9 @@ const makeNotificationRepo = Effect.gen(function* () {
             ),
     };
 });
-const makeAgentSessionRepo = Effect.gen(function* () {
-    const repository = yield* repo(AgentSession, 'agent_sessions', { resolve: { byRunId: 'runId', byUser: { field: 'userId', many: true } }, scoped: 'appId' });
-    return repository;
-});
-const makeAgentToolCallRepo = Effect.gen(function* () {
-    const repository = yield* repo(AgentToolCall, 'agent_tool_calls', { resolve: { byRunId: { field: 'runId', many: true }, bySession: { field: 'sessionId', many: true } }, scoped: 'appId' });
-    return repository;
-});
-const makeAgentCheckpointRepo = Effect.gen(function* () {
-    const repository = yield* repo(AgentCheckpoint, 'agent_checkpoints', {
-        conflict: { keys: ['sessionId'], only: ['chatJson', 'loopState', 'sceneSummary', 'sequence', 'stateHash'] },
-        pk: { column: 'session_id' },
-        resolve: { bySession: 'sessionId' },
+const makeAgentJournalRepo = Effect.gen(function* () {
+    const repository = yield* repo(AgentJournal, 'agent_journal', {
+        resolve: { byRunId: { field: 'runId', many: true }, bySession: { field: 'sessionId', many: true } },
         scoped: 'appId',
     });
     return repository;
@@ -228,15 +218,15 @@ class DatabaseService extends Effect.Service<DatabaseService>()('database/Databa
     dependencies: [SearchRepo.Default],
     effect: Effect.gen(function* () {
         const [searchRepo, sqlClient] = yield* Effect.all([SearchRepo, SqlClient.SqlClient]);
-        const [users, permissions, apps, sessions, apiKeys, oauthAccounts, assets, audit, mfaSecrets, webauthnCredentials, jobs, jobDlq, notifications, agentSessions, agentToolCalls, agentCheckpoints, kvStore, system] = yield* Effect.all([
+        const [users, permissions, apps, sessions, apiKeys, oauthAccounts, assets, audit, mfaSecrets, webauthnCredentials, jobs, jobDlq, notifications, agentJournal, kvStore, system] = yield* Effect.all([
             makeUserRepo, makePermissionRepo, makeAppRepo, makeSessionRepo, makeApiKeyRepo,
             makeOauthAccountRepo, makeAssetRepo, makeAuditRepo, makeMfaSecretRepo, makeWebauthnCredentialRepo,
             makeJobRepo, makeJobDlqRepo, makeNotificationRepo,
-            makeAgentSessionRepo, makeAgentToolCallRepo, makeAgentCheckpointRepo,
+            makeAgentJournalRepo,
             makeKvStoreRepo, makeSystemRepo,
         ]);
         return {
-            agentCheckpoints, agentSessions, agentToolCalls,
+            agentJournal,
             apiKeys, apps, assets, audit, jobDlq, jobs, kvStore, mfaSecrets, notifications, oauthAccounts, observability: system, permissions, search: searchRepo, sessions,
             users, webauthnCredentials, withTransaction: sqlClient.withTransaction,
         };

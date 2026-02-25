@@ -5,8 +5,7 @@
 import { createServer } from 'node:http';
 import { HttpApiBuilder, HttpApiSwagger, HttpMiddleware, HttpServer, HttpServerResponse } from '@effect/platform';
 import { NodeFileSystem, NodeHttpServer, NodeRuntime } from '@effect/platform-node';
-import { AiRuntime } from '@parametric-portal/ai/runtime';
-import { SearchService } from '@parametric-portal/ai/search';
+import { AiService } from '@parametric-portal/ai/service';
 import { Client } from '@parametric-portal/database/client';
 import { DatabaseService } from '@parametric-portal/database/repos';
 import { ParametricApi, TenantAsyncContextRoutePrefixes, TenantExemptRoutePrefixes } from '@parametric-portal/server/api';
@@ -64,7 +63,7 @@ const PlatformLayer = Layer.unwrapEffect(Env.Service.pipe(Effect.map((env) => La
 
 // --- [SERVICES_LAYER] --------------------------------------------------------
 // All application services in dependency order. Single provideMerge chain.
-// Crons: domain services own their schedules (PollingService.Crons, PurgeService.Crons, SearchService.EmbeddingCron)
+// Separated to allow disabling scheduled work in test/dev without removing the owning service.
 
 const CoreServicesLayer = Layer.mergeAll(
     Auth.Service.Default,
@@ -73,8 +72,7 @@ const CoreServicesLayer = Layer.mergeAll(
     NotificationService.Default,
     StorageService.Default,
     TransferService.Default,
-    AiRuntime.Live,
-    SearchService.Default,
+    AiService.Live,
     JobService.Default,
     PollingService.Default,
     EventBus.Default,
@@ -87,7 +85,7 @@ const ServiceCronsLayer = Layer.mergeAll(
     PollingService.Crons,
     PurgeService.Crons,
     PurgeService.SweepCron,
-    SearchService.EmbeddingCron,
+    AiService.EmbeddingCron,
 );
 const ServiceInfraLayer = Layer.mergeAll(
     DatabaseService.Default,

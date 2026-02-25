@@ -6,7 +6,7 @@ using ParametricPortal.Kargadan.Plugin.src.contracts;
 using static LanguageExt.Prelude;
 namespace ParametricPortal.Kargadan.Plugin.src.protocol;
 
-public static class CommandRouter {
+internal static class CommandRouter {
     private static readonly JsonElement EmptyJsonElement = JsonSerializer.SerializeToElement(new { });
     private const int MinimumDeadlineMs = 1;
     private static class JsonFields {
@@ -28,7 +28,7 @@ public static class CommandRouter {
         internal const string SpanId = "spanId";
         internal const string TraceId = "traceId";
     }
-    public static Fin<CommandEnvelope> Decode(
+    internal static Fin<CommandEnvelope> Decode(
         JsonElement envelope,
         EnvelopeIdentity sessionIdentity) =>
         EnsureEnvelopeObject(envelope: envelope).Bind((JsonElement commandEnvelope) =>

@@ -56,16 +56,16 @@ const StorageLive = HttpApiBuilder.group(ParametricApi, 'storage', (handlers) =>
             .handle('createAsset', ({ payload }) => storageRoute.mutation('createAsset', Effect.gen(function* () {
                 const [tenantId, session] = yield* Effect.all([Context.Request.currentTenantId, Context.Request.sessionOrFail]);
                 const asset = yield* database.assets.insert({
-                    appId: tenantId,
-                    content: payload.content,
-                    deletedAt: Option.none(),
-                    hash: Option.fromNullable(payload.hash),
-                    name: Option.fromNullable(payload.name),
-                    status: 'active' as const,
+                    appId:      tenantId,
+                    content:    payload.content,
+                    deletedAt:  Option.none(),
+                    hash:       Option.fromNullable(payload.hash),
+                    name:       Option.fromNullable(payload.name),
+                    status:     'active' as const,
                     storageRef: Option.fromNullable(payload.storageRef),
-                    type: payload.type,
-                    updatedAt: undefined,
-                    userId: Option.some(session.userId),
+                    type:       payload.type,
+                    updatedAt:  undefined,
+                    userId:     Option.some(session.userId),
                 });
                 yield* audit.log('Asset.create', { details: { name: payload.name, type: payload.type }, subjectId: asset.id });
                 return asset;
@@ -74,9 +74,9 @@ const StorageLive = HttpApiBuilder.group(ParametricApi, 'storage', (handlers) =>
                 const tenantId = yield* Context.Request.currentTenantId;
                 const updates = Record.getSomes({
                     content: Option.fromNullable(payload.content),
-                    name: Option.fromNullable(payload.name),
-                    status: Option.fromNullable(payload.status),
-                    type: Option.fromNullable(payload.type),
+                    name:    Option.fromNullable(payload.name),
+                    status:  Option.fromNullable(payload.status),
+                    type:    Option.fromNullable(payload.type),
                 });
                 yield* database.assets.set(path.id, updates, { app_id: tenantId }).pipe(HttpError.mapTo('Asset update failed'));
                 const updated = yield* database.assets.one([{ field: 'id', value: path.id }]).pipe(
@@ -98,15 +98,15 @@ const StorageLive = HttpApiBuilder.group(ParametricApi, 'storage', (handlers) =>
             .handle('listAssets', ({ urlParams }) => storageRoute.api('listAssets', Effect.gen(function* () {
                 const tenantId = yield* Context.Request.currentTenantId;
                 const predicates = database.assets.preds({
-                    after: urlParams.after,
+                    after:  urlParams.after,
                     app_id: tenantId,
                     before: urlParams.before,
-                    type: urlParams.type,
+                    type:   urlParams.type,
                 });
                 return yield* database.assets.page(predicates, {
-                    asc: urlParams.sort === 'asc',
+                    asc:    urlParams.sort === 'asc',
                     cursor: urlParams.cursor,
-                    limit: urlParams.limit,
+                    limit:  urlParams.limit,
                 });
             })));
     }),

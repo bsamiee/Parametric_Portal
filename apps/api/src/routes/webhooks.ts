@@ -27,8 +27,8 @@ const WebhooksLive = HttpApiBuilder.group(ParametricApi, 'webhooks', (handlers) 
             .handle('register', ({ payload }) => webhooksRoute.mutation('register', Middleware.feature('enableWebhooks').pipe(
                 Effect.andThen(Context.Request.currentTenantId),
                 Effect.flatMap((tenantId) => webhooks.register(tenantId, {
-                    active: payload.active,
-                    endpoint: new WebhookService.Endpoint(payload),
+                    active:     payload.active,
+                    endpoint:   new WebhookService.Endpoint(payload),
                     eventTypes: payload.eventTypes,
                 })),
                 Effect.mapError((e) => e instanceof WebhookService.Error && e.reason === 'NotFound'

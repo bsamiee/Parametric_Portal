@@ -18,11 +18,6 @@
             "import": "./src/files.ts",
             "default": "./src/files.ts"
         },
-        "./icons": {
-            "types": "./src/icons.ts",
-            "import": "./src/icons.ts",
-            "default": "./src/icons.ts"
-        },
         "./svg": {
             "types": "./src/svg.ts",
             "import": "./src/svg.ts",

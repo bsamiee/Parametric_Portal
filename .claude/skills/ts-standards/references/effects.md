@@ -1,367 +1,375 @@
 # [H1][EFFECTS]
->**Dictum:** *Effects are described, composed, and eliminated -- construction to schedule algebra in typed pipelines.*
+>**Dictum:** *Effect execution is contract algebra: every constructor, topology, and policy choice fixes observable `A/E/R` behavior.*
 
-`Effect<A, E, R>` encodes success, typed failure, and required context. All snippets assume `import { Boolean, Data, Duration, Effect, Option, Schedule, pipe } from "effect"`.
+<br>
+
+This reference owns runtime decisions that remain after shape and service modeling: entry semantics, topology and loss contracts, `R`-channel supply, and scoped policy rails. Every snippet is pinned to current local typings (`effect@3.19.x`) and keeps branch-free FP+ROP posture. Deep matching, service architecture, and concurrency internals stay in sibling references; this chapter focuses on execution-boundary decisions.
 
 ---
-## [1][CONSTRUCTION]
->**Dictum:** *Constructors lift values, side effects, and promises into the Effect type.*
+## [1][ENTRY_BOUNDARY_AND_CONSTRUCTOR_SEMANTICS]
+>**Dictum:** *Boundary constructors define failure semantics first; business flow composes only typed rails.*
 
-| [INDEX] | [CONSTRUCTOR]        | [SIGNATURE]               | [WHEN]                                  |
-| :-----: | -------------------- | ------------------------- | --------------------------------------- |
-|   [1]   | `Effect.succeed(a)`  | `Effect<A, never, never>` | Pure value -- no side effects           |
-|   [2]   | `Effect.fail(e)`     | `Effect<never, E, never>` | Typed failure -- domain error           |
-|   [3]   | `Effect.sync(fn)`    | `Effect<A, never, never>` | Lazy synchronous side effect            |
-|   [4]   | `Effect.promise(fn)` | `Effect<A, never, never>` | Infallible async -- never rejects       |
-|   [5]   | `Effect.tryPromise`  | `Effect<A, E, never>`     | Fallible async -- rejection mapped to E |
-|   [6]   | `Effect.suspend(fn)` | `Effect<A, E, R>`         | Deferred/recursive construction         |
-|   [7]   | `Effect.void`        | `Effect<void>`            | No-op placeholder                       |
-|   [8]   | `Effect.never`       | `Effect<never>`           | Infinite suspension -- fiber keep-alive |
+<br>
 
-```typescript
-class FetchError extends Data.TaggedError("FetchError")<{
-    readonly url: string;
-    readonly cause: unknown;
+- `Effect.promise` evaluates async code whose rejection/throw path is defect (`die`), not typed `E`.
+- `Effect.tryPromise` keeps async boundary recoverable and mappable into domain failure rails.
+- `Effect.sync` models synchronous side effects; `Effect.suspend` delays graph construction.
+- `Effect.succeed` and `Effect.fail` inject pure values directly into success/error channels.
+
+```ts
+import { Data, Effect, Schema as S } from "effect";
+
+// --- [ERRORS] ----------------------------------------------------------------
+
+class IntakeError extends Data.TaggedError("IntakeError")<{
+  readonly stage:  "decode" | "quota" | "upstream" | "defect";
+  readonly reason: "invalid" | "rejected" | "failed" | "unexpected";
+  readonly cause?: unknown;
 }> {}
-// why: tryPromise maps rejection to typed error -- replaces try/catch + await
-const fetchJson = (url: string) =>
-    Effect.tryPromise({
-        try:   () => fetch(url).then((r) => r.json() as Promise<unknown>),
-        catch: (cause) => new FetchError({ url, cause }),
-    });
-// why: suspend defers construction -- prevents stack overflow in recursive effects
-const poll = (url: string): Effect.Effect<unknown, FetchError> =>
-    Effect.suspend(() => pipe(
-        fetchJson(url),
-        Effect.flatMap((data) =>
-            data !== null
-                ? Effect.succeed(data)
-                : pipe(Effect.promise(() => new Promise<void>((r) => setTimeout(r, 1000))),
-                    Effect.andThen(poll(url))),
+
+// --- [SCHEMA] ----------------------------------------------------------------
+
+const Intake = S.Struct({
+  tenantId: S.UUID,
+  plan:     S.Literal("free", "pro", "enterprise"),
+  quota:    S.Number.pipe(S.int(), S.nonNegative()),
+});
+
+// --- [FUNCTIONS] -------------------------------------------------------------
+
+const stableHint = Effect.promise(() => Promise.resolve("edge-cache-hit" as const));
+const intakeRail = (input: unknown) =>
+  S.decodeUnknown(Intake)(input).pipe(
+    Effect.mapError((cause) => new IntakeError({ stage: "decode", reason: "invalid", cause })),
+    Effect.filterOrFail(({ quota }) => quota > 0, ({ quota }) => new IntakeError({ stage: "quota", reason: "rejected", cause: quota })),
+    Effect.flatMap((request) =>
+      Effect.tryPromise(() => Promise.resolve({ tenantId: request.tenantId, features: ["audit", "stream"] as const })).pipe(
+        Effect.mapError((cause) => new IntakeError({ stage: "upstream", reason: "failed", cause })),
+        Effect.map((upstream) => ({ request, upstream }) as const),
+      ),
+    ),
+    Effect.zip(stableHint),
+    Effect.map(([state, cacheHint]) => ({ ...state, cacheHint }) as const),
+  );
+```
+
+**Laws:**<br>
+- constructor choice sets boundary semantics, not implementation detail,
+- `tryPromise` is the recoverable async ingress rail, `promise` is defect-only ingress,
+- decode and normalization collapse at boundary once; downstream code stays domain-typed.
+
+---
+## [2][TOPOLOGY_MODE_AND_LOSS_CONTRACTS]
+>**Dictum:** *Topology chooses dependency shape; aggregation mode chooses information-loss semantics.*
+
+<br>
+
+- dependency topology: `flatMap` for dependent steps, `all` for independent fan-in, `race` for success-first latency hedging.
+- aggregation mode is contract surface:
+  - fail-fast (`all` default),
+  - branch-preserving (`mode: "either"`),
+  - validation-preserving (`mode: "validate"`),
+  - collection-level retention (`partition`, `validateAll`, `validateFirst`).
+- compare mode on the same graph shape; changing shape and mode together hides loss semantics.
+- choose retention operator only after mode intent is explicit (`either` retains branch success, `validate` retains error position).
+
+```ts
+import * as HttpClient from "@effect/platform/HttpClient";
+import * as HttpClientRequest from "@effect/platform/HttpClientRequest";
+import * as HttpClientResponse from "@effect/platform/HttpClientResponse";
+import { Chunk, Data, Effect, Either, HashMap, Match, Option, Stream } from "effect";
+
+// --- [ERRORS] ----------------------------------------------------------------
+
+class SnapshotError extends Data.TaggedError("SnapshotError")<{
+  readonly source: "profile" | "usage" | "entitlements";
+  readonly reason: "missing" | "rejected";
+}> {}
+const snapshotReasonPolicy = {
+  missing:  { status: 404, retryable: false },
+  rejected: { status: 503, retryable: true  },
+} as const satisfies Record<SnapshotError["reason"], { readonly status: 404 | 503; readonly retryable: boolean }>;
+
+// --- [FUNCTIONS] -------------------------------------------------------------
+
+const profile = (tenantId: string) =>
+  HttpClient.HttpClient.pipe(
+    Effect.map((client) => client.pipe(HttpClient.mapRequest(HttpClientRequest.acceptJson))),
+    Effect.flatMap((client) => client.get("https://profile.internal/v1/profile", { urlParams: { tenantId } })),
+    Effect.flatMap((response) =>
+      HttpClientResponse.matchStatus(response, {
+        200: () =>    Effect.succeed({ tenantId, status: "active" as const }),
+        404: () =>    Effect.fail(new SnapshotError({ source: "profile", reason: "missing" })),
+        orElse: () => Effect.fail(new SnapshotError({ source: "profile", reason: "rejected" })),
+      }),
+    ),
+  );
+const usage = (tenantId: string) =>
+  Match.value(tenantId).pipe(
+    Match.when("tenant-overdue", () => Effect.fail(new SnapshotError({ source: "usage", reason: "rejected" }))),
+    Match.orElse((id) => Effect.succeed({ tenantId: id, seatsUsed: 8, apiCalls: 520 } as const)),
+  );
+const entitlements = (tenantId: string) =>
+  Match.value(tenantId).pipe(
+    Match.when("tenant-denied", () => Effect.fail(new SnapshotError({ source: "entitlements", reason: "rejected" }))),
+    Match.orElse((id) => Effect.succeed({ tenantId: id, features: ["audit", "stream"] as const })),
+  );
+const snapshotGraph = (tenantId: string) => ({ profile: profile(tenantId), usage: usage(tenantId), entitlements: entitlements(tenantId) } as const);
+const byMode = (tenantId: string) => ({
+  failFast: Effect.all(snapshotGraph(tenantId)),
+  either:   Effect.all(snapshotGraph(tenantId), { mode: "either" }),
+  validate: Effect.all(snapshotGraph(tenantId), { mode: "validate" }),
+} as const);
+const retentionPolicies = (tenantIds: ReadonlyArray<string>) => ({
+  partition:     Effect.partition(tenantIds,     (tenantId) => byMode(tenantId).failFast, { concurrency: "unbounded" }),
+  validateAll:   Effect.validateAll(tenantIds,   (tenantId) => byMode(tenantId).failFast),
+  validateFirst: Effect.validateFirst(tenantIds, (tenantId) => byMode(tenantId).failFast),
+} as const);
+const summarizeWindows = (tenantIds: ReadonlyArray<string>) =>
+  Stream.fromIterable(tenantIds).pipe(
+    Stream.mapEffect((tenantId) => byMode(tenantId).either),
+    Stream.groupedWithin(64, "750 millis"),
+    Stream.map((window) =>
+      Chunk.reduce(window, HashMap.empty<"ok" | "error", number>(), (acc, outcomes) =>
+        [outcomes.profile, outcomes.usage, outcomes.entitlements].reduce(
+          (state, branch) =>
+            Either.match(branch, {
+              onLeft: () => HashMap.set(state, "error", Option.getOrElse(HashMap.get(state, "error"), () => 0) + 1),
+              onRight: () => HashMap.set(state, "ok", Option.getOrElse(HashMap.get(state, "ok"),      () => 0) + 1),
+            }),
+          acc,
         ),
-    ));
+      ),
+    ),
+    Stream.runCollect,
+  );
 ```
 
----
-## [2][COMPOSITION]
->**Dictum:** *pipe for linear flows; map/flatMap/tap thread values; zipWith combines two effects.*
-
-`pipe(value, f, g)` left-to-right. `map` transforms A; `flatMap` chains; `tap` observes; `andThen` polymorphic; `zipWith` merges two; `zipRight`/`zipLeft` discard one side.
-
-```typescript
-// why: pipe + map/flatMap/tap for linear 1-2 step flows
-const enriched = pipe(
-    fetchJson("/api/config"),
-    Effect.map((raw) => ({ ...(raw as Record<string, unknown>), fetchedAt: Date.now() })),
-    Effect.tap((config) => Effect.log(`keys: ${Object.keys(config).length}`)),
-    Effect.flatMap((config) => Effect.tryPromise({
-        try:   () => fetch("/api/validate", { method: "POST", body: JSON.stringify(config) })
-            .then((r) => r.json() as Promise<{ valid: boolean }>),
-        catch: (cause) => new FetchError({ url: "/api/validate", cause }),
-    })),
-);
-// why: zipWith combines two independent effects with a merge function
-const combined = Effect.zipWith(
-    Effect.succeed({ userId: "42" }),
-    Effect.sync(() => Date.now()),
-    (user, now) => ({ ...user, resolvedAt: now }),
-);
-```
+**Laws:**<br>
+- topology selection precedes implementation and is part of API meaning,
+- aggregation mode defines retention/loss semantics and therefore return-shape contracts (`validate` preserves error shape, not success retention),
+- tagged error reason policy is one canonical lookup (`reason -> policy`) instead of inline handler literals,
+- bulk rails (`partition`/`validate*`) express product guarantees, not local optimization.
 
 ---
-## [3][GEN_AND_FN]
->**Dictum:** *Effect.gen is monadic -- yield* unwraps Effect to A; Effect.fn wraps generators with automatic tracing spans.*
+## [3][CONTROL_FLOW_INVARIANTS]
+>**Dictum:** *Expression-level routing is mandatory; control structures belong to combinators and tagged rails.*
 
-Use `Effect.gen` for 3+ dependent operations. Each `yield*` unwraps `Effect<A, E, R>` to `A`, accumulating `E`/`R`. `Effect.fn('span.name')` wraps with automatic OpenTelemetry span. Pipeline form `Effect.fn(gen, pipeStep, ...)` applies up to 9 pipe steps after span. `Effect.fnUntraced` skips span. See `services.md [2]` for constructors; `observability.md [1]` for span naming.
+<br>
 
-```typescript
-// why: Effect.gen for 3+ dependent operations -- types thread automatically
-const provision = Effect.gen(function* () {
-    const config = yield* Effect.succeed({ namespace: "acme", quota: 100 });
-    const record = yield* pipe(
-        fetchJson(`/api/tenants/${config.namespace}`),
-        Effect.map((raw) => raw as { id: string; active: boolean }),
-    );
-    yield* Effect.log(`provisioned ${record.id}`);
-    return { tenantId: record.id, quota: config.quota };
-});
-// why: Effect.fn('name') wraps generator with automatic span + stack trace on error
-const activate = Effect.fn("Tenant.activate")(
-    function* (tenantId: string, quota: number) {
-        yield* Effect.annotateCurrentSpan("tenant.id", tenantId);
-        const result = yield* fetchJson(`/api/tenants/${tenantId}/activate`);
-        return { ...(result as Record<string, unknown>), quota };
-    },
-);
-// why: pipeline form applies timeout after span wraps body
-const activateWithTimeout = Effect.fn(
-    function* (tenantId: string) { return yield* activate(tenantId, 100); },
-    (effect) => Effect.timeout(effect, Duration.seconds(5)),
-);
-```
+Matching taxonomy and pattern inventory live in `matching.md` and `patterns.md`; this section only pins execution-law posture for effect pipelines.
 
----
-## [4][AGGREGATION]
->**Dictum:** *Effect.all aggregates independent effects; Effect.forEach maps effectful functions over collections.*
+```ts
+import { Data, Effect } from "effect";
 
-`Effect.all` accepts tuple, record, or iterable. `mode: "validate"` collects ALL errors (applicative). `mode: "either"` returns `Either` per element. `Effect.forEach` maps effectful function over collection; `{ discard: true }` for side-effect-only.
+// --- [ERRORS] ----------------------------------------------------------------
 
-```typescript
-// why: record form preserves field names; concurrency parallelizes
-const dashboard = (tenantId: string) =>
-    Effect.all({
-        profile:  fetchJson(`/api/tenants/${tenantId}`),
-        settings: fetchJson(`/api/tenants/${tenantId}/settings`),
-        metrics:  fetchJson(`/api/tenants/${tenantId}/metrics`),
-    }, { concurrency: "unbounded" });
-// why: mode "validate" collects ALL errors -- applicative semantics
-const validateAll = Effect.all([
-    fetchJson("/api/check/a"), fetchJson("/api/check/b"), fetchJson("/api/check/c"),
-], { concurrency: "unbounded", mode: "validate" });
-// why: mode "either" returns Either per element -- partial failures preserved
-const partial = Effect.all({
-    primary: fetchJson("/api/primary"), fallback: fetchJson("/api/fallback"),
-}, { concurrency: 2, mode: "either" });
-// why: forEach maps effectful fn over collection with bounded concurrency
-const processAll = (ids: ReadonlyArray<string>) =>
-    Effect.forEach(ids, (id) => fetchJson(`/api/items/${id}`), { concurrency: 10 });
-// why: discard true for side-effect-only loops
-const notifyAll = (endpoints: ReadonlyArray<string>) =>
-    Effect.forEach(endpoints, (url) => pipe(fetchJson(url), Effect.asVoid),
-        { concurrency: 5, discard: true });
-```
-
----
-## [5][CONTROL_FLOW]
->**Dictum:** *Conditional execution, predicate guards, and effectful loops replace all imperative branching.*
-
-`Effect.filterOrFail` replaces `if/throw`; refinement overload narrows `A` to `B`. `Effect.when`/`Effect.unless` return `Option<A>`. `Boolean.match` or `Option.match` select between effectful branches. `Effect.iterate` returns final state; `Effect.loop` collects body results.
-
-```typescript
-type Tenant = { readonly id: string; readonly status: "active" | "suspended"; readonly quota: number };
-class SuspendedError extends Data.TaggedError("SuspendedError")<{ readonly tenantId: string }> {}
-class QuotaError extends Data.TaggedError("QuotaError")<{
-    readonly tenantId: string; readonly limit: number; readonly current: number;
+class GateError extends Data.TaggedError("GateError")<{
+  readonly reason: "quota" | "burst";
+  readonly quota:  number;
+  readonly burst:  number;
 }> {}
-// why: filterOrFail with refinement narrows Tenant to active-only downstream
-const requireActive = (tenant: Tenant) =>
-    pipe(Effect.succeed(tenant), Effect.filterOrFail(
-        (row): row is Tenant & { readonly status: "active" } => row.status === "active",
-        (row) => new SuspendedError({ tenantId: row.id }),
-    ));
-// why: filterOrFail with predicate -- guards without narrowing
-const checkQuota = (tenant: Tenant, requested: number) =>
-    pipe(Effect.succeed(tenant), Effect.filterOrFail(
-        (row) => row.quota >= requested,
-        (row) => new QuotaError({ tenantId: row.id, limit: row.quota, current: requested }),
-    ));
-// why: when/unless return Option<A> (Some if executed, None if skipped)
-const conditionalLog = (verbose: boolean) =>
-    Effect.when(() => verbose)(Effect.log("verbose diagnostics enabled"));
-const skipOnDryRun = (dryRun: boolean) =>
-    Effect.unless(() => dryRun)(fetchJson("/api/deploy"));
-// why: Boolean.match selects between two effects based on boolean -- no Effect.if
-const modeDispatch = (production: boolean) =>
-    Boolean.match(production, {
-        onFalse: () => Effect.succeed({ mock: true }),
-        onTrue:  () => fetchJson("/api/prod"),
-    });
-// why: iterate returns final state -- effectful fold replacing while loops
-const retryUntilReady = (tenantId: string) =>
-    Effect.iterate({ attempts: 0, ready: false }, {
-        while: (state) => !state.ready && state.attempts < 10,
-        body:  (state) => pipe(fetchJson(`/api/tenants/${tenantId}/status`),
-            Effect.map((raw) => ({ attempts: state.attempts + 1, ready: (raw as { ready: boolean }).ready }))),
-    });
-// why: loop collects body results into array -- effectful unfold
-const paginateAll = (baseUrl: string) =>
-    Effect.loop(0 as number, {
-        while: (page) => page < 5, step: (page) => page + 1,
-        body:  (page) => fetchJson(`${baseUrl}?page=${page}`),
-    });
+
+// --- [FUNCTIONS] -------------------------------------------------------------
+
+const gateAdmission = (quota: number, burst: number) =>
+  Effect.succeed([quota, burst] as const).pipe(
+    Effect.filterOrFail(([currentQuota]) => currentQuota > 0, ([currentQuota, currentBurst]) => new GateError({ reason: "quota", quota: currentQuota, burst: currentBurst })),
+    Effect.filterOrFail(([currentQuota, currentBurst]) => currentBurst <= currentQuota, ([currentQuota, currentBurst]) => new GateError({ reason: "burst", quota: currentQuota, burst: currentBurst })),
+    Effect.map(([currentQuota, currentBurst]) => ({ mode: "admit" as const, quota: currentQuota, burst: currentBurst })),
+  );
 ```
 
----
-## [6][MEMOIZATION_AND_TIMING]
->**Dictum:** *cached is two-level (outer sets up, inner reads); race/timeout/timed bound execution with typed failures.*
+**Laws:**<br>
+- route with combinators, not statements,
+- keep failures tagged and local to the rail,
+- match collapse happens at boundary outputs, never mid-pipeline.
 
-```typescript
-// why: two-level -- outer effect yields the cached reader; inner reads/recomputes
-const cachedConfig = Effect.gen(function* () {
-    const reader = yield* Effect.cachedWithTTL(fetchJson("/api/remote-config"), Duration.minutes(5));
-    return yield* reader;
+---
+## [4][R_CHANNEL_PROVISIONING_AND_CONTEXT_LENSING]
+>**Dictum:** *`R` is capability demand; provide late, override deterministically, and narrow context explicitly.*
+
+<br>
+
+- `provide` satisfies graph-level requirements.
+- `provideService` and `provideServiceEffect` override capability sources for deterministic runs and tests.
+- `mapInputContext` narrows or remaps ambient context without rewriting core logic.
+- `Context.Tag`/`Context.GenericTag` model boundary contracts; `Effect.Service` owns module construction/default dependencies.
+
+```ts
+import { Context, Data, Effect, Option } from "effect";
+
+// --- [ERRORS] ----------------------------------------------------------------
+
+class TenantLifecycleError extends Data.TaggedError("TenantLifecycleError")<{
+  readonly operation: "repo.load" | "repo.save" | "audit.publish";
+  readonly reason:    "missing" | "write" | "rejected";
+  readonly cause?:    unknown;
+}> {}
+
+// --- [SERVICES] --------------------------------------------------------------
+
+const TenantRepo = Context.GenericTag<{
+  readonly load: (tenantId: string) => Effect.Effect<{ readonly tenantId: string; readonly status: "active" | "suspended" }, TenantLifecycleError>;
+  readonly save: (record: { readonly tenantId: string; readonly status: "active" | "suspended" }) => Effect.Effect<{ readonly tenantId: string; readonly status: "active" | "suspended" }, TenantLifecycleError>;
+}>("Fx/TenantRepo");
+const AuditSink =    Context.GenericTag<{readonly publish: (topic: string, payload: unknown) => Effect.Effect<void, TenantLifecycleError>;}>("Fx/AuditSink");
+const AuditTopic =   Context.GenericTag<string>("Fx/AuditTopic");
+const RequestTrace = Context.GenericTag<{ readonly traceId: string }>("Fx/RequestTrace");
+const AppTrace =     Context.GenericTag<{ readonly correlationId: string }>("Fx/AppTrace");
+
+// --- [FUNCTIONS] -------------------------------------------------------------
+
+const suspendTenant = (tenantId: string) =>
+  Effect.gen(function* () {
+    const repo = yield* TenantRepo;
+    const audit = yield* AuditSink;
+    const trace = yield* RequestTrace;
+    const maybeTopic = yield* Effect.serviceOption(AuditTopic);
+    const loaded = yield* repo.load(tenantId);
+    const saved = yield* repo.save({ ...loaded, status: "suspended" });
+    yield* Option.match(maybeTopic, {
+      onNone: () => Effect.void,
+      onSome: (topic) => audit.publish(topic, { tenantId: saved.tenantId, traceId: trace.traceId }),
+    });
+    return saved;
+  });
+const tracedRail = suspendTenant("tenant-1").pipe(
+  Effect.mapInputContext((ctx) => Context.add(ctx, RequestTrace, { traceId: Context.get(ctx, AppTrace).correlationId })),
+);
+const runWithOverrides = tracedRail.pipe(
+  Effect.provideService(AppTrace, { correlationId: "corr-1" }),
+  Effect.provideService(TenantRepo, {
+    load: (tenantId) => Effect.succeed({ tenantId, status: "active" as const }),
+    save: Effect.succeed,
+  }),
+  Effect.provideServiceEffect(AuditSink, Effect.succeed({ publish: () => Effect.void })),
+);
+```
+
+Deep layer and service graph architecture stays owned by `composition.md` and `services.md`; this section keeps only execution-time provisioning law.
+
+---
+## [5][SCOPED_POLICY_TIMEOUT_CACHE_AND_HEDGING]
+>**Dictum:** *Lifetime, timeout budgets, cache freshness, and cancellation are one policy surface and belong in one rail.*
+
+<br>
+
+**[5.1] Lifetime + timeout + hedging**<br>
+Use-scope exit drives the finalizer callback of `acquireRelease`; it does not report finalizer success/failure. Hedge policy is symmetric here: both branches are disconnected so the winner returns immediately and loser cleanup finishes in background.
+
+```ts
+import { Clock, Data, Duration, Effect, Exit, Scope } from "effect";
+
+// --- [ERRORS] ----------------------------------------------------------------
+
+class TransportError extends Data.TaggedError("TransportError")<{
+  readonly reason: "closed" | "timeout";
+}> {}
+
+// --- [RESOURCES] -------------------------------------------------------------
+
+const makeLease = (id: string) =>
+  Effect.acquireRelease(
+    Effect.sync(() => ({ id, open: true } as const)),
+    (_, useExit) =>
+      Exit.match(useExit, {
+        onFailure: () => Effect.logWarning(`transport.scope.failure:${id}`),
+        onSuccess: () => Effect.logDebug(`transport.scope.success:${id}`),
+      }),
+  );
+
+// --- [FUNCTIONS] -------------------------------------------------------------
+
+const sendOn = (channel: "primary" | "replica", payload: string) =>
+  Effect.succeed(payload).pipe(
+    Effect.filterOrFail((body) => body.length > 0, () => new TransportError({ reason: "closed" })),
+    Effect.map((body) => [channel, body] as const),
+  );
+const publishWithBudget = (lease: Effect.Effect<{ readonly id: string; readonly open: boolean }, never, Scope.Scope>, send: Effect.Effect<readonly ["primary" | "replica", string], TransportError>) =>
+  Effect.scoped(
+    lease.pipe(
+      Effect.flatMap((resource) =>
+        send.pipe(Effect.map(([channel, payload]) => ({ resourceId: resource.id, channel, payload }) as const)),
+      ),
+      Effect.timeoutFail({ duration: Duration.seconds(2), onTimeout: () => new TransportError({ reason: "timeout" }) }),
+      Effect.flatMap((record) =>
+        Clock.currentTimeMillis.pipe(Effect.map((finishedAt) => ({ ...record, finishedAt }) as const)),
+      ),
+    ),
+  );
+const hedgedPublish = (payload: string) =>
+  Effect.race(
+    Effect.disconnect(publishWithBudget(makeLease("transport-1"), sendOn("primary", payload))),
+    Effect.disconnect(Effect.sleep("25 millis").pipe(Effect.zipRight(publishWithBudget(makeLease("transport-2"), sendOn("replica", payload))))),
+  );
+```
+
+**[5.2] Cache setup vs getter/invalidate semantics**<br>
+Cache constructors return setup effects. Execute the returned getter to read a value, and execute invalidate explicitly when freshness must be reset.
+
+```ts
+import * as KeyValueStore from "@effect/platform/KeyValueStore";
+import { DateTime, Duration, Effect, Option, Schema as S } from "effect";
+
+// --- [SCHEMAS] ---------------------------------------------------------------
+
+const CachedProfile = S.Struct({
+  value:     S.Struct({ profileRevision: S.Number }),
+  expiresAt: S.Number,
 });
-// why: indefinite cache -- value computed once, never recomputed
-const permanent = Effect.gen(function* () {
-    const reader = yield* Effect.cached(Effect.sync(() => ({ buildId: "abc123", startedAt: Date.now() })));
-    return yield* reader;
+
+// --- [FUNCTIONS] -------------------------------------------------------------
+
+const cacheRail = Effect.gen(function* () {
+  const store = yield* KeyValueStore.KeyValueStore;
+  const typed = KeyValueStore.prefix(store, "profile:").forSchema(CachedProfile);
+  const [getProfile, invalidateProfile] = yield* Effect.cachedInvalidateWithTTL(
+    DateTime.now.pipe(
+      Effect.map(DateTime.toEpochMillis),
+      Effect.flatMap((now) =>
+        typed.get("tenant-1").pipe(
+          Effect.flatMap((hit) =>
+            Option.match(Option.filter(hit, (entry) => entry.expiresAt > now), {
+              onSome: ({ value }) => Effect.succeed(value),
+              onNone: () =>
+                DateTime.now.pipe(
+                  Effect.map((fresh) => ({ value: { profileRevision: DateTime.toEpochMillis(fresh) }, expiresAt: DateTime.toEpochMillis(DateTime.addDuration("5 minutes")(fresh)) })),
+                  Effect.tap((entry) => typed.set("tenant-1", entry)),
+                  Effect.map((entry) => entry.value),
+                ),
+            }),
+          ),
+        ),
+      ),
+    ),
+    Duration.seconds(45),
+  );
+  const profileFirst = yield* getProfile;
+  yield* invalidateProfile;
+  const profileSecond = yield* getProfile;
+  return { profileFirst, profileSecond } as const;
 });
-// why: race runs both concurrently; first-wins; loser fiber auto-interrupted
-const resilientFetch = (url: string) =>
-    pipe(fetchJson(url), Effect.race(pipe(
-        Effect.promise(() => new Promise<void>((r) => setTimeout(r, 2000))),
-        Effect.andThen(Effect.succeed({ fallback: true })),
-    )));
-// why: timeoutFail promotes timeout to typed domain error
-const strictBounded = pipe(fetchJson("/api/critical"), Effect.timeoutFail({
-    duration: Duration.seconds(5),
-    onTimeout: () => new FetchError({ url: "/api/critical", cause: "timeout" }),
-}));
-// why: timed wraps result with elapsed Duration for latency tracking
-const measured = pipe(fetchJson("/api/data"), Effect.timed,
-    Effect.tap(([duration]) => Effect.log(`elapsed: ${Duration.toMillis(duration)}ms`)),
-    Effect.map(([, result]) => result));
 ```
 
----
-## [7][RESOURCE]
->**Dictum:** *acquireRelease guarantees cleanup on success, failure, or interruption; ensuring/addFinalizer register lightweight teardown.*
-
-`Effect.acquireRelease(acquire, release)` -- release runs on scope close. Requires `Scope` in R. `Effect.ensuring` appends unconditional cleanup. `Effect.addFinalizer` registers in ambient scope. See `composition.md [6]` for Layer-scoped resources.
-
-```typescript
-declare const openConnection: () => Promise<{ query: (sql: string) => Promise<unknown>; close: () => Promise<void> }>;
-// why: acquireRelease guarantees close() runs -- replaces try/finally
-const managedConnection = Effect.acquireRelease(
-    Effect.tryPromise({ try: () => openConnection(), catch: (cause) => new FetchError({ url: "db", cause }) }),
-    (connection) => Effect.promise(() => connection.close()),
-);
-// why: ensuring appends unconditional cleanup to any effect
-const withCleanup = pipe(fetchJson("/api/data"), Effect.ensuring(Effect.log("cleanup complete")));
-// why: addFinalizer registers cleanup in ambient Scope -- use in scoped constructors
-const shutdownHook = Effect.addFinalizer(() => Effect.log("finalizer: scope closing"));
-```
+**Laws:**<br>
+- scoped resources must encode release behavior in-rail,
+- timeout and hedge are explicit policy values, never incidental wrappers,
+- `cached` yields a getter effect; TTL invalidate variant yields `[getter, invalidate]` and both must be exercised.
 
 ---
-## [8][SCHEDULE_ALGEBRA]
->**Dictum:** *Schedule is algebraic -- compose primitives via pipe, bound with intersect/union, gate with whileInput/whileOutput.*
+## [6][EFFECTS_DECISION_MATRIX]
+>**Dictum:** *Choose rails by contract, not convenience.*
 
-`Schedule<Out, In, R>` describes recurrence. `exponential` doubles delay. `fibonacci` uses Fibonacci. `spaced` fixed interval. `recurs(n)` caps attempts. `jittered` adds randomness. `upTo` caps wall time. `intersect` = AND (both agree). `union` = OR (either). `andThen` sequences phases. `modifyDelay` transforms computed delay. `whileInput`/`whileOutput` gate on predicate. Apply via `Effect.retry` or `Effect.repeat`.
+<br>
 
-```typescript
-// why: intersect = both policies must agree -- caps at 5 retries AND 30s
-const _resilient = pipe(
-    Schedule.exponential(Duration.millis(100), 2), Schedule.jittered,
-    Schedule.intersect(Schedule.recurs(5)), Schedule.upTo(Duration.seconds(30)),
-);
-// why: union = either policy extends -- shortest delay per iteration wins
-const _aggressive = Schedule.union(
-    pipe(Schedule.spaced(Duration.millis(50)), Schedule.intersect(Schedule.recurs(3))),
-    pipe(Schedule.exponential(Duration.millis(100)), Schedule.intersect(Schedule.recurs(5))),
-);
-// why: fibonacci backoff with jitter -- gentler growth than exponential
-const _fibonacci = pipe(
-    Schedule.fibonacci(Duration.millis(100)), Schedule.jittered,
-    Schedule.intersect(Schedule.recurs(8)),
-);
-// why: whileInput gates on error shape -- only retry transient failures
-const _transientOnly = pipe(
-    Schedule.exponential(Duration.millis(200)), Schedule.jittered,
-    Schedule.intersect(Schedule.recurs(3)),
-    Schedule.whileInput((err: { readonly retryable: boolean }) => err.retryable),
-);
-// why: modifyDelay caps individual delays at a ceiling
-const _capped = pipe(
-    Schedule.exponential(Duration.millis(100)),
-    Schedule.modifyDelay((d) => Duration.greaterThan(d, Duration.seconds(10)) ? Duration.seconds(10) : d),
-    Schedule.intersect(Schedule.recurs(10)),
-);
-// why: andThen sequences two schedule phases -- first exhausted, then second begins
-const _twoPhase = pipe(
-    pipe(Schedule.recurs(3), Schedule.intersect(Schedule.spaced(Duration.millis(100)))),
-    Schedule.andThen(pipe(Schedule.recurs(2), Schedule.intersect(Schedule.spaced(Duration.seconds(1))))),
-);
-// why: Effect.retry applies schedule; Effect.repeat for polling
-const resilientCall = (url: string) => pipe(fetchJson(url), Effect.retry(_resilient));
-const poller = (url: string) => pipe(fetchJson(url), Effect.repeat(Schedule.spaced(Duration.seconds(30))));
-```
-
----
-## [9][TRACING_AND_DI]
->**Dictum:** *Effect.fn names spans; Effect.provide/provideService eliminate R.*
-
-`Effect.fn('name')` creates traced function with automatic span. `Effect.withSpan` wraps inline. `Effect.provide` injects Layer. `Effect.provideService` injects single service. See `services.md [1]` for anatomy; `composition.md [1]` for topology.
-
-```typescript
-// why: withSpan wraps existing pipeline inline -- no generator needed
-const probed = pipe(fetchJson("/api/health"),
-    Effect.map((raw) => (raw as { status: string }).status), Effect.withSpan("Health.probe"));
-// why: provideService injects a single service -- test isolation without Layer
-declare const TenantRepo: Effect.Tag<typeof TenantRepo, {
-    readonly find: (id: string) => Effect.Effect<unknown, FetchError>;
-}>;
-const testProgram = pipe(
-    Effect.gen(function* () { return yield* (yield* TenantRepo).find("t1"); }),
-    Effect.provideService(TenantRepo, { find: (id) => Effect.succeed({ id, name: "stub" }) }),
-);
-```
-
----
-## [10][RULES]
->**Dictum:** *Rules compress into constraints.*
-
-- [ALWAYS] `Effect.gen` for 3+ dependent operations -- `yield*` threads `E` and `R` automatically.
-- [ALWAYS] `Effect.fn('Service.method')` for IO methods -- automatic span, stack trace on error.
-- [ALWAYS] `pipe` for linear transformations; reserve `flow` for reusable point-free fragments.
-- [ALWAYS] `Effect.all` with `{ concurrency }` for independent effects -- record/tuple/iterable.
-- [ALWAYS] `Effect.forEach` with `{ concurrency }` for parallel effectful iteration.
-- [ALWAYS] `Effect.filterOrFail` with refinement to narrow `A` to `B` with typed failure.
-- [ALWAYS] `Effect.when`/`Effect.unless` for conditional execution returning `Option<A>`.
-- [ALWAYS] `Effect.tryPromise` with `catch` for fallible async; `Effect.promise` for infallible.
-- [ALWAYS] `Effect.suspend` for recursive effect construction -- prevents stack overflow.
-- [ALWAYS] Schedule algebra: `exponential` + `jittered` + `recurs` + `upTo` via `intersect`.
-- [ALWAYS] `Schedule.whileInput`/`whileOutput` to gate retries on error/result shape.
-- [ALWAYS] `Effect.acquireRelease` for scoped resource lifecycle -- release guaranteed.
-- [ALWAYS] `Effect.cached`/`cachedWithTTL` for memoization -- two-level semantics.
-- [NEVER] `async/await` in Effect pipelines -- use `Effect.promise`/`Effect.tryPromise`.
-- [NEVER] `try/catch/throw` in domain code -- errors are typed values in `E`.
-- [NEVER] `if/else/switch` -- use `Effect.filterOrFail`, `Option.match`, `Match.valueTags`.
-- [NEVER] `Effect.fn` without span name on IO methods -- spans required for observability.
-- [NEVER] Ignore effects in `flatMap` chains -- every step must contribute to result.
-- [NEVER] `Schedule.union` when both bounds must hold -- use `intersect` for AND.
-
----
-## [11][QUICK_REFERENCE]
-
-| [INDEX] | [PATTERN]                               | [WHEN]                         | [KEY_TRAIT]                          |
-| :-----: | --------------------------------------- | ------------------------------ | ------------------------------------ |
-|   [1]   | `Effect.succeed(a)`                     | Pure value lift                | `E=never, R=never`                   |
-|   [2]   | `Effect.fail(e)`                        | Typed domain failure           | `A=never, R=never`                   |
-|   [3]   | `Effect.sync(() => a)`                  | Lazy synchronous side effect   | For Date.now, crypto, JSON           |
-|   [4]   | `Effect.tryPromise({ try, catch })`     | Fallible async interop         | Maps rejection to typed `E`          |
-|   [5]   | `Effect.suspend(() => eff)`             | Deferred/recursive             | Prevents eager stack overflow        |
-|   [6]   | `pipe(value, f, g)`                     | Linear left-to-right flow      | Data-first composition               |
-|   [7]   | `Effect.gen(function* () { yield* })`   | 3+ dependent ops               | Monadic; types accumulate            |
-|   [8]   | `Effect.fn('Svc.method')(gen)`          | Traced service method          | Auto span + stack trace              |
-|   [9]   | `Effect.map / flatMap / tap`            | Transform / chain / observe    | Core monadic algebra                 |
-|  [10]   | `Effect.all({ a, b }, { conc })`        | Aggregate independent effects  | Record/tuple/iterable                |
-|  [11]   | `Effect.all([...], { mode })`           | Validate/either aggregation    | `validate` collects E; `either` per  |
-|  [12]   | `Effect.forEach(xs, fn, { conc })`      | Parallel effectful iteration   | `discard: true` for side-effect-only |
-|  [13]   | `Effect.filterOrFail(pred, orFail)`     | Guard with typed failure       | Refinement narrows A to B            |
-|  [14]   | `Effect.when(() => bool)(eff)`          | Conditional execution          | Returns `Option<A>`                  |
-|  [15]   | `Effect.iterate(init, { while, body })` | Effectful state fold           | Returns final state                  |
-|  [16]   | `Effect.loop(init, { while, step })`    | Effectful unfold               | Collects body results                |
-|  [17]   | `Effect.cached / cachedWithTTL`         | Lazy memoization               | Two-level: outer setup, inner read   |
-|  [18]   | `Effect.race(a, b)`                     | First-wins concurrency         | Loser fiber auto-interrupted         |
-|  [19]   | `Effect.timeoutFail({ duration })`      | Typed timeout                  | Promotes expiry to domain error      |
-|  [20]   | `Effect.timed`                          | Latency measurement            | Wraps with elapsed Duration          |
-|  [21]   | `Effect.acquireRelease(acq, rel)`       | Resource lifecycle             | Release guaranteed on scope exit     |
-|  [22]   | `Effect.ensuring(cleanup)`              | Unconditional cleanup          | Runs after success or failure        |
-|  [23]   | `Schedule.exponential + jittered`       | Transient failure retry        | Compose via pipe + intersect         |
-|  [24]   | `Schedule.intersect(a, b)`              | Both policies must allow       | AND -- caps retries AND time         |
-|  [25]   | `Schedule.union(a, b)`                  | Either policy extends          | OR -- shortest delay per iter        |
-|  [26]   | `Schedule.andThen(a, b)`                | Sequential schedule phases     | First exhausted, then second         |
-|  [27]   | `Schedule.whileInput(pred)`             | Gate retries on error shape    | Retry only when predicate holds      |
-|  [28]   | `Effect.provide(layer)`                 | Eliminate R via Layer          | Production + test injection          |
-|  [29]   | `Effect.provideService(tag, impl)`      | Inline single-service override | Test isolation without full Layer    |
-|  [30]   | `Effect.fn('name') / withSpan`          | Tracing                        | OpenTelemetry span + stack trace     |
-
----
-## [CROSS_REFERENCES]
-
-- `errors.md [3]` -- recovery patterns, `catchTag` union narrowing, `tapError`/`mapError`
-- `services.md [1]` -- `Effect.Service` anatomy, `Effect.fn` inside capability groups
-- `composition.md [1]` -- Layer topology, `provideMerge` chains, `Layer.scoped`
-- `concurrency.md [1]` -- STM transactions, TMap, fibers, Ref, Queue
-- `matching.md [2]` -- `Match.type`/`Match.valueTags` for exhaustive dispatch
-- `observability.md [1]` -- span naming conventions, `Effect.annotateCurrentSpan`
+| [INDEX] | [API]                            | [CONTRACT]                | [FAILURE]                   | [BOUNDARY]          |
+| :-----: | :------------------------------- | :------------------------ | :-------------------------- | :------------------ |
+|   [1]   | `Effect.promise`                 | defect-only async ingress | rejection→defect (`die`)    | adapter only        |
+|   [2]   | `Effect.tryPromise`              | recoverable async ingress | rejection → typed `E`       | adapter+domain      |
+|   [3]   | `Effect.all({ mode })`           | fan-in + loss contract    | fail-fast/either/validate   | aggregation surface |
+|   [4]   | `Effect.partition`,`validate*`   | collection retention      | split/all-err/first-succ    | bulk policy         |
+|   [5]   | `Effect.cachedFunction`          | keyed memoization         | per-key effectful dedupe    | lookup policy       |
+|   [6]   | `Effect.cachedInvalidateWithTTL` | freshness + invalidate    | `[getter, invalidate]` pair | cache ownership     |
+|   [7]   | `provide*`,`mapInputContext`     | `R`-channel supply        | deterministic substitution  | execution boundary  |
+|   [8]   | `acquireRelease` + timeout       | scoped lifecycle policy   | release typed in-rail       | ownership plane     |

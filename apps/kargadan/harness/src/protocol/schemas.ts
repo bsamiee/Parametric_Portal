@@ -11,8 +11,8 @@ const FailureReasonSchema = S.Struct({
     message:      S.NonEmptyTrimmedString,
 });
 const EventSubtypeSchema = S.Literal('added', 'deleted', 'replaced', 'modified', 'undeleted', 'selected', 'deselected', 'deselect_all', 'properties_changed');
-const EventTypeSchema = S.Literal('objects.changed', 'layers.changed', 'view.changed', 'undo.redo', 'session.lifecycle', 'stream.compacted', 'selection.changed', 'material.changed', 'properties.changed', 'tables.changed');
-const OperationSchema = S.Literal(
+const EventTypeSchema =    S.Literal('objects.changed', 'layers.changed', 'view.changed', 'undo.redo', 'session.lifecycle', 'stream.compacted', 'selection.changed', 'material.changed', 'properties.changed', 'tables.changed');
+const OperationSchema =    S.Literal(
     'read.scene.summary', 'read.object.metadata', 'read.object.geometry', 'read.layer.state', 'read.view.state',
     'read.tolerance.units', 'write.object.create', 'write.object.update', 'write.object.delete', 'write.layer.update',
     'write.viewport.update', 'write.annotation.update', 'script.run',
@@ -22,7 +22,7 @@ const ObjectRefSchema = S.Struct({ objectId: S.UUID, sourceRevision: S.Int.pipe(
 const _envelope =       S.Struct({ appId: S.UUID, requestId: S.UUID, runId: S.UUID, sessionId: S.UUID, traceId: S.String.pipe(S.pattern(/^[A-Fa-f0-9]{8,64}$/)) });
 const StreamCompactedDeltaSchema = S.Struct({
     batchWindowMs:    S.Int.pipe(S.greaterThanOrEqualTo(0)),
-    categories:       S.Array(S.Struct({ category: EventTypeSchema, count: S.Int.pipe(S.greaterThanOrEqualTo(0)), subtypes: S.Array(S.Union(EventSubtypeSchema, S.Struct({ count: S.Int.pipe(S.greaterThanOrEqualTo(0)), subtype: EventSubtypeSchema }))) })),
+    categories:       S.Array(S.Struct({ category: EventTypeSchema, count: S.Int.pipe(S.greaterThanOrEqualTo(0)), subtypes: S.Array(S.Struct({ count: S.Int.pipe(S.greaterThanOrEqualTo(0)), subtype: EventSubtypeSchema })) })),
     containsUndoRedo: S.Boolean,
     totalCount:       S.Int.pipe(S.greaterThanOrEqualTo(0)),
 });
@@ -32,11 +32,11 @@ const SessionLifecycleDeltaSchema = S.Union(
     S.Struct({ errorCode: S.NonEmptyTrimmedString, failureClass: S.Literal('retryable', 'correctable', 'compensatable', 'fatal'), status: S.Literal('error') }),
 );
 const ObservationDeltaSchema = S.Struct({
-    isUndoRedo: S.optional(S.Boolean),
-    objectId:   S.optional(S.UUID),
-    objectType: S.optional(S.NonEmptyTrimmedString),
+    isUndoRedo:  S.optional(S.Boolean),
+    objectId:    S.optional(S.UUID),
+    objectType:  S.optional(S.NonEmptyTrimmedString),
     oldObjectId: S.optional(S.UUID),
-    subtype:    EventSubtypeSchema,
+    subtype:     EventSubtypeSchema,
 });
 const EventEnvelopeSchema = S.Union(
     S.extend(_envelope, S.Struct({

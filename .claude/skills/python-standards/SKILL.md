@@ -56,6 +56,7 @@ This skill enforces one dense style for Python 3.14+ modules: typed atoms via `N
 - [ALWAYS] Wrap every `Result`-returning stage inside `bind(...)` when composing with `flow`.
 - [ALWAYS] Use `lash(...)`/`alt(...)` for error-track transforms; never unwrap mid-pipeline.
 - [ALWAYS] Use `ParamSpec` + `Concatenate` + `@wraps` for decorators.
+- [ALWAYS] Treat cross-cutting behavior as decorator-driven design first (`trace/authorize/validate/cache/retry`) instead of duplicating inline policy blocks.
 - [ALWAYS] Keep models immutable (`frozen=True`); update with `model_copy(update=...)`.
 - [ALWAYS] Use `TypeAdapter` at module scope for boundary validation.
 - [ALWAYS] Keep loop-based side effects explicit (`for` at boundary only) and comment the boundary.
@@ -76,6 +77,7 @@ This skill enforces one dense style for Python 3.14+ modules: typed atoms via `N
 - [ALWAYS] typed atoms + total smart constructors (`Result`, not raises). See `types.md` [1].
 - [ALWAYS] frozen object carriers (`BaseModel`/dataclass with `frozen=True`). See `types.md` [3].
 - [ALWAYS] discriminated unions via `Discriminator` + `Tag` or `expression.@tagged_union`. See `types.md` [2].
+- [ALWAYS] for model contracts, keep validation/serialization semantics on decorator surfaces (`@field_validator`, `@model_validator`, `@field_serializer`, `@computed_field`) before helper-sprawl.
 - [NEVER] mutable collections in domain model fields; use `tuple[T, ...]` or `expression.Block[T]`.
 
 **Effect discipline**
@@ -86,7 +88,9 @@ This skill enforces one dense style for Python 3.14+ modules: typed atoms via `N
 
 **Decorator discipline**
 - [ALWAYS] signature-preserving decorators with `ParamSpec`. See `decorators.md` [1].
-- [ALWAYS] canonical ordering: trace > retry > cache > validate > authorize. See `decorators.md` [2].
+- [ALWAYS] canonical execution order (outer -> inner): trace > authorize > validate > cache > retry > operation. See `decorators.md` [2].
+- [ALWAYS] include idempotency + double-decoration guards (`__wrapped__`/marker attr) and tenant/identity-safe cache keys.
+- [ALWAYS] keep decorator stacks deterministic and context-safe (no hidden mutable closure state, preserve `contextvars` propagation).
 - [NEVER] god decorators or mutable closure state.
 
 **Concurrency discipline**

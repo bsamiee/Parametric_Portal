@@ -147,7 +147,7 @@ class RetryConfig(BaseModel, frozen=True):
 _DEFAULT_TRACE_CONFIG: TraceConfig = TraceConfig()
 
 
-# Canonical ordering: trace > retry > cache > validate > authorize.
+# Canonical ordering: trace > authorize > validate > cache > retry > operation.
 # See decorators.md [2] for ordering algebra.
 def trace_span[**P, R](
     config: TraceConfig = _DEFAULT_TRACE_CONFIG,
@@ -235,7 +235,7 @@ def handle_{{pipeline_name}}_result(
 
 *Bridge pattern* -- Domain smart constructors return `expression.Result` per `SKILL.md` [8] convention. Pipeline modules use `returns.Result` for `flow()` composition. `bridge_result` converts at the boundary via `match/case` destructuring -- the only place both libraries' types coexist. See `effects.md` [5] for bridge details.
 
-*Decorator ordering and config* -- Preserve canonical `trace > retry > cache > validate > authorize` ordering. Decorator config is a frozen Pydantic model -- immutable, validated, deterministic. See `decorators.md` [1][2].
+*Decorator ordering and config* -- Preserve canonical `trace > authorize > validate > cache > retry > operation` ordering. Decorator config is a frozen Pydantic model -- immutable, validated, deterministic. See `decorators.md` [1][2].
 
 ---
 **Post-Scaffold Checklist** (from `validation.md`)
@@ -243,7 +243,7 @@ def handle_{{pipeline_name}}_result(
 - [ ] PIPELINE_INTEGRITY: Each stage returns `Result[T, E]`; no bare values or `None` returns; `@safe` at foreign boundaries only. See `validation.md` [2].
 - [ ] FLOW_COMPOSITION: `flow()` + `bind` for left-to-right; `@effect.result` for complex branching; no manual `if result.is_success()` branching. See `validation.md` [2].
 - [ ] BRIDGE_DISCIPLINE: `bridge_result` at domain->pipeline boundary only; no mixing `expression.Ok` and `returns.Success` in same stage. See `validation.md` [2].
-- [ ] DECORATOR_ORDER: Canonical ordering (trace > retry > cache > validate > authorize); `ParamSpec` + `@wraps` on every decorator. See `validation.md` [4].
+- [ ] DECORATOR_ORDER: Canonical ordering (trace > authorize > validate > cache > retry > operation); `ParamSpec` + `@wraps` on every decorator. See `validation.md` [4].
 - [ ] LOGGING: Structured event keys via `structlog.contextvars`; zero f-string log interpolation; `bind_contextvars` per stage. See `observability.md` [1].
 - [ ] NO_MATCH_MID_PIPELINE: `match`/`case` on `Success`/`Failure` appears ONLY at terminal boundary; mid-pipeline uses `map`/`bind`. See `validation.md` [2].
 - [ ] DENSITY: ~225 LOC target; stages are self-contained; no single-call private helpers. See `validation.md` [6].

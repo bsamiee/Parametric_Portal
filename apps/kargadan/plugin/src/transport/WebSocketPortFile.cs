@@ -35,6 +35,7 @@ internal static class WebSocketPortFile {
     internal static void Delete() {
         try {
             File.Delete(PortFilePath);
+            File.Delete(PortFileTempPath);
         } catch (IOException) {
             // why: best-effort cleanup on shutdown
         } catch (UnauthorizedAccessException) {

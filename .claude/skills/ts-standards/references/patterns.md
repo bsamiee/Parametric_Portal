@@ -1,358 +1,333 @@
 # [H1][PATTERNS]
->**Dictum:** *Expert knowledge is knowing which landmines to avoid.*
+>**Dictum:** *Patterns are cross-boundary contracts: one canonical model family, one explicit rail taxonomy, one inspectable runtime graph.*
 
-Architectural anti-pattern codex with corrective examples. Each entry: 1-3 line anti-pattern, 1-3 line correct, WHY sentence. Cross-refs: `errors.md` (error handling) -- `matching.md` (dispatch) -- `services.md` (service shape) -- `composition.md` (Layer topology) -- `effects.md` (pipe/gen/retry) -- `concurrency.md` (STM/Ref/Fiber)
+<br>
 
-```typescript
-import { Data, Duration, Effect, Exit, Layer, Match, Option, Ref, Schedule, Schema as S, pipe } from "effect";
-```
+This file is for integration points where one module spans multiple boundaries (HTTP, RPC, workflow, persistence, cluster, telemetry, STM). It specifies the minimal contracts that keep those boundaries aligned through refactors.
 
 ---
-## [1][SCHEMA_DISCIPLINE]
->**Dictum:** *One canonical schema per entity -- derive all projections at call site via pick/omit/partial.*
+## [1][CONTRACT_CONVERGENCE]
+>**Dictum:** *Model, RPC, and HTTP must project from one runtime schema family or drift is guaranteed.*
 
-```typescript
-// --- [SCHEMA_SPAM] -----------------------------------------------------------
-// [ANTI-PATTERN] -- S.Class for internal config that never serializes
-class DbConfig extends S.Class<DbConfig>("DbConfig")({ url: S.String, pool: S.Number }) {}
-// [CORRECT] -- plain object + typeof; Schema reserved for boundary codecs
-const _CONFIG = { url: process.env.DB_URL ?? "", pool: 5, timeout: 5000 } as const;
-type DbConfig = typeof _CONFIG;
-```
-WHY: `S.Class` adds codec overhead, Hash/Equal derivation, and Class prototype where none is needed. Internal config never serializes -- `typeof` gives the same type for free.
+<br>
 
-```typescript
-// --- [SCHEMA_PROJECTION_COPY] ------------------------------------------------
-// [ANTI-PATTERN] -- separate schema files per operation; duplicated fields
-class CreateUser extends S.Class<CreateUser>("CreateUser")({ email: S.String, role: S.String }) {}
-class UpdateUser extends S.Class<UpdateUser>("UpdateUser")({ role: S.String }) {}
-// [CORRECT] -- derive from canonical entity; one schema, N projections
-const CreateUser = S.Struct(User.fields).pipe(S.pick("email", "role"));
-const PatchUser  = S.partial(S.Struct(User.fields).pipe(S.pick("role")));
-```
-WHY: Separate classes drift from the canonical entity. `pick`/`omit`/`partial` guarantee field definitions stay in sync -- add a field once, projections update automatically.
+```ts
+import { HttpApi, HttpApiEndpoint, HttpApiGroup } from "@effect/platform";
+import * as Model from "@effect/sql/Model";
+import * as Rpc from "@effect/rpc/Rpc";
+import * as RpcGroup from "@effect/rpc/RpcGroup";
+import { Effect, Schema as S } from "effect";
 
-```typescript
-// --- [AS_CONST_SCATTERING] ---------------------------------------------------
-// [ANTI-PATTERN] -- as const per property
-const Config = { mode: "production" as const, port: 8080 as const };
-// [CORRECT] -- single as const on the object
-const _CONFIG = { mode: "production", port: 8080 } as const;
-```
-WHY: Per-property `as const` is redundant noise. Object-level `as const` narrows all properties to literals in one declaration.
-
----
-## [2][SURFACE_DISCIPLINE]
->**Dictum:** *Minimal export surface -- one or two named exports per module; private internals; capability objects.*
-
-```typescript
-// --- [EXPORT_BLOAT] ----------------------------------------------------------
-// [ANTI-PATTERN] -- scattered exports; 5+ named exports fragment the surface
-export const findUser = (id: string) => /* ... */;
-export const validateUser = (user: unknown) => /* ... */;
-export const formatUser = (user: { name: string }) => /* ... */;
-export type UserConfig = { timeout: number };
-// [CORRECT] -- private internals; single const+namespace export
-const _find     = (id: string) => /* ... */;
-const _validate = (raw: unknown) => /* ... */;
-const _format   = (user: { name: string }) => /* ... */;
-const User = { find: _find, format: _format, validate: _validate } as const;
-type User = typeof UserSchema.Type;
-export { User };
-```
-WHY: Every named export is public API surface that must be maintained. A single `const` namespace collapses N exports to one import site; consumers destructure only what they need.
-
-```typescript
-// --- [INDIRECTION_FACTORY] ---------------------------------------------------
-// [ANTI-PATTERN] -- wrapper adding zero logic
-const makeRepo = (sql: SqlClient) => UserRepo.make(sql);
-// [CORRECT] -- call target directly
-const repo = UserRepo.make(sql);
-```
-WHY: Thin wrappers add a navigation hop and an indirection layer with no behavioral difference. Call the target directly.
-
-```typescript
-// --- [HELPER_SPAM] -----------------------------------------------------------
-// [ANTI-PATTERN] -- detached utility files
-import { formatIso } from "../helpers/dateUtils";
-// [CORRECT] -- colocate in domain module
-const _formatIso = (date: Date): string => date.toISOString();
-```
-WHY: `helpers.ts` and `utils.ts` are gravity wells that accumulate unrelated functions. Domain logic belongs in the domain module that owns the concept.
-
----
-## [3][NAMESPACE_AS_MODULE]
->**Dictum:** *Const + declare namespace merges runtime values and type-level exports under one symbol.*
-
-```typescript
-// --- [NAMESPACE_MERGE] -------------------------------------------------------
-// [ANTI-PATTERN] -- type and value exported separately; consumers need 2 imports
-export type User = typeof UserSchema.Type;
-export const UserOps = { find: _find, validate: _validate } as const;
-// [CORRECT] -- const+namespace merge; one import for values and types
-const User = { find: _find, validate: _validate } as const;
-// biome-ignore lint/correctness/noUnusedVariables: const+namespace merge
-namespace User {
-    export type Of = typeof UserSchema.Type;
-    export type Tag = Of["_tag"];
-}
-export { User };
-// consumer: import { User } from "./user"; User.find(id); const u: User.Of = ...;
-```
-WHY: Separate type/value exports force consumers to manage two imports. The merge pattern gives `User.find()` for runtime and `User.Of` for types through a single symbol.
-
----
-## [4][FACTORY_CONSTRUCTION]
->**Dictum:** *One service class with config-driven polymorphism inside the scoped constructor -- not one service class per variant.*
-
-```typescript
-// --- [FACTORY_WITH_EFFECT] ---------------------------------------------------
-// [ANTI-PATTERN] -- copy-paste service per provider variant
-class StripePayment extends Effect.Service<StripePayment>()("pay/Stripe", {
-    scoped: /* stripe-specific implementation */
+// --- [SCHEMA] ----------------------------------------------------------------
+class Tenant extends Model.Class<Tenant>("PatternTenant")({
+  id: Model.GeneratedByApp(S.UUID), slug: S.NonEmptyTrimmedString, plan: S.Literal("starter", "pro", "enterprise"), createdAt: Model.DateTimeInsertFromDate, updatedAt: Model.DateTimeUpdateFromDate,
 }) {}
-class PayPalPayment extends Effect.Service<PayPalPayment>()("pay/PayPal", {
-    scoped: /* paypal-specific implementation */
-}) {}
-// [CORRECT] -- one service; config algebra determines behavior at construction
-class PaymentService extends Effect.Service<PaymentService>()("pay/Payment", {
-    scoped: Effect.gen(function* () {
-        const config = yield* PaymentConfig;
-        const provider = Match.valueTags(config, {
-            Stripe: (settings) => stripeAdapter(settings),
-            PayPal: (settings) => paypalAdapter(settings),
-        });
-        return { charge: provider.charge, refund: provider.refund } as const;
-    }),
+const TenantConflict = S.Struct({ _tag: S.Literal("TenantConflict"), message: S.String });
+
+// --- [SERVICES] --------------------------------------------------------------
+const CreateTenant =   Rpc.make("tenant.create", { payload: Tenant.jsonCreate, success: Tenant.json, error: TenantConflict });
+const TenantProtocol = RpcGroup.make(CreateTenant);
+const TenantApi =      HttpApi.make("PortalApi").add(HttpApiGroup.make("tenant").add(HttpApiEndpoint.post("create", "/tenants").setPayload(Tenant.jsonCreate).addSuccess(Tenant.json).addError(TenantConflict, { status: 409 })));
+
+// --- [FUNCTIONS] -------------------------------------------------------------
+const contractSurface = Effect.succeed({ api: TenantApi, rpc: TenantProtocol, decodeTenantCreate: (raw: unknown) => S.decodeUnknown(Tenant.jsonCreate)(raw) } as const);
+```
+
+Contracts:
+- `Model.Class` projection is the single schema authority for RPC payloads and HTTP payloads.
+- Decode ingress from the exact projection used by the transports.
+- Shared error payload (`TenantConflict`) stays structurally identical across protocols.
+
+Failure modes prevented:
+- Parallel DTO families with field drift.
+- Transport-specific "almost the same" payloads.
+- Decode logic diverging from exposed contracts.
+
+Escalate to:
+- `surface.md` for route/middleware/client internals.
+- `persistence.md` for storage modeling and repository semantics.
+
+---
+## [2][SERVICE_RAIL_CONSTRUCTION]
+>**Dictum:** *Constructor rail owns dependency acquisition, classification algebra, and retry policy as typed data.*
+
+<br>
+
+```ts
+import * as HttpClient from "@effect/platform/HttpClient";
+import * as HttpClientRequest from "@effect/platform/HttpClientRequest";
+import * as HttpClientResponse from "@effect/platform/HttpClientResponse";
+import * as SqlClient from "@effect/sql/SqlClient";
+import { Data, Effect, Match, Schedule, Schema as S } from "effect";
+
+// --- [SCHEMA] ----------------------------------------------------------------
+const UpstreamTenant = S.Struct({ id: S.UUID, slug: S.NonEmptyTrimmedString, plan: S.Literal("starter", "pro", "enterprise") });
+class UpstreamError extends Data.TaggedError("UpstreamError")<{ readonly reason: "rate" | "timeout" | "fatal"; readonly detail: string; }> {}
+
+// --- [FUNCTIONS] -------------------------------------------------------------
+const upstreamReasonPolicy = {
+  fatal:   { retryable: false },
+  rate:    { retryable: true  },
+  timeout: { retryable: true  },
+} as const satisfies Record<UpstreamError["reason"], { readonly retryable: boolean }>;
+const classifyStatus = (status: number) => Match.value(status).pipe(Match.when((n) => n === 429, () => "rate" as const), Match.when((n) => n >= 500 && n < 600, () => "timeout" as const), Match.orElse(() => "fatal" as const));
+const retryPolicy = Schedule.recurWhile((error: UpstreamError) => upstreamReasonPolicy[error.reason].retryable);
+
+// --- [SERVICES] --------------------------------------------------------------
+class TenantSync extends Effect.Service<TenantSync>()("Patterns/TenantSync", {
+  effect: Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const http = yield* HttpClient.HttpClient;
+    return {
+      pull: (baseUrl: string, tenantId: string) => http.execute(HttpClientRequest.get(`${baseUrl}/tenants/${tenantId}`)).pipe(Effect.flatMap((response) => Match.value(response.status).pipe(Match.when((s) => s >= 200 && s < 300, () => HttpClientResponse.schemaBodyJson(UpstreamTenant)(response)), Match.orElse(() => Effect.fail(new UpstreamError({ reason: classifyStatus(response.status), detail: `status:${response.status}` }))))), Effect.mapError((error) => Match.value(error).pipe(Match.when((e): e is UpstreamError => e instanceof UpstreamError, (e) => e), Match.orElse((cause) => new UpstreamError({ reason: "fatal", detail: String(cause) })))), Effect.retry(retryPolicy)),
+      markSynced: (tenantId: string) => sql`update tenant set synced_at = now() where id = ${tenantId}`.pipe(Effect.asVoid),
+    } as const;
+  }),
 }) {}
 ```
-WHY: `Effect.Service` tags are static type-level identifiers -- they cannot be constructed dynamically. One service with `Match.valueTags` on a config algebra selects the adapter at layer construction time. Consumers depend on `PaymentService`, never on a specific provider.
+
+Contracts:
+- Constructor acquires dependencies once and returns a closed capability surface.
+- Status classification is a total mapping from transport status to bounded reasons.
+- Retry policy is defined from typed reasons, not ad-hoc call-site conditionals.
+
+Failure modes prevented:
+- Retrying terminal failures.
+- Unbounded or inconsistent retry behavior per call site.
+- Mixed transport/decode failures leaking as unclassified errors.
+
+Escalate to:
+- `services.md` for service catalog/topology.
+- `errors.md` for module-wide error family design.
 
 ---
-## [5][DISPATCH_TABLES]
->**Dictum:** *Object literal + typed key access replaces string switch; Match.valueTags replaces tag inspection.*
+## [3][TRANSPORT_PARITY_HTTP_RPC]
+>**Dictum:** *Parity means HTTP client and RPC handler are derived from the same contract family and validated together.*
 
-```typescript
-// --- [POLYMORPHIC_DISPATCH_TABLE] --------------------------------------------
-// [ANTI-PATTERN] -- string switch for mode dispatch
-const execute = (mode: string, data: unknown) => {
-    switch (mode) {
-        case "cloud": return deployCloud(data);
-        case "selfhosted": return deploySelfHosted(data);
-        default: throw new Error(`unknown mode: ${mode}`);
-    }
-};
-// [CORRECT] -- typed object literal; compiler rejects missing keys
-type DeployMode = "cloud" | "selfhosted";
-const _DEPLOY: Record<DeployMode, (data: unknown) => Effect.Effect<void>> = {
-    cloud:      (data) => deployCloud(data),
-    selfhosted: (data) => deploySelfHosted(data),
-};
-const execute = (mode: DeployMode, data: unknown) => _DEPLOY[mode](data);
+<br>
+
+```ts
+import { HttpApi, HttpApiClient, HttpApiEndpoint, HttpApiGroup } from "@effect/platform";
+import * as HttpClient from "@effect/platform/HttpClient";
+import * as BrowserHttpClient from "@effect/platform-browser/BrowserHttpClient";
+import * as BrowserKeyValueStore from "@effect/platform-browser/BrowserKeyValueStore";
+import * as Rpc from "@effect/rpc/Rpc";
+import * as RpcGroup from "@effect/rpc/RpcGroup";
+import { Effect, Schema as S } from "effect";
+
+// --- [SCHEMA] ----------------------------------------------------------------
+const TenantRead =     Rpc.make("tenant.read", { payload: S.Struct({ id: S.UUID }), success: S.Struct({ id: S.UUID, slug: S.NonEmptyTrimmedString, plan: S.Literal("starter", "pro", "enterprise") }), error: S.Struct({ _tag: S.Literal("TenantNotFound"), message: S.String }) });
+const TenantRpc =      RpcGroup.make(TenantRead);
+const TenantApi =      HttpApi.make("PortalApi").add(HttpApiGroup.make("tenant").add(HttpApiEndpoint.get("read", "/tenants/:id").setPath(TenantRead.payload).addSuccess(TenantRead.success).addError(TenantRead.error, { status: 404 })));
+
+// --- [LAYERS] ----------------------------------------------------------------
+const TenantRpcLive = TenantRpc.toLayer({ "tenant.read": ({ id }) => Effect.succeed({ id, slug: `tenant-${id.slice(0, 8)}`, plan: "starter" as const }) });
+const TenantHttpClient = Effect.gen(function* () { const httpClient = yield* HttpClient.HttpClient; return yield* HttpApiClient.group(TenantApi, { group: "tenant", httpClient, baseUrl: "https://api.parametric.dev" }); }).pipe(Effect.provide(BrowserHttpClient.layerXMLHttpRequest), Effect.provide(BrowserKeyValueStore.layerSessionStorage));
+const paritySurface = Effect.all({ http: TenantHttpClient, rpc: TenantRpc.accessHandler("tenant.read").pipe(Effect.provide(TenantRpcLive)) }, { concurrency: 2 });
 ```
-WHY: `switch` is open-ended -- the `default` branch hides missing cases at runtime. A `Record<UnionKey, Handler>` makes the compiler reject missing keys at build time. Adding a variant to the union immediately surfaces every incomplete dispatch table.
+
+Contracts:
+- RPC and HTTP surfaces share the exact success/error schema family.
+- Parity checks construct both paths (`HttpApiClient` and RPC access handler) in one effect.
+- Browser runtime dependencies are explicit and local to the parity graph.
+
+Failure modes prevented:
+- Schema drift hidden by one-sided tests.
+- Runtime-only integration breaks between RPC and HTTP callers.
+- Implicit browser dependency assumptions.
+
+Escalate to:
+- `surface.md` for route design, middleware policy, and client architecture.
 
 ---
-## [6][RESOURCE_LIFECYCLE]
->**Dictum:** *Scope mismatch is the most common resource leak -- match acquisition site to lifecycle owner.*
+## [4][STREAMED_PERSISTENCE_WINDOWS]
+>**Dictum:** *Windowing policy, decode boundary, and transaction scope must compose as one rail.*
 
-```typescript
-// --- [SCOPE_MISMATCH] --------------------------------------------------------
-// [ANTI-PATTERN] -- acquireRelease in effect mode (no Scope)
-class BrokenPool extends Effect.Service<BrokenPool>()("app/BrokenPool", {
-    effect: Effect.gen(function* () {
-        // acquireRelease needs Scope -- effect mode doesn't provide one
-        const pool = yield* Effect.acquireRelease(
-            openPool(), (resource) => resource.close(),
-        );
-        return { pool };
-    }),
-}) {}
-// [CORRECT] -- scoped mode provides Scope for acquireRelease
-class ManagedPool extends Effect.Service<ManagedPool>()("app/ManagedPool", {
-    scoped: Effect.gen(function* () {
-        const pool = yield* Effect.acquireRelease(
-            openPool(), (resource) => resource.close(),
-        );
-        return { pool };
-    }),
-}) {}
-```
-WHY: `effect` mode does not provide a `Scope` -- `acquireRelease` compiles but the release function never runs. `scoped` mode pairs acquisition with the Layer's lifecycle, guaranteeing cleanup on shutdown.
+<br>
 
-```typescript
-// --- [MISSING_SCOPED_FOR_FORKSCOPED] -----------------------------------------
-// [ANTI-PATTERN] -- forkScoped outside scoped constructor
-const worker = Effect.forkScoped(Effect.forever(process()));
-// just floating in module scope -- no ambient Scope, fiber leaks
-// [CORRECT] -- inside scoped service constructor
-class WorkerService extends Effect.Service<WorkerService>()("app/Worker", {
-    scoped: Effect.gen(function* () {
-        yield* Effect.forkScoped(Effect.forever(process()));
-        return { status: () => Effect.succeed("running") };
-    }),
-}) {}
-```
-WHY: `forkScoped` ties fiber lifetime to the ambient `Scope`. Outside a scoped constructor, there is no scope -- the fiber escapes and leaks. Inside `scoped`, fiber teardown happens automatically with the Layer.
+```ts
+import * as SqlClient from "@effect/sql/SqlClient";
+import { PgClient } from "@effect/sql-pg";
+import { Chunk, Data, DateTime, Effect, Schedule, Schema as S, Stream } from "effect";
 
-```typescript
-// --- [LAYER_FRESH_IN_PRODUCTION] ---------------------------------------------
-// [ANTI-PATTERN] -- Layer.fresh breaks sharing in production
-const DbLayer = Layer.fresh(Database.Default);
-// [CORRECT] -- Layer.fresh only in test isolation
-const TestDbLayer = Layer.fresh(Database.Default); // each test gets fresh instance
-const ProdDbLayer = Database.Default; // sharing: one allocation, reused across consumers
+// --- [SCHEMA] ----------------------------------------------------------------
+const IngestedEvent = S.Struct({ tenantId: S.UUID, payload: S.Record({ key: S.String, value: S.Unknown }) });
+
+// --- [CLASSES] ---------------------------------------------------------------
+
+class PersistEventsError extends Data.TaggedError("PersistEventsError")<{ readonly reason: "decode" | "write"; readonly cause?: unknown }> {}
+
+// --- [FUNCTIONS] -------------------------------------------------------------
+const persistEvents = (input: Stream.Stream<unknown>) => Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  const pg = yield* PgClient.PgClient;
+  const retry = Schedule.exponential("20 millis").pipe(Schedule.intersect(Schedule.recurs(5)));
+  const stamped = input.pipe(Stream.mapEffect((raw) => S.decodeUnknown(IngestedEvent)(raw).pipe(Effect.mapError((cause) => new PersistEventsError({ reason: "decode", cause })))), Stream.mapEffect((event) => DateTime.now.pipe(Effect.map((at) => [event, at] as const))), Stream.groupedWithin(128, "250 millis"));
+  return yield* stamped.pipe(Stream.runForEach((batch) => sql.withTransaction(Effect.forEach(Chunk.toReadonlyArray(batch), ([event, at]) => sql`insert into tenant_event (tenant_id, payload, observed_at_ms) values (${event.tenantId}, ${pg.json(event.payload)}, ${DateTime.toEpochMillis(at)})`.pipe(Effect.asVoid, Effect.mapError((cause) => new PersistEventsError({ reason: "write", cause }))), { concurrency: 1 })).pipe(Effect.retry(retry))));
+});
 ```
-WHY: `Layer.fresh` defeats Layer memoization -- every consumer allocates a new instance. In production this duplicates connections and state. Reserve for test isolation where independent instances prevent cross-test contamination.
+
+Contracts:
+- Unknown ingress is decoded before timestamping and windowing.
+- Window policy is explicit in count and duration (`groupedWithin`).
+- Transaction scope encloses one batch unit; retry wraps that unit.
+
+Failure modes prevented:
+- Mixed decoded/undecoded items inside the same persistence path.
+- Partial batch semantics without explicit retry boundaries.
+- Time-window behavior changing silently with refactors.
+
+Escalate to:
+- `persistence.md` for repositories, DDL, pagination, and OCC policy.
 
 ---
-## [7][CIRCUIT_BREAKER]
->**Dictum:** *Schedule + Ref compose an algebraic circuit breaker -- no hand-rolled state machine.*
+## [5][WORKFLOW_COMPENSATION_RAIL]
+>**Dictum:** *Compensation is typed workflow data attached at top-level effects, not side-channel rollback glue.*
 
-```typescript
-// --- [CIRCUIT_BREAKER_VIA_SCHEDULE_AND_REF] ----------------------------------
-type CircuitState = "closed" | "open" | "half_open";
-const makeCircuitBreaker = (threshold: number, cooldown: Duration.DurationInput) =>
-    Effect.gen(function* () {
-        const failures = yield* Ref.make(0);
-        const state    = yield* Ref.make<CircuitState>("closed");
-        const cooldownSchedule = pipe(
-            Schedule.spaced(cooldown),
-            Schedule.intersect(Schedule.recurs(1)),
-        );
-        const trip = Ref.set(state, "open" as CircuitState);
-        const reset = Effect.all([Ref.set(state, "closed"), Ref.set(failures, 0)]);
-        const execute = <A, E>(action: Effect.Effect<A, E>): Effect.Effect<A, E | CircuitOpen> =>
-            Effect.gen(function* () {
-                const current = yield* Ref.get(state);
-                yield* Effect.filterOrFail(
-                    Effect.succeed(current),
-                    (s): s is "closed" | "half_open" => s !== "open",
-                    () => new CircuitOpen(),
-                );
-                return yield* pipe(
-                    action,
-                    Effect.tapError(() =>
-                        Effect.gen(function* () {
-                            const count = yield* Ref.updateAndGet(failures, (n) => n + 1);
-                            yield* count >= threshold
-                                ? pipe(trip, Effect.andThen(
-                                    Effect.sleep(cooldown).pipe(
-                                        Effect.andThen(Ref.set(state, "half_open")),
-                                        Effect.fork,
-                                    ),
-                                  ))
-                                : Effect.void;
-                        }),
-                    ),
-                    Effect.tap(() => reset),
-                );
-            });
-        return { execute, state: Ref.get(state) } as const;
-    });
-class CircuitOpen extends Data.TaggedError("CircuitOpen")<{}> {}
+<br>
+
+```ts
+import * as Activity from "@effect/workflow/Activity";
+import * as Workflow from "@effect/workflow/Workflow";
+import { Effect, Schema as S } from "effect";
+
+// --- [SERVICES] --------------------------------------------------------------
+const Charge = Activity.make({ name: "payment.charge", success: S.Struct({ receiptId: S.UUID }), execute: Effect.succeed({ receiptId: "00000000-0000-4000-8000-000000000010" }) });
+const ReserveInventory = Activity.make({ name: "inventory.reserve", success: S.Struct({ reservationId: S.UUID }), execute: Effect.succeed({ reservationId: "00000000-0000-4000-8000-000000000011" }) });
+const FulfillOrder = Workflow.make({ name: "FulfillOrder", payload: { orderId: S.UUID }, idempotencyKey: ({ orderId }) => orderId, success: S.Struct({ receiptId: S.UUID, reservationId: S.UUID }), error: S.Struct({ _tag: S.Literal("FulfillFailed"), message: S.String }) });
+
+// --- [LAYERS] ----------------------------------------------------------------
+const FulfillOrderLive = FulfillOrder.toLayer((payload) => Effect.gen(function* () {
+  const charge = yield* Charge.execute.pipe(Workflow.withCompensation((value, _cause) => Effect.logWarning("payment.refund", { receiptId: value.receiptId, orderId: payload.orderId })));
+  const reservation = yield* ReserveInventory.execute.pipe(Workflow.withCompensation((value, _cause) => Effect.logWarning("inventory.release", { reservationId: value.reservationId, orderId: payload.orderId })));
+  return { receiptId: charge.receiptId, reservationId: reservation.reservationId } as const;
+}));
 ```
-WHY: Hand-rolled `if (failures > threshold) { isOpen = true; setTimeout(...) }` scatters mutable state across callbacks. `Ref` + `Schedule` compose atomically -- state transitions are pure functions, cooldown is a declarative schedule, and the circuit breaker is testable without timers.
+
+Contracts:
+- Each side effect registers compensation at the call site of the activity.
+- Workflow idempotency key derives from business identity (`orderId`).
+- Workflow success shape is assembled only from activity outputs.
+
+Failure modes prevented:
+- Hidden rollback logic outside the workflow graph.
+- Non-deterministic retries without stable idempotency identity.
+- Compensation paths that are not co-located with the forward action.
+
+Escalate to:
+- `services.md` and infra docs for runtime engine topology/deployment policy.
 
 ---
-## [8][BULKHEAD]
->**Dictum:** *Semaphore bounds concurrent access to a resource -- prevents cascade failures under load.*
+## [6][CLUSTER_ENTITY_TOPOLOGY]
+>**Dictum:** *Entity protocol and singleton duties belong in one explicit layer graph with bounded leadership behavior.*
 
-```typescript
-// --- [BULKHEAD_VIA_SEMAPHORE] ------------------------------------------------
-// [ANTI-PATTERN] -- unbounded Promise.all on external service
-const results = await Promise.all(ids.map((id) => externalApi.fetch(id)));
-// [CORRECT] -- Semaphore-based bounded concurrency
-const makeBulkhead = (maxConcurrent: number) =>
-    Effect.gen(function* () {
-        const semaphore = yield* Effect.makeSemaphore(maxConcurrent);
-        const execute = <A, E, R>(action: Effect.Effect<A, E, R>): Effect.Effect<A, E, R> =>
-            semaphore.withPermits(1)(action);
-        return { execute } as const;
-    });
-// For one-shot fan-out, Effect.forEach with bounded concurrency is simpler:
-const bounded = Effect.forEach(ids, (id) => fetchById(id), { concurrency: 10 });
+<br>
+
+```ts
+import * as Entity from "@effect/cluster/Entity";
+import * as Singleton from "@effect/cluster/Singleton";
+import * as Rpc from "@effect/rpc/Rpc";
+import { Effect, Layer, Schedule, Schema as S } from "effect";
+
+// --- [SCHEMA] ----------------------------------------------------------------
+const JobProgress = Rpc.make("job.progress", { payload: S.Struct({ jobId: S.UUID }), success: S.Struct({ pct: S.Int }), error: S.Struct({ _tag: S.Literal("JobMissing"), message: S.String }) });
+const JobCancel =   Rpc.make("job.cancel", { payload: JobProgress.payload, success: S.Void, error: JobProgress.error });
+
+// --- [LAYERS] ----------------------------------------------------------------
+const JobEntity =       Entity.make("Job", [JobProgress, JobCancel]);
+const JobEntityLive =   JobEntity.toLayer({ "job.progress": ({ payload }) => Effect.succeed({ pct: payload.jobId.length % 100 }), "job.cancel": () => Effect.void });
+const RebalanceLeader = Singleton.make("cluster.rebalance", Effect.logDebug("cluster.rebalance.tick").pipe(Effect.repeat(Schedule.spaced("15 seconds"))));
+const ClusterTopology = Layer.mergeAll(JobEntityLive, RebalanceLeader);
 ```
-WHY: `Promise.all` with unbounded parallelism exhausts connection pools and triggers cascade failures. `Semaphore.withPermits` queues excess work until a permit frees. For one-shot collections, `Effect.forEach({ concurrency: N })` is the simpler form; `Semaphore` is for long-lived rate gates shared across callers.
+
+Contracts:
+- Entity protocol is defined as explicit RPC capability set.
+- Singleton duties are isolated as separately named leadership tasks.
+- Cluster runtime graph is declared via layer composition, not implicit startup glue.
+
+Failure modes prevented:
+- Leadership behavior hidden in transport handlers.
+- Entity responsibilities spread across unrelated modules.
+- Runtime graphs that cannot be inspected from layer composition.
+
+Escalate to:
+- `surface.md` and infra docs for transport/server/deployment wiring.
 
 ---
-## [9][SAGA]
->**Dictum:** *Chained acquireRelease with conditional compensation via Exit.isFailure -- no imperative try/finally.*
+## [7][OBSERVABILITY_POLICY_SURFACE]
+>**Dictum:** *Telemetry policy is a stable contract: metric vocabulary, cardinality mapping, and exporter layer composition.*
 
-```typescript
-// --- [SAGA_VIA_ACQUIRE_RELEASE] ----------------------------------------------
-// [ANTI-PATTERN] -- imperative try/finally compensations
-// try { await charge(order); await ship(order); } catch { await refund(order); }
-// [CORRECT] -- chained acquireRelease; compensations guaranteed by Scope
-const orderSaga = (order: Order) =>
-    Effect.gen(function* () {
-        const receipt = yield* Effect.acquireRelease(
-            charge(order),
-            (payment, exit) => Exit.isFailure(exit) ? refund(payment) : Effect.void,
-        );
-        yield* Effect.acquireRelease(
-            ship(order, receipt),
-            (shipment, exit) => Exit.isFailure(exit) ? cancelShipment(shipment) : Effect.void,
-        );
-    });
-// MUST run within Effect.scoped or Layer.scoped to trigger release functions
-const executeSaga = Effect.scoped(orderSaga(order));
+<br>
+
+```ts
+import * as FetchHttpClient from "@effect/platform/FetchHttpClient";
+import * as Otlp from "@effect/opentelemetry/Otlp";
+import { Effect, Layer, Match, Metric, MetricLabel } from "effect";
+
+// --- [CONSTANTS] -------------------------------------------------------------
+const syncTelemetryVocab = {
+  label: { statusClass: "status_class" },
+  resource: { serviceName: "portal-api" },
+  statusClass: { class2xx: "2xx", class4xx: "4xx", class5xx: "5xx", other: "other" },
+} as const;
+const syncSignals = {
+  requests: Metric.counter("tenant_sync_requests_total"),
+  latency:  Metric.withNow(Metric.summaryTimestamp({ name: "tenant_sync_latency_ms", maxAge: "5 minutes", maxSize: 2048, error: 0.01, quantiles: [0.5, 0.9, 0.99] })),
+} as const;
+const statusClass = (status: number) => Match.value(status).pipe(Match.when((n) => n >= 200 && n < 300, () => syncTelemetryVocab.statusClass.class2xx), Match.when((n) => n >= 400 && n < 500, () => syncTelemetryVocab.statusClass.class4xx), Match.when((n) => n >= 500 && n < 600, () => syncTelemetryVocab.statusClass.class5xx), Match.orElse(() => syncTelemetryVocab.statusClass.other));
+
+// --- [FUNCTIONS] -------------------------------------------------------------
+const observeTenantSync = (status: number, durationMs: number) => Effect.all([Metric.increment(Metric.taggedWithLabels(syncSignals.requests, [MetricLabel.make(syncTelemetryVocab.label.statusClass, statusClass(status))])), Metric.update(syncSignals.latency, durationMs)], { concurrency: 2 });
+const telemetryLayer = (cfg: { readonly baseUrl: string; readonly authorization: string; readonly serviceVersion: string }) => Otlp.layerJson({ baseUrl: cfg.baseUrl, headers: { authorization: cfg.authorization }, resource: { serviceName: syncTelemetryVocab.resource.serviceName, serviceVersion: cfg.serviceVersion } }).pipe(Layer.provide(FetchHttpClient.layer));
 ```
-WHY: `try/finally` compensations are fragile -- a thrown exception in the finally block silently swallows the original error. `acquireRelease` guarantees the release function runs on scope close (success, failure, or interruption). The `exit` parameter enables conditional compensation: refund only on failure, not on success.
+
+Contracts:
+- Metric names and label vocabulary are bounded and reviewable.
+- Status classification is canonicalized once before emission.
+- Exporter layer is parameterized by explicit config payload.
+
+Failure modes prevented:
+- Cardinality blowups from free-form labels.
+- Divergent status bucketing across call sites.
+- Telemetry transport configuration hidden in ambient process state.
+
+Escalate to:
+- `observability.md` for tracing policy, dashboards, and alerts.
 
 ---
-## [10][ANTI_PATTERN_GALLERY]
->**Dictum:** *Naming and structure anti-patterns not covered by sibling reference files.*
+## [8][STM_LEDGER_COORDINATION]
+>**Dictum:** *High-contention coordination stays deterministic when queue strategy, transactional mutation, and snapshot projection live in one STM rail.*
 
-**ABBREVIATED_PARAMS**
+<br>
 
-[ANTI-PATTERN]: `const send = (s: Service, ch: string, msg: unknown) => s.publish(ch, msg);`
-[CORRECT]: `const send = (service: Service, channel: string, payload: unknown) => service.publish(channel, payload);`
-Single-letter params lose domain meaning at the call site and in stack traces. Descriptive names are the cheapest form of documentation.
+```ts
+import { Chunk, Clock, DateTime, Effect, HashMap, Match, Option, Order, STM, TMap, TQueue } from "effect";
 
-**COMMENT_WHAT_NOT_WHY**
-
-[ANTI-PATTERN]: `// increment retry count` before `const retries = current + 1;`
-[CORRECT]: `// OCC: version must match snapshot taken before optimistic update begins`
-Comments restating the code waste vertical space and drift from implementation. Reserve comments for invariants, non-obvious constraints, and the "why" behind a design choice.
-
-**FORWARD_REFERENCE_STATIC**
-
-[ANTI-PATTERN]: `class Svc extends Effect.Service<Svc>()(Svc.TAG, { /* ... */ }) {}`
-[CORRECT]:
-```typescript
-const _TAG = "infra/Cache" as const;
-class CacheService extends Effect.Service<CacheService>()(_TAG, { scoped: /* ... */ }) {}
+// --- [FUNCTIONS] -------------------------------------------------------------
+const ledgerProgram = (policy: "bounded" | "dropping" | "sliding") => Effect.gen(function* () {
+  const queue = yield* STM.commit(Match.value(policy).pipe(Match.when("bounded", () => TQueue.bounded<readonly [tenant: string, delta: bigint]>(128)), Match.when("dropping", () => TQueue.dropping<readonly [tenant: string, delta: bigint]>(128)), Match.when("sliding", () => TQueue.sliding<readonly [tenant: string, delta: bigint]>(128)), Match.exhaustive));
+  const ledger = yield* STM.commit(TMap.fromIterable<string, bigint>([["tenant-a", 0n], ["tenant-b", 0n], ["tenant-c", 0n]]));
+  yield* STM.commit(TQueue.offerAll(queue, [["tenant-a", 4n], ["tenant-b", -2n], ["tenant-c", 3n], ["tenant-a", -1n], ["tenant-b", 5n], ["tenant-c", -1n]]));
+  const drain = STM.commit(TQueue.takeUpTo(queue, 64).pipe(STM.flatMap((items) => STM.forEach(items, ([tenant, delta]) => TMap.updateWith(ledger, tenant, (current) => Option.some(Option.getOrElse(current, () => 0n) + delta))))));
+  yield* Effect.all([drain, drain, drain], { concurrency: 3 });
+  const nowMs = yield* Clock.currentTimeMillis;
+  const snapshot = yield* STM.commit(TMap.toHashMap(ledger));
+  const ordered = Chunk.fromIterable(HashMap.toEntries(snapshot)).pipe(Chunk.sortWith(([tenant]) => tenant, Order.string), Chunk.toReadonlyArray);
+  const totals = ordered.reduce((acc, [, delta]) => acc + delta, 0n);
+  const asOf = DateTime.make(nowMs).pipe(Option.map(DateTime.formatIso), Option.getOrElse(() => "invalid-time"));
+  return { asOf, ordered, totals, status: Match.value(totals >= 0n).pipe(Match.when(true, () => "balanced" as const), Match.when(false, () => "drift" as const), Match.exhaustive) } as const;
+});
 ```
-WHY: Class statics are not yet available in the `extends` clause -- the reference is a temporal dead zone error. Module-level `const` avoids the forward reference entirely.
 
-**DENSITY_OVER_VOLUME**
+Contracts:
+- Queue policy selection is exhaustive and value-driven.
+- Ledger mutation occurs only inside committed STM transactions.
+- Snapshot projection is ordered deterministically before externalization.
 
-[ANTI-PATTERN]: 500-line module with repetitive near-identical handler arms.
-[CORRECT]: Extract the varying part into a dispatch table or `Match.valueTags` -- the repetitive structure collapses to a single polymorphic pipeline.
-WHY: Volume is not complexity. Repetitive code masks the actual decision points and makes every refactor touch N sites instead of one.
+Failure modes prevented:
+- Lost updates from non-transactional mutation paths.
+- Non-deterministic snapshot order in downstream consumers.
+- Queue behavior changes that bypass compile-time policy selection.
 
----
-## [11][QUICK_REFERENCE]
-
-| [INDEX] | [PATTERN]              | [SYMPTOM]                           | [FIX]                                            |
-| :-----: | :--------------------- | :---------------------------------- | :----------------------------------------------- |
-|   [1]   | SCHEMA_SPAM            | `S.Class` for internal config       | Plain object + `typeof`                          |
-|   [2]   | SCHEMA_PROJECTION_COPY | Separate `CreateX`/`UpdateX`        | `S.pick`/`S.omit`/`S.partial` on canonical       |
-|   [3]   | AS_CONST_SCATTERING    | `as const` per property             | Single `as const` on object                      |
-|   [4]   | EXPORT_BLOAT           | 5+ named exports per module         | Single `const` namespace + one `export`          |
-|   [5]   | INDIRECTION_FACTORY    | Wrapper delegating 1:1              | Call target directly                             |
-|   [6]   | HELPER_SPAM            | `helpers.ts`, `utils.ts`            | Colocate in domain module                        |
-|   [7]   | NAMESPACE_MERGE        | Type + value exported separately    | Const + `namespace` merge                        |
-|   [8]   | FACTORY_WITH_EFFECT    | Copy-paste service per variant      | One service + `Match.valueTags` on config        |
-|   [9]   | DISPATCH_TABLE         | `switch` on string key              | `Record<Union, Handler>` typed key access        |
-|  [10]   | SCOPE_MISMATCH         | `acquireRelease` in `effect` mode   | Use `scoped` mode for resources                  |
-|  [11]   | MISSING_SCOPED         | `forkScoped` at module level        | Inside `scoped` service constructor              |
-|  [12]   | LAYER_FRESH_PROD       | `Layer.fresh` in production code    | Default sharing; `fresh` only for test           |
-|  [13]   | CIRCUIT_BREAKER        | Hand-rolled if/state machine        | `Schedule` + `Ref` algebraic pattern             |
-|  [14]   | BULKHEAD               | Unbounded `Promise.all`             | `Semaphore.withPermits` or `forEach` concurrency |
-|  [15]   | SAGA                   | Imperative `try`/`finally` rollback | Chained `acquireRelease` + `Exit.isFailure`      |
-|  [16]   | ABBREVIATED_PARAMS     | `(s, ch, d)` single-letter params   | Descriptive names                                |
-|  [17]   | COMMENT_WHAT_NOT_WHY   | `// increment counter`              | Comment the "why" only                           |
-|  [18]   | FORWARD_REF_STATIC     | Class static in `extends` clause    | Module-level `_CONST`                            |
-|  [19]   | DENSITY_OVER_VOLUME    | Repetitive near-identical arms      | Dispatch table or `Match.valueTags`              |
+Escalate to:
+- `concurrency.md` for fiber/queue runtime strategy beyond STM coordination.

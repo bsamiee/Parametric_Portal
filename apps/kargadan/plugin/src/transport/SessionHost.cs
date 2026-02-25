@@ -15,7 +15,7 @@ namespace ParametricPortal.Kargadan.Plugin.src.transport;
 
 // --- [TYPES] -----------------------------------------------------------------
 
-public sealed record SessionSnapshot(
+internal sealed record SessionSnapshot(
     EnvelopeIdentity Identity,
     SessionPhase Phase,
     Instant OpenedAt,
@@ -24,24 +24,24 @@ public sealed record SessionSnapshot(
     Duration HeartbeatTimeout,
     Option<Instant> TerminatedAt);
 [Union]
-public abstract partial record SessionPhase {
+internal abstract partial record SessionPhase {
     private SessionPhase() { }
-    public sealed record Connected : SessionPhase;
-    public sealed record Active(HandshakeEnvelope.Ack Ack) : SessionPhase;
-    public sealed record Terminal(SessionLifecycleState StateTag, Option<FailureReason> Failure) : SessionPhase;
+    internal sealed record Connected : SessionPhase;
+    internal sealed record Active(HandshakeEnvelope.Ack Ack) : SessionPhase;
+    internal sealed record Terminal(SessionLifecycleState StateTag, Option<FailureReason> Failure) : SessionPhase;
 }
 
 // --- [ADAPTER] ---------------------------------------------------------------
 
 [BoundaryAdapter]
-public sealed class SessionHost {
+internal sealed class SessionHost {
     // --- [CONSTANTS] ---------------------------------------------------------
     private static readonly Error SessionNotOpen = Error.New(message: "Session is not open.");
     // --- [STATE] -------------------------------------------------------------
     private readonly Lock _gate = new();
     private Option<SessionSnapshot> _current = None;
     // --- [INTERFACE] ---------------------------------------------------------
-    public Fin<SessionSnapshot> Activate(HandshakeEnvelope.Ack ack, Instant now) {
+    internal Fin<SessionSnapshot> Activate(HandshakeEnvelope.Ack ack, Instant now) {
         using Lock.Scope _ = _gate.EnterScope();
         return _current.ToFin(SessionNotOpen).Bind(snapshot =>
             TransitionFromMutablePhase(
@@ -50,14 +50,14 @@ public sealed class SessionHost {
                 nextPhase: new SessionPhase.Active(Ack: ack),
                 operation: "activate"));
     }
-    public Fin<SessionSnapshot> Beat(Instant now) {
+    internal Fin<SessionSnapshot> Beat(Instant now) {
         using Lock.Scope _ = _gate.EnterScope();
         return _current.ToFin(SessionNotOpen).Bind(snapshot =>
             UpdateActiveHeartbeat(
                 snapshot: snapshot,
                 now: now));
     }
-    public Fin<SessionSnapshot> Close(string reason, Instant now) {
+    internal Fin<SessionSnapshot> Close(string reason, Instant now) {
         using Lock.Scope _ = _gate.EnterScope();
         return _current.ToFin(Error.New(message: $"Session close failed: {reason}")).Bind(snapshot =>
             TransitionFromMutablePhase(
@@ -68,7 +68,7 @@ public sealed class SessionHost {
                     Failure: None),
                 operation: "close"));
     }
-    public Fin<SessionSnapshot> Open(
+    internal Fin<SessionSnapshot> Open(
         EnvelopeIdentity identity,
         Duration heartbeatInterval,
         Duration heartbeatTimeout,
@@ -88,7 +88,7 @@ public sealed class SessionHost {
                     message: "Heartbeat interval/timeout must be positive.")),
         };
     }
-    public Fin<SessionSnapshot> Reject(FailureReason reason, Instant now) {
+    internal Fin<SessionSnapshot> Reject(FailureReason reason, Instant now) {
         using Lock.Scope _ = _gate.EnterScope();
         return Optional(reason)
             .ToFin(Error.New(message: "Session reject reason is required."))
@@ -102,14 +102,14 @@ public sealed class SessionHost {
                             Failure: Some(reasonValue)),
                         operation: "reject")));
     }
-    public Fin<SessionSnapshot> Timeout(Instant now) {
+    internal Fin<SessionSnapshot> Timeout(Instant now) {
         using Lock.Scope _ = _gate.EnterScope();
         return _current.ToFin(Error.New(message: "Session timeout requested while no session is active.")).Bind(snapshot =>
             TimeoutIfNeeded(
                 snapshot: snapshot,
                 now: now));
     }
-    public Fin<SessionSnapshot> Snapshot() {
+    internal Fin<SessionSnapshot> Snapshot() {
         using Lock.Scope _ = _gate.EnterScope();
         return _current.ToFin(SessionNotOpen);
     }

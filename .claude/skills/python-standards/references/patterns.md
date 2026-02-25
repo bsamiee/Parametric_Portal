@@ -154,7 +154,7 @@ def process(data: Input) -> Output: ...
 @cache_result(CacheConfig(ttl=300))
 def process(data: Input) -> Output: ...
 ```
-One decorator per concern; canonical ordering: trace > retry > cache > validate > authorize. See `decorators.md` [2].
+One decorator per concern; canonical ordering: trace > authorize > validate > cache > retry > operation. See `decorators.md` [2].
 
 **MISSING_CHECKPOINT**
 > **DETECT:** `grep -rn "while True\|async for" --include="*.py" | grep -v "checkpoint\|sleep\|await"`

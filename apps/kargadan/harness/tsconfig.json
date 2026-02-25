@@ -6,7 +6,13 @@
         "emitDeclarationOnly": false,
         "noEmit": true,
         "outDir": "dist",
-        "rootDir": ".",
+        "paths": {
+            "@parametric-portal/ai": ["../../../packages/ai/src/service.ts"],
+            "@parametric-portal/ai/*": ["../../../packages/ai/src/*"],
+            "@parametric-portal/database/*": ["../../../packages/database/src/*"],
+            "@parametric-portal/server/*": ["../../../packages/server/src/*"],
+            "@parametric-portal/types/*": ["../../../packages/types/src/*"]
+        },
         "tsBuildInfoFile": "../../../.nx/cache/tsbuildinfo/kargadan-harness.tsbuildinfo",
         "types": ["node", "vitest/globals"]
     },

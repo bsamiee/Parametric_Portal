@@ -14,7 +14,7 @@ using static LanguageExt.Prelude;
 namespace ParametricPortal.Kargadan.Plugin.src.observation;
 
 internal delegate void EventBatchFlushed(EventBatchSummary batch, Instant flushedAt);
-public sealed class ObservationPipeline : IDisposable {
+internal sealed class ObservationPipeline : IDisposable {
     private const int ChannelCapacity = 256;
     private const int DebounceWindowMs = 200;
     private readonly record struct RhinoSubscription(

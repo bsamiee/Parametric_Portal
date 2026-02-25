@@ -1,374 +1,367 @@
 # [H1][ERRORS]
->**Dictum:** *Errors are values -- typed, discriminated, and translated at boundaries; never thrown.*
+>**Dictum:** *Error handling is rail design: bounded domain failures in `E`, invariant defects in `Cause`, and one deterministic boundary translation pass.*
 
-`Data.TaggedError` for domain errors (yieldable, Hash/Equal, zero-overhead). `Schema.TaggedError`
-for boundary errors (codec-derived, OpenAPI-annotated). One polymorphic error class with a `reason`
-literal union replaces 3-9 loose classes. Defects bypass the E channel entirely.
+<br>
 
-```typescript
-import { Cause, Data, Effect, Match, Option, Schedule, Schema as S, pipe } from "effect";
-import { HttpApiSchema } from "@effect/platform";
-```
+This chapter defines how a TypeScript + Effect module keeps error semantics composable under load instead of collapsing into ad-hoc catches. It treats domain failure vocabulary as a first-class algebra, then composes recovery, retry, accumulation, and transport mapping without leaking internals. The target is predictable failure topology: one tag vocabulary per concern, one explicit defect boundary, and one exhaustive transport translation.
 
 ---
-## [1][POLYMORPHIC_DOMAIN_ERROR]
->**Dictum:** *One error class per boundary -- reason field collapses variants; from() factory unifies cause intake; _props enriches without branching.*
+## [1][TAGGED_ERROR_RAIL_ALGEBRA]
+>**Dictum:** *Model one bounded tag first; reason literals and operation labels carry policy semantics, not free-form strings.*
 
-```typescript
+<br>
+
+`Data.TaggedError` is the canonical recoverable rail for domain modules. Keep reason vocabulary finite, derive status/retry policy from that vocabulary, and drive orchestration from the policy surface instead of duplicating routing logic across handlers.
+
+```ts
+import { Data, Effect, Match, Option, pipe } from "effect";
+
 // --- [ERRORS] ----------------------------------------------------------------
-// why: one class collapses not_found + conflict + validation + upstream + rate_limited
-//      into a single type; _props enriches each reason with behavioral metadata
-class OrderError extends Data.TaggedError("OrderError")<{
-    readonly operation: string;
-    readonly reason:    "not_found" | "conflict" | "validation" | "upstream" | "rate_limited";
-    readonly details?:  string;
-    readonly cause?:    unknown;
-}> {
-    static readonly _props = {
-        conflict:     { retryable: false, terminal: false },
-        not_found:    { retryable: false, terminal: false },
-        rate_limited: { retryable: true,  terminal: false },
-        upstream:     { retryable: true,  terminal: false },
-        validation:   { retryable: false, terminal: true  },
-    } as const;
-    override get message() {
-        return `OrderError[${this.operation}/${this.reason}]${this.details ? `: ${this.details}` : ""}`;
-    }
-    // why: adding a reason without _props entry is a compile-time error
-    get isRetryable(): boolean { return OrderError._props[this.reason].retryable; }
-    get isTerminal(): boolean  { return OrderError._props[this.reason].terminal; }
-    // why: boundary collapse -- known typed errors pass through; unknowns wrap with operation context
-    static readonly from = (operation: string) => (cause: unknown): OrderError =>
-        Match.value(cause).pipe(
-            Match.when(Match.instanceOf(OrderError), (existing) => existing),
-            Match.orElse((unknown) => new OrderError({ cause: unknown, operation, reason: "upstream" })),
-        );
-    // why: named constructors prevent misaligned field assignment at 4+ call sites
-    static readonly notFound   = (operation: string, details?: string) =>
-        new OrderError({ details, operation, reason: "not_found" });
-    static readonly conflict   = (operation: string, details: string) =>
-        new OrderError({ details, operation, reason: "conflict" });
-    static readonly validation = (operation: string, details: string) =>
-        new OrderError({ details, operation, reason: "validation" });
-}
-// usage: Effect.tryPromise({ catch: OrderError.from("syncInventory") })
-// usage: Effect.fail(OrderError.notFound("findOrder", id))
+
+class AccountError extends Data.TaggedError("AccountError")<{
+  readonly operation: "parse" | "load" | "patch";
+  readonly reason:    "validation" | "not_found" | "conflict" | "rate_limited" | "upstream";
+  readonly details?:  string;
+  readonly cause?:    unknown;
+}> {}
+const accountReasonPolicy = {
+  validation:   { status: 422, retryable: false },
+  not_found:    { status: 404, retryable: false },
+  conflict:     { status: 409, retryable: false },
+  rate_limited: { status: 429, retryable: true  },
+  upstream:     { status: 503, retryable: true  },
+} as const satisfies Record<AccountError["reason"], { readonly status: number; readonly retryable: boolean }>;
+const toAccountPolicy = (reason: AccountError["reason"]) => accountReasonPolicy[reason];
+
+// --- [FUNCTIONS] -------------------------------------------------------------
+
+const parseAccountId = (rawAccountId: string) =>
+  pipe(
+    Option.some(rawAccountId.trim()),
+    Option.filter((accountId) => accountId.length > 0),
+    Option.match({
+      onNone: () => Effect.fail(new AccountError({ operation: "parse", reason: "validation", details: "accountId required" })),
+      onSome: Effect.succeed,
+    }),
+  );
+const loadAccount = (accountId: string) =>
+  Match.value(accountId).pipe(
+    Match.when("missing", () => Effect.fail(new AccountError({ operation: "load", reason: "not_found", details: accountId }))),
+    Match.when("rate",    () => Effect.fail(new AccountError({ operation: "load", reason: "rate_limited" }))),
+    Match.orElse((value) => Effect.succeed({ accountId: value, version: 3, status: "active" as const })),
+  );
+const patchAccount = (accountId: string, version: number) =>
+  Match.value(version === 3).pipe(
+    Match.when(true,  () => Effect.succeed({ accountId, version: version + 1, status: "suspended" as const })),
+    Match.when(false, () => Effect.fail(new AccountError({ operation: "patch", reason: "conflict", details: "version mismatch" }))),
+    Match.exhaustive,
+  );
+const suspendAccount = (rawAccountId: string) =>
+  pipe(
+    parseAccountId(rawAccountId),
+    Effect.flatMap(loadAccount),
+    Effect.flatMap(({ accountId, version }) => patchAccount(accountId, version)),
+  );
+const suspendAccountTransport = (rawAccountId: string) =>
+  suspendAccount(rawAccountId).pipe(
+    Effect.mapError((error) => ({ ...toAccountPolicy(error.reason), error }) as const),
+  );
 ```
 
 ---
-## [2][BOUNDARY_ERRORS]
->**Dictum:** *Schema.TaggedError at HTTP/RPC seams -- codec + OpenAPI status + static of() in one declaration; const+namespace merge exports all variants as one symbol.*
+## [2][FAILURE_RAIL_AND_DEFECT_BOUNDARY]
+>**Dictum:** *Defects stay defects in core flow; convert at an explicit boundary adapter only when transport requires value-level failure.*
 
-```typescript
-// --- [BOUNDARY_ERRORS] -------------------------------------------------------
-// why: Schema.TaggedError derives codec + equality + OpenAPI in one declaration
-class NotFound extends S.TaggedError<NotFound>()(
-    "NotFound",
-    { cause: S.optional(S.Unknown), id: S.optional(S.String), resource: S.String },
-    HttpApiSchema.annotations({ description: "Resource not found", status: 404 }),
-) {
-    static readonly of = (resource: string, id?: string, cause?: unknown) =>
-        new NotFound({ cause, id, resource });
-    override get message() {
-        return this.id ? `NotFound: ${this.resource}/${this.id}` : `NotFound: ${this.resource}`;
-    }
-}
-// pattern repeats for: Auth(401), Conflict(409), Forbidden(403), GatewayTimeout(504),
-// Gone(410), Internal(500), OAuth(400), RateLimit(429), ServiceUnavailable(503), Validation(400)
-// all share: S.optional(S.Unknown) cause, static of(), override get message()
-```
+<br>
 
-```typescript
-// --- [CONST_NAMESPACE_MERGE] -------------------------------------------------
-// why: one export symbol for all boundary errors + guard + mapTo; callers use
-//      HttpError.NotFound.of(resource, id) and HttpError.mapTo('label')
-const _errors = { Auth, Conflict, Forbidden, Internal, NotFound /* ... */ } as const;
-const _isHttpError = <E>(error: E): error is Extract<E, { readonly _tag: keyof typeof _errors }> =>
-    error !== null && typeof error === "object" && "_tag" in error &&
-    typeof (error as { readonly _tag: unknown })._tag === "string" &&
-    (error as { readonly _tag: string })._tag in _errors;
-const _mapToHttpError = (label: string) =>
-    Effect.mapError((error: unknown) => _isHttpError(error) ? error : Internal.of(label, error));
-// biome-ignore lint/correctness/noUnusedVariables: const+namespace merge pattern
-const HttpError = { ..._errors, is: _isHttpError, mapTo: _mapToHttpError } as const;
-namespace HttpError {
-    type _I<K extends keyof typeof _errors> = InstanceType<(typeof _errors)[K]>;
-    export type Any = _I<keyof typeof _errors>;
-    export type NotFound = _I<"NotFound">;
-    export type Internal = _I<"Internal">;
-    // ... one type alias per error class
-}
-// --- [EXPORT] ----------------------------------------------------------------
-export { HttpError };
-```
+Use `die`/`dieMessage` for invariant breakage and keep that semantics visible until a boundary intentionally translates `Cause` into recoverable rails. This prevents silent defect laundering inside domain orchestration and keeps postmortem fidelity intact.
 
----
-## [3][DOMAIN_TO_BOUNDARY_TRANSLATION]
->**Dictum:** *Domain error reason maps to distinct HTTP responses at the route seam; HttpError.mapTo wraps unknowns as Internal.*
+```ts
+import { Cause, Data, Effect, Match, Option, pipe } from "effect";
 
-```typescript
-// --- [TRANSLATION] -----------------------------------------------------------
-// why: Match.value on reason string is exhaustive -- new reasons get compile-time error
-const getOrderHandler = (id: string) =>
-    findOrder(id).pipe(
-        Effect.mapError((err) =>
-            Match.value(err.reason).pipe(
-                Match.when("not_found",    () => HttpError.NotFound.of("order", id, err)),
-                Match.when("conflict",     () => HttpError.Conflict.of("order", err.details ?? "version mismatch", err)),
-                Match.when("validation",   () => HttpError.Validation.of("order", err.details ?? "invalid input", err)),
-                Match.when("upstream",     () => HttpError.Internal.of("order.upstream", err)),
-                Match.when("rate_limited", () => HttpError.Internal.of("order.rate_limited", err)),
-                Match.exhaustive,
-            ),
-        ),
-        HttpError.mapTo("order.get"),
-    );
-// HttpError.mapTo('label') is the catch-all safety net:
-// typed HTTP errors pass through; unknowns wrap as Internal.of(label, error)
+// --- [ERRORS] ----------------------------------------------------------------
 
----
-## [4][DEFECTS_VS_FAILURES]
->**Dictum:** *Defects are programming errors that bypass the E channel -- only Cause-level handlers observe them.*
+class QueryError extends Data.TaggedError("QueryError")<{
+  readonly operation: "select_account";
+  readonly reason:    "transport" | "not_found";
+  readonly cause?:    unknown;
+}> {}
+const queryTelemetry = {
+  event: { boundaryCause: "query.boundary.cause" },
+} as const;
 
-`Effect.die`/`Effect.dieMessage` for invariant violations (impossible state, broken preconditions).
-Defects produce `Cause.Die` -- invisible to `catchTag`/`catchAll`/`catchTags`. Only
-`Effect.catchAllCause` and `Effect.tapErrorCause` observe them. Use `Cause.isInterrupted`
-inside `catchAllCause` to distinguish graceful shutdown from real failures.
+// --- [FUNCTIONS] -------------------------------------------------------------
 
-```typescript
-// --- [DEFECTS] ---------------------------------------------------------------
-// why: invariant violation -- query must return rows; if not, fiber should crash
-const requireRow = <A>(rows: ReadonlyArray<A>): Effect.Effect<A> =>
-    pipe(
-        Option.fromNullable(rows[0]),
+const selectRows = (accountId: string) =>
+  Match.value(accountId).pipe(
+    Match.when("transport", () => Effect.fail(new QueryError({ operation: "select_account", reason: "transport" }))),
+    Match.when("none",      () => Effect.succeed([] as ReadonlyArray<{ readonly accountId: string; readonly status: "active" }>)),
+    Match.orElse((value) => Effect.succeed([{ accountId: value, status: "active" as const }] as const)),
+  );
+const requireSingleRow = <A>(rows: ReadonlyArray<A>) =>
+  pipe(
+    Option.fromNullable(rows.at(0)),
+    Option.match({
+      onNone: () => Effect.dieMessage("Invariant violated: expected one row"),
+      onSome: Effect.succeed,
+    }),
+  );
+const strictLoad =   (accountId: string) => pipe(selectRows(accountId), Effect.flatMap(requireSingleRow));
+const boundaryLoad = (accountId: string) =>
+  strictLoad(accountId).pipe(
+    Effect.catchAllCause((cause) =>
+      Cause.failureOption(cause).pipe(
         Option.match({
-            onNone: () => Effect.dieMessage("Query returned no rows -- invariant violated"),
-            onSome: Effect.succeed,
-        }),
-    );
-// why: filterOrDie for inline assertion -- defect when precondition breaks
-const ensurePositive = (amount: number): Effect.Effect<number> =>
-    pipe(
-        Effect.succeed(amount),
-        Effect.filterOrDie(
-            (n) => n > 0,
-            () => new Error("Amount must be positive -- programming error"),
-        ),
-    );
-// --- [SHUTDOWN_GUARD] --------------------------------------------------------
-// why: catchAllCause MUST check Cause.isInterrupted to avoid swallowing shutdown signals;
-//      interrupts are graceful teardown, not failures
-const safeCleanup = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
-    pipe(
-        effect,
-        Effect.catchAllCause((cause) =>
-            Cause.isInterrupted(cause)
-                ? Effect.void
-                : Effect.logError("Unexpected failure", { cause: Cause.pretty(cause) }),
-        ),
-    );
+          onNone: () => Effect.fail(new QueryError({ operation: "select_account", reason: "transport", cause })),
+          onSome: Effect.fail,
+        }))),
+    Effect.tapErrorCause((cause) => Effect.logError(queryTelemetry.event.boundaryCause, { cause: Cause.pretty(cause) })),
+  );
 ```
 
 ---
-## [5][ERROR_CHANNEL_NARROWING]
->**Dictum:** *catchTag removes one variant from E at the type level; catchTags removes multiple; progressive narrowing reaches never.*
+## [3][RECOVERY_AND_RETRY_NARROWING]
+>**Dictum:** *Recovery is union reduction: each catch removes variants; retries run only on metadata-backed retryable variants.*
 
-```typescript
-// --- [NARROWING] -------------------------------------------------------------
-declare const fetchResource: (
-    id: string,
-) => Effect.Effect<{ data: string }, NotFoundError | TimeoutError | ServiceError>;
-// why: each catchTag/catchTags call removes variants from the error union at compile time;
-//      the final type reflects only the unhandled variants
-const getResource = (id: string) =>
-    pipe(
-        fetchResource(id),
-        // E = NotFoundError | TimeoutError | ServiceError
-        Effect.tapError((err) => Effect.logWarning("resource.error", { tag: err._tag })),
-        // [1] catchTag removes ONE variant -- E narrows
-        Effect.catchTag("NotFoundError", () => fetchFallback(id)),
-        // E = TimeoutError | ServiceError
-        // [2] catchTags removes MULTIPLE variants via record form
-        Effect.catchTags({
-            TimeoutError: () => pipe(fetchFallback(id), Effect.retry(_resilientRetry)),
-        }),
-        // E = ServiceError (sole remaining variant)
-    );
-// type: Effect<{ data: string }, ServiceError>
-// if all variants handled: Effect<{ data: string }, never>
-```
+<br>
 
-`catchTags` record form is more ergonomic than chaining `catchTag` for 2+ variants. Missing
-a tag key in the record is a compile-time error when the union is closed.
+This section composes `catchTag` with schedule algebra so residual error rails remain explicit at each stage. Boundary tags collapse immediately to one exported rail (`BillingError`) before the function leaves this section.
 
----
-## [6][RETRY_WITH_ERROR_REFINEMENT]
->**Dictum:** *Retry predicates gate on error shape -- connect _props.retryable metadata to Effect.retry({while}).*
+```ts
+import { Data, DateTime, Duration, Effect, Match, Schedule, pipe } from "effect";
 
-```typescript
-// --- [RETRY_GATING] ----------------------------------------------------------
-// why: while predicate uses polymorphic _props metadata -- only retryable reasons trigger retry;
-//      terminal/non-retryable failures fail fast without wasting retry budget
-const _retryPolicy = pipe(
-    Schedule.exponential("200 millis", 2),
-    Schedule.jittered,
-    Schedule.intersect(Schedule.recurs(3)),
-    Schedule.upTo("30 seconds"),
-);
-const resilientOrder = (id: string) =>
-    pipe(
-        findOrder(id),
-        Effect.retry({ schedule: _retryPolicy, while: (err) => err.isRetryable }),
-    );
-// while: Predicate<E> -- continue retrying while predicate holds
-// until: Predicate<E> -- stop retrying once predicate holds (inverse of while)
-// times: number        -- simple N-times retry without schedule
+// --- [ERRORS] ----------------------------------------------------------------
 
-// --- [ACTIVITY_RETRY_PATTERN] ------------------------------------------------
-// why: production pattern -- Activity.retry gates on isRetryable computed from _props;
-//      non-retryable errors (SignatureError, NotFound) fail immediately to DLQ
-// deliverActivity.pipe(Activity.retry({ times: maxAttempts, while: (err) => err.isRetryable }))
-```
+class BillingError extends Data.TaggedError("BillingError")<{
+  readonly operation: "lookup_invoice";
+  readonly reason: "invalid_input" | "not_found" | "throttled" | "upstream";
+  readonly cause?: unknown;
+}> {}
+const billingReasonPolicy = {
+  invalid_input: { retryable: false },
+  not_found:     { retryable: false },
+  throttled:     { retryable: true  },
+  upstream:      { retryable: true  },
+} as const satisfies Record<BillingError["reason"], { readonly retryable: boolean }>;
+const toBillingPolicy = (reason: BillingError["reason"]) => billingReasonPolicy[reason];
+const billingTelemetry = {
+  event: { getInvoiceError: "billing.get_invoice.error" },
+} as const;
 
----
-## [7][ERROR_ACCUMULATION]
->**Dictum:** *Accumulate ALL failures for batch validation instead of short-circuiting on first.*
+// --- [FUNCTIONS] -------------------------------------------------------------
 
-```typescript
-// --- [ACCUMULATION] ----------------------------------------------------------
-// why: validateAll collects ALL failures instead of fail-fast;
-//      error channel is E[] (array), NOT Cause -- each failure preserved as element
-declare const OrderSchema: S.Schema<{ id: string; total: number }>;
-const validateBatch = (items: ReadonlyArray<unknown>) =>
-    Effect.validateAll(items, (item) =>
-        S.decodeUnknown(OrderSchema)(item).pipe(
-            Effect.mapError((parseError) => OrderError.validation("batch", String(parseError))),
-        ),
-    );
-// type: Effect<Array<{ id: string; total: number }>, Array<OrderError>>
-// if ANY item fails, ALL successes are lost
-// use Effect.all(items.map(fn), { mode: 'either' }) when partial success needed --
-// returns Array<Either<A, E>> with per-element Right(success) or Left(failure)
-```
-
----
-## [8][CROSS_SERVICE_ERROR_COMPOSITION]
->**Dictum:** *When ServiceA calls ServiceB, ServiceB's errors translate into ServiceA's error channel at the call boundary.*
-
-```typescript
-// --- [SERVICE_COMPOSITION] ---------------------------------------------------
-// why: from(operation) wraps unknown causes as upstream; typed ServiceB errors
-//      translate explicitly via catchTag before from() sees them
-class InventoryError extends Data.TaggedError("InventoryError")<{
-    readonly operation: string;
-    readonly reason:    "stock_depleted" | "upstream" | "warehouse_offline";
-    readonly cause?:    unknown;
-}> {
-    static readonly from = (operation: string) => (cause: unknown): InventoryError =>
-        Match.value(cause).pipe(
-            Match.when(Match.instanceOf(InventoryError), (existing) => existing),
-            Match.orElse((unknown) => new InventoryError({ cause: unknown, operation, reason: "upstream" })),
-        );
-}
-// why: OrderService calls InventoryService -- typed translation at call boundary
-const fulfillOrder = Effect.fn("OrderService.fulfillOrder")(function* (orderId: string) {
-    const inventory = yield* InventoryService;
-    return yield* pipe(
-        inventory.reserve(orderId),
-        Effect.catchTag("InventoryError", (err) =>
-            Match.value(err.reason).pipe(
-                Match.when("stock_depleted", () =>
-                    Effect.fail(OrderError.conflict("fulfillOrder", "insufficient stock"))),
-                Match.orElse(() =>
-                    Effect.fail(new OrderError({ operation: "fulfillOrder", reason: "upstream", cause: err }))),
-            ),
-        ),
-    );
-});
-// type: Effect<ReserveResult, OrderError, InventoryService>
-// at the route handler: Effect.mapError + HttpError.mapTo collapses to boundary errors
-```
-
----
-## [9][CAUSE_INSPECTION]
->**Dictum:** *Cause<E> is the full failure tree -- inspect at observability boundaries only; see observability.md [1] for span middleware.*
-
-```typescript
-// --- [CAUSE_SKELETON] --------------------------------------------------------
-// why: Cause.match deconstructs the full failure tree -- Empty/Fail/Die/Interrupt/Sequential/Parallel;
-// why: Cause.match deconstructs the full failure tree -- Empty/Fail/Die/Interrupt/Sequential/Parallel;
-//      use only in telemetry/observability middleware via Effect.tapErrorCause
-const _inspectCause = Effect.tapErrorCause((cause: Cause.Cause<unknown>) =>
-    pipe(
-        Cause.match(cause, {
-            onEmpty:      {} as Record<string, unknown>,
-            onFail:       (error) => ({ "error.type": (error as { _tag?: string })._tag ?? "DomainError" }),
-            onDie:        (defect) => Match.value(defect).pipe(
-                Match.when(Match.instanceOf(Error), (e) => ({ "error.type": e.constructor.name })),
-                Match.orElse(() => ({ "error.type": "Defect" })),
-            ),
-            onInterrupt:  (_fiberId) => ({ "error.type": "FiberInterrupted" }),
-            onSequential: (left, right) => ({ ...left, ...right }),
-            onParallel:   (left, right) => ({ ...left, ...right }),
-        }),
-        (attrs) => Effect.annotateCurrentSpan({ error: true, ...attrs }),
+const retryPolicy = Schedule.exponential(Duration.millis(40)).pipe(Schedule.jittered, Schedule.intersect(Schedule.recurs(5)));
+const lookupInvoice = (invoiceId: string) =>
+  Match.value(invoiceId).pipe(
+    Match.when("", () => Effect.fail(new BillingError({ operation: "lookup_invoice", reason: "invalid_input" }))),
+    Match.when("404", () => Effect.fail(new BillingError({ operation: "lookup_invoice", reason: "not_found" }))),
+    Match.when("429", () => Effect.fail(new BillingError({ operation: "lookup_invoice", reason: "throttled" }))),
+    Match.when("503", () => Effect.fail(new BillingError({ operation: "lookup_invoice", reason: "upstream" }))),
+    Match.orElse((value) => Effect.succeed({ invoiceId: value, amount: 1200 } as const)),
+  );
+const lookupWithPolicyRetry = (invoiceId: string) =>
+  lookupInvoice(invoiceId).pipe(
+    Effect.retry(retryPolicy.pipe(Schedule.whileInput((error: BillingError) => toBillingPolicy(error.reason).retryable))),
+  );
+const getInvoice = (invoiceId: string) =>
+  pipe(
+    lookupInvoice(invoiceId),
+    Effect.catchTag("BillingError", (error) =>
+      Match.value(error.reason).pipe(
+        Match.when("not_found", () => Effect.succeed({ invoiceId, amount: 0, fallback: true } as const)),
+        Match.when("throttled", () =>
+          lookupWithPolicyRetry(invoiceId).pipe(
+            Effect.mapError((cause) => new BillingError({ operation: "lookup_invoice", reason: "upstream", cause })),
+          )),
+        Match.when("invalid_input", () => Effect.fail(error)),
+        Match.when("upstream", () => Effect.fail(error)),
+        Match.exhaustive,
+      ),
     ),
-);
-// see observability.md [1] for the full pattern
+    Effect.tapBoth({
+      onFailure: (error) => Effect.logWarning(billingTelemetry.event.getInvoiceError, { tag: error._tag, reason: error.reason }),
+      onSuccess: () => Effect.void,
+    }),
+  );
+const getInvoiceStamped = (invoiceId: string) =>
+  getInvoice(invoiceId).pipe(
+    Effect.zip(DateTime.now),
+    Effect.map(([invoice, observedAt]) => ({ ...invoice, observedAt: DateTime.formatIso(observedAt) })),
+  );
 ```
 
 ---
-## [10][RULES]
+## [4][ACCUMULATION_CONTRACTS_WITH_STREAM_AND_CHUNK]
+>**Dictum:** *`validateAll`, `validateFirst`, and `mode: "validate"` encode distinct error-retention contracts; choose one explicitly and document loss semantics.*
 
-- [ALWAYS] One polymorphic `Data.TaggedError` per service boundary with `reason` literal union -- collapse 3-9 loose classes into one.
-- [ALWAYS] `static readonly _props` dispatch table when reasons carry behavioral metadata (retryability, terminal); computed getters derive via property access.
-- [ALWAYS] `static from(operation)` returning `(cause: unknown) => Error` -- pass-through typed, wrap unknown.
-- [ALWAYS] Named constructors (`notFound`, `conflict`) when 4+ call sites per reason variant.
-- [ALWAYS] `Schema.TaggedError` + `HttpApiSchema.annotations({ status })` for boundary errors -- codec + OpenAPI in one declaration.
-- [ALWAYS] `static readonly of` on boundary errors -- callers never invoke constructors directly.
-- [ALWAYS] Const+namespace merge for boundary error collections -- one `HttpError` export, not 11 classes.
-- [ALWAYS] Override `get message()` on all error classes for structured `Error.message`.
-- [ALWAYS] Keep error unions at 3-5 variants per service boundary; collapse related causes via `reason`.
-- [ALWAYS] Translate domain errors to boundary errors via `Effect.mapError` at the outermost seam (route handler or RPC endpoint).
-- [ALWAYS] `Effect.catchTags({...})` for multi-variant recovery -- prefer over chaining `catchTag` for 2+ variants.
-- [ALWAYS] `Effect.retry({ schedule, while: (err) => err.isRetryable })` to gate retries on polymorphic `_props` metadata.
-- [ALWAYS] `Effect.validateAll` for batch validation collecting all errors (returns `E[]` in error channel).
-- [ALWAYS] `Effect.die`/`Effect.dieMessage` for invariant violations -- defects bypass E channel entirely.
-- [ALWAYS] `Cause.isInterrupted(cause)` guard in `catchAllCause` handlers to distinguish shutdown from failure.
-- [ALWAYS] `Cause.match` only in telemetry/observability layers via `Effect.tapErrorCause` -- never in domain code.
-- [NEVER] Proliferate loose error classes (`UserNotFound`, `UserConflict`, `UserValidation`) -- use one class with `reason`.
-- [NEVER] `throw` anywhere in domain code -- construct typed errors and `Effect.fail`.
-- [NEVER] Untyped string errors or generic `new Error(message)` in Effect pipelines.
-- [NEVER] `Effect.catchAll` as primary recovery -- name each `_tag` explicitly via `catchTag`/`catchTags`.
-- [NEVER] `Effect.catchAllCause` without checking `Cause.isInterrupted` first -- swallows shutdown signals.
-- [NEVER] `Effect.die` for recoverable business errors -- die is for programming defects only.
+<br>
+
+`Stream` handles ingestion, `Chunk` preserves decoded payload order, and `HashMap` projects residual reason frequency without widening rail vocabulary. This keeps accumulation policy explicit for bulk import and replay workflows.
+
+```ts
+import { Chunk, Clock, Data, Effect, HashMap, Match, Option, Schema as S, Stream, pipe } from "effect";
+
+// --- [SCHEMA] ----------------------------------------------------------------
+
+const RowSchema = S.Struct({
+  tenantId: S.UUID,
+  seats:    S.Number.pipe(S.int(), S.nonNegative()),
+  plan:     S.Literal("free", "pro", "enterprise"),
+});
+
+// --- [ERRORS] ----------------------------------------------------------------
+
+class ImportError extends Data.TaggedError("ImportError")<{
+  readonly row:    number;
+  readonly reason: "decode" | "policy";
+  readonly cause?: unknown;
+}> {}
+
+// --- [FUNCTIONS] -------------------------------------------------------------
+
+const decodeRow = (value: unknown, row: number) =>
+  pipe(
+    S.decodeUnknown(RowSchema)(value),
+    Effect.mapError((cause) => new ImportError({ row, reason: "decode", cause })),
+    Effect.filterOrFail(
+      (entry) => entry.seats <= 2000,
+      (entry) => new ImportError({ row, reason: "policy", cause: entry.seats }),
+    ),
+  );
+const decodeStream = (rows: ReadonlyArray<unknown>) =>
+  pipe(
+    Stream.fromIterable(rows),
+    Stream.zipWithIndex,
+    Stream.mapEffect(([value, row]) => decodeRow(value, row)),
+    Stream.runCollect,
+  );
+const reasonHistogram = (errors: ReadonlyArray<ImportError>) =>
+  errors.reduce(
+    (acc, error) =>
+      HashMap.set(
+        acc,
+        error.reason,
+        pipe(
+          HashMap.get(acc, error.reason),
+          Option.match({
+            onNone: () => 1,
+            onSome: (value) => value + 1,
+          }),
+        ),
+      ),
+    HashMap.empty<ImportError["reason"], number>(),
+  );
+const allOrFailures =  (rows: ReadonlyArray<unknown>) => Effect.validateAll  (rows, decodeRow);
+const firstValid =     (rows: ReadonlyArray<unknown>) => Effect.validateFirst(rows, decodeRow);
+const residualMatrix = (rows: ReadonlyArray<unknown>) =>
+  Effect.all(rows.map(decodeRow), { mode: "validate" }).pipe(
+    Effect.match({
+      onFailure: (residuals) =>
+        residuals.map((residual, row) =>
+          Option.match(residual, {
+            onNone: () =>      ({ row, _tag: "ok" as const }),
+            onSome: (error) => ({ row, _tag: "invalid" as const, reason: error.reason }),
+          })),
+      onSuccess: (values) => values.map((_, row) => ({ row, _tag: "ok" as const })),
+    }),
+  );
+const ingest = (rows: ReadonlyArray<unknown>) =>
+  Effect.all({ startedAtMs: Clock.currentTimeMillis, decoded: decodeStream(rows) }).pipe(
+    Effect.match({
+      onFailure: (error) =>                    ({ _tag: "invalid" as const, histogram: reasonHistogram([error]) }),
+      onSuccess: ({ startedAtMs, decoded }) => ({ _tag: "ok" as const, startedAtMs, rows: Chunk.fromIterable(decoded) }),
+    }),
+  );
+```
 
 ---
-## [11][QUICK_REFERENCE]
+## [5][STM_TMAP_CONCURRENT_REASON_AGGREGATION]
+>**Dictum:** *Concurrent error aggregation belongs in transactional rails when counter integrity matters under parallel writers.*
 
-| [INDEX] | [API]                                     | [WHEN]                            | [NOTE]                                       |
-| :-----: | ----------------------------------------- | --------------------------------- | -------------------------------------------- |
-|   [1]   | `Data.TaggedError("Tag")<Fields>`         | Internal domain errors            | Yieldable, Hash/Equal, no codec              |
-|   [2]   | `reason: "a" \| "b" \| "c"` field         | Collapse N causes into one class  | Keep 3-5; dispatch via Match at boundary     |
-|   [3]   | `static from(op)(cause)`                  | Polymorphic cause intake          | Pass-through typed; wrap unknown             |
-|   [4]   | `static _props` dispatch table            | Behavioral metadata per reason    | Computed getters; compile-time completeness  |
-|   [5]   | `S.TaggedError<Self>()(tag, fields, ann)` | Boundary errors (HTTP, RPC)       | Codec + OpenAPI; `HttpApiSchema.annotations` |
-|   [6]   | `static readonly of`                      | Boundary error construction       | Encapsulates payload; callers skip ctor      |
-|   [7]   | Const+namespace merge                     | Boundary error collection         | One `HttpError` export, not 11 classes       |
-|   [8]   | `HttpError.mapTo('label')`                | Boundary catch-all                | Pass-through typed; wrap unknown as Internal |
-|   [9]   | `Effect.mapError(fn)`                     | Translate errors without recovery | Domain -> HTTP at boundary seam              |
-|  [10]   | `Effect.catchTag("Tag", handler)`         | Recover one variant               | Union narrows post-recovery                  |
-|  [11]   | `Effect.catchTags({ Tag: handler })`      | Recover multiple variants         | Record form; missing tag = type error        |
-|  [12]   | `Effect.tapError(fn)`                     | Observe without recovery          | Error propagates unchanged                   |
-|  [13]   | `Effect.die(defect)`                      | Invariant violation               | Bypasses E; only catchAllCause sees it       |
-|  [14]   | `Effect.dieMessage(msg)`                  | Invariant with string             | Shorthand for die(RuntimeException)          |
-|  [15]   | `Effect.retry({ while })`                 | Conditional retry                 | Gate on error shape (retryable flag)         |
-|  [16]   | `Effect.validateAll(xs, fn)`              | Batch accumulation                | Error channel is `E[]`; all-or-nothing       |
-|  [17]   | `Effect.all({}, { mode: "either" })`      | Partial success                   | Per-element `Either<A, E>` results           |
-|  [18]   | `Cause.isInterrupted(cause)`              | Shutdown guard                    | Distinguishes interrupt from real failure    |
-|  [19]   | `Cause.match(cause, handlers)`            | Full failure tree                 | Empty/Fail/Die/Interrupt/Seq/Par             |
-|  [20]   | `Exit<A, E>`                              | Inspect completed effect          | Success(value) or Failure(Cause)             |
+<br>
+
+`STM` + `TMap` gives deterministic counter updates without lock choreography, then commits a stable `HashMap` snapshot into Effect land. Use this when accumulation must remain race-safe and replayable.
+
+```ts
+import { Data, Effect, HashMap, STM, TMap, pipe } from "effect";
+
+// --- [ERRORS] ----------------------------------------------------------------
+
+class IngestError extends Data.TaggedError("IngestError")<{
+  readonly tenantId: string;
+  readonly reason:   "decode" | "policy" | "upstream";
+}> {}
+
+// --- [FUNCTIONS] -------------------------------------------------------------
+
+const aggregateReasonsTx = (errors: ReadonlyArray<IngestError>) =>
+  pipe(
+    TMap.empty<string, number>(),
+    STM.flatMap((counts) =>
+      pipe(
+        errors,
+        STM.forEach((error) => TMap.merge(counts, `${error.tenantId}:${error.reason}`, 1, (left, right) => left + right)),
+        STM.as(counts),
+      )),
+    STM.flatMap(TMap.toHashMap),
+  );
+const aggregateReasons = (errors: ReadonlyArray<IngestError>) =>
+  aggregateReasonsTx(errors).pipe(
+    STM.commit,
+    Effect.map((counts) => ({ cardinality: HashMap.size(counts), counts } as const)),
+  );
+```
 
 ---
+## [6][PLATFORM_BOUNDARY_TRANSLATION_RAIL]
+>**Dictum:** *Transport mapping is a single exhaustive projection from domain rails to platform rails; decode errors and domain errors converge at the edge only.*
 
-Cross-references: `effects.md [3]` Schedule composition and recovery pipeline -- `matching.md [3]` Match.valueTags for multi-error dispatch -- `services.md [3]` error propagation through service dependencies -- `observability.md [1]` Cause inspection in span middleware -- `surface.md [2]` HttpApiBuilder.group handler wiring.
+<br>
+
+Collapse parse and domain failures into one reason rail, then project that rail to canonical platform errors (`BadRequest`, `NotFound`, `Conflict`, `ServiceUnavailable`) with explicit coverage. Reuse the same policy-table posture from Section 1: one canonical reason map, lookup dispatch, and exhaustive reason coverage. Keep the mapping total and status-stable (`conflict -> 409`) so handler behavior is deterministic.
+
+```ts
+import { Data, Effect, Match, Schema as S, pipe } from "effect";
+import { HttpApiError } from "@effect/platform";
+
+// --- [SCHEMA] ----------------------------------------------------------------
+
+const InvoiceRequest = S.Struct({ invoiceId: S.String.pipe(S.nonEmptyString(), S.maxLength(1000)) });
+
+// --- [ERRORS] ----------------------------------------------------------------
+
+class BillingRail extends Data.TaggedError("BillingRail")<{
+  readonly reason: "invalid_input" | "not_found" | "conflict" | "upstream";
+  readonly cause?: unknown;
+}> {}
+
+// --- [FUNCTIONS] -------------------------------------------------------------
+
+const decodeRequest = (input: unknown) =>
+  S.decodeUnknown(InvoiceRequest)(input).pipe(
+    Effect.mapError((cause) => new BillingRail({ reason: "invalid_input", cause })),
+  );
+const billingReasonPolicy = {
+  invalid_input: () => new HttpApiError.BadRequest(undefined),
+  not_found:     () => new HttpApiError.NotFound(undefined),
+  conflict:      () => new HttpApiError.Conflict(undefined),
+  upstream:      () => new HttpApiError.ServiceUnavailable(undefined),
+} as const satisfies Record<
+  BillingRail["reason"],
+  () => HttpApiError.BadRequest | HttpApiError.NotFound | HttpApiError.Conflict | HttpApiError.ServiceUnavailable
+>;
+const toHttpError = (reason: BillingRail["reason"]) => billingReasonPolicy[reason]();
+const routeProgram = (rawInput: unknown) =>
+  pipe(
+    decodeRequest(rawInput),
+    Effect.flatMap(({ invoiceId }) =>
+      Match.value(invoiceId).pipe(
+        Match.when("404", () => Effect.fail(new BillingRail({ reason: "not_found" }))),
+        Match.when("409", () => Effect.fail(new BillingRail({ reason: "conflict"  }))),
+        Match.when("503", () => Effect.fail(new BillingRail({ reason: "upstream"  }))),
+        Match.orElse((value) => Effect.succeed({ status: 200 as const, body: { invoiceId: value } })),
+      ),
+    ),
+    Effect.mapError((error) => toHttpError(error.reason)),
+  );
+```

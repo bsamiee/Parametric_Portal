@@ -59,9 +59,9 @@ const handleIngest = (signal: (typeof _CONFIG.signal)[number], request: HttpServ
 
 const TelemetryRouteLive = HttpApiBuilder.group(ParametricApi, 'telemetry', (handlers) =>
     handlers
-        .handle('ingestTraces', ({ request }) => CacheService.rateLimit('api', handleIngest('traces', request)))
+        .handle('ingestTraces',  ({ request }) => CacheService.rateLimit('api', handleIngest('traces',  request)))
         .handle('ingestMetrics', ({ request }) => CacheService.rateLimit('api', handleIngest('metrics', request)))
-        .handle('ingestLogs', ({ request }) => CacheService.rateLimit('api', handleIngest('logs', request))),
+        .handle('ingestLogs',    ({ request }) => CacheService.rateLimit('api', handleIngest('logs',    request))),
 );
 
 // --- [EXPORT] ----------------------------------------------------------------

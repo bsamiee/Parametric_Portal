@@ -6,8 +6,8 @@ import type { EnvelopeSchema } from './schemas';
 // --- [ERRORS] ----------------------------------------------------------------
 
 class CommandDispatchError extends Data.TaggedError('CommandDispatchError')<{
-    readonly reason: 'disconnected' | 'protocol' | 'rejected' | 'transport';
-    readonly details?: unknown;
+    readonly reason:        'disconnected' | 'protocol' | 'rejected' | 'transport';
+    readonly details?:      unknown;
     readonly failureClass?: 'compensatable' | 'correctable' | 'fatal' | 'retryable';
 }> {
     override get message() {
@@ -30,7 +30,7 @@ class CommandDispatch extends Effect.Service<CommandDispatch>()('kargadan/Comman
                         Effect.andThen(Effect.fail(new CommandDispatchError(
                             error.issue._tag === 'Disconnected'
                                 ? { details: { reason: error.issue.reason }, reason: 'disconnected' }
-                                : { details: { issue: error.issue }, reason: 'transport' },
+                                : { details: { issue: error.issue },         reason: 'transport'    },
                         ))),
                     ),
                 ),

@@ -11,6 +11,7 @@ export default defineConfig(
             entry: './src/main.ts',
             external: [
                 '@parametric-portal/ai',
+                '@parametric-portal/ai/service',
                 '@parametric-portal/database',
                 '@parametric-portal/server',
                 '@parametric-portal/types',

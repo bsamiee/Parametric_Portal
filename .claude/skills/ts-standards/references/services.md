@@ -1,381 +1,399 @@
 # [H1][SERVICES]
->**Dictum:** *Effect.Service is the sole DI mechanism -- class, constructor, capability groups, lifecycle, namespace.*
+>**Dictum:** *Services are scoped capability algebras: constructor mode fixes lifetime, traced methods fix observability, layer topology fixes wiring -- compose all three or drift is guaranteed.*
 
-Cross-references: `errors.md [1]` (TaggedError) -- `effects.md [1]` (Effect.gen/fn) -- `composition.md [1-2]` (Layer topology, assembly) -- `concurrency.md [5]` (fiber lifecycle) -- `observability.md [1]` (span naming)
+<br>
+
+Service owns `Effect.Service` class API (3.19.x): constructor modes, scoped resource lifecycle, `Effect.fn` traced methods, dual-access patterns, fiber subscription ownership, layer substitution, and cross-library integration surfaces. Layer graph algebra: `composition.md`; fiber ownership: `concurrency.md`; telemetry vocabulary: `observability.md`; error rail design: `errors.md`.
 
 ---
-## [1][SERVICE_ANATOMY]
->**Dictum:** *Four constructor modes -- succeed, sync, effect, scoped -- one class, one Default layer.*
+## [1][CONSTRUCTOR_MODE_AND_RESOURCE_LIFECYCLE]
+>**Dictum:** *Constructor mode determines service lifetime algebra.*
 
-`class X extends Effect.Service<X>()('namespace/X', { ... }) {}` -- canonical form.
-`dependencies` accepts any `Layer<Tag>` -- not limited to `.Default`. `X.Default`
-auto-wires from `dependencies`; `X.DefaultWithoutDependencies` exposes the unwired layer.
+<br>
 
-```typescript
-import { Data, Duration, Effect, Layer, Option, Schedule, Stream } from 'effect';
-import { SqlClient } from '@effect/sql';
+- `scoped:` is default -- `effect:` only when zero resources need finalization.
+- LIFO release -- acquire infrastructure first (released last), register drain finalizers second (run before infra teardown).
+- `acquireRelease` for guaranteed cleanup; `addFinalizer` for inline registration without paired acquire.
+- [NEVER] `sync:` for IO -- cannot express errors or deps.
+- [NEVER] `acquireRelease` inside `Layer.effect` -- Scope leaks into `RIn`, no teardown on interrupt.
+
+```ts
+import { Data, Effect, Metric, Queue } from "effect";
+import { SqlClient } from "@effect/sql";
+
 // --- [ERRORS] ----------------------------------------------------------------
-class IngestError extends Data.TaggedError('IngestError')<{
-    readonly operation: string;
-    readonly reason:    'channel' | 'normalize' | 'persist' | 'query';
-    readonly cause?:    unknown;
-}> {
-    static readonly from = (operation: string, reason: IngestError['reason']) =>
-        (cause: unknown) => new IngestError({ cause, operation, reason });
-}
+
+class StorageError extends Data.TaggedError("StorageError")<{
+    readonly operation: "acquire" | "migrate" | "query";
+    readonly reason: "pool";
+    readonly cause?: unknown;
+}> {}
+
+// --- [CONSTANTS] -------------------------------------------------------------
+
+const _METRICS = {
+    activeConns: Metric.gauge("storage_active_connections"),
+    acquireMs:   Metric.histogram("storage_acquire_duration_ms", Metric.exponentialBuckets(1, 2, 12)),
+} as const;
+
 // --- [SERVICES] --------------------------------------------------------------
-// [1] succeed -- pure synchronous value; R=never; no deps, no lifecycle
-class CodecService extends Effect.Service<CodecService>()('server/Codec', {
-    succeed: {
-        serialize:   (value: unknown): string => JSON.stringify(value),
-        deserialize: (raw: string): unknown   => JSON.parse(raw),
-    },
-}) {}
-// [2] effect -- yields deps, no managed lifecycle
-class TransformService extends Effect.Service<TransformService>()(
-    'server/Transform',
-    {
-        dependencies: [CodecService.Default],
-        effect: Effect.gen(function* () {
-            const codec = yield* CodecService;
-            return {
-                normalize: (raw: string) =>
-                    Effect.try({
-                        try:   () => codec.deserialize(raw),
-                        catch: IngestError.from('normalize', 'normalize'),
-                    }),
-            };
-        }),
-    },
-) {}
-// [3] scoped -- managed lifecycle; acquireRelease + capability groups
-class IngestService extends Effect.Service<IngestService>()(
-    'server/Ingest',
-    {
-        // SqlClient provided at composition root via PgClient.layer or similar
-        dependencies: [TransformService.Default],
-        scoped: Effect.gen(function* () {
-            // phase 1: resolve all deps once
-            const sql       = yield* SqlClient.SqlClient;
-            const transform = yield* TransformService;
-            // phase 2: acquire managed resources
-            const channel = yield* Effect.acquireRelease(
-                Effect.tryPromise({
-                    try:   () => openChannel(),
-                    catch: IngestError.from('channel.open', 'channel'),
-                }),
-                (handle) => Effect.promise(() => handle.close()),
-            );
-            // phase 3: capability groups as closures
-            const read = {
-                recent: Effect.fn('IngestService.recent')(
-                    function* (tenantId: string, limit: number) {
-                        return yield* sql<{ id: string; payload: string }>`
-                            SELECT id, payload FROM events
-                            WHERE tenant_id = ${tenantId}
-                            ORDER BY created_at DESC LIMIT ${limit}
-                        `.pipe(Effect.mapError(IngestError.from('recent', 'query')));
-                    },
-                ),
-            } as const;
-            const write = {
-                ingest: Effect.fn('IngestService.ingest')(
-                    function* (tenantId: string, raw: string) {
-                        const parsed = yield* transform.normalize(raw);
-                        yield* sql`
-                            INSERT INTO events (tenant_id, payload)
-                            VALUES (${tenantId}, ${JSON.stringify(parsed)})
-                        `.pipe(Effect.mapError(IngestError.from('ingest', 'persist')));
-                        yield* channel.push(tenantId, parsed).pipe(
-                            Effect.mapError(IngestError.from('ingest.push', 'channel')),
-                        );
-                    },
-                ),
-            } as const;
-            const observe = {
-                health: Effect.fn('IngestService.health')(function* () {
-                    return yield* channel.ping().pipe(
-                        Effect.map(() => ({ status: 'ok' as const })),
-                        Effect.orElseSucceed(() => ({ status: 'degraded' as const })),
-                    );
-                }),
-            } as const;
-            return { observe, read, write };
-        }),
-    },
-) {}
-```
 
-| [INDEX] | [MODE]    | [LIFECYCLE] | [USE_WHEN]                                   |
-| :-----: | --------- | ----------- | -------------------------------------------- |
-|   [1]   | `succeed` | none        | Pure config, codec tables, crypto utils      |
-|   [2]   | `sync`    | lazy        | Deferred pure init (LazyArg)                 |
-|   [3]   | `effect`  | none        | Stateful compute, DB repos, needs deps       |
-|   [4]   | `scoped`  | yes         | Connections, pools, pub/sub, background work |
-
----
-## [2][SCOPED_CONSTRUCTOR]
->**Dictum:** *Yield deps once at top; acquireRelease owns resources; closures define capabilities; Effect.fn traces every method.*
-
-Three-phase structure: (1) `yield*` all deps at top, (2) `Effect.acquireRelease` for managed resources, (3) capability groups as closures. Key mechanics:
-- `yield*` resolves deps once per layer instantiation -- not per call; closures give R=never
-- `Effect.acquireRelease` guarantees `release` on scope exit; `Effect.addFinalizer` for lightweight cleanup
-- `Effect.forkScoped` launches background fibers torn down with layer scope
-- Span convention: `'ServiceName.methodName'`; `Effect.fnUntraced` for tight loops
-- [NEVER] `scoped` just to yield deps -- that is `effect`'s job; reserve for lifecycle management
-- [NEVER] `Effect.fn` on route handlers -- use `Telemetry.span` directly (request context/metrics)
-
----
-## [3][CAPABILITY_GROUPS]
->**Dictum:** *Group by concern: { read, write, observe } as const; consumers destructure only what they need.*
-
-```typescript
-const notifyHandler = Effect.gen(function* () {
-    const { write } = yield* IngestService;
-    yield* write.ingest('t1', '{"event": "user.created"}');
-});
-```
-
-| [INDEX] | [GROUP]   | [OPERATIONS]               | [TYPICAL_SIGNATURE]      |
-| :-----: | --------- | -------------------------- | ------------------------ |
-|   [1]   | `read`    | get, find, list, page      | `Effect<A, E, never>`    |
-|   [2]   | `write`   | insert, update, drop, send | `Effect<void, E, never>` |
-|   [3]   | `observe` | stream, watch, health      | `Stream<A>` / `Effect`   |
-
----
-## [4][DUAL_ACCESS_AND_CLASS_STATICS]
->**Dictum:** *Instance (R=never) inside scoped constructors; static delegates (R=Service) for layer-provided contexts; class body is a legitimate namespace.*
-
-```typescript
-class SomeService extends Effect.Service<SomeService>()(
-    'server/SomeService',
-    {
-        dependencies: [SomeDep.Default],
-        scoped: Effect.gen(function* () {
-            const dep = yield* SomeDep;
-            const read = {
-                get: Effect.fn('SomeService.get')((id: string) => dep.query(id)),
-            } as const;
-            return { read };
-        }),
-    },
-) {
-    // [1] static delegate -- R=SomeService
-    static readonly get = (id: string) =>
-        SomeService.pipe(Effect.flatMap((service) => service.read.get(id)));
-    // [2] static layer derivation
-    static readonly Layer = SomeService.Default.pipe(
-        Layer.provideMerge(ExternalLib.layer),
-    );
-    // [3] static re-exports -- consumer ergonomics
-    static readonly Error = SomeServiceError;
-    static readonly Request = SomeRequest;
-    // [4] static domain operation -- R=SomeService | DatabaseService
-    static readonly replay = (id: string) =>
-        SomeService.pipe(Effect.flatMap((service) =>
-            Effect.flatMap(DatabaseService, (database) =>
-                database.items.one([{ field: 'id', value: id }]).pipe(
-                    Effect.flatMap(Option.match({
-                        onNone: () => Effect.fail(SomeServiceError.from(id, 'NotFound')),
-                        onSome: (entry) => service.write.process(entry),
-                    })),
-                ),
+class StorageService extends Effect.Service<StorageService>()("domain/Storage", {
+    scoped: Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        yield* Effect.acquireRelease(
+            sql`SELECT pg_advisory_lock(42)`.pipe(
+                Effect.zipRight(Metric.increment(_METRICS.activeConns)),
+                Effect.mapError((cause) => new StorageError({ operation: "acquire", reason: "pool", cause })),
             ),
-        ));
-}
+            () => Metric.incrementBy(_METRICS.activeConns, -1),
+        );
+        yield* Effect.addFinalizer(() => sql`SELECT pg_advisory_unlock(42)`.pipe(Effect.ignore));
+        const channel = yield* Effect.acquireRelease(Queue.bounded<string>(512), Queue.shutdown);
+        const read = Effect.fn("Storage.read")((key: string) =>
+            sql<{ readonly value: string }>`SELECT value FROM kv WHERE key = ${key}`.pipe(
+                Effect.mapError((cause) => new StorageError({ operation: "query", reason: "pool", cause })),
+            ),
+        );
+        const write = Effect.fn("Storage.write")((key: string, value: string) =>
+            sql`INSERT INTO kv (key, value) VALUES (${key}, ${value}) ON CONFLICT (key) DO UPDATE SET value = ${value}`.pipe(
+                Effect.zipRight(Queue.offer(channel, key)),
+                Effect.mapError((cause) => new StorageError({ operation: "query", reason: "pool", cause })),
+            ),
+        );
+        return { read, write, channel } as const;
+    }),
+}) {}
 ```
 
-Codebase: **CacheService** -- `static kv`/`sets` (delegates), `static Persistence`/`Layer`/`cache()`/`rateLimit()`. **NotificationService** -- `static Error`/`Preferences`/`Request`. **JobService** -- `static Error`/`Payload`/`State`/`replay()`/`resetJob()`/`isLocal()`.
-**Instance** inside scoped constructors (`cache.kv.set`); **Static** in layer-provided contexts (`CacheService.kv.get`).
+**Laws:**<br>
+- if `acquireRelease` succeeds and the enclosing scope closes via success, failure, or interruption, the release callback executes exactly once -- no path skips finalization,
+- LIFO stack ordering is the sole contract: the last resource registered is the first released, regardless of error channel state at teardown.
 
 ---
-## [5][NAMESPACE_MERGE]
->**Dictum:** *declare namespace augments the class -- no standalone type aliases.*
+## [2][TRACED_METHODS_AND_OBSERVABILITY_SURFACE]
+>**Dictum:** *Every service method is a named span with metric emission.*
 
-```typescript
-class CacheService extends Effect.Service<CacheService>()('server/CacheService', {
-    scoped: Effect.gen(function* () { /* ... */ }),
-}) {
-    static readonly _rateLimits = {
-        api:      { algorithm: 'token-bucket', limit: 100, window: Duration.minutes(1)  },
-        auth:     { algorithm: 'fixed-window', limit: 5,   window: Duration.minutes(15) },
-        mutation: { algorithm: 'token-bucket', limit: 100, window: Duration.minutes(1)  },
-    } as const;
-}
-declare namespace CacheService {
-    type RateLimitPreset = keyof typeof CacheService._rateLimits;
-}
-```
+<br>
 
----
-## [6][BACKGROUND_FIBERS]
->**Dictum:** *Effect.forkScoped inside scoped constructor -- fiber lives and dies with layer scope.*
+- `Effect.fn('Service.method')` wraps every public method -- automatic span + pipe continuation for retry/timeout.
+- Module-level `_METRICS` const holds counters/histograms/gauges -- co-located, never shared across modules.
+- `FiberRef` propagates tenant/request context through fiber hierarchy -- set at boundary, read via `FiberRef.get`.
+- `Effect.annotateCurrentSpan` for structured span attributes -- bounded vocabulary only.
+- [NEVER] metrics inside scoped gen -- module-level singletons, not per-instance allocations.
+- [NEVER] string interpolation for span names -- dot-path convention: `'Namespace.method'`.
 
-### [6.1] EventBus subscription
+```ts
+import { Data, Duration, Effect, FiberRef, Metric, Option, Schedule } from "effect";
+import { SqlClient } from "@effect/sql";
 
-```typescript
-class NotificationService extends Effect.Service<NotificationService>()(
-    'server/Notifications',
-    {
-        scoped: Effect.gen(function* () {
-            const jobs = yield* JobService;
-            yield* jobs.registerHandler(
-                'notification.send',
-                Effect.fn(function* (raw) {
-                    const { notificationId } = yield* S.decodeUnknown(
-                        S.Struct({ notificationId: S.UUID }),
-                    )(raw);
-                    // ... delivery logic
-                }, (effect) => effect.pipe(
-                    Effect.catchIf(Cause.isNoSuchElementException, () => Effect.void),
-                    Telemetry.span('notification.job.handle', { metrics: false }),
-                )) as (raw: unknown) => Effect.Effect<void, unknown, never>,
+// --- [ERRORS] ----------------------------------------------------------------
+
+class CatalogError extends Data.TaggedError("CatalogError")<{
+    readonly operation: "lookup" | "upsert";
+    readonly reason: "missing" | "conflict" | "timeout" | "upstream";
+    readonly cause?: unknown;
+}> {}
+
+// --- [CONSTANTS] -------------------------------------------------------------
+
+const TenantRef = FiberRef.unsafeMake<Option.Option<string>>(Option.none());
+const _METRICS = {
+    lookups:   Metric.counter("catalog_lookups_total"),
+    upserts:   Metric.counter("catalog_upserts_total"),
+    latencyMs: Metric.histogram("catalog_operation_duration_ms", Metric.exponentialBuckets(1, 2, 12)),
+} as const;
+
+// --- [SERVICES] --------------------------------------------------------------
+
+class CatalogService extends Effect.Service<CatalogService>()("domain/Catalog", {
+    scoped: Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        const lookup = Effect.fn("Catalog.lookup")(function* (slug: string) {
+            const tenant = yield* FiberRef.get(TenantRef);
+            yield* Effect.annotateCurrentSpan({ "catalog.slug": slug, "catalog.tenant": Option.getOrElse(tenant, () => "system") });
+            const rows = yield* sql<{ readonly id: string; readonly slug: string }>`SELECT id, slug FROM catalog WHERE slug = ${slug}`.pipe(
+                Effect.mapError((cause) => new CatalogError({ operation: "lookup", reason: "upstream", cause })),
             );
-            return { /* capabilities */ } as const;
-        }),
-    },
-) {}
+            yield* Metric.increment(Metric.tagged(_METRICS.lookups, "tenant", Option.getOrElse(tenant, () => "system")));
+            return rows;
+        });
+        const upsert = Effect.fn("Catalog.upsert")(
+            (slug: string, payload: string) =>
+                sql`INSERT INTO catalog (slug, payload) VALUES (${slug}, ${payload}) ON CONFLICT (slug) DO UPDATE SET payload = ${payload}`.pipe(
+                    Effect.timedWith((duration) => Metric.update(_METRICS.latencyMs, Duration.toMillis(duration))),
+                    Effect.zipRight(Metric.increment(_METRICS.upserts)),
+                    Effect.mapError((cause) => new CatalogError({ operation: "upsert", reason: "conflict", cause })),
+                ),
+            (effect) => effect.pipe(
+                Effect.retry(Schedule.exponential("50 millis").pipe(Schedule.jittered, Schedule.intersect(Schedule.recurs(3)))),
+                Effect.timeoutFail({ duration: Duration.seconds(5), onTimeout: () => new CatalogError({ operation: "upsert", reason: "timeout" }) }),
+            ),
+        );
+        return { lookup, upsert } as const;
+    }),
+}) {}
 ```
 
-### [6.2] Leader-gated cron
-
-```typescript
-// inside scoped constructor -- only one pod runs cron at a time
-yield* cluster.isLocal('jobs-maintenance:dlq').pipe(
-    Effect.flatMap((isLeader) => isLeader ? dlqWatcher : Effect.void),
-    Effect.repeat(Schedule.spaced(Duration.millis(dlqCheckIntervalMs))),
-    Effect.catchAllCause((cause) =>
-        Effect.logWarning('DLQ watcher failed', { cause: String(cause) }),
-    ),
-    Effect.forkScoped,
-);
-```
-
-`cluster.isLocal(key)` checks leader election per cycle. `Schedule.spaced` governs interval. `Effect.forkScoped` ties fiber to layer scope. `Effect.catchAllCause` prevents cron failure from tearing down the service.
+**Laws:**<br>
+- `Effect.fn` pipe continuation receives the wrapped effect and original args -- retry/timeout compose without re-entering the generator or losing argument context,
+- `Effect.timedWith` duration is wall-clock elapsed between effect start and completion -- not CPU time, not span duration from tracing,
+- `FiberRef` mutation in a child fiber is invisible to the parent after fork -- tenant context set via `locally` is scoped, not shared.
 
 ---
-## [7][TENANT_SCOPING]
->**Dictum:** *Context.Request.withinSync for synchronous DB paths; within for async paths.*
+## [3][DUAL_ACCESS_AND_LAYER_TOPOLOGY]
+>**Dictum:** *Closure capture eliminates R; static delegates preserve it.*
 
-```typescript
-// scopes database operations to tenant
-const _dbRun = <A, E, R>(tenantId: string, effect: Effect.Effect<A, E, R>) =>
-    Context.Request.withinSync(tenantId, effect).pipe(
-        Effect.provideService(SqlClient.SqlClient, sql),
-    );
-// tenant-scoped job submission
-const resubmit = Context.Request.withinSync(
-    row.appId,
-    jobs.submit('notification.send', { notificationId: row.id }, {
-        dedupeKey: `${row.appId}:${row.id}:retry`,
-        maxAttempts: 1,
+<br>
+
+- Instance access: methods close over yielded deps -> `R = never` for callers within scope.
+- Static delegates: `accessors: true` generates delegates that yield service tag -> `R = ServiceTag`.
+- [NEVER] mix instance and static access for the same call within a scoped generator.
+- `Layer.provideMerge` passes deps through for downstream consumers; `Layer.provide` removes them from output.
+- `accessors: true` generates `.pipe(Effect.flatMap(tag => tag.method))` delegates -- callers import static accessors without yielding the service tag.
+- [CRITICAL] `Layer.fresh` bypasses memo -- test isolation only, never production composition.
+
+```ts
+import { Data, Effect, Layer, Metric } from "effect";
+import { SqlClient } from "@effect/sql";
+
+// --- [ERRORS] ----------------------------------------------------------------
+
+class InventoryError extends Data.TaggedError("InventoryError")<{
+    readonly reason: "missing" | "conflict" | "upstream";
+    readonly cause?: unknown;
+}> {}
+const _METRICS = { quotes: Metric.counter("pricing_quotes_total") } as const;
+
+// --- [SERVICES] --------------------------------------------------------------
+
+class InventoryService extends Effect.Service<InventoryService>()("domain/Inventory", {
+    accessors: true,
+    scoped: Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        const reserve = Effect.fn("Inventory.reserve")((sku: string, quantity: number) =>
+            sql`UPDATE inventory SET reserved = reserved + ${quantity} WHERE sku = ${sku}`.pipe(
+                Effect.mapError((cause) => new InventoryError({ reason: "conflict", cause })),
+            ),
+        );
+        const check = Effect.fn("Inventory.check")((sku: string) =>
+            sql<{ readonly available: number }>`SELECT available FROM inventory WHERE sku = ${sku}`.pipe(
+                Effect.mapError((cause) => new InventoryError({ reason: "upstream", cause })),
+            ),
+        );
+        return { reserve, check } as const;
+    }),
+}) {}
+
+// --- [LAYERS] ----------------------------------------------------------------
+
+class PricingService extends Effect.Service<PricingService>()("domain/Pricing", {
+    effect: Effect.gen(function* () {
+        const inventory = yield* InventoryService;
+        return { quote: Effect.fn("Pricing.quote")((sku: string, quantity: number) =>
+            inventory.check(sku).pipe(
+                Effect.filterOrFail((rows) => rows.length > 0, () => new InventoryError({ reason: "missing" })),
+                Effect.map((rows) => ({ sku, quantity, unitPrice: rows[0].available * 0.15, total: rows[0].available * 0.15 * quantity })),
+                Effect.tap(() => inventory.reserve(sku, quantity)),
+                Effect.zipRight(Metric.increment(Metric.tagged(_METRICS.quotes, "sku", sku))),
+            )) } as const;
+    }),
+}) {}
+const ServicesLayer = PricingService.Default.pipe(Layer.provideMerge(InventoryService.Default)); // Layer.fresh bypasses memo -- test isolation only
+```
+
+**Laws:**<br>
+- `accessors: true` delegates yield the service tag -- callers outside the scoped gen observe `R = Self`; callers inside observe `R = never` -- the R-channel difference is structural, not incidental,
+- `Layer.provideMerge` output includes both the new service AND its satisfied deps -- reversing chain order produces a compile-time error, not a runtime failure,
+- two `Layer` values constructed by the same factory function are memoized independently -- reference identity, not structural equality, governs sharing.
+
+---
+## [4][SCOPED_SUBSCRIPTION_AND_EVENT_PIPELINE]
+>**Dictum:** *Fibers born in scope die with scope — subscriptions are lifecycle-bound; subscribe before fork or lose messages.*
+
+<br>
+
+- `Effect.forkScoped` spawns fibers that auto-interrupt on layer teardown — canonical for event subscriptions inside service constructors.
+- Subscribe inside scoped gen, pass dequeuer to forked fiber — acquiring subscription inside the forked fiber creates a race window where messages between constructor return and fiber start are silently dropped.
+- `Stream.groupedWithin` for microbatch aggregation before persistence — window policy is explicit data: count cap and duration ceiling.
+- Drain: `Stream.fromQueue` -> `groupedWithin` -> traced `persistBatch` -> `runDrain` composes subscription, aggregation, write, and metrics in one rail.
+- [NEVER] `Effect.fork` inside scoped gen — fiber outlives service scope, resource leak on teardown.
+- [NEVER] acquire subscription inside `Effect.forkScoped` body — race window silently drops messages.
+- Cross-reference: fiber ownership -> `concurrency.md [1]`; queue strategy -> `concurrency.md [2]`.
+
+```ts
+import { Chunk, Data, Duration, Effect, Metric, MetricLabel, PubSub, Stream } from "effect";
+import { SqlClient } from "@effect/sql";
+
+// --- [ERRORS] ----------------------------------------------------------------
+
+class EventError extends Data.TaggedError("EventError")<{ readonly operation: "subscribe" | "persist" | "drain"; readonly reason: "write"; readonly cause?: unknown }> {}
+
+// --- [CONSTANTS] -------------------------------------------------------------
+
+const _METRICS = {
+    batchesProcessed: Metric.counter("events_batches_processed_total"),
+    eventsIngested:   Metric.counter("events_ingested_total"),
+    batchLatencyMs:   Metric.histogram("events_batch_latency_ms", Metric.exponentialBuckets(1, 2, 10)),
+} as const;
+
+// --- [SERVICES] --------------------------------------------------------------
+
+class EventProcessor extends Effect.Service<EventProcessor>()("domain/EventProcessor", {
+    scoped: Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        const hub = yield* Effect.acquireRelease(PubSub.bounded<{ readonly topic: string; readonly payload: string }>(2048), PubSub.shutdown);
+        const sub = yield* PubSub.subscribe(hub);
+        const persistBatch = Effect.fn("EventProcessor.persistBatch")(
+            (batch: Chunk.Chunk<{ readonly topic: string; readonly payload: string }>) =>
+                sql.withTransaction(Effect.forEach(Chunk.toReadonlyArray(batch), (event) => sql`INSERT INTO event_log (topic, payload) VALUES (${event.topic}, ${event.payload})`, { concurrency: 1 })).pipe(
+                    Effect.timed,
+                    Effect.tap(([duration]) => Metric.update(Metric.taggedWithLabels(_METRICS.batchLatencyMs, [MetricLabel.make("pipeline", "event")]), Duration.toMillis(duration))),
+                    Effect.map(([, result]) => result),
+                    Effect.tap(() => Metric.increment(_METRICS.batchesProcessed)),
+                    Effect.tap(() => Metric.incrementBy(_METRICS.eventsIngested, Chunk.size(batch))),
+                    Effect.mapError((cause) => new EventError({ operation: "persist", reason: "write", cause })),
+                ),
+        );
+        yield* Effect.forkScoped(
+            Stream.fromQueue(sub).pipe(Stream.groupedWithin(100, Duration.millis(250)), Stream.mapEffect((batch) => persistBatch(batch)), Stream.runDrain),
+        );
+        const publish = Effect.fn("EventProcessor.publish")(
+            (topic: string, payload: string) => PubSub.publish(hub, { topic, payload }).pipe(Effect.asVoid),
+        );
+        return { publish } as const;
+    }),
+}) {}
+```
+
+**Laws:**<br>
+- if subscription is acquired inside `Effect.forkScoped` body, messages published between scope entry and fork start are silently lost -- subscribe-then-fork eliminates this window,
+- `groupedWithin` emits a partial chunk when the time window expires before count is reached -- the drain fiber observes every message, never silently drops,
+- if the drain fiber is interrupted mid-batch, unprocessed messages remain in the queue -- the producer's next `offer` observes backpressure, not silent loss.
+
+---
+## [5][SUBSTITUTION_ALGEBRA]
+>**Dictum:** *Layer substitution is the only mechanism for test doubles — type system enforces full shape; `Ref` tracks interactions.*
+
+<br>
+
+- `Layer.succeed(Tag, stub)` — full replacement, `R=never`; compiler rejects partial shapes.
+- `Tag.DefaultWithoutDependencies` — preserves scoped constructor, overrides only upstream dependencies.
+- `Layer.fresh` — bypasses memoization for per-test state isolation; critical when services hold `Ref`, `PubSub`, or `Queue`.
+- `it.scoped` from `@effect/vitest` — required when service uses `acquireRelease`; provides `Scope` automatically.
+- [NEVER] mock at function level — substitute at Layer level where the type system enforces completeness.
+- [NEVER] partial implementations — `Layer.succeed` requires every key; `Layer.mock` defaults omitted effectful keys to `UnimplementedError`.
+
+```ts
+import { Effect, Layer, Ref } from "effect";
+import { it } from "@effect/vitest";
+
+// --- [SERVICES] --------------------------------------------------------------
+
+class LedgerService extends Effect.Service<LedgerService>()("domain/Ledger", {
+    scoped: Effect.gen(function* () {
+        const entries = yield* Effect.acquireRelease(Ref.make<ReadonlyArray<{ readonly account: string; readonly amount: number }>>([]), () => Effect.logDebug("ledger.ref.released"));
+        const credit = Effect.fn("Ledger.credit")((account: string, amount: number) => Ref.update(entries, (current) => [...current, { account, amount }]));
+        const balance = Ref.get(entries);
+        return { credit, balance } as const;
+    }),
+}) {}
+
+// --- [LAYERS] ----------------------------------------------------------------
+
+const LedgerTracked = (calls: Ref.Ref<ReadonlyArray<string>>) => Layer.succeed(LedgerService, {
+    credit: (account: string, _amount: number) => Ref.update(calls, (ids) => [...ids, account]),
+    balance: Ref.get(calls).pipe(Effect.map((ids) => ids.map((account) => ({ account, amount: 0 })))),
+});
+
+// --- [FUNCTIONS] -------------------------------------------------------------
+
+const ledgerSpec = it.scoped("tracks credits via layer substitution", () =>
+    Effect.gen(function* () {
+        const calls = yield* Ref.make<ReadonlyArray<string>>([]);
+        const service = yield* LedgerService.pipe(Effect.provide(LedgerTracked(calls)));
+        yield* service.credit("acct-1", 100);
+        yield* service.credit("acct-2", 250);
+        const tracked = yield* Ref.get(calls);
+        return { tracked, invariant: tracked.length === 2 } as const;
     }),
 );
-// async cross-pod context
-yield* Context.Request.within(
-    entry.appId,
-    submitFn(entry.type, entry.payload, { priority: 'normal' }),
-    Context.Request.system(),
+```
+
+**Laws:**<br>
+- `Layer.succeed` requires every key in the service interface at compile time -- omitting a method is a type error, not a runtime `undefined`,
+- without `Layer.fresh`, two tests providing the same service layer share `Ref`/`Queue` state -- test B observes mutations from test A,
+- `it.scoped` provides `Scope` to the test fiber -- `it.effect` does not, causing `acquireRelease` finalizers to never execute.
+
+---
+## [6][CROSS_LIBRARY_SERVICE_INTEGRATION]
+>**Dictum:** *Services are the integration surface for the Effect ecosystem — routes, resolvers, and tools are thin adapters over service capabilities.*
+
+<br>
+
+- `HttpApiBuilder.group` yields services inside handler generator — routes delegate all logic to service methods; handler bodies stay under 3 lines.
+- `SqlResolver.findById` inside scoped gen — automatic request batching eliminates N+1 queries transparently across concurrent fiber access.
+- `FiberRef` propagates tenant context through the fiber hierarchy — set once at boundary middleware, read downstream without parameter threading.
+- [ALWAYS] services own the integration boundary — routes/handlers are thin adapters that yield service and call methods.
+
+```ts
+import { Data, Effect, FiberRef, Metric, Option, Schema as S } from "effect";
+import { HttpApi, HttpApiBuilder, HttpApiEndpoint, HttpApiGroup } from "@effect/platform";
+import { SqlClient, SqlResolver } from "@effect/sql";
+import * as Model from "@effect/sql/Model";
+
+// --- [SCHEMA] ----------------------------------------------------------------
+
+class Tenant extends Model.Class<Tenant>("Tenant")({
+    id: Model.GeneratedByApp(S.UUID), slug: S.NonEmptyTrimmedString, plan: S.Literal("starter", "pro", "enterprise"), createdAt: Model.DateTimeInsertFromDate, updatedAt: Model.DateTimeUpdateFromDate,}) {}
+
+// --- [ERRORS] ----------------------------------------------------------------
+class TenantError extends Data.TaggedError("TenantError")<{ readonly operation: "resolve" | "provision"; readonly reason: "missing" | "conflict" | "upstream"; readonly cause?: unknown }> {}
+
+// --- [CONSTANTS] -------------------------------------------------------------
+
+const TenantRef = FiberRef.unsafeMake<Option.Option<string>>(Option.none());
+const _METRICS = { resolved: Metric.counter("tenant_resolved_total"), provisioned: Metric.counter("tenant_provisioned_total") } as const;
+
+// --- [SERVICES] --------------------------------------------------------------
+
+class TenantService extends Effect.Service<TenantService>()("domain/TenantService", {
+    scoped: Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        const resolver = yield* SqlResolver.findById("TenantById", { Id: S.UUID, Result: Tenant.json, ResultId: (tenant) => tenant.id, execute: (ids) => sql`SELECT * FROM tenant WHERE id IN ${sql.in(ids)}` });
+        const resolve = Effect.fn("Tenant.resolve")((tenantId: string) =>
+            resolver.execute(tenantId).pipe(Effect.mapError((cause) => new TenantError({ operation: "resolve", reason: "upstream", cause })), Effect.flatMap(Option.match({
+                onNone: () => Effect.fail(new TenantError({ operation: "resolve", reason: "missing" })),
+                onSome: (tenant) => Metric.increment(Metric.tagged(_METRICS.resolved, "plan", tenant.plan)).pipe(Effect.zipRight(Effect.annotateCurrentSpan({ "tenant.id": tenantId, "tenant.plan": tenant.plan })), Effect.as(tenant)),
+            }))),
+        );
+        const provision = Effect.fn("Tenant.provision")(function* (slug: string, plan: "starter" | "pro" | "enterprise") {
+            const tenant = yield* FiberRef.get(TenantRef);
+            yield* Effect.annotateCurrentSpan({ "tenant.slug": slug, "tenant.plan": plan, "tenant.requester": Option.getOrElse(tenant, () => "system") });
+            yield* sql`INSERT INTO tenant (slug, plan) VALUES (${slug}, ${plan})`.pipe(Effect.mapError((cause) => new TenantError({ operation: "provision", reason: "conflict", cause })));
+            yield* Metric.increment(Metric.tagged(_METRICS.provisioned, "plan", plan));
+        });
+        return { resolve, provision } as const;
+    }),
+}) {}
+
+// --- [LAYERS] ----------------------------------------------------------------
+
+const TenantApi = HttpApi.make("TenantApi").add(HttpApiGroup.make("tenant")
+    .add(HttpApiEndpoint.get("resolve", "/tenants/:id").setPath(S.Struct({ id: S.UUID })).addSuccess(Tenant.json))
+    .add(HttpApiEndpoint.post("provision", "/tenants").setPayload(Tenant.jsonCreate).addSuccess(S.Void)));
+const TenantHandlers = HttpApiBuilder.group(TenantApi, "tenant", (handlers) =>
+    Effect.gen(function* () {
+        const tenants = yield* TenantService;
+        return handlers
+            .handle("resolve", ({ path }) => tenants.resolve(path.id))
+            .handle("provision", ({ payload }) => tenants.provision(payload.slug, payload.plan));
+    }),
 );
 ```
 
-- [NEVER] Mix `within`/`withinSync` -- async routes use `within`; DB-scoped routes use `withinSync`
-
----
-## [8][SERVICE_COMPOSITION]
->**Dictum:** *Services reference other services via yield* -- dependencies array wires the layers.*
-
-```typescript
-class NotificationService extends Effect.Service<NotificationService>()(
-    'server/Notifications',
-    {
-        dependencies: [
-            DatabaseService.Default,
-            EmailAdapter.Default,
-            EventBus.Default,
-            JobService.Default,
-            MetricsService.Default,
-            Resilience.Layer,           // custom layer, not .Default
-            WebhookService.Default,
-        ],
-        scoped: Effect.gen(function* () {
-            const [database, email, eventBus, jobs, metrics, webhooks] = yield* Effect.all([
-                DatabaseService, EmailAdapter, EventBus,
-                JobService, MetricsService, WebhookService,
-            ]);
-            const resilienceCtx = yield* Effect.context<Resilience.State>();
-            return { /* capabilities closing over all deps */ } as const;
-        }),
-    },
-) {}
-```
-
-`dependencies` wires arbitrary layers: `.Default`, `Layer.scoped(Tag, ...)`, `.toLayer()`, composed layers. `yield* Effect.all([...])` resolves multiple deps in a single destructured binding.
-
----
-## [9][PARAMETERIZED_CONSTRUCTORS]
->**Dictum:** *Effect 3.16+: effect/scoped accept Effect.fn with input params; params flow to X.Default(args).*
-
-```typescript
-class NumberService extends Effect.Service<NumberService>()(
-    'server/NumberService',
-    {
-        effect: Effect.fn(function* (seed: number) {
-            return {
-                next: Effect.fn('NumberService.next')(function* () {
-                    return seed + Math.random();
-                }),
-            };
-        }),
-    },
-) {}
-// parameterized Default -- seed flows through constructor
-const layer: Layer.Layer<NumberService> = NumberService.Default(42);
-```
-
----
-## [10][RULES]
-
-| [INDEX] | [RULE]                                                                                                                                                           |
-| :-----: | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-|   [1]   | [ALWAYS] `class X extends Effect.Service<X>()('namespace/X', { ... }) {}` -- class form only.                                                                    |
-|   [2]   | [ALWAYS] `dependencies: [...]` accepts any `Layer<Tag>` -- `.Default`, `Layer.scoped(Tag, ...)`, custom layers.                                                  |
-|   [3]   | [ALWAYS] `succeed` for pure stateless; `sync` for deferred init; `effect` for deps without lifecycle; `scoped` for `acquireRelease`/`addFinalizer`/`forkScoped`. |
-|   [4]   | [ALWAYS] `yield*` all deps at the top of the scoped generator, once; nested functions capture via closure.                                                       |
-|   [5]   | [ALWAYS] `Effect.fn('ServiceName.method')` for every capability group method -- automatic span.                                                                  |
-|   [6]   | [ALWAYS] `{ group1, group2 } as const` return shape -- group by concern; `as const` on each group.                                                               |
-|   [7]   | [ALWAYS] Instance access (R=never) inside scoped constructors; static delegates (R=Service) for layer-provided contexts.                                         |
-|   [8]   | [ALWAYS] `declare namespace X { type T = ... }` for service type exposure -- no standalone type aliases.                                                         |
-|   [9]   | [ALWAYS] `Effect.forkScoped` for background subscriptions and crons inside scoped constructors.                                                                  |
-|  [10]   | [ALWAYS] `Context.Request.withinSync` for tenant-scoped DB ops; `within` for async paths.                                                                        |
-|  [11]   | [NEVER] `Context.Tag` directly -- `Effect.Service` subsumes it.                                                                                                  |
-|  [12]   | [NEVER] `scoped` just to yield deps -- that is `effect`'s job. Reserve for lifecycle management.                                                                 |
-|  [13]   | [NEVER] `yield*` inside nested `Effect.gen` that already has a dep in scope -- hoist to top.                                                                     |
-|  [14]   | [NEVER] Flat object of 10+ methods -- group into `read`/`write`/`observe` first.                                                                                 |
-|  [15]   | [NEVER] `Effect.fn` on route handlers -- use `Telemetry.span` directly.                                                                                          |
-|  [16]   | [NEVER] Background fibers without `Effect.forkScoped` -- they outlive the layer scope.                                                                           |
-
----
-## [11][QUICK_REFERENCE]
-
-| [INDEX] | [PATTERN]                 | [FORM]                                                                     |
-| :-----: | ------------------------- | -------------------------------------------------------------------------- |
-|   [1]   | Class declaration         | `class X extends Effect.Service<X>()('ns/X', { ... }) {}`                  |
-|   [2]   | succeed mode              | `succeed: { method: (a) => result }`                                       |
-|   [3]   | sync mode                 | `sync: () => ({ method: (a) => result })`                                  |
-|   [4]   | effect mode               | `effect: Effect.gen(function* () { const d = yield* Dep; return {...}; })` |
-|   [5]   | scoped mode               | `scoped: Effect.gen(function* () { yield* acquireRelease(...); ... })`     |
-|   [6]   | Arbitrary deps            | `dependencies: [A.Default, Layer.scoped(B, ...), C.toLayer()]`             |
-|   [7]   | Traced method             | `Effect.fn('Service.method')(function* (arg) { ... })`                     |
-|   [8]   | Unnamed callback          | `Effect.fn(function* (item) { ... })`                                      |
-|   [9]   | Capability group          | `const read = { get, list } as const; return { read, write };`             |
-|  [10]   | Consumer destructure      | `const { read } = yield* MyService;`                                       |
-|  [11]   | Instance (R=never)        | `service.read.get(id)` -- inside scoped constructor                        |
-|  [12]   | Static delegate (R=Svc)   | `MyService.pipe(Effect.flatMap((s) => s.read.get(id)))`                    |
-|  [13]   | Static re-export          | `static readonly Error = SomeError;`                                       |
-|  [14]   | Static layer              | `static readonly Layer = X.Default.pipe(Layer.provideMerge(...))`          |
-|  [15]   | Namespace merge           | `declare namespace X { type T = keyof typeof X._statics; }`                |
-|  [16]   | Background fiber          | `yield* stream.pipe(Stream.runDrain, Effect.forkScoped);`                  |
-|  [17]   | Leader-gated cron         | `cluster.isLocal(key).pipe(..., Effect.repeat(...), Effect.forkScoped)`    |
-|  [18]   | Tenant scoping            | `Context.Request.withinSync(tenantId, effect)`                             |
-|  [19]   | Parameterized constructor | `effect: Effect.fn(function* (seed: number) { ... })` -> `X.Default(42)`   |
+**Laws:**<br>
+- `SqlResolver` deduplicates concurrent requests for the same entity ID within a single fiber scope -- two fibers resolving ID "x" simultaneously produce one SQL query, not two,
+- handler bodies exceeding 3 lines indicate domain logic leaking past the service boundary -- the handler's sole role is parameter extraction and delegation,
+- `FiberRef` set in middleware propagates to all service methods called within that request fiber -- no explicit parameter threading required,
+- `Entity.client` yields a curried factory `(id: string) => TypedClient` -- the same service methods exposed via `HttpApiBuilder.group` are equally reachable through `Sharding.registerEntity`, proving protocol-agnostic service design.

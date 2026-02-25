@@ -15,7 +15,7 @@ const TransferLive = HttpApiBuilder.group(ParametricApi, 'transfer', (handlers) 
         const transfer = yield* TransferService;
         return handlers
             .handleRaw('export', ({ urlParams }) => transfer.exportAssets(urlParams).pipe(Telemetry.span('transfer.export')))
-            .handle('import', ({ urlParams }) => transfer.importAssets(urlParams).pipe(Telemetry.span('transfer.import')));
+            .handle('import',    ({ urlParams }) => transfer.importAssets(urlParams).pipe(Telemetry.span('transfer.import')));
     }),
 );
 

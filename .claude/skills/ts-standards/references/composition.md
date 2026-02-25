@@ -1,374 +1,375 @@
 # [H1][COMPOSITION]
->**Dictum:** *Layer topology encodes dependency order; the type-checker enforces it. Composition root is the only place wiring happens.*
+>**Dictum:** *Composition is typed graph algebra: model edges, eliminate requirements once, and encode visibility as explicit policy.*
 
-Cross-references: `services.md [1]` service anatomy + constructor modes -- `services.md [4]` layer assembly + test doubles -- `effects.md [2]` acquireRelease/pipe/flow -- `algorithms.md [1-4]` Stream/Chunk/Sink -- `concurrency.md [5]` fiber lifecycle + forkScoped.
+<br>
+
+Composition owns graph geometry, not service semantics or runtime policy. This reference is declaration-only and compile-focused: snippets target current `effect@3.19.18` and installed Effect-* APIs, keep branch-free FP+ROP composition, and avoid wrapper indirection. Root assembly is a one-time boundary operation; feature modules export partial layers that remain composable.
 
 ---
-## [1][LAYER_SEMANTICS]
->**Dictum:** *Layer<ROut, E, RIn> is a recipe -- shared by default, constructed once, torn down on scope exit.*
+## [1][COMPOSITION_LAWS]
+>**Dictum:** *Graph laws are stronger than conventions because wiring, visibility, and topology transitions remain type-auditable.*
 
-`Layer<ROut, E, RIn>` -- provides `ROut`, requires `RIn`, may fail with `E`.
-Diamond-safe: when two consumers require the same dependency, the layer graph allocates it once.
-Four construction modes on `Effect.Service`: `succeed`, `sync`, `effect`, `scoped` (see `services.md [1]`).
-`Layer.scoped` pairs with `Effect.acquireRelease` -- resource allocated on construction, released on scope exit.
-`Layer.effect` resolves deps without lifecycle management.
-`Layer.succeed` provides a pure value with no acquisition, no error, no requirements.
-`Layer.fail` constructs a layer that immediately fails -- useful for config validation gates.
+<br>
 
-```typescript
-import { Context, Data, Duration, Effect, FiberRef, Layer, ManagedRuntime, Option, pipe, Schedule } from "effect"
-import { NodeRuntime } from "@effect/platform-node"
-import { SqlClient } from "@effect/sql"
+- Encode dependencies with raw `Layer` combinators; do not hide DAG semantics behind helpers.
+- Keep dynamic graph choice in-layer with `unwrapEffect`, `unwrapScoped`, `flatMap`, `match`, `matchCause`.
+- Model visibility intentionally with `provide` and `provideMerge`; never rely on accidental exposure.
+- Shape boundary outputs with `project`, `passthrough`, `discard`, `effectDiscard`, `scopedDiscard`.
+- Use collection-driven mapping (`HashMap`, `HashSet`, `Chunk`) when topology must stay data-driven.
+- Treat Effect-* packages as first-class graph nodes; composition wires nodes, sibling references own behavior.
+
+---
+## [2][REQUIREMENT_ELIMINATION_AND_VISIBILITY]
+>**Dictum:** *`provide` removes satisfied requirements; `provideMerge` preserves selected upstream outputs for downstream consumers.*
+
+<br>
+
+```ts
+import { PlatformConfigProvider } from "@effect/platform";
+import { ConfigProvider, Context, Effect, Layer } from "effect";
+
+// --- [SERVICES] --------------------------------------------------------------
+
+const Host =     Context.GenericTag<string>("Cmp/Host");
+const Port =     Context.GenericTag<number>("Cmp/Port");
+const Token =    Context.GenericTag<string>("Cmp/Token");
+const Endpoint = Context.GenericTag<string>("Cmp/Endpoint");
+const Header =   Context.GenericTag<string>("Cmp/Header");
+
+// --- [LAYERS] ----------------------------------------------------------------
+
+const Network =       Layer.mergeAll(Layer.succeed(Host, "db.internal"), Layer.succeed(Port, 5432));
+const Credentials =   Layer.succeed(Token, "token.live");
+const EndpointLayer = Layer.effect(Endpoint, Effect.all([Host, Port]).pipe(Effect.map(([host, port]) => `${host}:${port}`)));
+const HeaderLayer =   Layer.effect(Header, Effect.all([Endpoint, Token]).pipe(Effect.map(([endpoint, token]) => `${token}@${endpoint}`)));
+const ConfigSources = Layer.mergeAll(PlatformConfigProvider.layerDotEnvAdd(".env"), PlatformConfigProvider.layerFileTreeAdd({ rootDirectory: "config" }));
+const HeaderWithEndpoint =     Layer.mergeAll(HeaderLayer, EndpointLayer).pipe(Layer.provide(Network), Layer.provide(Credentials));
+const HeaderWithConfigInputs = HeaderWithEndpoint.pipe(Layer.provideMerge(ConfigSources), Layer.provideMerge(Layer.setConfigProvider(ConfigProvider.fromEnv())));
+
+// --- [EXPORT] ----------------------------------------------------------------
+
+export { ConfigSources, Credentials, EndpointLayer, HeaderLayer, HeaderWithConfigInputs, HeaderWithEndpoint, Network };
+```
+
+---
+## [3][BOUNDARY_OUTPUT_SHAPING]
+>**Dictum:** *Boundary shape is a contract budget: export only the minimum surface that downstream graphs require.*
+
+<br>
+
+```ts
+import { KeyValueStore } from "@effect/platform";
+import { Context, Layer, Schema } from "effect";
+
+// --- [SERVICES] --------------------------------------------------------------
+
+const Config =       Context.GenericTag<{ readonly endpoint: string; readonly region: string }>("Cmp/Config");
+const Endpoint =     Context.GenericTag<string>("Cmp/OutEndpoint");
+const SessionStore = Context.GenericTag<KeyValueStore.KeyValueStore>("Cmp/SessionStore");
+
+// --- [LAYERS] ----------------------------------------------------------------
+
+const ConfigLayer =       Layer.succeed(Config, { endpoint: "https://edge.internal", region: "us-east-1" });
+const EndpointOnly =      ConfigLayer.pipe(Layer.project(Config, Endpoint, ({ endpoint }) => endpoint));
+const SessionStoreLayer = KeyValueStore.layerMemory.pipe(Layer.project(KeyValueStore.KeyValueStore, SessionStore, (store) => KeyValueStore.prefix(store, "tenant:")));
+const SessionSchema =     KeyValueStore.layerSchema(Schema.Struct({ endpoint: Schema.String, region: Schema.String }), "Cmp/SessionSchema");
+const TypedSessionStore = SessionSchema.layer.pipe(Layer.provide(KeyValueStore.layerMemory));
+const BoundaryGraph =     Layer.mergeAll(EndpointOnly, SessionStoreLayer, TypedSessionStore);
+
+// --- [EXPORT] ----------------------------------------------------------------
+
+export { BoundaryGraph, ConfigLayer, EndpointOnly, SessionStoreLayer, TypedSessionStore };
+```
+
+---
+## [4][DYNAMIC_TOPOLOGY_SELECTION]
+>**Dictum:** *Dynamic edges belong inside `Layer` selection operators; call-sites remain static and branch-free.*
+
+<br>
+
+```ts
+import { FetchHttpClient, KeyValueStore } from "@effect/platform";
+import { BrowserHttpClient, BrowserKeyValueStore } from "@effect/platform-browser";
+import { Context, Effect, Layer, Match } from "effect";
+
+// --- [SERVICES] --------------------------------------------------------------
+
+const RuntimeModeValue = {
+  fetch: "fetch",
+  xhr: "xhr",
+} as const satisfies Record<"fetch" | "xhr", string>;
+const ReplicaModeValue = {
+  primary: "primary",
+  replica: "replica",
+} as const satisfies Record<"primary" | "replica", string>;
+const TagId = {
+  runtimeMode: "Cmp/RuntimeMode",
+  replicaMode: "Cmp/ReplicaMode",
+  connectionName: "Cmp/ConnectionName",
+} as const satisfies Record<"runtimeMode" | "replicaMode" | "connectionName", string>;
+const RuntimeMode =    Context.GenericTag<(typeof RuntimeModeValue)[keyof typeof RuntimeModeValue]>(TagId.runtimeMode);
+const ReplicaMode =    Context.GenericTag<(typeof ReplicaModeValue)[keyof typeof ReplicaModeValue]>(TagId.replicaMode);
+const ConnectionName = Context.GenericTag<string>(TagId.connectionName);
+
+// --- [CONSTANTS] -------------------------------------------------------------
+
+const Connection = {
+  primary: "primary-conn",
+  replica: "replica-conn",
+} as const satisfies Record<"primary" | "replica", string>;
+const ReleaseLog = {
+  primary: "release.primary",
+  replica: "release.replica",
+} as const satisfies Record<"primary" | "replica", string>;
+
+// --- [LAYERS] ----------------------------------------------------------------
+
+const DynamicTransport = Layer.unwrapEffect(
+  RuntimeMode.pipe(
+    Effect.map((mode) =>
+      Match.value(mode).pipe(
+        Match.when(RuntimeModeValue.fetch, () => FetchHttpClient.layer),
+        Match.when(RuntimeModeValue.xhr,   () => BrowserHttpClient.layerXMLHttpRequest),
+        Match.exhaustive,
+      ),
+    ),
+  ),
+);
+const DynamicStore = Layer.unwrapEffect(
+  RuntimeMode.pipe(
+    Effect.map((mode) =>
+      Match.value(mode).pipe(
+        Match.when(RuntimeModeValue.fetch, () => KeyValueStore.layerMemory),
+        Match.when(RuntimeModeValue.xhr,   () => BrowserKeyValueStore.layerSessionStorage),
+        Match.exhaustive,
+      ),
+    ),
+  ),
+);
+const DynamicConnection = Layer.unwrapScoped(
+  ReplicaMode.pipe(
+    Effect.map((mode) =>
+      Match.value(mode).pipe(
+        Match.when(ReplicaModeValue.primary, () =>
+          Layer.scoped(
+            ConnectionName,
+            Effect.acquireRelease(
+              Effect.succeed(Connection.primary),
+              () => Effect.logDebug(ReleaseLog.primary),
+            ),
+          ),
+        ),
+        Match.when(ReplicaModeValue.replica, () =>
+          Layer.scoped(
+            ConnectionName,
+            Effect.acquireRelease(
+              Effect.succeed(Connection.replica),
+              () => Effect.logDebug(ReleaseLog.replica),
+            ),
+          ),
+        ),
+        Match.exhaustive,
+      ),
+    ),
+  ),
+);
+const DynamicGraph = Layer.mergeAll(DynamicTransport, DynamicStore, DynamicConnection).pipe(
+  Layer.provide(Layer.succeed(RuntimeMode, RuntimeModeValue.xhr)),
+  Layer.provide(Layer.succeed(ReplicaMode, ReplicaModeValue.replica)),
+);
+
+// --- [EXPORT] ----------------------------------------------------------------
+
+export { DynamicConnection, DynamicGraph, DynamicStore, DynamicTransport };
+```
+
+---
+## [5][ERROR_AWARE_GRAPH_REWRITES]
+>**Dictum:** *Use layer-level error algebra (`match`, `matchCause`, `mapError`, `retry`) to keep rewrites explicit and typed.*
+
+<br>
+
+```ts
+import { Context, Data, Effect, Layer, Match } from "effect";
 
 // --- [ERRORS] ----------------------------------------------------------------
-class PoolError extends Data.TaggedError("PoolError")<{
-    readonly operation: string
-    readonly cause:     unknown
-}> {
-    static readonly from = (operation: string) =>
-        (cause: unknown) => new PoolError({ cause, operation })
-}
+
+class ProvisioningRail extends Data.TaggedError("ProvisioningRail")<{
+  readonly operation: "tenant.guard";
+  readonly reason:    "invalid-tenant";
+  readonly tenant:    string;
+}> {}
 
 // --- [SERVICES] --------------------------------------------------------------
-// why: Layer.succeed -- pure synchronous config, no acquisition, R=never, E=never
-class DeployConfig extends Effect.Service<DeployConfig>()("app/DeployConfig", {
-    succeed: { mode: "cluster" as const, region: "us-east-1" },
-}) {}
 
-// why: Layer.fail -- gate: when required config is missing, layer construction fails immediately
-const RequiredFeatureGate: Layer.Layer<never, PoolError> = Layer.fail(
-    new PoolError({ operation: "feature-gate", cause: "FEATURE_X_DISABLED" }),
-)
-```
+const Tenant = Context.GenericTag<string>("Cmp/Tenant");
+const Topic =  Context.GenericTag<string>("Cmp/Topic");
 
----
-## [2][LAYER_COMPOSITION]
->**Dictum:** *provide feeds deps; provideMerge accumulates context; mergeAll groups independent peers.*
-
-`Layer.provide` accepts a single layer or an **array** of layers -- feeds requirements, exposes only consumer output.
-`Layer.provideMerge` retains both self and base outputs downstream -- canonical for tiered composition roots.
-`Layer.mergeAll` groups independent peer layers at the same tier -- all outputs available.
-
-```typescript
-// --- [SERVICES] --------------------------------------------------------------
-declare class Database extends Effect.Service<Database>()("app/Database", {
-    scoped: Effect.gen(function* () {
-        const sql = yield* SqlClient.SqlClient
-        return { sql }
-    }),
-}) {}
-declare class CacheClient extends Effect.Service<CacheClient>()("app/CacheClient", {
-    scoped: Effect.gen(function* () {
-        return { get: Effect.fn("Cache.get")((key: string) => Effect.succeed(Option.none())) }
-    }),
-}) {}
-declare class EventBus extends Effect.Service<EventBus>()("app/EventBus", {
-    dependencies: [Database.Default],
-    effect: Effect.gen(function* () {
-        const { sql } = yield* Database
-        return { publish: Effect.fn("EventBus.publish")((payload: unknown) => Effect.void) }
-    }),
-}) {}
-declare class SearchIndex extends Effect.Service<SearchIndex>()("app/SearchIndex", {
-    dependencies: [Database.Default],
-    effect: Effect.gen(function* () {
-        const { sql } = yield* Database
-        return { reindex: Effect.fn("Search.reindex")(() => Effect.void) }
-    }),
-}) {}
-
-// --- [LAYERS] ----------------------------------------------------------------
-// provide(array) -- feeds multiple deps at once; Database shared across both consumers
-const InfraLayer = Layer.mergeAll(Database.Default, CacheClient.Default)
-
-// provideMerge -- retains all outputs for downstream tiers
-const MidLayer = Layer.mergeAll(EventBus.Default, SearchIndex.Default)
-
-// Tiered composition root: leaf -> mid -> top
-// why: provideMerge ensures every tier's outputs remain available to subsequent tiers
-const AppLayer = MidLayer.pipe(
-    Layer.provideMerge(InfraLayer),
-)
-```
-
-| [INDEX] | [COMBINATOR]         | [OUTPUT_INCLUDES]           | [USE_WHEN]                              |
-| :-----: | -------------------- | --------------------------- | --------------------------------------- |
-|   [1]   | `Layer.provide`      | consumer output only        | Feeding deps, discarding intermediates  |
-|   [2]   | `Layer.provideMerge` | both self + base outputs    | Accumulating context in tiered chains   |
-|   [3]   | `Layer.mergeAll`     | all layers (parallel merge) | Independent peer services at same tier  |
-|   [4]   | `Layer.provide([])`  | consumer output only        | Feeding multiple deps via array literal |
-
----
-## [3][DYNAMIC_LAYERS]
->**Dictum:** *Layer.unwrapEffect lifts runtime config into layer construction; Layer.unwrapScoped adds resource lifecycle to construction.*
-
-`Layer.unwrapEffect` takes `Effect<Layer<ROut, E, RIn>, E2, RIn2>` and collapses to `Layer<ROut, E | E2, RIn | RIn2>`.
-Canonical pattern: read config from Env, then construct platform resources with resolved values.
-`Layer.unwrapScoped` takes `Effect<Layer, E, R | Scope>` -- construction itself acquires scoped resources.
-`Layer.effectDiscard` / `Layer.scopedDiscard` -- fire-and-forget initialization (cache warming, subscription setup) that produces no service output.
-
-```typescript
-// --- [LAYERS] ----------------------------------------------------------------
-// Layer.unwrapEffect -- resolve config before constructing the database layer
-// why: connection string is runtime config; Env must resolve before pool opens
-const PlatformLayer = Layer.unwrapEffect(
-    Effect.gen(function* () {
-        const config = yield* DeployConfig
-        return Layer.mergeAll(
-            Database.Default,
-            Layer.succeed(DeployConfig, config),
-        )
-    }),
-)
-
-// Layer.unwrapScoped -- construction acquires a scoped resource
-// why: pool opened during layer construction, closed on scope exit
-const ScopedPlatformLayer = Layer.unwrapScoped(
-    Effect.gen(function* () {
-        const config = yield* DeployConfig
-        const handle = yield* Effect.acquireRelease(
-            Effect.tryPromise({
-                try:   () => connectExternal(config.region),
-                catch: PoolError.from("connect"),
-            }),
-            (resource) => Effect.promise(() => resource.disconnect()),
-        )
-        return Layer.succeed(Database, Database.make({ sql: handle.client }))
-    }),
-)
-
-// Layer.effectDiscard -- fire-and-forget init producing no service output
-// why: cache warming runs at startup; no output added to context
-const WarmCacheLayer: Layer.Layer<never, never, CacheClient> = Layer.effectDiscard(
-    Effect.gen(function* () {
-        const cache = yield* CacheClient
-        yield* cache.get("warmup-key")
-    }),
-)
-
-// Layer.scopedDiscard -- fire-and-forget init with scoped lifecycle
-// why: background subscription torn down on scope exit; no output
-const SubscriptionLayer: Layer.Layer<never, never, EventBus> = Layer.scopedDiscard(
-    Effect.gen(function* () {
-        const bus = yield* EventBus
-        yield* Effect.addFinalizer(() => Effect.log("subscription torn down"))
-        yield* bus.publish({ type: "system.startup" })
-    }),
-)
-```
-
----
-## [4][LAYER_RESILIENCE]
->**Dictum:** *Layer.retry handles transient construction failures; Layer.fresh breaks sharing for test isolation.*
-
-`Layer.retry(layer, schedule)` retries failed layer construction using a `Schedule`.
-`Layer.fresh(layer)` breaks memoization -- each use allocates a new instance. Reserved for test isolation.
-
-```typescript
-// --- [LAYERS] ----------------------------------------------------------------
-// Layer.retry -- resilient construction with exponential backoff
-// why: database cold start may fail transiently; retry 5x over ~15s
-const ResilientDb = Layer.retry(
-    Database.Default,
-    pipe(
-        Schedule.exponential("500 millis", 2),
-        Schedule.jittered,
-        Schedule.intersect(Schedule.recurs(5)),
-    ),
-)
-
-// Layer.fresh -- breaks sharing; new instance per use (test isolation only)
-// why: each test gets its own database state; no cross-test contamination
-const IsolatedDb = Layer.fresh(Database.Default)
-```
-
----
-## [5][CONTEXT_TAGS]
->**Dictum:** *Context.Tag is the typed service key; Context.Reference adds a default value -- no Layer needed for optional deps.*
-
-`Context.Tag` -- raw typed key for manual DI (subsume via `Effect.Service` in production code).
-`Context.Reference` -- tag that auto-resolves to a default value without requiring a Layer. Consumers can provide a Layer to override, or accept the default. Pattern for optional configuration that most consumers never customize.
-
-```typescript
-// --- [SERVICES] --------------------------------------------------------------
-// Context.Reference -- optional dep with default; no Layer required to resolve
-class LogLevel extends Context.Reference<LogLevel>()("app/LogLevel", {
-    defaultValue: () => "info" as const,
-}) {}
-
-// why: LogLevel resolves to 'info' without any Layer; override via Layer.succeed
-const withDebugLogging = Layer.succeed(LogLevel, "debug" as const)
-
-// Consumer -- works with or without LogLevel in the layer graph
-const logSomething = Effect.gen(function* () {
-    const level = yield* LogLevel
-    yield* Effect.log(`current level: ${level}`)
-})
-```
-
----
-## [6][LAYER_SCOPED_FIBERREF]
->**Dictum:** *Layer.locally scopes FiberRef mutation to a layer subtree -- propagation without parameter drilling.*
-
-`Layer.locally(fiberRef, value)(layer)` or `Layer.locally(layer, fiberRef, value)` -- sets a FiberRef
-value visible only within the layer subtree. Fibers outside see the original value.
-`Layer.memoize(layer)` produces `Effect<Layer<ROut, E, RIn>, never, Scope>` -- guarantees single
-allocation across multiple `Effect.provide` calls. The `Scope` requirement ties the memoized
-layer's lifetime to the enclosing scope.
-
-```typescript
 // --- [CONSTANTS] -------------------------------------------------------------
-const _tenantRef = FiberRef.unsafeMake(Option.none<string>())
 
-// --- [LAYERS] ----------------------------------------------------------------
-// Layer.locally -- scope FiberRef to layer subtree
-// why: system-level jobs execute with tenant='system'; application layers see their own tenant
-const SystemScopedLayer = pipe(
-    AppLayer,
-    Layer.locally(_tenantRef, Option.some("system")),
-)
+const TenantInput =   Layer.succeed(Tenant, "tenant_01");
+const GuardedTenant = Layer.unwrapEffect(Tenant.pipe(Effect.map((tenant) => Match.value(tenant.startsWith("tenant_")).pipe(Match.when(true, () => Layer.succeed(Tenant, tenant)), Match.orElse(() => Layer.fail(new ProvisioningRail({ operation: "tenant.guard", reason: "invalid-tenant", tenant })))))));
+const TopicLayer = GuardedTenant.pipe(Layer.flatMap((context) => Layer.succeed(Topic, `${Context.get(context, Tenant)}.events`)));
+const TopicWithFallback = TopicLayer.pipe(Layer.match({ onFailure: () => Layer.succeed(Topic, "tenant_default.events"), onSuccess: (context) => Layer.succeed(Topic, Context.get(context, Topic)) }));
 
-// Layer.memoize -- single allocation across scopes (requires Scope)
-// why: expensive resource allocated once; shared across multiple Effect.provide calls
-const memoizedProgram = Effect.scoped(
-    Effect.gen(function* () {
-        const shared = yield* Layer.memoize(Database.Default)
-        const resultA = yield* Effect.provide(someEffectA, shared)
-        const resultB = yield* Effect.provide(someEffectB, shared)
-        return { resultA, resultB }
-    }),
-)
+// --- [EXPORT] ----------------------------------------------------------------
+
+export { GuardedTenant, TenantInput, TopicLayer, TopicWithFallback };
 ```
 
 ---
-## [7][APPLICATION_ENTRY]
->**Dictum:** *NodeRuntime.runMain + Layer.launch for servers; ManagedRuntime for embedded runtimes; Effect.provide for tests.*
+## [6][MEMOIZATION_AND_FRESHNESS]
+>**Dictum:** *Default sharing is graph-level optimization; `fresh` is explicit re-allocation and `memoize` is explicit stabilization.*
 
-`Layer.launch(layer)` returns `Effect<never, E, RIn>` -- self-scoped, stays open until interruption.
-`NodeRuntime.runMain` handles SIGTERM/SIGINT and tears down all scoped resources.
-`ManagedRuntime.make(layer)` constructs an embedded runtime synchronously.
-`runtime.runFork(effect, options?)` returns `RuntimeFiber<A, E>` -- interop with non-Effect frameworks.
-`runtime.runCallback(effect, options?)` -- fire-and-forget with optional exit handler.
-`runtime.dispose()` / `runtime.disposeEffect` -- releases all layer resources.
+<br>
 
-```typescript
+```ts
+import { Context, Effect, Layer } from "effect";
+
+// --- [SERVICES] --------------------------------------------------------------
+
+const Seed = Context.GenericTag<number>("Cmp/Seed");
+const A =    Context.GenericTag<number>("Cmp/A");
+const B =    Context.GenericTag<number>("Cmp/B");
+
 // --- [LAYERS] ----------------------------------------------------------------
-// Long-running server entry -- canonical pattern
-// why: Layer.launch keeps scope open; runMain handles OS signals + teardown
-NodeRuntime.runMain(Layer.launch(AppLayer).pipe(
-    Effect.onInterrupt(() => Effect.log("graceful shutdown initiated")),
-))
 
-// --- [FUNCTIONS] -------------------------------------------------------------
-// ManagedRuntime -- embedded runtime for CLI tools, worker threads, one-shot scripts
-// why: non-Effect host needs to drive Effect programs; dispose guarantees resource cleanup
-const embeddedWorkflow = Effect.gen(function* () {
-    const runtime = yield* Effect.acquireRelease(
-        Effect.sync(() => ManagedRuntime.make(AppLayer)),
-        (managed) => managed.disposeEffect,
-    )
-    // runFork -- returns RuntimeFiber<A, E> for non-blocking interop
-    const fiber = runtime.runFork(Effect.log("forked task"))
-    // runCallback -- fire-and-forget with exit handler
-    runtime.runCallback(Effect.log("background"), { onExit: (exit) => console.log("exited", exit) })
-    // runPromise -- bridges to Promise for await-based callers
-    yield* Effect.promise(() => runtime.runPromise(
-        Effect.gen(function* () {
-            const { reindex } = yield* SearchIndex
-            yield* reindex()
-        }),
-    ))
-})
+const SeedLive =        Layer.effect(Seed, Effect.succeed(5).pipe(Effect.tap(() => Effect.logDebug("seed.init"))));
+const ALive =           Layer.effect(A, Seed.pipe(Effect.map((seed) => seed + 1)));
+const BLive =           Layer.effect(B, Seed.pipe(Effect.map((seed) => seed + 2)));
+const SharedSeedGraph = Layer.mergeAll(ALive.pipe(Layer.provide(SeedLive)), BLive.pipe(Layer.provide(SeedLive)));
+const FreshSeedGraph =  Layer.mergeAll(ALive.pipe(Layer.provide(Layer.fresh(SeedLive))), BLive.pipe(Layer.provide(Layer.fresh(SeedLive))));
+const ManualMemoGraph = Effect.scoped(Layer.memoize(SeedLive).pipe(Effect.map((memoized) => Layer.mergeAll(ALive.pipe(Layer.provide(memoized)), BLive.pipe(Layer.provide(memoized)))), Effect.flatMap(Layer.build)));
 
-// Test entry -- Effect.provide injects layer; scope auto-tears down
-// why: no runtime plumbing in tests; layer provides all deps
-const testEffect = Effect.gen(function* () {
-    const bus = yield* EventBus
-    yield* bus.publish({ type: "test.event" })
-}).pipe(Effect.provide(AppLayer))
+// --- [EXPORT] ----------------------------------------------------------------
+
+export { ALive, BLive, FreshSeedGraph, ManualMemoGraph, SeedLive, SharedSeedGraph };
 ```
 
 ---
-## [8][COMPOSITION_ROOT_PATTERN]
->**Dictum:** *One file owns the full layer graph -- tiered from leaf to top, linear provideMerge chain.*
+## [7][EFFECT_STAR_CROSS_LIBRARY_COMPOSITION]
+>**Dictum:** *Effect-* modules are first-class graph inputs; compose transport, policy, and storage with the same layer algebra.*
 
-Mirrors the real codebase: `PlatformLayer -> ServicesLayer -> RouteLayer -> ServerLayer`.
-Each tier is `Layer.mergeAll` of peers; `Layer.provideMerge` chains tiers bottom-up.
-`dependencies: [...]` on services auto-wires transitive deps into `X.Default` (see `services.md [1]`).
+<br>
 
-```typescript
+Use this section as the single ownership point for HTTP+KV graph wiring; reuse `HttpClient.withTracerPropagation`, `KeyValueStore.prefix`, and `KeyValueStore.layerSchema` patterns from here rather than re-declaring them elsewhere.
+
+```ts
+import { FetchHttpClient, HttpClient, KeyValueStore } from "@effect/platform";
+import { BrowserHttpClient, BrowserKeyValueStore } from "@effect/platform-browser";
+import { Context, Effect, Layer, Match } from "effect";
+
+// --- [SERVICES] --------------------------------------------------------------
+
+const ClientModeValue = {
+  fetch: "fetch",
+  xhr: "xhr",
+} as const satisfies Record<"fetch" | "xhr", string>;
+const TagId = {
+  clientMode: "Cmp/ClientMode",
+  sessionStore: "Cmp/SessionStore",
+} as const satisfies Record<"clientMode" | "sessionStore", string>;
+const ClientMode =          Context.GenericTag<(typeof ClientModeValue)[keyof typeof ClientModeValue]>(TagId.clientMode);
+const SessionStore =        Context.GenericTag<KeyValueStore.KeyValueStore>(TagId.sessionStore);
+const SessionPrefix =       "session:" as const;
+const BrowserResponseType = "arraybuffer" as const;
+
 // --- [LAYERS] ----------------------------------------------------------------
-// Tier 1: Platform -- leaf services with no deps
-const PlatformLayer = Layer.mergeAll(
-    DeployConfig.Default,
-    Database.Default,
-    CacheClient.Default,
-)
 
-// Tier 2: Infrastructure -- depends on platform
-const InfraServices = Layer.mergeAll(
-    EventBus.Default,
-    SearchIndex.Default,
-)
+const BaseClientLayer = Layer.unwrapEffect(
+  ClientMode.pipe(
+    Effect.map((mode) =>
+      Match.value(mode).pipe(
+        Match.when(ClientModeValue.fetch, () => FetchHttpClient.layer),
+        Match.when(ClientModeValue.xhr,   () => BrowserHttpClient.layerXMLHttpRequest),
+        Match.exhaustive,
+      ),
+    ),
+  ),
+);
+const TracingPolicyLayer = HttpClient.layerMergedContext(HttpClient.HttpClient.pipe(Effect.map(HttpClient.withTracerPropagation(true)), Effect.map(HttpClient.filterStatusOk)));
+const StrictClientLayer = TracingPolicyLayer.pipe(Layer.provide(BaseClientLayer));
+const SessionStoreLayer = BrowserKeyValueStore.layerLocalStorage.pipe(Layer.project(KeyValueStore.KeyValueStore, SessionStore, (store) => KeyValueStore.prefix(store, SessionPrefix)));
+const BrowserArrayBufferClient = BrowserHttpClient.layerXMLHttpRequest.pipe(Layer.locally(BrowserHttpClient.currentXHRResponseType, BrowserResponseType));
+const BrowserInfra = Layer.mergeAll(StrictClientLayer, SessionStoreLayer).pipe(Layer.provide(Layer.succeed(ClientMode, ClientModeValue.xhr)));
 
-// Tier 3: Application -- full composition root
-// why: provideMerge retains all outputs; downstream tiers can access any ancestor service
-const CompositionRoot = InfraServices.pipe(
-    Layer.provideMerge(PlatformLayer),
-)
+// --- [EXPORT] ----------------------------------------------------------------
 
-// Resilient variant -- retries platform layer construction on transient failure
-const ResilientRoot = InfraServices.pipe(
-    Layer.provideMerge(Layer.retry(
-        PlatformLayer,
-        pipe(Schedule.exponential("1 second"), Schedule.intersect(Schedule.recurs(3))),
-    )),
-)
-
-// Entry point -- one line
-NodeRuntime.runMain(Layer.launch(CompositionRoot))
+export { BaseClientLayer, BrowserArrayBufferClient, BrowserInfra, SessionStoreLayer, StrictClientLayer };
 ```
 
 ---
-## [9][RULES]
+## [8][ROOT_ASSEMBLY_ONCE]
+>**Dictum:** *Entrypoints assemble one root graph; modules export partial layers and never rebuild roots locally.*
 
-- [ALWAYS] `Layer.provide(dep)` to wire deps: `consumer.pipe(Layer.provide(dep))` -- accepts single or array.
-- [ALWAYS] `Layer.provideMerge` at composition roots when downstream needs both tiers in context.
-- [ALWAYS] `Layer.mergeAll` to group independent peers at the same tier.
-- [ALWAYS] `Layer.unwrapEffect` when layer construction depends on runtime config (Env, feature flags).
-- [ALWAYS] `Layer.unwrapScoped` when layer construction acquires scoped resources.
-- [ALWAYS] `Layer.retry(layer, schedule)` for transient construction failures (DB cold start, network).
-- [ALWAYS] `Layer.locally(ref, value)` to scope FiberRef mutation to a layer subtree.
-- [ALWAYS] `NodeRuntime.runMain` + `Layer.launch` for long-running servers.
-- [ALWAYS] `ManagedRuntime.make` for embedded runtimes; call `dispose()` on exit.
-- [ALWAYS] `Effect.provide(layer)` in tests -- no runtime plumbing; scope auto-tears down.
-- [ALWAYS] `Context.Reference` for optional deps with sensible defaults -- no Layer required.
-- [ALWAYS] Rely on Layer sharing for diamond deps -- never duplicate leaf layers manually.
-- [NEVER] `Effect.runPromise` / `Effect.runSync` inside application logic -- only at boundary.
-- [NEVER] `Layer.fresh` outside test isolation -- breaks sharing, duplicates resource allocation.
-- [NEVER] `process.on("SIGTERM")` for shutdown -- `NodeRuntime.runMain` handles signals.
-- [NEVER] Wrap `Layer.launch` in `Effect.scoped` -- launch manages its own scope.
-- [NEVER] Omit `dispose()` on short-lived `ManagedRuntime` -- causes resource leaks.
+<br>
+
+Use this assembly boundary to consume specialized layers from sibling references (for example, `surface.md` HTTP layers) instead of re-declaring those concerns in composition.
+
+```ts
+import { HttpClient } from "@effect/platform";
+import { Context, Effect, Layer } from "effect";
+
+// --- [SERVICES] --------------------------------------------------------------
+
+const Platform = Context.GenericTag<string>("Cmp/Platform");
+const Infra =    Context.GenericTag<string>("Cmp/Infra");
+const Domain =   Context.GenericTag<string>("Cmp/Domain");
+const Surface =  Context.GenericTag<string>("Cmp/Surface");
+
+// --- [LAYERS] ----------------------------------------------------------------
+
+const PlatformLayer = Layer.succeed(Platform, "platform.ready");
+const InfraLayer =    Layer.effect(Infra,   Effect.all([Platform, HttpClient.HttpClient]).pipe(Effect.map(([platform]) => `${platform}.infra.ready`)));
+const DomainLayer =   Layer.effect(Domain,  Infra.pipe(Effect.map((infra) =>    `${infra}.domain.ready` )));
+const SurfaceLayer =  Layer.effect(Surface, Domain.pipe(Effect.map((domain) =>  `${domain}.surface.ready`)));
+const Root = SurfaceLayer.pipe(Layer.provide(DomainLayer), Layer.provide(InfraLayer), Layer.provide(PlatformLayer));
+
+// --- [EXPORT] ----------------------------------------------------------------
+
+export { DomainLayer, InfraLayer, PlatformLayer, Root, SurfaceLayer };
+```
 
 ---
-## [10][QUICK_REFERENCE]
+## [9][LAYER_FUSION_AND_NORMALIZATION]
+>**Dictum:** *Fuse parallel nodes with `zipWith` and normalize exports with `map`/`match` so downstream contracts stay minimal.*
 
-| [INDEX] | [API]                                | [SIGNATURE_SUMMARY]                                 | [USE_WHEN]                              |
-| :-----: | ------------------------------------ | --------------------------------------------------- | --------------------------------------- |
-|   [1]   | `Layer.succeed(Tag, value)`          | `Layer<ROut, never, never>`                         | Pure value service, no acquisition      |
-|   [2]   | `Layer.fail(error)`                  | `Layer<never, E, never>`                            | Config validation gate                  |
-|   [3]   | `Layer.unwrapEffect(effect)`         | `Effect<Layer> -> Layer`                            | Dynamic layer from runtime config       |
-|   [4]   | `Layer.unwrapScoped(effect)`         | `Effect<Layer, E, R \| Scope> -> Layer`             | Dynamic layer with scoped construction  |
-|   [5]   | `Layer.effectDiscard(effect)`        | `Effect<void, E, R> -> Layer<never, E, R>`          | Fire-and-forget init, no output         |
-|   [6]   | `Layer.scopedDiscard(effect)`        | `Effect<void, E, R \| Scope> -> Layer<never, E, R>` | Scoped fire-and-forget init             |
-|   [7]   | `Layer.retry(layer, schedule)`       | retries failed construction                         | Transient construction failures         |
-|   [8]   | `Layer.fresh(layer)`                 | breaks sharing; new allocation per use              | Test isolation only                     |
-|   [9]   | `Layer.locally(ref, value)(layer)`   | scopes FiberRef to layer subtree                    | Tenant context, log level override      |
-|  [10]   | `Layer.memoize(layer)`               | `Effect<Layer, never, Scope>` -- single allocation  | Cross-scope sharing with lifetime bound |
-|  [11]   | `Layer.launch(layer)`                | `Effect<never, E, RIn>` -- self-scoped              | Pair with `runMain` for server entry    |
-|  [12]   | `NodeRuntime.runMain(effect)`        | runs with signal handling + teardown                | Long-running server entry point         |
-|  [13]   | `ManagedRuntime.make(layer)`         | `ManagedRuntime<ROut, E>` (sync factory)            | Embedded runtime, CLI tools             |
-|  [14]   | `runtime.runFork(effect, opts?)`     | `RuntimeFiber<A, E>` for non-blocking interop       | Non-Effect host driving Effect programs |
-|  [15]   | `runtime.runCallback(effect, opts?)` | fire-and-forget with optional exit handler          | Background tasks from non-Effect code   |
-|  [16]   | `runtime.dispose()`                  | `Promise<void>` -- releases all resources           | Graceful shutdown of embedded runtime   |
-|  [17]   | `Context.Reference`                  | Tag with default value, no Layer required           | Optional configuration / feature flags  |
+<br>
+
+```ts
+import { Context, Layer } from "effect";
+
+// --- [SERVICES] --------------------------------------------------------------
+
+const Left =     Context.GenericTag<{ readonly endpoint: string }>("Cmp/FuseLeft");
+const Right =    Context.GenericTag<{ readonly region: string }>("Cmp/FuseRight");
+const Contract = Context.GenericTag<{ readonly endpoint: string; readonly region: string }>("Cmp/FuseContract");
+
+// --- [LAYERS] ----------------------------------------------------------------
+
+const LeftLayer =     Layer.succeed(Left,  { endpoint: "https://edge.internal" });
+const RightLayer =    Layer.succeed(Right, { region: "us-east-1"               });
+const Fused =         Layer.zipWith(LeftLayer, RightLayer, Context.merge);
+const ContractLayer = Fused.pipe(Layer.map((context) => Context.empty().pipe(Context.add(Contract, { endpoint: Context.get(context, Left).endpoint, region: Context.get(context, Right).region }))));
+
+// --- [EXPORT] ----------------------------------------------------------------
+
+export { ContractLayer, Fused, LeftLayer, RightLayer };
+```
+
+---
+## [10][NON_NEGOTIABLES]
+>**Dictum:** *Top-tier composition is deterministic graph intent: explicit requirements, explicit visibility, explicit topology transitions.*
+
+<br>
+
+[IMPORTANT]:
+- [ALWAYS] Keep graph choice and rewrites inside `Layer` combinators.
+- [ALWAYS] Model visibility via `provide`, `provideMerge`, and `project`.
+- [ALWAYS] Use collection-driven topology (`HashMap`, `HashSet`, `Chunk`) where routing must stay data-driven.
+- [ALWAYS] Treat Effect-* layers as first-class graph nodes.
+- [ALWAYS] Assemble roots once at entrypoints and keep feature graphs partial.
+
+[CRITICAL]:
+- [NEVER] Add wrapper helpers that obscure graph semantics.
+- [NEVER] Execute effects at import time in reference snippets.

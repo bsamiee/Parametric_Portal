@@ -88,7 +88,7 @@ def parse_config(raw: str) -> TraceConfig:
 
 <br>
 
-Three unified patterns: `Validated` descriptor for method-level injection via `__get__` binding, `Traceable.__init_subclass__` for hierarchy-wide auto-instrumentation, and canonical ordering validation as a class decorator via pure recursive `__wrapped__` chain walking. Canonical order (outermost to innermost): **trace > retry > cache > validate > authorize**.
+Three unified patterns: `Validated` descriptor for method-level injection via `__get__` binding, `Traceable.__init_subclass__` for hierarchy-wide auto-instrumentation, and canonical ordering validation as a class decorator via pure recursive `__wrapped__` chain walking. Canonical order (outermost to innermost): **trace > authorize > validate > cache > retry > operation**.
 
 ```python
 # --- [IMPORTS] ----------------------------------------------------------------
@@ -100,7 +100,7 @@ from returns.result import Failure, Result, Success
 
 # --- [CONSTANTS] --------------------------------------------------------------
 
-CANONICAL_ORDER: tuple[str, ...] = ("trace", "retry", "cache", "validate", "authorize")
+CANONICAL_ORDER: tuple[str, ...] = ("trace", "authorize", "validate", "cache", "retry")
 
 # --- [CLASSES] ----------------------------------------------------------------
 

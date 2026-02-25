@@ -1,512 +1,352 @@
 # [H1][PERSISTENCE]
->**Dictum:** *Model.Class is VariantSchema; SqlClient is the tag; repos compose via factory, not hand-rolled queries.*
+>**Dictum:** *One model anchors the table; predicates, writes, and tenant scope are algebra over that anchor — never parallel schemas, never implicit semantics.*
 
-Cross-references: `services.md [2]` (scoped constructors), `effects.md [1]` (Effect.gen), `composition.md [4]` (Layer merging), `types.md [5]` (schema family selection).
+<br>
+
+[IMPORTANT] ALWAYS assume the newest possible version of all db related libs: PostgreSQL, effect/sql, effect/sql-pg, etc.
+[IMPORTANT] `@effect/sql` <latest> + `@effect/sql-pg` <latest> + PostgreSQL <latest>. `Model.Class` IS `VariantSchema` — one declaration yields six typed projections. Tenant isolation is transaction-local `SET` via `FiberRef`, not RLS. OCC is a conditional `WHERE`, not a version column.
 
 ---
-## [1][MODEL_CLASS]
->**Dictum:** *One Model.Class definition replaces 5-10 manual type/schema declarations.*
+## [1][MODEL_ANCHOR]
+>**Dictum:** *`Model.Class` is `VariantSchema` — one declaration, six projections; field modifiers are the projection algebra.*
 
-`Model.Class` wraps VariantSchema -- field modifiers control per-variant inclusion/exclusion across six coordinated projections. Types derive via `typeof User.Type`, `typeof User.insert.Type` -- never redeclare.
+<br>
 
-```typescript
+| [INDEX] | [MODIFIER]               | [SELECT] | [INSERT] | [UPDATE] | [JSON] | [JSON_CREATE] | [JSON_UPDATE] |
+| :-----: | :----------------------- | :------: | :------: | :------: | :----: | :-----------: | :-----------: |
+|   [1]   | `Generated`              |   YES    |    --    |   YES    |  YES   |      --       |      --       |
+|   [2]   | `GeneratedByApp`         |   YES    |   YES    |   YES    |  YES   |      --       |      --       |
+|   [3]   | `Sensitive`              |   YES    |   YES    |   YES    |   --   |      --       |      --       |
+|   [4]   | `FieldOption`            |   null   |   null   |   null   |  opt   |   opt+null    |   opt+null    |
+|   [5]   | `DateTimeInsertFromDate` |   YES    |  (auto)  |    --    |  YES   |      --       |      --       |
+|   [6]   | `DateTimeUpdateFromDate` |   YES    |  (auto)  |  (auto)  |  YES   |      --       |      --       |
+|   [7]   | `JsonFromString`         |   str    |   str    |   str    |  obj   |      obj      |      obj      |
+
+`FieldOption` legend — `null`: `OptionFromNullOr` (key required, value null|T → Option); `opt`: `optionalWith as Option` (key optional → Option); `opt+null`: `optionalWith as Option + nullable` (key optional OR null → Option).
+
+`Generated` produces `{select, update, json}` — absent from insert, jsonCreate, jsonUpdate. `GeneratedByApp` adds `insert` — use for app-assigned IDs that should not appear in JSON create/update. `Model.Override` forces a `Generated` field into an insert; fixtures/migrations only.
+
+`Model.FieldOnly("select", "json")(S.String)` — include field only in named variants. `Model.FieldExcept("insert", "jsonCreate")(S.String)` — include field in all variants except named ones. These composable primitives extend projection algebra beyond built-in modifiers.
+
+```ts
+import { Schema as S } from "effect";
+import { Model } from "@effect/sql";
+
 // --- [SCHEMA] ----------------------------------------------------------------
-import { Model } from '@effect/sql';
-import { Schema as S } from 'effect';
-
-class Session extends Model.Class<Session>('Session')({
-    id:            Model.Generated(S.UUID),
-    appId:         S.UUID,
-    userId:        S.UUID,
-    expiryAccess:  S.DateFromSelf,
-    expiryRefresh: S.DateFromSelf,
-    verifiedAt:    Model.FieldOption(S.DateFromSelf),
-    ipAddress:     Model.FieldOption(S.String),
-    agent:         Model.FieldOption(S.String),
-    tokenAccess:   Model.Sensitive(S.String),
-    tokenRefresh:  Model.Sensitive(S.String),
-    deletedAt:     Model.FieldOption(S.DateFromSelf),
-    updatedAt:     Model.DateTimeUpdateFromDate,
+class Session extends Model.Class<Session>("Session")({
+    id:        Model.Generated(S.UUID),
+    userId:    S.UUID,
+    payload:   Model.JsonFromString(S.Struct({ scopes: S.Array(S.String) })),
+    ipAddress: Model.Sensitive(S.String),
+    revokedAt: Model.FieldOption(S.DateTimeUtc),
+    createdAt: Model.DateTimeInsertFromDate,
+    updatedAt: Model.DateTimeUpdateFromDate,
 }) {}
-// Session          -- select (all fields present)
-// Session.insert   -- id omitted (Generated), updatedAt auto-now
-// Session.update   -- id present (WHERE), updatedAt auto-now
-// Session.json     -- tokenAccess/tokenRefresh excluded (Sensitive)
-// Session.jsonCreate -- id + Sensitive excluded
-// Session.jsonUpdate -- id + Sensitive excluded
+const seedFixture = Session.insert.make({
+    id: Model.Override("00000000-0000-0000-0000-ffffffffffff"),
+    userId: "00000000-0000-0000-0000-000000000001",
+    payload: { scopes: [] }, ipAddress: "127.0.0.1", revokedAt: undefined,
+    createdAt: Model.Override(new Date("2025-01-01")),
+});
 ```
 
-### [1.1] Field Modifier Truth Table
-
-| [INDEX] | [MODIFIER]                     | [SELECT] | [INSERT] | [UPDATE] | [JSON] | [JSON_CREATE] | [JSON_UPDATE] |
-| :-----: | ------------------------------ | :------: | :------: | :------: | :----: | :-----------: | :-----------: |
-|   [1]   | Plain field                    |    Y     |    Y     |    Y     |   Y    |       Y       |       Y       |
-|   [2]   | `Model.Generated(schema)`      |    Y     |    --    |    Y     |   Y    |      --       |      --       |
-|   [3]   | `Model.GeneratedByApp(schema)` |    Y     |    Y     |    Y     |   Y    |      --       |      --       |
-|   [4]   | `Model.Sensitive(schema)`      |    Y     |    Y     |    Y     |   --   |      --       |      --       |
-|   [5]   | `Model.FieldOption(schema)`    |  Option  | nullable | nullable | Option |   nullable    |   nullable    |
-|   [6]   | `Model.DateTimeInsertFromDate` |    Y     | auto-now |    --    |   Y    |       Y       |      --       |
-|   [7]   | `Model.DateTimeUpdateFromDate` |    Y     | auto-now | auto-now |   Y    |       Y       |       Y       |
-|   [8]   | `Model.JsonFromString(schema)` |   text   |   text   |   text   | object |    object     |    object     |
-|   [9]   | `Model.BooleanFromNumber`      |   0/1    |   0/1    |   0/1    |  bool  |     bool      |     bool      |
-|  [10]   | `Model.UuidV4Insert(brand)`    |    Y     | auto-gen |    Y     |   Y    |      --       |      --       |
-
-`Generated` -- DB-owned columns (uuidv7 PKs, stored-generated). `Sensitive` -- tokens, hashes, encrypted payloads. `FieldOption` -- `Option<T>` in domain, `NULL` in DB. `JsonFromString` -- JSONB column stored as text in DB, parsed object in JSON variants. `DateTimeInsertFromDate` for `createdAt`; `DateTimeUpdateFromDate` for `updatedAt`.
-
 ---
-## [2][REPO_FACTORY]
->**Dictum:** *repo(model, table, config) produces CRUD surface with predicates, OCC, soft-delete, and tenant scoping.*
+## [2][PREDICATE_ALGEBRA]
+>**Dictum:** *Predicates are values assembled from `Option` — `sql.and` composes an array; UUIDv7 temporal lift reuses the index.*
 
-The `repo()` factory extends `Model.makeRepository` with predicate algebra, keyset pagination, soft-delete, OCC, MERGE, streaming, and tenant scoping. Domain repos spread the factory result and add business-specific methods.
+Each filter field yields `Option<Fragment>`, `Array.getSomes` collects, `sql.and(preds)` folds.
 
-```typescript
-// --- [REPOSITORIES] ----------------------------------------------------------
-import { Effect, Option, Schema as S } from 'effect';
-import { repo, Update } from './factory.ts';
+```ts
+import { Array as A, Effect, Option, Schema as S, pipe } from "effect";
+import { SqlClient, SqlSchema, type Statement } from "@effect/sql";
 
-const makeSessionRepo = Effect.gen(function* () {
-    const repository = yield* repo(Session, 'sessions', {
-        scoped: 'appId',
-        purge:  'purge_sessions',
-        resolve: {
-            byAccessToken:  {
-                field: 'tokenAccess',
-                through: { table: 'session_tokens', target: 'sessionId' },
-            },
-            byRefreshToken: {
-                field: 'tokenRefresh',
-                through: { table: 'session_tokens', target: 'sessionId' },
-            },
-            byUser: { field: 'userId', many: true },
-        },
-    });
-    return {
-        ...repository,
-        byRefreshTokenForUpdate: (hash: string) =>
-            repository.by('byRefreshToken', hash, 'update'),
-        softDeleteByIp: (appId: string, ipAddress: string) =>
-            repository.drop([
-                { field: 'appId', value: appId },
-                { field: 'ipAddress', value: ipAddress },
-            ]),
-        touch: repository.touch('updatedAt'),
-        verify: (id: string) =>
-            repository.set(id, { verifiedAt: Update.now },
-                undefined,
-                { field: 'verifiedAt', op: 'null' },
-            ),
+// --- [FUNCTIONS] -------------------------------------------------------------
+const assemblePredicates = Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    return (filter: { readonly userId?: string; readonly status?: string; readonly after?: Date }) => {
+        const preds = A.getSomes([
+            pipe(Option.fromNullable(filter.userId), Option.map((uid) => sql`user_id = ${uid}`)),
+            pipe(Option.fromNullable(filter.status), Option.map((st) => sql`status = ${st}`)),
+            pipe(Option.fromNullable(filter.after), Option.map((ts) => sql`uuid_extract_timestamp(id) >= ${ts}`)),
+        ]) as ReadonlyArray<Statement.Fragment>;
+        const where = A.match(preds, { onEmpty: () => sql`TRUE`, onNonEmpty: (ps) => sql.and(ps) });
+        return SqlSchema.findAll({
+            Request: S.Void, Result: Session,
+            execute: () => sql`SELECT * FROM session WHERE ${where} ORDER BY id DESC LIMIT 50`,
+        })(undefined);
     };
 });
 ```
 
-### [2.1] Factory Config
-
-| [INDEX] | [KEY]       | [PURPOSE]                                                            |
-| :-----: | ----------- | -------------------------------------------------------------------- |
-|   [1]   | `pk`        | Custom primary key `{ column: string; cast?: SqlCast }`              |
-|   [2]   | `scoped`    | Tenant isolation field -- auto-injects WHERE from `Client.tenant`    |
-|   [3]   | `resolve`   | Named lookups: string field, compound key, `through` join table      |
-|   [4]   | `conflict`  | UPSERT keys + columns to update: `{ keys, only? }`                   |
-|   [5]   | `purge`     | Soft-delete purge: function name or `{ table, column, defaultDays }` |
-|   [6]   | `functions` | PostgreSQL function call specs with typed params/results             |
-
-### [2.2] Factory Surface
-
-| [INDEX] | [METHOD]      | [SIGNATURE]                                  | [RETURNS]               |
-| :-----: | ------------- | -------------------------------------------- | ----------------------- |
-|   [1]   | `find`        | `(pred, { asc? })`                           | `Effect<Row[]>`         |
-|   [2]   | `one`         | `(pred, lock?)`                              | `Effect<Option<Row>>`   |
-|   [3]   | `page`        | `(pred, { limit?, cursor?, asc? })`          | `Effect<KeysetPage>`    |
-|   [4]   | `pageOffset`  | `(pred, { limit?, offset?, asc? })`          | `Effect<OffsetPage>`    |
-|   [5]   | `count`       | `(pred)`                                     | `Effect<number>`        |
-|   [6]   | `exists`      | `(pred)`                                     | `Effect<boolean>`       |
-|   [7]   | `agg`         | `(pred, { sum?, avg?, min?, max?, count? })` | `Effect<Record>`        |
-|   [8]   | `put`         | `(data, conflict?)`                          | `Effect<Row>`           |
-|   [9]   | `upsert`      | `(data, occ?)`                               | `Effect<Row>`           |
-|  [10]   | `merge`       | `(data)`                                     | `Effect<Row & _action>` |
-|  [11]   | `set`         | `(id\|pred, updates, scope?, when?)`         | `Effect<Row\|number>`   |
-|  [12]   | `drop`        | `(id\|ids\|pred)`                            | `Effect<Row\|number>`   |
-|  [13]   | `lift`        | `(id\|ids\|pred)`                            | `Effect<Row\|number>`   |
-|  [14]   | `by`          | `(resolverName, value, lock?)`               | `Effect<Option\|Row[]>` |
-|  [15]   | `preds`       | `(filter)`                                   | `Pred[]`                |
-|  [16]   | `wildcard`    | `(field, value?)`                            | `Pred[]`                |
-|  [17]   | `stream`      | `(pred, { asc? })`                           | `Stream<Row>`           |
-|  [18]   | `touch`       | `(field) => (id) =>`                         | `Effect<Row>`           |
-|  [19]   | `fn`          | `<T>(name, params)`                          | `Effect<T>`             |
-|  [20]   | `json.decode` | `(field, schema) => (opt) =>`                | `Effect<Option<A>>`     |
-|  [21]   | `json.encode` | `(schema) => (value) =>`                     | `Effect<string>`        |
-
-### [2.3] Predicate Algebra
-
-```typescript
-// --- [TYPES] -----------------------------------------------------------------
-type Pred =
-    | [string, unknown]                                         // tuple shorthand
-    | { field: string; op?: PredOp; value?: unknown;            // structured
-        values?: unknown[]; cast?: SqlCast; wrap?: 'casefold' }
-    | { raw: Statement.Fragment };                              // escape hatch
-
-// --- [FUNCTIONS] -------------------------------------------------------------
-// preds() auto-generates from filter objects -- temporal awareness on uuidv7
-const filter = repository.preds({ userId, type: types, after, before });
-// after/before map to tsGte/tsLte on uuidv7 PK via uuid_extract_timestamp
-repository.find(filter)
-repository.page(filter, { limit: 50, cursor })
-repository.count(filter)
-
-// wildcard() converts glob patterns to LIKE predicates
-repository.find(repository.wildcard('type', 'image/*'))
-// 'image/*' -> { field: 'type', op: 'like', value: 'image/%' }
-// 'image/png' -> { field: 'type', op: 'eq', value: 'image/png' }
-```
-
-| [INDEX] | [OPERATOR]    | [SQL]                                   | [USE]                       |
-| :-----: | ------------- | --------------------------------------- | --------------------------- |
-|   [1]   | `eq`          | `col = $value`                          | Default; exact match        |
-|   [2]   | `in`          | `col IN ($values...)`                   | Array membership            |
-|   [3]   | `gt`/`gte`    | `col > $value` / `col >= $value`        | Range lower bound           |
-|   [4]   | `lt`/`lte`    | `col < $value` / `col <= $value`        | Range upper bound           |
-|   [5]   | `null`        | `col IS NULL`                           | Null check                  |
-|   [6]   | `notNull`     | `col IS NOT NULL`                       | Existence check             |
-|   [7]   | `contains`    | `col @> $value::jsonb`                  | JSONB containment           |
-|   [8]   | `containedBy` | `col <@ $value::jsonb`                  | JSONB inverse containment   |
-|   [9]   | `hasKey`      | `col ? $value`                          | JSONB key existence         |
-|  [10]   | `hasKeys`     | `col ?& ARRAY[$values]::text[]`         | JSONB multi-key existence   |
-|  [11]   | `tsGte`       | `uuid_extract_timestamp(col) >= $value` | UUIDv7 temporal lower bound |
-|  [12]   | `tsLte`       | `uuid_extract_timestamp(col) <= $value` | UUIDv7 temporal upper bound |
-|  [13]   | `like`        | `col LIKE $value`                       | Pattern matching            |
-
-### [2.4] Update Render Functions
-
-```typescript
-// Update renders -- (col, sql, pg) => Statement.Fragment
-repository.set(id, { updatedAt: Update.now })
-// -> SET updated_at = NOW()
-
-repository.set(id, { counter: Update.inc(1) })
-// -> SET counter = counter + 1
-
-repository.set(id, { settings: Update.jsonb.set(['featureFlags', 'enableMfa'], 100) })
-// -> SET settings = jsonb_set(settings, '{featureFlags,enableMfa}'::text[], '100'::jsonb)
-
-repository.set(id, { settings: Update.jsonb.del(['featureFlags', 'enableMfa']) })
-// -> SET settings = settings #- '{featureFlags,enableMfa}'::text[]
-```
-
-### [2.5] MERGE RETURNING
-
-PostgreSQL 18.2 `MERGE INTO` with `_action` discriminator. Requires `conflict.keys` in factory config. Returns row + `_action: 'insert' | 'update'` via `xmax = 0` heuristic.
-
-```typescript
-// --- [FUNCTIONS] -------------------------------------------------------------
-const result = yield* repository.merge({
-    appId, role: 'admin', resource: 'documents', action: 'read',
-    deletedAt: Option.none(), updatedAt: undefined,
-});
-// result._action === 'insert' -- new row created
-// result._action === 'update' -- existing row updated
-
-// SQL generated:
-// MERGE INTO permissions USING (VALUES (...)) AS source(...)
-//   ON permissions.app_id = source.app_id AND ...
-//   WHEN MATCHED THEN UPDATE SET ...
-//   WHEN NOT MATCHED THEN INSERT (...) VALUES (...)
-//   RETURNING *, (CASE WHEN xmax = 0 THEN 'insert' ELSE 'update' END) AS _action
-```
-
-### [2.6] Soft-Delete and OCC
-
-```typescript
-// --- [FUNCTIONS] -------------------------------------------------------------
-// drop() sets deleted_at = NOW() on the field with mark: 'soft' in Field registry
-yield* repository.drop(id)             // single -> returns Row
-yield* repository.drop([id1, id2])     // bulk   -> returns count
-yield* repository.drop([              // predicate-based -> returns count
-    { field: 'role', value: 'guest' },
-    { field: 'expiresAt', op: 'lt', value: new Date() },
-])
-
-// lift() restores: sets deleted_at = NULL (requires mark: 'soft')
-yield* repository.lift(id)
-
-// OCC via put() -- fails with RepoOccError if updated_at diverged
-yield* repository.put(data, {
-    keys: ['appId', 'email'],
-    occ: expectedUpdatedAt,
-})
-// -> INSERT ... ON CONFLICT (app_id, email) DO UPDATE SET ...
-//    WHERE permissions.updated_at = $expectedUpdatedAt
-
-// upsert() uses pre-configured conflict keys with optional OCC
-yield* repository.upsert(data, expectedUpdatedAt)
-```
-
-`$active` fragment auto-appends `AND deleted_at IS NULL` to all queries. `$fresh` appends `AND (expires_at IS NULL OR expires_at > NOW())` for `mark: 'exp'` fields. Both are transparent -- consumers never construct these guards.
-
 ---
-## [3][SQL_CLIENT_AND_TRANSACTIONS]
->**Dictum:** *SqlSchema combinators compose request/result schemas once; withTransaction wraps atomically; nesting auto-savepoints.*
+## [3][QUERY_SURFACE]
+>**Dictum:** *`makeDataLoaders` batches across concurrent fibers via windowed aggregation; `SqlSchema` curried functions compose into typed error rails.*
 
-```typescript
-// --- [SERVICES] --------------------------------------------------------------
-import { SqlClient, SqlSchema } from '@effect/sql';
-import { Array as A, Data, Effect, Option, Schema as S, pipe } from 'effect';
+`Model.makeDataLoaders` groups concurrent `findById`/`insert` calls within a `window` into single batched queries — critical for N+1 prevention in Effect fiber-heavy workloads. `SqlSchema.findOne` returns `(request) => Effect<Option<A>>` — `Effect.flatten` lifts `Option` into the error channel as `NoSuchElementException`, enabling `catchTag` for typed domain errors.
 
-const makeBalanceRepo = Effect.gen(function* () {
-    const sql = yield* SqlClient.SqlClient;
-    const findByAccount = SqlSchema.findOne({
-        Request:  S.Struct({ accountId: S.UUID }),
-        Result:   S.Struct({ id: S.UUID, balance: S.Number }),
-        execute:  (params) => sql`
-            SELECT id, balance FROM accounts
-            WHERE id = ${params.accountId} FOR UPDATE`,
-    });
-    return { findByAccount };
-});
+```ts
+import { Data, Duration, Effect, Option, Schema as S, pipe } from "effect";
+import { Model, SqlClient, SqlSchema } from "@effect/sql";
 
-// --- [FUNCTIONS] -------------------------------------------------------------
-class InsufficientFundsError extends Data.TaggedError('InsufficientFundsError')<{
-    readonly accountId: string;
-    readonly available: number;
-    readonly requested: number;
+// --- [SCHEMA] ----------------------------------------------------------------
+class Invoice extends Model.Class<Invoice>("Invoice")({
+    id: Model.Generated(S.UUID), amount: S.Number, status: S.Literal("draft", "paid", "void"),
+}) {}
+class InvoiceError extends Data.TaggedError("InvoiceError")<{
+    readonly reason: "not_found" | "already_void";
 }> {}
 
-const transfer = (fromId: string, toId: string, amount: number) =>
-    Effect.gen(function* () {
-        const sql = yield* SqlClient.SqlClient;
-        return yield* sql.withTransaction(
-            Effect.gen(function* () {
-                const row = yield* sql<{ balance: number }>`
-                    SELECT balance FROM accounts
-                    WHERE id = ${fromId} FOR UPDATE`;
-                const balance = pipe(
-                    A.head(row),
-                    Option.map((account) => account.balance),
-                    Option.getOrElse(() => 0),
-                );
-                yield* Effect.succeed(balance).pipe(
-                    Effect.filterOrFail(
-                        (available) => available >= amount,
-                        () => new InsufficientFundsError({
-                            accountId: fromId, available: balance,
-                            requested: amount,
-                        }),
-                    ),
-                );
-                yield* sql`UPDATE accounts
-                    SET balance = balance - ${amount}
-                    WHERE id = ${fromId}`;
-                yield* sql`UPDATE accounts
-                    SET balance = balance + ${amount}
-                    WHERE id = ${toId}`;
-            }),
-        );
-    });
-```
-
-| [INDEX] | [COMBINATOR]        | [RETURNS]                  | [USE]                              |
-| :-----: | ------------------- | -------------------------- | ---------------------------------- |
-|   [1]   | `SqlSchema.findAll` | `Effect<ReadonlyArray<A>>` | SELECT 0-N rows                    |
-|   [2]   | `SqlSchema.findOne` | `Effect<Option<A>>`        | SELECT 0-1 rows                    |
-|   [3]   | `SqlSchema.single`  | `Effect<A>`                | SELECT exactly 1 (fails if 0)      |
-|   [4]   | `SqlSchema.void`    | `Effect<void>`             | INSERT/UPDATE/DELETE, discard rows |
-
-`sql.withTransaction(effect)` -- BEGIN/COMMIT on success, ROLLBACK on any `E` failure or interruption. PgClient tracks nesting depth -- inner `withTransaction` calls issue `SAVEPOINT sp_N` / `ROLLBACK TO SAVEPOINT sp_N` automatically. Never manage savepoints manually.
-
----
-## [4][CLIENT_INFRASTRUCTURE]
->**Dictum:** *Client provides connection pool, tenant context, advisory locks, and LISTEN/NOTIFY streaming.*
-
-### [4.1] Connection Pool
-
-```typescript
-// --- [LAYERS] ----------------------------------------------------------------
-import { PgClient } from '@effect/sql-pg';
-import { Config, Duration, String as S } from 'effect';
-
-PgClient.layerConfig({
-    applicationName:      Config.succeed('my-app'),
-    maxConnections:       Config.succeed(20),
-    minConnections:       Config.succeed(2),
-    connectionTTL:        Config.succeed(Duration.minutes(30)),
-    idleTimeout:          Config.succeed(Duration.minutes(5)),
-    connectTimeout:       Config.succeed(Duration.seconds(10)),
-    transformQueryNames:  Config.succeed(S.camelToSnake),
-    transformResultNames: Config.succeed(S.snakeToCamel),
-    url:                  Config.succeed(Redacted.make(connectionUrl)),
-})
-```
-
-`transformQueryNames: S.camelToSnake` -- tagged template identifiers `sql(fieldName)` auto-map camelCase to snake_case. `transformResultNames: S.snakeToCamel` -- result columns auto-map back. Capability guard runs on pool creation -- asserts PG18.2+ and pgvector extension.
-
-### [4.2] Tenant Context
-
-```typescript
 // --- [FUNCTIONS] -------------------------------------------------------------
-// FiberRef-based tenant context for row-level security
-Client.tenant.current
-// -> FiberRef.get(ref) => tenantId string
-
-Client.tenant.with(appId, effect)
-// -> fiber-local tenantId + set_config('app.current_tenant', appId, true)
-//    within an implicit transaction for RLS activation
-
-Client.tenant.locally(appId, effect)
-// -> fiber-local override without SQL context (no set_config)
-
-Client.tenant.set(tenantId)
-// -> FiberRef.set(ref, tenantId)
-
-Client.tenant.Id.system
-// -> '00000000-0000-7000-8000-000000000000' (bypasses scope guard)
-
-Client.tenant.Id.unspecified
-// -> '00000000-0000-7000-8000-ffffffffffff' (fails RepoScopeError)
-```
-
-`scoped: 'appId'` repos read `Client.tenant.current` on every operation and inject `AND app_id = $tenantId`. System tenant bypasses the scope guard entirely. Unspecified tenant fails with RepoScopeError -- prevents accidental cross-tenant access.
-
-### [4.3] Advisory Locks
-
-```typescript
-// --- [FUNCTIONS] -------------------------------------------------------------
-// Transaction-scoped locks (released at tx end)
-yield* Client.lock.acquire(lockKey)        // pg_advisory_xact_lock
-const acquired = yield* Client.lock.try(lockKey)
-// -> pg_try_advisory_xact_lock => boolean
-
-// Session-scoped locks (released explicitly or at disconnect)
-yield* Client.lock.session.acquire(lockKey)
-const acquired = yield* Client.lock.session.try(lockKey)
-const released = yield* Client.lock.session.release(lockKey)
-```
-
-### [4.4] LISTEN/NOTIFY
-
-```typescript
-// --- [FUNCTIONS] -------------------------------------------------------------
-import { Stream } from 'effect';
-
-// Raw notifications as Stream
-const raw: Stream.Stream<Notification> = Client.listen.raw('channel_name')
-
-// Typed with schema decode + error filtering
-const typed: Stream.Stream<MyEvent> = Client.listen.typed(
-    'events', MyEventSchema,
-)
-// Decode failures logged as warnings and filtered out
-
-// Publish
-yield* Client.notify('channel_name', JSON.stringify(payload))
-```
-
----
-## [5][PAGINATION]
->**Dictum:** *Keyset pagination via LIMIT+1 sentinel; cursor is Base64URL-encoded JSON.*
-
-```typescript
-// --- [SCHEMA] ----------------------------------------------------------------
-import { Page } from './page.ts';
-
-// Request schemas for API endpoints
-Page.Keyset      // S.Struct({ cursor: S.optional(S.String), limit: Limit })
-Page.KeysetInput // S.Struct({ asc: Asc, cursor: S.optional(S.String), limit: Limit })
-Page.Offset      // S.Struct({ limit: Limit, offset: S.NonNegativeInt })
-Page.OffsetInput // S.Struct({ asc: Asc, limit: Limit, offset: S.NonNegativeInt })
-Page.Limit       // S.Int between 1..1000, default 100
-Page.bounds      // { min: 1, max: 1000, default: 100 }
-
-// --- [FUNCTIONS] -------------------------------------------------------------
-// Cursor decode -- Base64URL -> JSON -> { id, v? }
-const decoded = yield* Page.decode(cursor)
-// -> Effect<Option<{ id: string }>>
-const decoded = yield* Page.decode(cursor, ScoreSchema)
-// -> Effect<Option<{ id: string; v: Score }>>
-
-// Cursor encode
-const encoded = Page.encode(lastId)
-const encoded = Page.encode(lastId, score, ScoreSchema)
-
-// Keyset result -- strips LIMIT+1 sentinel, computes hasNext/hasPrev
-Page.keyset(rows, total, limit, (item) => ({ id: item.id }))
-// -> { items, total, cursor, hasNext, hasPrev }
-
-// Offset result -- computes page/pages/hasNext/hasPrev
-Page.offset(items, total, start, limit)
-// -> { items, total, page, pages, hasNext, hasPrev }
-```
-
-Factory `page()` method combines CTE total count + keyset cursor in a single query -- no separate COUNT. `pageOffset()` uses standard `LIMIT/OFFSET` for admin-facing UIs where total page count is needed.
-
----
-## [6][MIGRATIONS]
->**Dictum:** *Migrations are Effect.gen programs using SqlClient; one file per schema epoch.*
-
-```typescript
-// migrations/0002_add_feature_flags.ts
-import { SqlClient } from '@effect/sql';
-import { Effect } from 'effect';
-
-// biome-ignore lint/style/noDefaultExport: @effect/sql-pg migrations require default export
-export default Effect.gen(function* () {
+const makeInvoiceQueries = Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
-    yield* sql.unsafe(String.raw`
-        ALTER TABLE apps
-            ADD COLUMN IF NOT EXISTS feature_flags JSONB
-                NOT NULL DEFAULT '{}'::jsonb
-                CHECK (jsonb_typeof(feature_flags) = 'object');
-        CREATE INDEX IF NOT EXISTS idx_apps_feature_flags
-            ON apps USING GIN (feature_flags)
-            WHERE feature_flags != '{}'::jsonb`);
+    const loaders = yield* Model.makeDataLoaders(Invoice, {
+        tableName: "invoice", spanPrefix: "invoice", idColumn: "id",
+        window: Duration.millis(10), maxBatchSize: 100,
+    });
+    const findByIdSafe = SqlSchema.findOne({
+        Request: S.UUID, Result: Invoice,
+        execute: (id) => sql`SELECT * FROM invoice WHERE id = ${id}`,
+    });
+    const voidInvoice = Effect.fn("Invoice.void")(function* (invoiceId: string) {
+        const invoice = yield* pipe(
+            findByIdSafe(invoiceId), Effect.flatten,
+            Effect.catchTag("NoSuchElementException", () => Effect.fail(new InvoiceError({ reason: "not_found" }))),
+            Effect.filterOrFail((inv) => inv.status !== "void", () => new InvoiceError({ reason: "already_void" })));
+        return yield* SqlSchema.single({
+            Request: S.UUID, Result: Invoice,
+            execute: (id) => sql`UPDATE invoice SET status = 'void' WHERE id = ${id} RETURNING *`,
+        })(invoiceId);
+    });
+    return { loaders, findByIdSafe, voidInvoice } as const;
 });
 ```
 
-Tracked in `_sql_migrations` table -- run once per environment. `String.raw` preserves backslash sequences in SQL regex patterns. Each migration runs in its own transaction. Seeding follows the same pattern -- idempotent `INSERT ... ON CONFLICT DO NOTHING`. Rollback is always a new forward migration; `Down()` is unreliable in production.
+---
+## [4][WRITE_SEMANTICS]
+>**Dictum:** *`jsonb_set` patches in-place; `MERGE RETURNING` with `merge_action()` yields typed domain signal.*
+
+Use `pg.json(value)` for JSONB parameters — never `JSON.stringify`. PG18.2 `merge_action()` returns `'INSERT' | 'UPDATE'`.
+
+```ts
+import { Array as A, Effect, Match, Option, pipe } from "effect";
+import { SqlClient } from "@effect/sql";
+import { PgClient } from "@effect/sql-pg";
+
+// --- [FUNCTIONS] -------------------------------------------------------------
+const makeWrites = Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const pg = yield* PgClient.PgClient;
+    const atomicPatch = (id: string, delta: number, path: string, value: unknown) =>
+        sql`UPDATE asset SET counter = counter + ${delta},
+            metadata = jsonb_set(metadata, ${`{${path}}`}, ${pg.json(value)}::jsonb),
+            updated_at = NOW() WHERE id = ${id} RETURNING *`;
+    const mergeWithAction = (id: string, name: string, tier: string) =>
+        sql`MERGE INTO account AS tgt
+        USING (VALUES (${id}, ${name}, ${tier})) AS src(id, name, tier) ON tgt.id = src.id
+        WHEN MATCHED THEN UPDATE SET name = src.name, updated_at = NOW()
+        WHEN NOT MATCHED THEN INSERT (id, name, tier) VALUES (src.id, src.name, src.tier)
+        RETURNING *, merge_action() AS _action`;
+    const dispatch = (id: string, name: string, tier: string) =>
+        pipe(mergeWithAction(id, name, tier), Effect.flatMap((rows) => Option.match(A.head(rows), {
+            onNone: () => Effect.fail(new Error("merge_empty")),
+            onSome: (row) => Effect.succeed(Match.value(row._action as "INSERT" | "UPDATE").pipe(
+                Match.when("INSERT", () => ({ signal: "created" as const, row })),
+                Match.when("UPDATE", () => ({ signal: "updated" as const, row })),
+                Match.exhaustive)),
+        })));
+    return { atomicPatch, mergeWithAction, dispatch } as const;
+});
+```
 
 ---
-## [7][RULES]
+## [5][CONFLICT_AND_OCC]
+>**Dictum:** *OCC is `WHERE updated_at = $expected` — zero rows maps to typed error, not a version integer.*
 
-[ALWAYS]:
-- `Model.Class<Self>(name)(fields)` for persistence entities -- one class, six derived projections.
-- `repo(model, table, config)` for entity CRUD -- never hand-roll predicates, soft-delete, or pagination.
-- `SqlSchema.findAll`/`findOne`/`single`/`void` with explicit `Request`/`Result` schemas -- construct once at initialization, invoke per-request.
-- `scoped: 'appId'` for tenant-bound repos -- auto-injects WHERE from `Client.tenant` FiberRef.
-- Spread `repository` in maker function, add domain methods alongside -- no artificial grouping.
-- `sql.withTransaction(effect)` for atomic multi-statement mutations -- nesting auto-savepoints.
-- `preds(filter)` for dynamic query composition -- never hand-build predicate arrays from filter objects.
-- `Update.now`/`Update.inc`/`Update.jsonb.set`/`Update.jsonb.del` for column mutations via `set()`.
-- `Page.keyset` for paginated endpoints -- always fetch `LIMIT+1` for hasNext detection.
+```ts
+import { Array as A, Data, Effect, Option, Schema as S, pipe } from "effect";
+import { SqlClient, SqlSchema } from "@effect/sql";
 
-[NEVER]:
-- Expose `SqlClient` outside the persistence layer -- consumers use typed repo/service methods.
-- `sql.literal(userInput)` -- bypasses parameterization; DDL and static operators only.
-- Declare `type UserRow = { ... }` separately -- derive via `typeof User.Type`.
-- Redeclare insert/update shapes -- `User.insert.Type` is canonical.
-- `Model.Class` for config, state, or objects that never serialize -- use plain objects + `typeof`.
-- Manual savepoint nesting -- PgClient depth tracking handles it automatically.
-- Offset pagination on large tables -- `OFFSET N` forces sequential scan; use keyset via `page()`.
-- `rows[0]?.field ?? fallback` -- use `pipe(A.head(rows), Option.map(...), Option.getOrElse(...))`.
+// --- [ERRORS] ----------------------------------------------------------------
+class RepoOccError extends Data.TaggedError("RepoOccError")<{
+    readonly entity: string; readonly id: string; readonly expected: string;
+}> {}
+const makeConflict = Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const Result = S.Struct({ id: S.UUID, name: S.String, updated_at: S.String });
+    const upsert = (id: string, name: string) =>
+        sql`INSERT INTO account (id, name) VALUES (${id}, ${name})
+        ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, updated_at = NOW() RETURNING *`;
+    const putWithOcc = (id: string, name: string, occ: string) =>
+        pipe(
+            sql<S.Schema.Type<typeof Result>>`UPDATE account SET name = ${name}, updated_at = NOW()
+                WHERE id = ${id} AND updated_at = ${occ} RETURNING *`,
+            Effect.flatMap((rows) => Option.match(A.head(rows), {
+                onNone: () => Effect.fail(new RepoOccError({ entity: "account", id, expected: occ })),
+                onSome: Effect.succeed,
+            })),
+        );
+    return { upsert, putWithOcc } as const;
+});
+```
 
 ---
-## [8][QUICK_REFERENCE]
+## [6][TENANT_ISOLATION]
+>**Dictum:** *`withTenantScope` wraps arbitrary effects in tenant-scoped transactions via `FiberRef` + transaction-local `SET`.*
 
-| [INDEX] | [API]                          | [WHEN]                                 | [KEY_TRAIT]                                      |
-| :-----: | ------------------------------ | -------------------------------------- | ------------------------------------------------ |
-|   [1]   | `Model.Class<S>(name)(fields)` | Persistence entity with field metadata | Six auto-projections: select/insert/update/json* |
-|   [2]   | `repo(model, table, config)`   | Extended CRUD with predicates + OCC    | find/one/page/upsert/merge/drop/lift/count/preds |
-|   [3]   | `SqlSchema.findAll({...})`     | SELECT 0-N rows                        | `Effect<ReadonlyArray<A>, SqlError\|ParseError>` |
-|   [4]   | `SqlSchema.findOne({...})`     | SELECT 0-1 rows                        | `Effect<Option<A>, SqlError\|ParseError>`        |
-|   [5]   | `SqlSchema.single({...})`      | SELECT exactly 1 row                   | Fails with NoSuchElementException if 0 rows      |
-|   [6]   | `SqlSchema.void({...})`        | INSERT/UPDATE/DELETE, discard rows     | `Effect<void, SqlError\|ParseError>`             |
-|   [7]   | `sql.withTransaction(effect)`  | Atomic multi-statement boundary        | Any `E` failure -> rollback; nesting = savepoint |
-|   [8]   | `Client.tenant.with(id, eff)`  | Scoped tenant SQL context              | FiberRef + `set_config` for RLS activation       |
-|   [9]   | `Client.lock.acquire(key)`     | Transaction-scoped advisory lock       | `pg_advisory_xact_lock` -- released at tx end    |
-|  [10]   | `Client.listen.typed(ch, s)`   | PostgreSQL LISTEN as typed Stream      | Decode + filter; failures logged as warnings     |
-|  [11]   | `Update.now`                   | Render: `col = NOW()`                  | Timestamp mutation via `repository.set()`        |
-|  [12]   | `Update.inc(delta)`            | Render: `col = col + delta`            | Atomic counter increment                         |
-|  [13]   | `Update.jsonb.set(path, val)`  | Render: `jsonb_set(col, path, val)`    | Nested JSONB field mutation                      |
-|  [14]   | `Update.jsonb.del(path)`       | Render: `col #- path`                  | Nested JSONB field removal                       |
-|  [15]   | `Page.keyset(rows, ...)`       | Keyset pagination result               | LIMIT+1 sentinel, Base64URL cursor               |
-|  [16]   | `Page.decode(cursor)`          | Cursor decode                          | `Effect<Option<{ id, v? }>>`                     |
-|  [17]   | `preds(filter)`                | Auto-generate predicates from filter   | Temporal awareness on uuidv7 columns             |
-|  [18]   | `merge(data)`                  | PostgreSQL 18.2 MERGE RETURNING        | `_action: 'insert' \| 'update'` discriminator    |
+`set_config('app.current_tenant', id, true)` pins tenant per-transaction. Returns `<A, E, R>(effect) => Effect<A, E | TenantScopeError, R | SqlClient>`.
+
+```ts
+import { Data, Effect, FiberRef, Option, pipe } from "effect";
+import { SqlClient } from "@effect/sql";
+
+// --- [ERRORS] ----------------------------------------------------------------
+class TenantScopeError extends Data.TaggedError("TenantScopeError")<{
+    readonly reason: "missing" | "nested";
+}> {}
+const tenantRef =     FiberRef.unsafeMake(Option.none<string>());
+const sqlContextRef = FiberRef.unsafeMake(false);
+const requireTenant = pipe(FiberRef.get(tenantRef), Effect.flatMap(Option.match({
+    onNone: () => Effect.fail(new TenantScopeError({ reason: "missing" })),
+    onSome: Effect.succeed,
+})));
+const withTenantScope = (tenantId: string) =>
+    <A, E, R>(effect: Effect.Effect<A, E, R>):
+        Effect.Effect<A, E | TenantScopeError, R | SqlClient.SqlClient> =>
+        Effect.gen(function* () {
+            const sql = yield* SqlClient.SqlClient;
+            yield* pipe(FiberRef.get(sqlContextRef), Effect.filterOrFail((inTx) => !inTx, () => new TenantScopeError({ reason: "nested" })));
+            return yield* Effect.locally(sqlContextRef, true)(
+                sql.withTransaction(pipe(sql`SELECT set_config('app.current_tenant', ${tenantId}, true)`, Effect.zipRight(effect))),
+            );
+        });
+```
+
+---
+## [7][TRANSACTION_BOUNDARIES]
+>**Dictum:** *Isolation level is per-operation — RC + OCC default, RR for reporting, SSI for financial invariants.*
+
+Nested `withTransaction` = `SAVEPOINT effect_sql_N`. `pg_advisory_xact_lock` is transaction-scoped (pooler-safe); `pg_advisory_lock` is session-scoped (NOT PgBouncer-safe).
+
+```ts
+import { Data, Effect, Match, pipe } from "effect";
+import { SqlClient } from "@effect/sql";
+
+class InvariantError extends Data.TaggedError("InvariantError")<{ readonly check: string }> {}
+const makeTx = Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const withIsolation = (level: "RC" | "RR" | "SSI") =>
+        sql`SET TRANSACTION ISOLATION LEVEL ${sql.literal(Match.value(level).pipe(
+            Match.when("RC",  () => "READ COMMITTED"), Match.when("RR", () => "REPEATABLE READ"),
+            Match.when("SSI", () => "SERIALIZABLE"),   Match.exhaustive))}`;
+    const advisoryLock = (lockId: bigint) => sql`SELECT pg_advisory_xact_lock(${lockId})`;
+    const transfer =     (fromId: string, toId: string, amount: number) =>
+        sql.withTransaction(pipe(
+            withIsolation("SSI"), Effect.zipRight(advisoryLock(BigInt(0x1001))),
+            Effect.zipRight(sql`UPDATE account SET balance = balance - ${amount}
+                WHERE id = ${fromId} AND balance >= ${amount} RETURNING *`),
+            Effect.flatMap((rows) => Effect.filterOrFail(Effect.succeed(rows),
+                (r) => r.length > 0, () => new InvariantError({ check: "insufficient_balance" }))),
+            Effect.zipRight(sql`UPDATE account SET balance = balance + ${amount} WHERE id = ${toId}`)));
+    return { withIsolation, advisoryLock, transfer } as const;
+});
+```
+
+---
+## [8][CURSOR_PAGINATION]
+>**Dictum:** *Keyset is O(log n) via composite index; compound `{id, v}` cursors guarantee stability across tied sort values.*
+
+Fetch `LIMIT + 1`; `hasNext = rows.length > limit`. Compound `(rank, id) < ($v, $id)` prevents duplicates. UUIDv7 monotonic ordering guarantees cursor stability under concurrent inserts — `uuid_extract_timestamp(id) <= $boundary` freezes the visible window, preventing phantom rows from shifting page offsets.
+
+```ts
+import { Effect, Option, Schema as S, pipe } from "effect";
+import { SqlClient } from "@effect/sql";
+
+const Cursor =           S.Struct({ id: S.UUID, v: S.optional(S.String) });
+const CursorFromBase64 = S.compose(S.StringFromBase64Url, S.parseJson(Cursor));
+const encodeCursor =     S.encodeSync(CursorFromBase64);
+const decodeCursor = (raw: string | undefined) =>
+    pipe(Option.fromNullable(raw), Option.flatMap(S.decodeUnknownOption(CursorFromBase64)));
+const keysetPage = Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    return (cursor: Option.Option<typeof Cursor.Type>, limit: number, boundary: string) => {
+        const take = limit + 1;
+        const query = Option.match(cursor, {
+            onNone: () => sql`SELECT * FROM asset WHERE created_at <= ${boundary}
+                ORDER BY rank DESC, id DESC LIMIT ${take}`,
+            onSome: (c) => sql`SELECT * FROM asset WHERE created_at <= ${boundary}
+                AND (rank, id) < (${c.v}, ${c.id}) ORDER BY rank DESC, id DESC LIMIT ${take}`,
+        });
+        return pipe(query, Effect.map((rows) => ({
+            items: rows.slice(0, limit), hasNext: rows.length > limit,
+            nextCursor: Option.fromNullable(rows.at(limit - 1)).pipe(
+                Option.map((last) => encodeCursor({ id: last.id, v: last.rank }))),
+        })));
+    };
+});
+```
+
+---
+## [9][CLIENT_LIFECYCLE]
+>**Dictum:** *Pool is a Layer-managed resource — name transforms and JSON deserialization are infrastructure concerns.*
+
+Use `String.camelToSnake`/`String.snakeToCamel` from `effect` for transform config. `listen(channel)` holds a dedicated connection outside the pool.
+
+```ts
+import { Config, Effect, Schema as S, Stream, String as Str, pipe } from "effect";
+import { PgClient } from "@effect/sql-pg";
+
+const DatabaseLayer = PgClient.layerConfig({
+    url:                  Config.redacted("DATABASE_URL"),
+    maxConnections:       Config.integer("DB_POOL_MAX").pipe(Config.withDefault(10)),
+    idleTimeout:          Config.integer("DB_IDLE_MS").pipe(Config.withDefault(30_000)),
+    connectionTTL:        Config.integer("DB_TTL_MS").pipe(Config.withDefault(300_000)),
+    transformQueryNames:  Config.succeed(Str.camelToSnake),
+    transformResultNames: Config.succeed(Str.snakeToCamel),
+    transformJson:        Config.succeed(true),
+});
+const typedListen = (channel: string) => Effect.gen(function* () {
+    const pg = yield* PgClient.PgClient;
+    const Payload = S.Struct({ type: S.String, entityId: S.UUID });
+    return pg.listen(channel).pipe(
+        Stream.mapEffect((raw) => pipe(
+            S.decodeUnknown(S.parseJson(Payload))(raw),
+            Effect.tapError((parseError) => Effect.logWarning("listen.decode.failure", { channel, parseError })),
+            Effect.option)),
+        Stream.filterMap((opt) => opt));
+});
+```
+
+---
+## [10][SCHEMA_EVOLUTION]
+>**Dictum:** *Zero-downtime DDL follows expand-and-contract — never rewrite a table under exclusive lock.*
+
+`SET LOCAL lock_timeout = '2s'` on every DDL. Failed concurrent index builds leave `indisvalid = false`. `NOT ENFORCED` FK (PG18.2) stores metadata without trigger overhead.
+
+```ts
+import { Effect, pipe } from "effect";
+import { SqlClient } from "@effect/sql";
+
+const safeDdl = Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const addNullable = pipe(
+        sql`SET LOCAL lock_timeout = '2s'`,
+        Effect.zipRight(sql`ALTER TABLE asset ADD COLUMN IF NOT EXISTS region TEXT`),
+    );
+    const backfill = (batch: number) => pipe(
+        sql`SET LOCAL lock_timeout = '2s'`,
+        Effect.zipRight(sql`UPDATE asset SET region = 'us-east-1' WHERE region IS NULL AND id IN (
+            SELECT id FROM asset WHERE region IS NULL ORDER BY id LIMIT ${batch} FOR UPDATE SKIP LOCKED)`),
+    );
+    const validate = pipe(
+        sql`SET LOCAL lock_timeout = '2s'`,
+        Effect.zipRight(sql`ALTER TABLE asset ADD CONSTRAINT asset_region_nn CHECK (region IS NOT NULL) NOT VALID`),
+        Effect.zipRight(sql`ALTER TABLE asset VALIDATE CONSTRAINT asset_region_nn`),
+    );
+    const cleanInvalid = sql`SELECT indexrelid::regclass AS idx FROM pg_index WHERE NOT indisvalid`;
+    const notEnforcedFk = sql`ALTER TABLE audit_entry ADD CONSTRAINT fk_audit_account
+        FOREIGN KEY (account_id) REFERENCES account(id) NOT ENFORCED`;
+    return { addNullable, backfill, validate, cleanInvalid, notEnforcedFk } as const;
+});
+```
+
+- Expand-and-contract: nullable -> backfill -> `CHECK NOT VALID` -> `VALIDATE`. Check `pg_index.indisvalid` after concurrent builds.

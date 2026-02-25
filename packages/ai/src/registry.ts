@@ -6,6 +6,7 @@ import { Config, Duration, Effect, Layer, Option, Schema as S } from 'effect';
 
 // --- [TYPES] -----------------------------------------------------------------
 
+/** Factory input shapes - must match subset of _SettingsSchema.language / _SettingsSchema.embedding fields. */
 type _LanguageFactoryInput = {
     readonly maxTokens: number;
     readonly model: string;
@@ -13,7 +14,6 @@ type _LanguageFactoryInput = {
     readonly topK: number;
     readonly topP: number;
 };
-
 type _EmbeddingFactoryInput = {
     readonly cacheCapacity: number;
     readonly cacheTtlMinutes: number;
@@ -26,8 +26,8 @@ type _EmbeddingFactoryInput = {
 // --- [LAYERS] ----------------------------------------------------------------
 
 const _anthropicClient = AnthropicClient.layerConfig({ apiKey: Config.redacted('ANTHROPIC_API_KEY') }).pipe(Layer.provide(FetchHttpClient.layer));
-const _geminiClient =    GoogleClient.layerConfig({ apiKey: Config.redacted('GEMINI_API_KEY') }).pipe(Layer.provide(FetchHttpClient.layer));
-const _openAiClient =    OpenAiClient.layerConfig({ apiKey: Config.redacted('OPENAI_API_KEY') }).pipe(Layer.provide(FetchHttpClient.layer));
+const _geminiClient =    GoogleClient.layerConfig({    apiKey: Config.redacted('GEMINI_API_KEY') }).pipe(Layer.provide(FetchHttpClient.layer));
+const _openAiClient =    OpenAiClient.layerConfig({    apiKey: Config.redacted('OPENAI_API_KEY') }).pipe(Layer.provide(FetchHttpClient.layer));
 
 // --- [SCHEMA] ----------------------------------------------------------------
 
@@ -95,15 +95,6 @@ const _embeddingProviderFactories = Object.fromEntries(
     readonly [K in keyof typeof _providerFactories as (typeof _providerFactories)[K] extends { readonly embedding: unknown } ? K : never]:
     (typeof _providerFactories)[K] extends { readonly embedding: infer E } ? E : never;
 };
-const _languageProviders = Object.fromEntries(
-    (Object.keys(_languageProviderFactories) as ReadonlyArray<keyof typeof _languageProviderFactories>).map((provider) => [provider, provider] as const),
-) as { readonly [K in keyof typeof _languageProviderFactories]: K };
-const _embeddingModes = Object.fromEntries(
-    (Object.keys(_openAiEmbeddingModeFactories) as ReadonlyArray<keyof typeof _openAiEmbeddingModeFactories>).map((mode) => [mode, mode] as const),
-) as { readonly [K in keyof typeof _openAiEmbeddingModeFactories]: K };
-const _embeddingProviders = Object.fromEntries(
-    (Object.keys(_embeddingProviderFactories) as ReadonlyArray<keyof typeof _embeddingProviderFactories>).map((provider) => [provider, provider] as const),
-) as { readonly [K in keyof typeof _embeddingProviderFactories]: K };
 const _SettingsSchema = S.Struct({
     embedding: S.optionalWith(
         S.Struct({
@@ -111,19 +102,19 @@ const _SettingsSchema = S.Struct({
             cacheTtlMinutes: S.optionalWith(S.Int, { default: () => 30 }),
             dimensions:      S.optionalWith(S.Int, { default: () => 1536 }),
             maxBatchSize:    S.optionalWith(S.Int, { default: () => 256 }),
-            mode:            S.optionalWith(S.Enums(_embeddingModes), { default: () => 'batched' as const }),
+            mode:            S.optionalWith(S.Literal('batched', 'data-loader'), { default: () => 'batched' as const }),
             model:           S.optionalWith(S.String, { default: () => 'text-embedding-3-small' }),
-            provider:        S.optionalWith(S.Enums(_embeddingProviders), { default: () => 'openai' as const }),
+            provider:        S.optionalWith(S.Literal('openai'), { default: () => 'openai' as const }),
             windowMs:        S.optionalWith(S.Int, { default: () => 200 }),
         }),
         { default: () => ({ cacheCapacity: 1000, cacheTtlMinutes: 30, dimensions: 1536, maxBatchSize: 256, mode: 'batched' as const, model: 'text-embedding-3-small', provider: 'openai' as const, windowMs: 200 }) },
     ),
     language: S.optionalWith(
         S.Struct({
-            fallback:    S.optionalWith(S.Array(S.Enums(_languageProviders)), { default: () => [] as Array<keyof typeof _languageProviderFactories> }),
+            fallback:    S.optionalWith(S.Array(S.Literal('anthropic', 'gemini', 'openai')), { default: () => [] as Array<keyof typeof _languageProviderFactories> }),
             maxTokens:   S.optionalWith(S.Int, { default: () => 4096 }),
             model:       S.optionalWith(S.String, { default: () => 'gpt-4o' }),
-            provider:    S.optionalWith(S.Enums(_languageProviders), { default: () => 'openai' as const }),
+            provider:    S.optionalWith(S.Literal('anthropic', 'gemini', 'openai'), { default: () => 'openai' as const }),
             temperature: S.optionalWith(S.Number, { default: () => 1 }),
             topK:        S.optionalWith(S.Number, { default: () => 40 }),
             topP:        S.optionalWith(S.Number, { default: () => 1 }),
@@ -143,18 +134,16 @@ const _SettingsSchema = S.Struct({
         { default: () => ({ maxRequestsPerMinute: 60, maxTokensPerDay: 1_000_000, maxTokensPerRequest: 16384, tools: { mode: 'allow' as const, names: [] as Array<string> } }) },
     ),
 });
-const _AppSettingsSchema = S.Struct({ ai: S.optional(_SettingsSchema) });
 const _languageModel = (settings: S.Schema.Type<typeof _SettingsSchema>['language']) => _languageProviderFactories[settings.provider](settings);
 const _embeddingModel = (settings: S.Schema.Type<typeof _SettingsSchema>['embedding']) => _embeddingProviderFactories[settings.provider][settings.mode](settings);
-
 // --- [ENTRY_POINT] -----------------------------------------------------------
 
 // biome-ignore lint/correctness/noUnusedVariables: const+namespace merge pattern
 const AiRegistry = {
     decodeAppSettings: (raw: unknown) =>
-        S.decodeUnknown(_AppSettingsSchema)(raw).pipe(
-            Effect.flatMap((settings) =>
-                Option.fromNullable(settings.ai).pipe(
+        S.decodeUnknown(S.Struct({ ai: S.optional(_SettingsSchema) }))(raw).pipe(
+            Effect.flatMap(({ ai }) =>
+                Option.fromNullable(ai).pipe(
                     Option.match({
                         onNone: () => S.decodeUnknown(_SettingsSchema)({}),
                         onSome: Effect.succeed,
@@ -164,7 +153,7 @@ const AiRegistry = {
         ),
     layers: (settings: S.Schema.Type<typeof _SettingsSchema>) => ({
         embedding:        _embeddingModel(settings.embedding),
-        fallbackLanguage: settings.language.fallback.map((provider) => _languageModel({ ...settings.language, provider }),),
+        fallbackLanguage: settings.language.fallback.map((provider) => _languageModel({ ...settings.language, provider })),
         language:         _languageModel(settings.language),
         policy:           settings.policy,
     }),

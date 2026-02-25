@@ -34,6 +34,7 @@ internal static class CommandExecutor {
     }
     private static readonly Error ScriptNotExecuted =
         Error.New(message: "Rhino did not execute the script.");
+    private static Fin<Unit> DoEffect(Action effect) { effect(); return FinSucc(unit); }
     private static Error ScriptCancelled(string commandName) =>
         Error.New(message: $"Command '{commandName}' was cancelled.");
     private static Error ObjectNotFound(Guid objectId) =>
@@ -254,9 +255,7 @@ internal static class CommandExecutor {
         Fin<Unit> layerResult = payload.TryGetProperty(JsonFields.LayerIndex, out JsonElement layerElement) switch {
             true when layerElement.TryGetInt32(out int layerIndex) =>
                 (layerIndex >= 0 && layerIndex < doc.Layers.Count) switch {
-                    true => SetLayerIndex(
-                        attributes: attributes,
-                        layerIndex: layerIndex),
+                    true => DoEffect(() => attributes.LayerIndex = layerIndex),
                     false => FinFail<Unit>(
                         Error.New(message: $"{JsonFields.LayerIndex} {layerIndex} is out of range [0, {doc.Layers.Count}).")),
                 },
@@ -265,19 +264,9 @@ internal static class CommandExecutor {
         return layerResult.Bind((_) =>
             payload.TryGetProperty(JsonFields.Name, out JsonElement nameElement) switch {
                 true when nameElement.ValueKind == JsonValueKind.String =>
-                    FinSucc(SetName(
-                        attributes: attributes,
-                        name: nameElement.GetString() ?? string.Empty)),
+                    DoEffect(() => attributes.Name = nameElement.GetString() ?? string.Empty),
                 _ => FinSucc(unit),
             });
-    }
-    private static Unit SetName(ObjectAttributes attributes, string name) {
-        attributes.Name = name;
-        return unit;
-    }
-    private static Unit SetLayerIndex(ObjectAttributes attributes, int layerIndex) {
-        attributes.LayerIndex = layerIndex;
-        return unit;
     }
     internal static Fin<JsonElement> ExecuteDirectApi(
         RhinoDoc doc,
@@ -397,7 +386,8 @@ internal static class CommandExecutor {
                 tag: state);
             bool isUndo = !args.CreatedByRedo;
             _ = onUndoRedo(state: state, isUndo: isUndo)
-                .IfFail(error => RhinoApp.WriteLine($"UndoRedo publish failed: {error.Message}"));
+                .IfFail(error => RhinoApp.WriteLine(
+                    $"[Kargadan] UndoRedo publish failed: isUndo={isUndo}, requestId={state.RequestId}, undoSerial={state.UndoSerial}, error={error}"));
         };
     private static Fin<Guid> GetPrimaryObjectId(CommandEnvelope envelope) =>
         envelope.ObjectRefs.HeadOrNone()

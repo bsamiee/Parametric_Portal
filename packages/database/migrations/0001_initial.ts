@@ -5,7 +5,7 @@
  * Extensions: pg_trgm btree_gin fuzzystrmatch unaccent vector pg_partman.
  * Partitions: sessions(created_at), audit_logs(id), notifications(id) monthly via pg_partman.
  * Multivariate stats: users/permissions(app_id,role), jobs(app_id,status), audit_logs(app_id,target_type),
- *   notifications(app_id,status,channel), search_documents(scope_id,entity_type).
+ *   notifications(app_id,status,channel), search_chunks(scope_id,entity_type).
  */
 import { SqlClient } from '@effect/sql';
 import { Effect } from 'effect';
@@ -272,57 +272,33 @@ export default Effect.gen(function* () {
         ALTER TABLE notifications ALTER COLUMN status SET STATISTICS 500, ALTER COLUMN channel SET STATISTICS 500, ALTER COLUMN template SET STATISTICS 500;
         ALTER TABLE notifications ALTER COLUMN payload SET STORAGE MAIN;
         CREATE STATISTICS stat_notifications_app_status_channel (ndistinct, dependencies, mcv) ON app_id, status, channel FROM notifications;
-        CREATE TABLE agent_sessions (
+        CREATE TABLE agent_journal (
             id UUID PRIMARY KEY DEFAULT uuidv7(),
             app_id UUID NOT NULL REFERENCES apps(id) ON DELETE RESTRICT,
-            user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+            session_id UUID NOT NULL,
             run_id UUID NOT NULL,
-            status TEXT NOT NULL DEFAULT 'running'
-                CHECK (status IN ('running', 'completed', 'failed', 'interrupted')),
-            tool_call_count INTEGER NOT NULL DEFAULT 0 CHECK (tool_call_count >= 0),
-            error TEXT,
-            metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
-            started_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-            ended_at TIMESTAMPTZ,
-            updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-            CONSTRAINT agent_sessions_metadata_shape CHECK (jsonb_typeof(metadata) = 'object'),
-            CONSTRAINT agent_sessions_ended_after_started CHECK (ended_at IS NULL OR ended_at >= started_at),
-            CONSTRAINT agent_sessions_run_unique UNIQUE (app_id, run_id)
-        );
-        CREATE INDEX idx_agent_sessions_app_status_started ON agent_sessions(app_id, status, started_at DESC) INCLUDE (id, user_id, tool_call_count);
-        CREATE INDEX idx_agent_sessions_app_user_started ON agent_sessions(app_id, user_id, started_at DESC) WHERE user_id IS NOT NULL;
-        CREATE TABLE agent_tool_calls (
-            id UUID PRIMARY KEY DEFAULT uuidv7(),
-            app_id UUID NOT NULL REFERENCES apps(id) ON DELETE RESTRICT,
-            session_id UUID NOT NULL REFERENCES agent_sessions(id) ON DELETE CASCADE,
-            run_id UUID NOT NULL,
-            sequence INTEGER NOT NULL CHECK (sequence >= 0),
-            operation TEXT NOT NULL CHECK (length(trim(operation)) > 0),
-            params JSONB NOT NULL DEFAULT '{}'::jsonb,
-            result JSONB,
-            duration_ms INTEGER NOT NULL DEFAULT 0 CHECK (duration_ms >= 0),
-            status TEXT NOT NULL DEFAULT 'ok'
-                CHECK (status IN ('ok', 'error')),
-            error TEXT,
-            created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-            CONSTRAINT agent_tool_calls_params_shape CHECK (jsonb_typeof(params) = 'object')
-        );
-        CREATE UNIQUE INDEX idx_agent_tool_calls_session_sequence ON agent_tool_calls(session_id, sequence);
-        CREATE INDEX idx_agent_tool_calls_app_created ON agent_tool_calls(app_id, created_at DESC) INCLUDE (session_id, status, operation);
-        CREATE INDEX idx_agent_tool_calls_app_status_created ON agent_tool_calls(app_id, status, created_at DESC) INCLUDE (session_id, operation);
-        CREATE TABLE agent_checkpoints (
-            session_id UUID PRIMARY KEY REFERENCES agent_sessions(id) ON DELETE CASCADE,
-            app_id UUID NOT NULL REFERENCES apps(id) ON DELETE RESTRICT,
-            loop_state JSONB NOT NULL DEFAULT '{}'::jsonb,
-            chat_json TEXT NOT NULL DEFAULT '',
-            state_hash TEXT NOT NULL,
-            scene_summary JSONB,
             sequence INTEGER NOT NULL DEFAULT 0 CHECK (sequence >= 0),
-            updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-            CONSTRAINT agent_checkpoints_loop_state_shape CHECK (jsonb_typeof(loop_state) = 'object')
+            entry_kind TEXT NOT NULL
+                CHECK (entry_kind IN ('session_start', 'tool_call', 'checkpoint', 'session_complete')),
+            status TEXT
+                CHECK (status IN ('running', 'completed', 'failed', 'interrupted', 'ok', 'error')),
+            operation TEXT,
+            payload_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+            state_hash TEXT,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            CONSTRAINT agent_journal_payload_shape CHECK (jsonb_typeof(payload_json) = 'object'),
+            CONSTRAINT agent_journal_status_kind_check CHECK (
+                CASE entry_kind
+                    WHEN 'session_start' THEN status IN ('running', 'failed')
+                    WHEN 'session_complete' THEN status IN ('completed', 'failed', 'interrupted')
+                    WHEN 'tool_call' THEN status IN ('ok', 'error')
+                    WHEN 'checkpoint' THEN status IS NULL
+                END)
         );
-        CREATE UNIQUE INDEX idx_agent_checkpoints_app_session ON agent_checkpoints(app_id, session_id);
-        CREATE INDEX idx_agent_checkpoints_app_updated ON agent_checkpoints(app_id, updated_at DESC) INCLUDE (session_id, sequence)`);
+        CREATE UNIQUE INDEX idx_agent_journal_session_sequence_kind ON agent_journal(session_id, sequence, entry_kind);
+        CREATE INDEX idx_agent_journal_app_session_sequence ON agent_journal(app_id, session_id, sequence DESC);
+        CREATE INDEX idx_agent_journal_app_kind_created ON agent_journal(app_id, entry_kind, created_at DESC);
+        CREATE INDEX idx_agent_journal_run_kind ON agent_journal(run_id, entry_kind, created_at DESC)`);
     // --- [PARTITIONS] ----------------------------------------------------------------
     yield* sql.unsafe(String.raw`DO $$ BEGIN
         PERFORM _register_monthly_partition('sessions', 'created_at', '30 days');
@@ -365,15 +341,12 @@ export default Effect.gen(function* () {
             ARRAY['sessions','user_id'], ARRAY['assets','user_id'],
             ARRAY['audit_logs','app_id'], ARRAY['audit_logs','user_id'],
             ARRAY['notifications','user_id'], ARRAY['job_dlq','app_id'],
-            ARRAY['agent_sessions','app_id'], ARRAY['agent_sessions','user_id'],
-            ARRAY['agent_tool_calls','app_id'], ARRAY['agent_tool_calls','session_id'],
-            ARRAY['agent_checkpoints','app_id']
+            ARRAY['agent_journal','session_id']
         ] LOOP EXECUTE format('CREATE INDEX idx_%s_%s_fk ON %I(%I)', _pair[1], _pair[2], _pair[1], _pair[2]); END LOOP;
         FOR _tbl IN SELECT unnest(ARRAY[
             'apps','users','permissions','api_keys','oauth_accounts','assets',
             'mfa_secrets','webauthn_credentials','jobs','notifications','kv_store',
-            'agent_sessions','agent_checkpoints',
-            'search_documents','search_embeddings'
+            'search_chunks'
         ]) LOOP EXECUTE format(
             'CREATE TRIGGER %I BEFORE UPDATE ON %I '
             'FOR EACH ROW WHEN (OLD.* IS DISTINCT FROM NEW.*) '
@@ -412,14 +385,14 @@ export default Effect.gen(function* () {
         CREATE OR REPLACE FUNCTION purge_tenant(p_app_id UUID) RETURNS INT LANGUAGE plpgsql VOLATILE AS $$
         DECLARE _total bigint := 0; _count bigint; _user_ids uuid[]; _tbl text; BEGIN
             SELECT array_agg(id) INTO _user_ids FROM users WHERE app_id = p_app_id;
-            FOR _tbl IN SELECT unnest(ARRAY['search_embeddings','search_documents']) LOOP
+            FOR _tbl IN SELECT unnest(ARRAY['search_chunks']) LOOP
                 EXECUTE format('DELETE FROM %I WHERE scope_id = $1', _tbl) USING p_app_id; GET DIAGNOSTICS _count = ROW_COUNT; _total := _total + _count;
             END LOOP;
             DELETE FROM notifications WHERE app_id = p_app_id; GET DIAGNOSTICS _count = ROW_COUNT; _total := _total + _count;
             ALTER TABLE audit_logs DISABLE TRIGGER audit_logs_immutable;
             DELETE FROM audit_logs WHERE app_id = p_app_id; GET DIAGNOSTICS _count = ROW_COUNT; _total := _total + _count;
             ALTER TABLE audit_logs ENABLE TRIGGER audit_logs_immutable;
-            FOR _tbl IN SELECT unnest(ARRAY['jobs','job_dlq','assets','agent_tool_calls','agent_checkpoints','agent_sessions']) LOOP
+            FOR _tbl IN SELECT unnest(ARRAY['jobs','job_dlq','assets','agent_journal']) LOOP
                 EXECUTE format('DELETE FROM %I WHERE app_id = $1', _tbl) USING p_app_id; GET DIAGNOSTICS _count = ROW_COUNT; _total := _total + _count;
             END LOOP;
             IF _user_ids IS NOT NULL THEN
@@ -602,7 +575,7 @@ export default Effect.gen(function* () {
         CREATE TEXT SEARCH CONFIGURATION parametric_search (COPY = english);
         ALTER TEXT SEARCH CONFIGURATION parametric_search ALTER MAPPING FOR hword, hword_part, word WITH parametric_unaccent, english_stem`);
     yield* sql.unsafe(String.raw`
-        CREATE TABLE search_documents (
+        CREATE TABLE search_chunks (
             entity_type TEXT NOT NULL, entity_id UUID NOT NULL, scope_id UUID,
             display_text TEXT NOT NULL, content_text TEXT, metadata JSONB,
             normalized_text TEXT NOT NULL, updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -616,33 +589,32 @@ export default Effect.gen(function* () {
             ) STORED,
             phonetic_daitch TEXT[] GENERATED ALWAYS AS (daitch_mokotoff(left(normalized_text, 255))) STORED,
             phonetic_code TEXT GENERATED ALWAYS AS (dmetaphone(left(normalized_text, 255))) STORED,
-            CONSTRAINT search_documents_pk PRIMARY KEY (entity_type, entity_id));
-        CREATE TABLE search_embeddings (
-            entity_type TEXT NOT NULL, entity_id UUID NOT NULL, scope_id UUID,
-            model TEXT NOT NULL, dimensions INTEGER NOT NULL,
-            embedding HALFVEC(3072) NOT NULL, hash TEXT NOT NULL,
-            updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-            CONSTRAINT search_embeddings_pk PRIMARY KEY (entity_type, entity_id),
-            CONSTRAINT search_embeddings_dimensions_positive CHECK (dimensions > 0),
-            CONSTRAINT search_embeddings_fk FOREIGN KEY (entity_type, entity_id) REFERENCES search_documents(entity_type, entity_id) ON DELETE CASCADE);
-        CREATE INDEX idx_search_documents_scope ON search_documents (scope_id, entity_type);
-        CREATE INDEX idx_search_documents_scope_entity_vector ON search_documents USING GIN (scope_id uuid_ops, entity_type text_ops, search_vector) WITH (parallel_workers = 4);
-        CREATE INDEX idx_search_documents_scope_entity_trgm ON search_documents
+            model TEXT, dimensions INTEGER, embedding HALFVEC(3072), embedding_hash TEXT,
+            CONSTRAINT search_chunks_pk PRIMARY KEY (entity_type, entity_id),
+            CONSTRAINT search_chunks_dimensions_positive CHECK (dimensions IS NULL OR dimensions > 0),
+            CONSTRAINT search_chunks_embedding_shape CHECK (
+                (model IS NULL AND dimensions IS NULL AND embedding IS NULL AND embedding_hash IS NULL)
+                OR
+                (model IS NOT NULL AND dimensions IS NOT NULL AND embedding IS NOT NULL AND embedding_hash IS NOT NULL)
+            ));
+        CREATE INDEX idx_search_chunks_scope ON search_chunks (scope_id, entity_type);
+        CREATE INDEX idx_search_chunks_scope_entity_vector ON search_chunks USING GIN (scope_id uuid_ops, entity_type text_ops, search_vector) WITH (parallel_workers = 4);
+        CREATE INDEX idx_search_chunks_scope_entity_trgm ON search_chunks
             USING GIN (scope_id uuid_ops, entity_type text_ops, normalized_text gin_trgm_ops) WITH (parallel_workers = 4);
-        CREATE INDEX idx_search_documents_trgm_knn ON search_documents USING GIST (normalized_text gist_trgm_ops(siglen=64));
-        CREATE INDEX idx_search_documents_phonetic ON search_documents (phonetic_code) WHERE phonetic_code <> '';
-        CREATE INDEX idx_search_documents_phonetic_daitch ON search_documents USING GIN (phonetic_daitch);
+        CREATE INDEX idx_search_chunks_trgm_knn ON search_chunks USING GIST (normalized_text gist_trgm_ops(siglen=64));
+        CREATE INDEX idx_search_chunks_phonetic ON search_chunks (phonetic_code) WHERE phonetic_code <> '';
+        CREATE INDEX idx_search_chunks_phonetic_daitch ON search_chunks USING GIN (phonetic_daitch);
         CREATE TABLE search_terms (
             scope_id UUID, term TEXT NOT NULL, frequency INTEGER NOT NULL CHECK (frequency > 0),
             updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
             CONSTRAINT search_terms_scope_term_unique UNIQUE NULLS NOT DISTINCT (scope_id, term));
         CREATE INDEX idx_search_terms_scope_term_trgm ON search_terms USING GIN (scope_id uuid_ops, term gin_trgm_ops) WITH (parallel_workers = 4);
         CREATE INDEX idx_search_terms_trgm_knn ON search_terms USING GIST (term gist_trgm_ops(siglen=64));
-        CREATE INDEX idx_search_embeddings_scope ON search_embeddings (scope_id, entity_type, model, dimensions);
-        CREATE INDEX idx_search_embeddings_embedding ON search_embeddings USING hnsw (embedding halfvec_cosine_ops) WITH (m = 24, ef_construction = 200);
-        CREATE INDEX idx_search_embeddings_model_dim ON search_embeddings (model, dimensions) INCLUDE (entity_type, entity_id);
-        ALTER TABLE search_documents ALTER COLUMN entity_type SET STATISTICS 500;
-        CREATE STATISTICS stat_search_documents_scope_entity (ndistinct, dependencies) ON scope_id, entity_type FROM search_documents`);
+        CREATE INDEX idx_search_chunks_scope_embedding ON search_chunks (scope_id, entity_type, model, dimensions);
+        CREATE INDEX idx_search_chunks_embedding ON search_chunks USING hnsw (embedding halfvec_cosine_ops) WITH (m = 24, ef_construction = 200);
+        CREATE INDEX idx_search_chunks_model_dim ON search_chunks (model, dimensions) INCLUDE (entity_type, entity_id);
+        ALTER TABLE search_chunks ALTER COLUMN entity_type SET STATISTICS 500;
+        CREATE STATISTICS stat_search_chunks_scope_entity (ndistinct, dependencies) ON scope_id, entity_type FROM search_chunks`);
     // --- [SEARCH_TRIGGERS] -----------------------------------------------------------
     yield* sql.unsafe(String.raw`
         CREATE OR REPLACE FUNCTION _search_terms_array(p_text text) RETURNS text[] LANGUAGE sql IMMUTABLE PARALLEL SAFE AS $$
@@ -661,10 +633,10 @@ export default Effect.gen(function* () {
             IF TG_OP IN ('UPDATE', 'DELETE') THEN PERFORM _merge_search_terms(OLD.scope_id, _search_terms_array(OLD.normalized_text), -1); END IF;
             IF TG_OP IN ('INSERT', 'UPDATE') THEN PERFORM _merge_search_terms(NEW.scope_id, _search_terms_array(NEW.normalized_text), 1); END IF;
             RETURN COALESCE(NEW, OLD); END $$ LANGUAGE plpgsql;
-        CREATE TRIGGER search_documents_terms_sync AFTER INSERT OR DELETE ON search_documents FOR EACH ROW EXECUTE FUNCTION sync_search_terms();
-        CREATE TRIGGER search_documents_terms_sync_update AFTER UPDATE ON search_documents FOR EACH ROW
+        CREATE TRIGGER search_chunks_terms_sync AFTER INSERT OR DELETE ON search_chunks FOR EACH ROW EXECUTE FUNCTION sync_search_terms();
+        CREATE TRIGGER search_chunks_terms_sync_update AFTER UPDATE ON search_chunks FOR EACH ROW
             WHEN (OLD.scope_id IS DISTINCT FROM NEW.scope_id OR OLD.normalized_text IS DISTINCT FROM NEW.normalized_text) EXECUTE FUNCTION sync_search_terms();
-        CREATE OR REPLACE VIEW search_document_source AS
+        CREATE OR REPLACE VIEW search_chunk_source AS
             SELECT 'app'::text AS entity_type, a.id AS entity_id, NULL::uuid AS scope_id,
                 a.name AS display_text, a.namespace AS content_text,
                 jsonb_build_object('name', a.name, 'namespace', a.namespace) AS metadata
@@ -687,45 +659,49 @@ export default Effect.gen(function* () {
                 l.target_type || ' ' || l.operation::text AS content_text,
                 jsonb_strip_nulls(jsonb_build_object('targetType', l.target_type, 'operation', l.operation, 'userId', l.user_id, 'hasDelta', l.delta IS NOT NULL), true) AS metadata
             FROM audit_logs l;
-        CREATE OR REPLACE FUNCTION upsert_search_document_from_source(p_entity_type text, p_entity_id uuid)
+        CREATE OR REPLACE FUNCTION upsert_search_chunk_from_source(p_entity_type text, p_entity_id uuid)
             RETURNS void LANGUAGE sql VOLATILE AS $$
-            INSERT INTO search_documents (entity_type, entity_id, scope_id, display_text, content_text, metadata, normalized_text)
+            INSERT INTO search_chunks (entity_type, entity_id, scope_id, display_text, content_text, metadata, normalized_text)
             SELECT s.entity_type, s.entity_id, s.scope_id, s.display_text, s.content_text, s.metadata,
                 normalize_search_text(s.display_text, s.content_text, s.metadata)
-            FROM search_document_source s
+            FROM search_chunk_source s
             WHERE s.entity_type = p_entity_type AND s.entity_id = p_entity_id
             ON CONFLICT (entity_type, entity_id) DO UPDATE SET
                 scope_id = EXCLUDED.scope_id,
                 display_text = EXCLUDED.display_text,
                 content_text = EXCLUDED.content_text,
                 metadata = EXCLUDED.metadata,
-                normalized_text = EXCLUDED.normalized_text $$;
-        CREATE OR REPLACE FUNCTION sync_search_document() RETURNS TRIGGER AS $$ DECLARE _et TEXT := TG_ARGV[0]; BEGIN
+                normalized_text = EXCLUDED.normalized_text,
+                model = NULL,
+                dimensions = NULL,
+                embedding = NULL,
+                embedding_hash = NULL $$;
+        CREATE OR REPLACE FUNCTION sync_search_chunk() RETURNS TRIGGER AS $$ DECLARE _et TEXT := TG_ARGV[0]; BEGIN
             IF TG_OP = 'DELETE' THEN
-                DELETE FROM search_documents WHERE entity_type = _et AND entity_id = OLD.id;
+                DELETE FROM search_chunks WHERE entity_type = _et AND entity_id = OLD.id;
                 RETURN OLD;
             END IF;
-            PERFORM upsert_search_document_from_source(_et, NEW.id);
+            PERFORM upsert_search_chunk_from_source(_et, NEW.id);
             RETURN NEW;
         END; $$ LANGUAGE plpgsql;
-        CREATE TRIGGER apps_search_upsert AFTER INSERT OR UPDATE OF name, namespace ON apps FOR EACH ROW EXECUTE FUNCTION sync_search_document('app');
-        CREATE TRIGGER users_search_upsert AFTER INSERT OR UPDATE OF email, role, deleted_at ON users FOR EACH ROW WHEN (NEW.deleted_at IS NULL) EXECUTE FUNCTION sync_search_document('user');
-        CREATE TRIGGER users_search_delete AFTER UPDATE OF deleted_at ON users FOR EACH ROW WHEN (NEW.deleted_at IS NOT NULL) EXECUTE FUNCTION sync_search_document('user');
-        CREATE TRIGGER assets_search_upsert AFTER INSERT OR UPDATE OF content, type, name, hash, deleted_at ON assets FOR EACH ROW WHEN (NEW.deleted_at IS NULL) EXECUTE FUNCTION sync_search_document('asset');
-        CREATE TRIGGER assets_search_delete AFTER UPDATE OF deleted_at ON assets FOR EACH ROW WHEN (NEW.deleted_at IS NOT NULL) EXECUTE FUNCTION sync_search_document('asset');
-        CREATE TRIGGER audit_logs_search_insert AFTER INSERT ON audit_logs FOR EACH ROW EXECUTE FUNCTION sync_search_document('auditLog')`);
+        CREATE TRIGGER apps_search_upsert AFTER INSERT OR UPDATE OF name, namespace ON apps FOR EACH ROW EXECUTE FUNCTION sync_search_chunk('app');
+        CREATE TRIGGER users_search_upsert AFTER INSERT OR UPDATE OF email, role, deleted_at ON users FOR EACH ROW WHEN (NEW.deleted_at IS NULL) EXECUTE FUNCTION sync_search_chunk('user');
+        CREATE TRIGGER users_search_delete AFTER UPDATE OF deleted_at ON users FOR EACH ROW WHEN (NEW.deleted_at IS NOT NULL) EXECUTE FUNCTION sync_search_chunk('user');
+        CREATE TRIGGER assets_search_upsert AFTER INSERT OR UPDATE OF content, type, name, hash, deleted_at ON assets FOR EACH ROW WHEN (NEW.deleted_at IS NULL) EXECUTE FUNCTION sync_search_chunk('asset');
+        CREATE TRIGGER assets_search_delete AFTER UPDATE OF deleted_at ON assets FOR EACH ROW WHEN (NEW.deleted_at IS NOT NULL) EXECUTE FUNCTION sync_search_chunk('asset');
+        CREATE TRIGGER audit_logs_search_insert AFTER INSERT ON audit_logs FOR EACH ROW EXECUTE FUNCTION sync_search_chunk('auditLog')`);
     // --- [SEARCH_REFRESH] ------------------------------------------------------------
     yield* sql.unsafe(String.raw`
-        CREATE OR REPLACE FUNCTION refresh_search_documents(p_scope_id uuid DEFAULT NULL, p_include_global boolean DEFAULT false)
+        CREATE OR REPLACE FUNCTION refresh_search_chunks(p_scope_id uuid DEFAULT NULL, p_include_global boolean DEFAULT false)
             RETURNS void LANGUAGE plpgsql SECURITY INVOKER AS $$ BEGIN
-            IF p_scope_id IS NULL THEN DELETE FROM search_documents;
-            ELSE DELETE FROM search_documents WHERE scope_id = p_scope_id; IF p_include_global THEN DELETE FROM search_documents WHERE scope_id IS NULL; END IF; END IF;
-            INSERT INTO search_documents (entity_type, entity_id, scope_id, display_text, content_text, metadata, normalized_text)
+            IF p_scope_id IS NULL THEN DELETE FROM search_chunks;
+            ELSE DELETE FROM search_chunks WHERE scope_id = p_scope_id; IF p_include_global THEN DELETE FROM search_chunks WHERE scope_id IS NULL; END IF; END IF;
+            INSERT INTO search_chunks (entity_type, entity_id, scope_id, display_text, content_text, metadata, normalized_text)
             SELECT s.entity_type, s.entity_id, s.scope_id, s.display_text, s.content_text, s.metadata,
                 normalize_search_text(s.display_text, s.content_text, s.metadata)
-            FROM search_document_source s
+            FROM search_chunk_source s
             WHERE p_scope_id IS NULL OR s.scope_id = p_scope_id OR (p_include_global AND s.scope_id IS NULL);
-            ANALYZE search_documents; ANALYZE search_terms;
+            ANALYZE search_chunks; ANALYZE search_terms;
         END $$;
         CREATE OR REPLACE FUNCTION notify_search_refresh() RETURNS void LANGUAGE sql SECURITY INVOKER AS $$
             SELECT pg_notify('search_refresh', json_build_object('timestamp', extract(epoch from now()), 'event', 'refresh_complete')::text) $$;
@@ -758,7 +734,7 @@ export default Effect.gen(function* () {
                 LIMIT (SELECT max_limit FROM normalized)),
             merged AS (SELECT term, frequency, 0 AS bucket FROM prefix_hits UNION ALL SELECT term, frequency, 1 AS bucket FROM fuzzy_hits)
             SELECT term, frequency FROM merged ORDER BY bucket ASC, frequency DESC, term ASC LIMIT (SELECT max_limit FROM normalized) $$;
-        SELECT refresh_search_documents()`);
+        SELECT refresh_search_chunks()`);
 
     // --- [SEED_PERMISSIONS] ----------------------------------------------------------
     yield* sql.unsafe(String.raw`
@@ -786,9 +762,9 @@ export default Effect.gen(function* () {
     DO $$ DECLARE _r record; BEGIN
         FOR _r IN SELECT * FROM (VALUES
             ('users','app'),('permissions','app'),('sessions','app'),('assets','app'),('audit_logs','app'),('jobs','app'),('notifications','app'),('job_dlq','app'),
-            ('agent_sessions','app'),('agent_tool_calls','app'),('agent_checkpoints','app'),
+            ('agent_journal','app'),
             ('api_keys','user'),('oauth_accounts','user'),('mfa_secrets','user'),('webauthn_credentials','user'),
-            ('session_tokens','session'),('search_documents','scope'),('search_embeddings','scope'),('search_terms','scope')
+            ('session_tokens','session'),('search_chunks','scope'),('search_terms','scope')
         ) AS t(tbl text, kind text) LOOP
             EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', _r.tbl);
             EXECUTE format('ALTER TABLE %I FORCE ROW LEVEL SECURITY', _r.tbl);

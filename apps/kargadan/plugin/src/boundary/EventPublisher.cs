@@ -7,7 +7,7 @@ using static LanguageExt.Prelude;
 namespace ParametricPortal.Kargadan.Plugin.src.boundary;
 
 [BoundaryAdapter]
-public sealed class EventPublisher {
+internal sealed class EventPublisher {
     private readonly Ref<Seq<EventEnvelope>> _queue = Ref(Seq<EventEnvelope>());
     public Unit Publish(EventEnvelope envelope) {
         _ = _queue.Swap(queue => queue.Add(envelope));

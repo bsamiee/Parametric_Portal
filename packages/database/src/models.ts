@@ -10,20 +10,20 @@ import { Schema as S } from 'effect';
 
 // --- [SCHEMA] ----------------------------------------------------------------
 
-const SearchSurfaceValues = ['app', 'user', 'asset', 'auditLog'] as const;
-const AgentPersistenceEntityValues = ['agentSession', 'agentToolCall', 'agentCheckpoint'] as const;
-const AgentSessionStatusValues = ['running', 'completed', 'failed', 'interrupted'] as const;
-const AgentToolCallStatusValues = ['ok', 'error'] as const;
-const SearchSurfaceSchema = S.Literal(...SearchSurfaceValues);
+const SearchSurfaceValues =          ['app', 'user', 'asset', 'auditLog', 'command'] as const;
+const AgentPersistenceEntityValues = ['agentJournal'] as const;
+const AgentJournalEntryKindValues =  ['session_start', 'tool_call', 'checkpoint', 'session_complete'] as const;
+const AgentJournalStatusValues =     ['running', 'completed', 'failed', 'interrupted', 'ok', 'error'] as const;
+const SearchSurfaceSchema =          S.Literal(...SearchSurfaceValues);
 const AgentPersistenceEntitySchema = S.Literal(...AgentPersistenceEntityValues);
-const AgentSessionStatusSchema = S.Literal(...AgentSessionStatusValues);
-const AgentToolCallStatusSchema = S.Literal(...AgentToolCallStatusValues);
-const RoleSchema =           S.Literal('owner', 'admin', 'member', 'viewer', 'guest');
-const OAuthProviderSchema =  S.Literal('apple', 'github', 'google', 'microsoft');
-const JobStatusSchema =      S.Literal('queued', 'processing', 'complete', 'failed', 'cancelled');
-const JobPrioritySchema =    S.Literal('critical', 'high', 'normal', 'low');
-const NotificationStatusSchema = S.Literal('queued', 'sending', 'delivered', 'failed', 'dlq');
-const NotificationChannelSchema = S.Literal('email', 'webhook', 'inApp');
+const AgentJournalEntryKindSchema =  S.Literal(...AgentJournalEntryKindValues);
+const AgentJournalStatusSchema =     S.Literal(...AgentJournalStatusValues);
+const RoleSchema =                   S.Literal('owner', 'admin', 'member', 'viewer', 'guest');
+const OAuthProviderSchema =          S.Literal('apple', 'github', 'google', 'microsoft');
+const JobStatusSchema =              S.Literal('queued', 'processing', 'complete', 'failed', 'cancelled');
+const JobPrioritySchema =            S.Literal('critical', 'high', 'normal', 'low');
+const NotificationStatusSchema =     S.Literal('queued', 'sending', 'delivered', 'failed', 'dlq');
+const NotificationChannelSchema =    S.Literal('email', 'webhook', 'inApp');
 const AuditOperationSchema = S.Literal(
     'create', 'update', 'delete', 'read', 'list', 'status',
     'login', 'refresh', 'revoke', 'revokeByIp',
@@ -56,21 +56,21 @@ const NotificationDeliverySchema = S.Struct({
     provider: S.optional(S.String),
 });
 const AgentMetadataSchema = S.Record({ key: S.String, value: S.Unknown });
-const PreferencesSchema = S.Struct({
+const PreferencesSchema =   S.Struct({
     channels:   S.Struct({email: S.Boolean, inApp: S.Boolean, webhook: S.Boolean,}),
     mutedUntil: S.NullOr(S.String),
     templates:  S.Record({key: S.String, value: S.Struct({email: S.optional(S.Boolean), inApp: S.optional(S.Boolean), webhook: S.optional(S.Boolean),}),}),
 });
 const FeatureFlagsSchema = S.Struct({
-    enableAiSearch:        S.optionalWith(S.Int.pipe(S.between(0, 100)), { default: () => 0 }),
+    enableAiSearch:        S.optionalWith(S.Int.pipe(S.between(0, 100)), { default: () => 0   }),
     enableApiKeys:         S.optionalWith(S.Int.pipe(S.between(0, 100)), { default: () => 100 }),
     enableAuditLog:        S.optionalWith(S.Int.pipe(S.between(0, 100)), { default: () => 100 }),
-    enableExport:          S.optionalWith(S.Int.pipe(S.between(0, 100)), { default: () => 0 }),
-    enableMfa:             S.optionalWith(S.Int.pipe(S.between(0, 100)), { default: () => 0 }),
+    enableExport:          S.optionalWith(S.Int.pipe(S.between(0, 100)), { default: () => 0   }),
+    enableMfa:             S.optionalWith(S.Int.pipe(S.between(0, 100)), { default: () => 0   }),
     enableNotifications:   S.optionalWith(S.Int.pipe(S.between(0, 100)), { default: () => 100 }),
-    enableOAuth:           S.optionalWith(S.Int.pipe(S.between(0, 100)), { default: () => 0 }),
+    enableOAuth:           S.optionalWith(S.Int.pipe(S.between(0, 100)), { default: () => 0   }),
     enableRealtime:        S.optionalWith(S.Int.pipe(S.between(0, 100)), { default: () => 100 }),
-    enableWebhooks:        S.optionalWith(S.Int.pipe(S.between(0, 100)), { default: () => 0 }),
+    enableWebhooks:        S.optionalWith(S.Int.pipe(S.between(0, 100)), { default: () => 0   }),
 });
 const WebhookUrlSchema = S.String.pipe(
     S.filter((value) => {
@@ -294,47 +294,19 @@ class Notification extends Model.Class<Notification>('Notification')({
     updatedAt:    Model.DateTimeUpdateFromDate,
 }) {}
 
-// --- [AGENT: SESSION] --------------------------------------------------------
-class AgentSession extends Model.Class<AgentSession>('AgentSession')({
-    id:            Model.Generated(S.UUID),
-    appId:         S.UUID,
-    userId:        Model.FieldOption(S.UUID),
-    runId:         S.UUID,
-    status:        AgentSessionStatusSchema,
-    toolCallCount: S.Int,
-    error:         Model.FieldOption(S.String),
-    metadata:      AgentMetadataSchema,
-    startedAt:     Model.Generated(S.DateFromSelf),
-    endedAt:       Model.FieldOption(S.DateFromSelf),
-    updatedAt:     Model.DateTimeUpdateFromDate,
-}) {}
-
-// --- [AGENT: TOOL_CALL] ------------------------------------------------------
-class AgentToolCall extends Model.Class<AgentToolCall>('AgentToolCall')({
-    id:         Model.Generated(S.UUID),
-    appId:      S.UUID,
-    sessionId:  S.UUID,
-    runId:      S.UUID,
-    sequence:   S.Int,
-    operation:  S.NonEmptyTrimmedString,
-    params:     S.Unknown,
-    result:     Model.FieldOption(S.Unknown),
-    durationMs: S.Int,
-    status:     AgentToolCallStatusSchema,
-    error:      Model.FieldOption(S.String),
-    createdAt:  Model.Generated(S.DateFromSelf),
-}) {}
-
-// --- [AGENT: CHECKPOINT] -----------------------------------------------------
-class AgentCheckpoint extends Model.Class<AgentCheckpoint>('AgentCheckpoint')({
-    sessionId:    S.UUID,
-    appId:        S.UUID,
-    loopState:    S.Unknown,
-    chatJson:     S.String,
-    stateHash:    S.String,
-    sceneSummary: Model.FieldOption(S.Unknown),
-    sequence:     S.Int,
-    updatedAt:    Model.DateTimeUpdateFromDate,
+// --- [AGENT: JOURNAL] --------------------------------------------------------
+class AgentJournal extends Model.Class<AgentJournal>('AgentJournal')({
+    id:          Model.Generated(S.UUID),
+    appId:       S.UUID,
+    sessionId:   S.UUID,
+    runId:       S.UUID,
+    sequence:    S.Int.pipe(S.greaterThanOrEqualTo(0)),
+    entryKind:   AgentJournalEntryKindSchema,
+    status:      Model.FieldOption(AgentJournalStatusSchema),
+    operation:   Model.FieldOption(S.NonEmptyTrimmedString),
+    payloadJson: S.Unknown,
+    stateHash:   Model.FieldOption(S.String),
+    createdAt:   Model.Generated(S.DateFromSelf),
 }) {}
 
 // --- [INFRA: KV_STORE] -------------------------------------------------------
@@ -349,8 +321,8 @@ class KvStore extends Model.Class<KvStore>('KvStore')({
 // --- [EXPORT] ----------------------------------------------------------------
 
 export {
-    AgentCheckpoint, AgentMetadataSchema, AgentPersistenceEntitySchema, AgentPersistenceEntityValues, AgentSession,
-    AgentSessionStatusSchema, AgentSessionStatusValues, AgentToolCall, AgentToolCallStatusSchema, AgentToolCallStatusValues,
+    AgentJournal, AgentJournalEntryKindSchema, AgentJournalEntryKindValues, AgentJournalStatusSchema,
+    AgentJournalStatusValues, AgentMetadataSchema, AgentPersistenceEntitySchema, AgentPersistenceEntityValues,
     ApiKey, App, AppWebhookSchema, Asset, AuditLog, Job, JobCorrelationSchema, JobDlq, JobPrioritySchema, JobStatusSchema, KvStore, MfaSecret, Notification, NotificationChannelSchema, NotificationCorrelationSchema, NotificationDeliveryErrorSchema, NotificationDeliverySchema, NotificationStatusSchema,
     AppSettingsDefaults, AppSettingsSchema, FeatureFlagsSchema,
     AuditOperationSchema, PreferencesSchema, OAuthProviderSchema, SearchSurfaceSchema, SearchSurfaceValues,

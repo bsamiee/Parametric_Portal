@@ -1,376 +1,366 @@
 # [H1][CONCURRENCY]
->**Dictum:** *STM composes atomic transactions; fibers structure concurrent lifecycles; coordination primitives replace locks, condition variables, and polling loops.*
+>**Dictum:** *Concurrency is explicit coordination plus explicit ownership: signal once, bound contention, and encode cancellation paths in the rail.*
 
-STM (Software Transactional Memory) provides lock-free, composable atomic operations across transactional data structures. Fibers are lightweight threads with structured lifecycles. Coordination primitives (Deferred, Semaphore, Pool, Queue) gate, signal, and bound concurrent work. All snippets assume `import { STM, TMap, TRef, TArray, Deferred, Queue, Effect, Fiber, Stream, Channel, Option, Duration, pipe } from "effect"`.
+<br>
+
+Concurrency here is ownership algebra, not syntax sugar. Every fork, queue, permit, and transport is an allocation event that must declare lifetime, interruption, and contention policy. The sections below encode those decisions as values so pressure, shutdown, and cancellation remain inspectable and composable.
 
 ---
-## [1][STM_TRANSACTIONS]
->**Dictum:** *STM.gen composes reads and writes across multiple transactional variables into a single atomic unit -- no locks, no deadlocks, automatic retry on conflict.*
+## [1][FIBER_OWNERSHIP_AND_HANDSHAKE]
+>**Dictum:** *Fork is allocation; every fork requires an ownership decision (`join`, `awaitAll`, `interruptAll`, or scoped lifetime).*
 
-`STM<A, E, R>` is a speculative transaction: reads/writes tracked in a journal, validated at commit. On conflict (overlapping writes from another fiber), the runtime re-executes from scratch. `STM.commit` converts to `Effect`. `STM.retry` blocks until any observed variable changes -- replaces condition variables. `STM.orTry` falls back when the primary branch retries (not failures -- use `STM.orElse` for failures). `STM.check(predicate)` retries until predicate holds.
+<br>
 
-```typescript
-// --- [STM_TRANSACTIONS] ------------------------------------------------------
-import { STM, TMap, TRef, Option, Effect, pipe } from "effect";
+```ts
+import { Chunk, Deferred, Effect, Fiber, Queue } from "effect";
 
-type Session = { readonly id: string; readonly tenantId: string; readonly expiresAt: number };
-
-// Atomic multi-variable transaction: balance transfer across two TMap entries
-const transfer = (
-    balances: TMap.TMap<string, number>,
-    from: string,
-    to: string,
-    amount: number,
-): Effect.Effect<void> =>
-    STM.commit(
-        STM.gen(function* () {
-            const source = yield* TMap.get(balances, from);
-            yield* Option.match(source, {
-                onNone: () => STM.fail(new Error("source not found")),
-                onSome: (balance) =>
-                    STM.gen(function* () {
-                        // why: STM.check retries until balance sufficient -- no polling
-                        yield* STM.check(() => balance >= amount);
-                        yield* TMap.set(balances, from, balance - amount);
-                        yield* TMap.merge(balances, to, amount, (old, delta) => old + delta);
-                    }),
-            });
-        }),
-    );
-
-// STM.retry + Option.match: block until session appears in map
-const awaitSession = (
-    sessions: TMap.TMap<string, Session>,
-    id: string,
-): Effect.Effect<Session> =>
-    STM.commit(
-        STM.gen(function* () {
-            const found = yield* TMap.get(sessions, id);
-            return yield* Option.match(found, {
-                onNone: () => STM.retry,
-                onSome: STM.succeed,
-            });
-        }),
-    );
-
-// STM.orTry: fall back when primary retries -- not when it fails
-const takeOrNone = (
-    sessions: TMap.TMap<string, Session>,
-    id: string,
-): Effect.Effect<Option.Option<Session>> =>
-    STM.commit(
-        pipe(
-            STM.gen(function* () {
-                const found = yield* TMap.get(sessions, id);
-                return yield* Option.match(found, {
-                    onNone: () => STM.retry,
-                    onSome: (session) => STM.succeed(Option.some(session)),
-                });
-            }),
-            STM.orTry(() => STM.succeed(Option.none())),
+const workerGraph = Effect.scoped(
+  Effect.gen(function* () {
+    const start = yield* Deferred.make<void>();
+    const queue = yield* Queue.bounded<number>(64);
+    const workers = yield* Effect.forEach(
+      [1, 2, 3, 4] as const,
+      (lane) =>
+        Effect.forkScoped(
+          Deferred.await(start).pipe(
+            Effect.zipRight(Queue.offer(queue, lane * 10)),
+            Effect.zipRight(Queue.offer(queue, lane * 10 + 1)),
+            Effect.as(lane),
+          ),
         ),
+      { concurrency: "unbounded" },
     );
-
-// TRef: single-variable transactional state -- compose with TMap in STM.gen
-const conditionalIncrement = (counter: TRef.TRef<number>, ceiling: number): Effect.Effect<number> =>
-    STM.commit(STM.gen(function* () {
-        const current = yield* TRef.get(counter);
-        yield* STM.check(() => current < ceiling);
-        yield* TRef.set(counter, current + 1);
-        return current + 1;
-    }));
-```
-
----
-## [2][TMAP_ADVANCED]
->**Dictum:** *TMap blocking extractions, bulk mutations, and conditional updates replace mutex + condition variable choreography.*
-
-`TMap.takeFirst(map, pf)` extracts + removes the first matching entry, **retrying if none exist** -- a blocking dequeue on arbitrary predicates. `TMap.takeSome(map, pf)` extracts all matching entries with the same retry semantics. `TMap.updateWith(map, key, f)` where `f: Option<V> => Option<V>` atomically inserts, updates, or deletes. `TMap.removeIf`/`TMap.retainIf` with `{ discard: boolean }` control whether removed entries are returned. `TMap.transform(map, f)` rebuilds all entries atomically.
-
-```typescript
-// --- [TMAP_ADVANCED] ---------------------------------------------------------
-import { STM, TMap, TArray, Option, Effect, pipe } from "effect";
-
-type Task = { readonly id: string; readonly priority: number; readonly status: "pending" | "running" };
-
-// takeFirst: blocking dequeue by predicate -- retries until match exists
-const claimHighPriority = (tasks: TMap.TMap<string, Task>): Effect.Effect<readonly [string, Task]> =>
-    STM.commit(
-        TMap.takeFirst(tasks, (key, task) =>
-            task.priority > 5 && task.status === "pending"
-                ? Option.some([key, { ...task, status: "running" as const }] as const)
-                : Option.none(),
-        ),
-    );
-
-// updateWith: atomic conditional update/delete via Option transform
-const completeOrRemove = (tasks: TMap.TMap<string, Task>, id: string): Effect.Effect<void> =>
-    STM.commit(
-        TMap.updateWith(tasks, id, (existing) =>
-            Option.flatMap(existing, (task) =>
-                task.status === "running" ? Option.none() : Option.some(task),
-            ),
-        ),
-    );
-
-// removeIf + retainIf: atomic bulk mutations
-const evictExpired = (
-    sessions: TMap.TMap<string, { expiresAt: number }>,
-    now: number,
-): Effect.Effect<ReadonlyArray<readonly [string, { expiresAt: number }]>> =>
-    STM.commit(TMap.removeIf(sessions, (_, session) => session.expiresAt <= now));
-
-// TArray: fixed-size transactional array for indexed concurrent access
-const swapIndices = (array: TArray.TArray<number>, indexA: number, indexB: number): Effect.Effect<void> =>
-    STM.commit(
-        STM.gen(function* () {
-            const valA = yield* TArray.get(array, indexA);
-            const valB = yield* TArray.get(array, indexB);
-            yield* TArray.update(array, indexA, () => valB);
-            yield* TArray.update(array, indexB, () => valA);
-        }),
-    );
-```
-
----
-## [3][COORDINATION]
->**Dictum:** *Deferred signals once; Semaphore bounds concurrency; Pool manages resource lifecycles; Queue bridges producers and consumers.*
-
-`Deferred.make<A, E>()` returns `Effect<Deferred<A, E>>` -- a one-shot completion primitive. `Deferred.await` suspends calling fiber until `Deferred.succeed`/`fail` fires. Both return `Effect<boolean>` (true if first completion). `Effect.makeSemaphore(n)` returns `Semaphore` with `withPermits(n)(effect)` -- guaranteed release on failure/interruption. `Pool.make` creates fixed-size resource pools; `Pool.makeWithTTL` adds idle eviction. `Queue.bounded` back-pressures; `Queue.sliding` drops oldest; `Queue.dropping` drops newest.
-
-```typescript
-// --- [COORDINATION] ----------------------------------------------------------
-import { Deferred, Effect, Queue, Pool, Duration, pipe } from "effect";
-
-// Deferred: initialization gate -- workers wait until setup completes
-const initGate = Effect.gen(function* () {
-    const ready = yield* Deferred.make<void, never>();
-    yield* Effect.forkScoped(
-        Effect.gen(function* () {
-            yield* Effect.log("initializing...");
-            yield* Effect.sleep(Duration.seconds(1));
-            yield* Deferred.succeed(ready, undefined as void);
-        }),
-    );
-    yield* Deferred.await(ready);
-    yield* Effect.log("initialized -- proceed");
-});
-
-// Semaphore: bound concurrent API calls to N permits
-const bounded = Effect.gen(function* () {
-    const semaphore = yield* Effect.makeSemaphore(10);
-    // why: withPermits(n) acquires n slots; guaranteed release on failure/interruption
-    const throttled = <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, R> =>
-        semaphore.withPermits(1)(effect);
-    return { throttled } as const;
-});
-
-// Pool: scoped resource pool with TTL eviction -- lifetime tied to enclosing Scope
-const connectionPool = Pool.makeWithTTL({
-    acquire: Effect.succeed({ query: (sql: string) => Effect.succeed(sql) }),
-    min: 2, max: 10, timeToLive: Duration.minutes(5),
-});
-
-// Queue backpressure modes
-const queues = Effect.gen(function* () {
-    const lossless = yield* Queue.bounded<string>(128);    // blocks producer when full
-    const latestState = yield* Queue.sliding<string>(32);  // evicts oldest on overflow
-    const bestEffort = yield* Queue.dropping<string>(32);  // discards newest on overflow
-    return { lossless, latestState, bestEffort } as const;
-});
-```
-
----
-## [4][FIBER_LIFECYCLE]
->**Dictum:** *forkScoped ties fiber to ambient Scope; race auto-interrupts the loser; interrupt masking protects critical sections.*
-
-`Effect.fork` spawns a detached fiber. `Effect.forkScoped` ties fiber lifetime to the enclosing `Scope` -- canonical for service constructors. `Effect.forkDaemon` escapes scope entirely. `Fiber.join` propagates errors; `Fiber.await` returns `Exit`. `Effect.race` runs two effects concurrently -- first to complete wins, loser auto-interrupted. `Effect.raceAll` for N effects. `Fiber.awaitAll` joins N fibers, returning `Array<Exit<A, E>>`. `Effect.uninterruptible` masks interruption for critical sections; `Effect.interruptible` re-opens it.
-
-```typescript
-// --- [FIBER_LIFECYCLE] -------------------------------------------------------
-import { Effect, Fiber, Duration, Scope, pipe } from "effect";
-
-// forkScoped: worker fibers torn down when enclosing Scope closes
-const spawnWorkers = (
-    count: number,
-    work: Effect.Effect<void>,
-): Effect.Effect<ReadonlyArray<Fiber.RuntimeFiber<void>>, never, Scope> =>
-    Effect.forEach(
-        Array.from({ length: count }, (_, index) => index),
-        () => Effect.forkScoped(Effect.forever(work)),
-    );
-
-// race: hedged request -- primary + delayed fallback, loser auto-interrupted
-const hedged = <A, E>(
-    primary: Effect.Effect<A, E>,
-    fallback: Effect.Effect<A, E>,
-    delay: Duration.DurationInput,
-): Effect.Effect<A, E> =>
-    Effect.race(
-        primary,
-        pipe(Effect.sleep(delay), Effect.zipRight(fallback)),
-    );
-
-// Fiber.awaitAll: fan-out N fibers, join all exits
-const fanOutJoin = <A, E>(effects: ReadonlyArray<Effect.Effect<A, E>>) =>
-    Effect.gen(function* () {
-        const fibers = yield* Effect.forEach(effects, Effect.fork);
-        return yield* Fiber.awaitAll(fibers);
-    });
-
-// Interrupt masking: uninterruptible critical section, interruptible cleanup
-const safeCommit = <A, E, R>(commit: Effect.Effect<A, E, R>, cleanup: Effect.Effect<void, never, R>) =>
-    pipe(Effect.uninterruptible(commit), Effect.tap(() => Effect.interruptible(cleanup)));
-```
-
----
-## [5][STREAM_CONCURRENCY]
->**Dictum:** *mergeAll interleaves N streams; broadcast fans out to N consumers; zipLatest combines reactive signals.*
-
-`Stream.mergeAll` merges N streams with bounded concurrency. `Stream.merge` interleaves two streams non-deterministically. `Stream.broadcast(stream, maximumLag)` fans out to N consumers -- each receives ALL elements, bounded by lag. `Stream.broadcastDynamic` allows consumers to join/leave at runtime. `Stream.distributedWith(stream, n, decide)` partitions by predicate. `Stream.zipLatest` combines latest values from two streams (reactive combineLatest).
-
-```typescript
-// --- [STREAM_CONCURRENCY] ----------------------------------------------------
-import { Stream, Effect, Duration, pipe } from "effect";
-
-// mergeAll: N source streams into one with bounded concurrency
-const merged = Stream.mergeAll(
-    [Stream.make("a1", "a2"), Stream.make("b1", "b2"), Stream.make("c1", "c2")],
-    { concurrency: 3 },
+    yield* Deferred.succeed(start, undefined);
+    const lanes = yield* Effect.all(workers.map(Fiber.join), { concurrency: "unbounded" });
+    const values = yield* Queue.takeAll(queue);
+    return {
+      lanes,
+      values:    Chunk.toReadonlyArray(values),
+      invariant: lanes.length === 4 && Chunk.size(values) === 8,
+    } as const;
+  }),
 );
+```
 
-// broadcast: fan-out to N consumers, each sees all elements, max lag bounded
-const fanOut = <A, E, R>(source: Stream.Stream<A, E, R>) =>
-    pipe(
-        Stream.broadcast(source, 2, 16),
-        Effect.flatMap(([c1, c2]) =>
-            Effect.all([Stream.runCollect(c1), Stream.runCollect(c2)], { concurrency: 2 }),
+**Ownership laws:**<br>
+- `forkScoped` ties worker lifetime to scope; detached fibers require explicit finalizers.
+- `Effect.all(workers.map(Fiber.join))` keeps failure propagation in-rail without detached exit post-processing.
+- one-shot `Deferred` handshakes remove ambient start ordering.
+
+**Invariant:** worker completion count and emitted queue cardinality are both explicit output values.
+
+---
+## [2][QUEUE_STRATEGY_AND_SHUTDOWN_PROTOCOL]
+>**Dictum:** *Queue strategy is data-loss policy: `bounded` backpressures, `dropping` sheds, `sliding` preserves recency.*
+
+<br>
+
+```ts
+import { Chunk, Duration, Effect, Option, Queue } from "effect";
+
+const queuePolicySurface = Effect.scoped(
+  Effect.gen(function* () {
+  const bounded = yield* Effect.acquireRelease(Queue.bounded<number>(2), Queue.shutdown);
+  const dropping = yield* Effect.acquireRelease(Queue.dropping<number>(2), Queue.shutdown);
+  const sliding = yield* Effect.acquireRelease(Queue.sliding<number>(2), Queue.shutdown);
+  yield* Effect.all([
+    Queue.offer(bounded,  1),  Queue.offer(bounded, 2), Queue.offer(dropping, 1),
+    Queue.offer(dropping, 2),  Queue.offer(sliding, 1), Queue.offer(sliding,  2),
+  ]);
+  const boundedThird = yield* Queue.offer(bounded, 3).pipe(Effect.timeoutOption(Duration.millis(5)),);
+  const droppingThird = yield* Queue.offer(dropping, 3);
+  const slidingThird = yield* Queue.offer(sliding, 3);
+  const boundedValues = yield* Queue.takeAll(bounded);
+  const droppingValues = yield* Queue.takeAll(dropping);
+  const slidingValues = yield* Queue.takeAll(sliding);
+  const boundedSnapshot =  Chunk.toReadonlyArray(boundedValues);
+  const droppingSnapshot = Chunk.toReadonlyArray(droppingValues);
+  const slidingSnapshot =  Chunk.toReadonlyArray(slidingValues);
+  return {
+    boundedThird, droppingThird, slidingThird, boundedSnapshot, droppingSnapshot, slidingSnapshot,
+    invariant:
+      Option.isNone(boundedThird) &&
+      droppingThird === false &&
+      slidingSnapshot[0] === 2 &&
+      slidingSnapshot[1] === 3,
+  } as const;
+}),
+);
+```
+
+**Queue laws:**<br>
+- bounded policy must declare what waits and for how long.
+- dropping/sliding semantics are product behavior, not logging behavior.
+- `acquireRelease` finalizers keep shutdown ownership explicit even on failure paths.
+
+**Invariant:** backpressure, shedding, and recency outcomes are returned as first-class booleans and snapshots.
+
+---
+## [3][PERMIT_ALGEBRA_AND_LOAD_SHEDDING]
+>**Dictum:** *Use permits as the canonical contention model; shape admission with blocking (`withPermits`) or shedding (`withPermitsIfAvailable`).*
+
+<br>
+
+```ts
+import { Duration, Effect, Option, Ref } from "effect";
+
+const permitPolicySurface = Effect.gen(function* () {
+  const semaphore = yield* Effect.makeSemaphore(2);
+  const admitted = yield* Ref.make(0);
+  const shed = yield* Ref.make(0);
+  const BlockingDelay = Duration.millis(8);
+  const SheddingDelay = Duration.millis(2);
+  const blockingRun = yield* Effect.all(
+    [1, 2, 3, 4].map((id) =>
+      semaphore.withPermits(1)(
+        Effect.sleep(BlockingDelay).pipe(
+          Effect.zipRight(Ref.update(admitted, (n) => n + 1)),
+          Effect.as(id),
         ),
+      ),
+    ),
+    { concurrency: "unbounded" },
+  );
+  const shedRun = yield* Effect.all(
+    [11, 12, 13, 14].map((id) =>
+      semaphore.withPermitsIfAvailable(1)(
+        Effect.sleep(SheddingDelay).pipe(
+          Effect.zipRight(Ref.update(admitted, (n) => n + 1)),
+          Effect.as(id),
+        ),
+      ).pipe(
+        Effect.tap((result) =>
+          Option.match(result, {
+            onNone: () => Ref.update(shed, (n) => n + 1),
+            onSome: () => Effect.void,
+          }),
+        ),
+      ),
+    ),
+    { concurrency: "unbounded" },
+  );
+  const admittedCount = yield* Ref.get(admitted);
+  const shedCount = yield* Ref.get(shed);
+  return {
+    blockingRun, shedRun, admittedCount, shedCount,
+    invariant:
+      admittedCount === blockingRun.length + shedRun.filter(Option.isSome).length &&
+      shedCount === shedRun.filter(Option.isNone).length,
+  } as const;
+});
+```
+
+**Permit laws:**<br>
+- switch from blocking to shedding only with explicit product policy.
+- shed counts are primary runtime signals.
+- semaphore boundaries must wrap the critical section itself.
+
+**Invariant:** admissions and sheds reconcile exactly against observed optional results.
+
+---
+## [4][STM_COORDINATION_WITH_TRANSACTIONAL_SIGNALING]
+>**Dictum:** *Cross-structure consistency (`TQueue` + `TMap` + `TSemaphore` + `TDeferred`) belongs in one transactional model.*
+
+<br>
+
+```ts
+import { Duration, Effect, Fiber, Option, STM, TDeferred, TMap, TQueue, TSemaphore } from "effect";
+
+const transactionalCoordinator = Effect.gen(function* () {
+  const jobs = yield* STM.commit(TQueue.bounded<readonly [string, number]>(32));
+  const inFlight = yield* STM.commit(TMap.empty<string, number>());
+  const permits = yield* STM.commit(TSemaphore.make(2));
+  const done = yield* STM.commit(TDeferred.make<void>());
+  const CompletionSignal = "observed" as const;
+  const WorkerDelay = Duration.millis(3);
+  yield* STM.commit(
+    TQueue.offerAll(jobs, [
+      ["tenant-a", 1], ["tenant-b", 1], ["tenant-a", 2],
+      ["tenant-c", 1], ["tenant-b", 3], ["tenant-a", 1],
+    ]),
+  );
+  const completionObserver = yield* Effect.fork(
+    STM.commit(TDeferred.await(done)).pipe(Effect.as(CompletionSignal)),
+  );
+  const fibers = yield* Effect.forEach(
+    [0, 1, 2, 3, 4, 5] as const,
+    () =>
+      Effect.fork(
+        TSemaphore.withPermits(
+          STM.commit(
+            TQueue.take(jobs).pipe(
+              STM.flatMap(([tenant, delta]) =>
+                TMap.updateWith(inFlight, tenant, (current) =>
+                  Option.some(Option.getOrElse(current, () => 0) + delta),
+                ).pipe(STM.as(tenant)),
+              ),
+            ),
+          ).pipe(Effect.zipLeft(Effect.sleep(WorkerDelay))),
+          permits,
+          1,
+        ),
+      ),
+    { concurrency: "unbounded" },
+  );
+  yield* Fiber.awaitAll(fibers);
+  yield* STM.commit(TDeferred.succeed(done, undefined));
+  const completionSignal = yield* Fiber.join(completionObserver);
+  const snapshot = yield* STM.commit(TMap.toArray(inFlight));
+  const available = yield* STM.commit(TSemaphore.available(permits));
+  return {
+    completionSignal, snapshot, available,
+    invariant: completionSignal === CompletionSignal && snapshot.length === 3 && available === 2,
+  } as const;
+});
+```
+
+**STM laws:**<br>
+- dequeue plus state transition belongs in the same committed transaction.
+- admission remains explicit and separate in `TSemaphore` permits.
+- `TDeferred` completion is useful only when at least one distinct observer awaits it.
+
+**Invariant:** transactional cardinality and restored permit count are explicit outputs.
+
+---
+## [5][INTERRUPTION_PATHS_AND_RELEASE_GUARANTEES]
+>**Dictum:** *Interruption is a first-class runtime event; cleanup must be encoded in the effect graph.*
+
+<br>
+
+```ts
+import { Deferred, Effect, Fiber, Queue } from "effect";
+
+const interruptionSurface = Effect.scoped(
+  Effect.gen(function* () {
+    const queue = yield* Queue.bounded<number>(16);
+    const cleaned = yield* Deferred.make<void>();
+    const worker = Queue.take(queue).pipe(
+      Effect.tap((n) => Effect.logDebug(`worker:${n}`)),
+      Effect.forever,
+      Effect.onInterrupt(() =>
+        Queue.shutdown(queue).pipe(
+          Effect.zipRight(Deferred.succeed(cleaned, undefined)),
+          Effect.asVoid,
+        ),
+      ),
     );
+    const fiber = yield* Effect.forkScoped(worker);
+    yield* Queue.offerAll(queue, [1, 2, 3, 4]);
+    yield* Fiber.interrupt(fiber);
+    yield* Deferred.await(cleaned);
+    const closed = yield* Queue.isShutdown(queue);
+    return { closed, invariant: closed } as const;
+  }),
+);
+```
 
-// distributedWith: partition by predicate into N downstream queues
-const partitioned = <E, R>(source: Stream.Stream<string, E, R>) =>
-    Stream.distributedWith({
-        self: source, size: 2, maximumLag: 16,
-        decide: (value) => Effect.succeed((index) => index === (value.startsWith("A") ? 0 : 1)),
+**Interruption laws:**<br>
+- interruption handlers are business policy when resources are shared.
+- cleanup effects must be idempotent and local to interrupted scope.
+- interruption correctness is observable through closure and signals.
+
+**Invariant:** cleanup signal completion and queue shutdown state converge to one outcome.
+
+---
+## [6][SCOPED_FANOUT_AND_POOL_CONTENTION]
+>**Dictum:** *Fan-out and pooling are scope-bound resources; lag, replay, and contention limits must be explicit at the call site.*
+
+<br>
+
+```ts
+import { randomUUID } from "node:crypto";
+import { Deferred, Duration, Effect, Fiber, Pool, Ref, Schedule, Stream } from "effect";
+
+const fanoutAndPool = Effect.scoped(
+  Effect.gen(function* () {
+    const done = yield* Deferred.make<void>();
+    const BroadcastStrategy = "suspend" as const;
+    const PoolTtlStrategy = "usage" as const;
+    const PoolStepDelay = Duration.millis(1);
+    const streams = yield* Stream.range(1, 60).pipe(
+      Stream.schedule(Schedule.spaced(Duration.millis(2))),
+      Stream.broadcast(2, { capacity: 32, strategy: BroadcastStrategy, replay: 0 }),
+    );
+    const [slow, fast] = streams;
+    const pool = yield* Pool.makeWithTTL({
+      acquire: Effect.sync(() => ({ id: randomUUID(), closed: false } as const)),
+      min: 1,
+      max: 4,
+      concurrency: 4,
+      timeToLive: Duration.seconds(20),
+      timeToLiveStrategy: PoolTtlStrategy,
     });
-
-// zipLatest: combine latest values from two reactive streams (combineLatest)
-const combined = Stream.zipLatest(Stream.make(1, 2, 3), Stream.make("a", "b"));
+    const invalidated = yield* Ref.make(0);
+    const sumFiber = yield* Effect.fork(
+      fast.pipe(
+        Stream.interruptWhenDeferred(done),
+        Stream.runFold(0, (sum, n) => sum + n),
+      ),
+    );
+    const processedFiber = yield* Effect.fork(
+      slow.pipe(
+        Stream.mapEffect(
+          (n) =>
+            Pool.get(pool).pipe(
+              Effect.flatMap((resource) =>
+                Effect.sleep(PoolStepDelay).pipe(
+                  Effect.zipRight(Pool.invalidate(pool, resource)),
+                  Effect.zipRight(Ref.update(invalidated, (x) => x + 1)),
+                  Effect.as(n),
+                ),
+              ),
+            ),
+          { concurrency: 4 },
+        ),
+        Stream.runFold(0, (count) => count + 1),
+        Effect.ensuring(Deferred.succeed(done, undefined).pipe(Effect.ignore)),
+      ),
+    );
+    const [sum, processed, invalidationCount] = yield* Effect.all([
+      Fiber.join(sumFiber),
+      Fiber.join(processedFiber),
+      Ref.get(invalidated),
+    ]);
+    return {
+      sum, processed, invalidationCount,
+      invariant: processed === invalidationCount && processed <= 60,
+    } as const;
+  }),
+);
 ```
 
+**Concurrency laws:**<br>
+- fan-out lag strategy and replay budget define causal pressure boundaries.
+- pool `max` and stream map concurrency must communicate one contention policy.
+- termination signaling (`Deferred`) should govern consumer shutdown explicitly.
+
+**Invariant:** invalidation count and processed cardinality remain policy-aligned under bounded contention.
+
 ---
-## [6][CHANNEL_PIPELINES]
->**Dictum:** *Channels are the backpressure-aware primitive underlying Stream/Sink -- compose pipeline stages with typed input/output/done/error.*
+## [7][WORKER_RUNNER_AND_BROWSER_TRANSPORT_BRIDGES]
+>**Dictum:** *Cross-runtime lanes (`@effect/platform`, `@effect/platform-browser`) must share one ownership contract for close-latch and interruption semantics.*
 
-`Channel<out Env, in InErr, in InElem, in InDone, out OutErr, out OutElem, out OutDone>` is bidirectional. `Channel.pipeTo` connects output to input. `Channel.mergeWith` combines two channels with concurrency control. `Channel.mapOutEffectPar(f, n)` enables bounded parallel processing. `Channel.readWith` pattern-matches input (element/error/done). Bridge ops: `Channel.fromQueue`, `Channel.toQueue`, `Channel.fromEffect`.
+<br>
 
-```typescript
-// --- [CHANNEL_PIPELINES] -----------------------------------------------------
-import { Channel, Queue, Effect, pipe } from "effect";
+```ts
+import * as WorkerRunner from "@effect/platform/WorkerRunner";
+import * as BrowserWorkerRunner from "@effect/platform-browser/BrowserWorkerRunner";
+import * as Transferable from "@effect/platform/Transferable";
+import { Effect, Layer } from "effect";
 
-// readWith: pattern match on upstream events -- recursive pipeline stage
-const transformStage = <E>(): Channel.Channel<never, E, string, void, E, string, void> =>
-    Channel.readWith({
-        onInput: (input: string) =>
-            pipe(Channel.write(input.toUpperCase()), Channel.flatMap(() => transformStage<E>())),
-        onFailure: (error: E) => Channel.fail(error),
-        onDone: () => Channel.void,
-    });
-
-// pipeTo: connect source -> transform stage; fromQueue/toQueue bridge Queue
-const pipeline = <E>(
-    source: Channel.Channel<never, unknown, unknown, unknown, E, string, void>,
-) => Channel.pipeTo(source, transformStage<E>());
+const workerLane = WorkerRunner.layer((payload: Uint8Array) =>
+  Transferable.addAll([payload.buffer]).pipe(Effect.zipRight(Effect.succeed(payload.byteLength * 2)),),
+);
+const launchWorkerLane = (port: MessagePort | Window) =>
+  WorkerRunner.launch(workerLane).pipe(
+    Effect.provide(Layer.mergeAll(BrowserWorkerRunner.layerMessagePort(port), WorkerRunner.layerCloseLatch)),
+    Effect.provideServiceEffect(Transferable.Collector, Transferable.makeCollector),
+  );
 ```
 
----
-## [7][HAZARDS]
->**Dictum:** *Starvation, livelock, and unbounded growth are structural defects -- detect via topology, not symptoms.*
+**Bridge laws:**<br>
+- `layerCloseLatch` is the canonical close signal across worker lanes.
+- browser runner binding is transport ownership, not business logic.
+- transferables are explicit payload policy, not implicit transport side effects.
 
-```typescript
-// --- [HAZARDS] ---------------------------------------------------------------
-
-// [ANTI-PATTERN] Unbounded fork: each request spawns a fiber with no backpressure
-// const handle = (request: Request) => Effect.fork(process(request));
-// [CORRECT] Bounded queue absorbs burst; fixed worker pool drains at controlled rate
-// yield* Queue.bounded<Request>(256) -> N forkScoped workers -> Queue.take loop
-
-// [ANTI-PATTERN] Effect.runSync inside Effect pipeline -- sync-over-async starvation
-// const bad = Effect.flatMap(fetchData, (data) => Effect.sync(() => Effect.runSync(parse(data))));
-// [CORRECT] Compose effects; never collapse mid-pipeline
-// const good = Effect.flatMap(fetchData, (data) => parse(data));
-
-// [ANTI-PATTERN] STM livelock: long-running transaction contends with high-frequency writers
-// STM.gen(function* () {
-//     const all = yield* TMap.toArray(bigMap);        // reads entire map
-//     const result = expensiveComputation(all);        // time passes
-//     yield* TMap.set(bigMap, "result", result);       // conflict -> re-execute from scratch
-// })
-// [CORRECT] Snapshot outside transaction, compute, then commit minimal write
-// const snapshot = yield* STM.commit(TMap.toArray(bigMap));
-// const result = expensiveComputation(snapshot);       // pure, outside STM
-// yield* STM.commit(TMap.set(bigMap, "result", result));
-
-// [ANTI-PATTERN] Uninterruptible region blocks graceful shutdown
-// Effect.uninterruptible(Effect.forever(pollLoop));
-// [CORRECT] Interruptible body with uninterruptible cleanup only
-// Effect.forever(pipe(pollLoop, Effect.onInterrupt(() => cleanup)));
-
-// [ANTI-PATTERN] forkDaemon for service work -- escapes scope, leaks on shutdown
-// Effect.forkDaemon(workerLoop);
-// [CORRECT] forkScoped ties worker lifetime to service scope
-// Effect.forkScoped(workerLoop);
-```
-
-| [INDEX] | [HAZARD]                | [SYMPTOM]                               | [STRUCTURAL_FIX]                              |
-| :-----: | ----------------------- | --------------------------------------- | --------------------------------------------- |
-|   [1]   | Unbounded fork          | OOM, fiber count grows without limit    | `Queue.bounded` + fixed worker pool           |
-|   [2]   | Sync-over-async         | Deadlock, blocked fiber scheduler       | Compose effects; `Effect.promise` at boundary |
-|   [3]   | STM livelock            | Transaction retries spike under load    | Minimize read-set; compute outside STM        |
-|   [4]   | Uninterruptible regions | Shutdown hangs, fibers refuse interrupt | Scope `uninterruptible` to critical sections  |
-|   [5]   | forkDaemon leak         | Orphan fibers outlive service scope     | `forkScoped` in service constructors          |
-|   [6]   | Mutable shared state    | Data races across fibers                | `TMap`/`TRef`/`Ref` -- never JS `Map`/`Set`   |
-
----
-## [8][RULES]
->**Dictum:** *Rules compress into constraints.*
-
-- [ALWAYS] `STM.commit` to execute any `STM` value as an `Effect`.
-- [ALWAYS] Compose multiple `TMap`/`TRef`/`TArray` operations inside a single `STM.gen` for atomicity.
-- [ALWAYS] `STM.check(() => condition)` to guard transactions -- retries until predicate holds.
-- [ALWAYS] `STM.orTry` for fallback branches when the primary transaction enters retry.
-- [ALWAYS] `Deferred.make` for one-shot signaling; `Deferred.await` to suspend until completion.
-- [ALWAYS] `Effect.makeSemaphore(n)` + `withPermits` for bounded concurrency gates.
-- [ALWAYS] `Effect.forkScoped` inside service constructors so fibers tear down with scope.
-- [ALWAYS] `Queue.bounded` as default -- makes backpressure explicit.
-- [ALWAYS] `Pool.makeWithTTL` for connection/resource pools with idle eviction.
-- [ALWAYS] Minimize STM transaction read-set -- long transactions under contention livelock.
-- [NEVER] Mix `async/await` with STM or Queue operations -- use `Effect.promise` at boundaries.
-- [NEVER] Share mutable JS objects (`Map`, `Set`, `Array`) across fibers -- use `TMap`, `Ref`, `Queue`.
-- [NEVER] `Effect.forkDaemon` for work that must respect service lifecycle -- use `forkScoped`.
-- [NEVER] `Effect.runSync`/`Effect.runPromise` inside Effect pipelines -- compose effects.
-- [NEVER] `Effect.uninterruptible` around unbounded loops -- scope to critical sections only.
-- [NEVER] Create `Ref`/`TMap`/`Deferred` at module level -- always inside `Effect.gen` or scoped constructor.
-
----
-## [9][QUICK_REFERENCE]
-
-| [INDEX] | [PRIMITIVE]        | [CONSTRUCTOR]                      | [KEY_OPS]                                                    | [DOMAIN]                            |
-| :-----: | ------------------ | ---------------------------------- | ------------------------------------------------------------ | ----------------------------------- |
-|   [1]   | `STM<A,E,R>`       | `STM.gen` + `STM.commit`           | `retry`, `orTry`, `check`, `orElse`                          | Atomic multi-variable transactions  |
-|   [2]   | `TMap<K,V>`        | `TMap.empty()` / `TMap.make()`     | `get`, `set`, `merge`, `takeFirst`, `takeSome`, `updateWith` | Session registries, atomic caches   |
-|   [3]   | `TRef<A>`          | `TRef.make(a)`                     | `get`, `set`, `update`, `modify`                             | Single-variable transactional state |
-|   [4]   | `TArray<A>`        | `TArray.make()` / `TArray.empty`   | `get`, `update`, `transform`, `forEach`                      | Indexed concurrent access           |
-|   [5]   | `Deferred<A,E>`    | `Deferred.make()`                  | `await`, `succeed`, `fail`, `poll`                           | One-shot fiber rendezvous           |
-|   [6]   | `Semaphore`        | `Effect.makeSemaphore(n)`          | `withPermits(n)(effect)`                                     | Bounded concurrent access           |
-|   [7]   | `Pool<A,E>`        | `Pool.make` / `Pool.makeWithTTL`   | `get`, scoped lifecycle                                      | Connection/resource pools           |
-|   [8]   | `Queue<A>`         | `Queue.bounded(n)`                 | `offer`, `take`, `takeAll`, `shutdown`                       | Fiber-to-fiber handoff              |
-|   [9]   | `Fiber<A,E>`       | `Effect.fork` / `forkScoped`       | `join`, `await`, `interrupt`, `awaitAll`                     | Structured concurrency              |
-|  [10]   | `Effect.race`      | `Effect.race(a, b)`                | Loser auto-interrupted                                       | Hedged requests, first-wins         |
-|  [11]   | `Stream.mergeAll`  | `Stream.mergeAll(streams, opts)`   | Concurrent interleave                                        | Multi-source ingestion              |
-|  [12]   | `Stream.broadcast` | `Stream.broadcast(stream, n, lag)` | N consumers, all elements                                    | Fan-out to parallel consumers       |
-|  [13]   | `Stream.zipLatest` | `Stream.zipLatest(a, b)`           | Combine latest values                                        | Reactive signal composition         |
-|  [14]   | `Channel`          | `Channel.readWith` / `pipeTo`      | `write`, `fromQueue`, `toQueue`, `mergeWith`                 | Custom backpressure pipelines       |
-
-Cross-references: `effects.md [2]` for `pipe`/`flow` and `Effect.all` concurrency options, `effects.md [3]` for Schedule retry algebra, `services.md [2]` for `Effect.forkScoped` in scoped constructors, `algorithms.md [1]` for `Stream.groupedWithin` microbatch pipelines, `observability.md [2]` for `FiberRef` context propagation across forked fibers, `performance.md [4]` for backpressure topology with `Queue.bounded`.
+**Invariant:** worker launch, browser transport, and transferable collection are composed through one close-latch contract.

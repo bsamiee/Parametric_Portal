@@ -6,15 +6,23 @@ import { CommandDispatch, CommandDispatchError } from '../protocol/dispatch';
 
 // --- [TYPES] -----------------------------------------------------------------
 
-type Command = Extract<typeof EnvelopeSchema.Type, {_tag: 'command'}>;
+type Command =       Extract<typeof EnvelopeSchema.Type, {_tag: 'command'}>;
 type EventEnvelope = Extract<typeof EnvelopeSchema.Type, {_tag: 'event'}>;
-type Result = Extract<typeof EnvelopeSchema.Type, {_tag: 'result'}>;
-type IdentityBase = { readonly appId: string; readonly runId: string; readonly sessionId: string; readonly traceId: string };
-type LoopState = { readonly attempt: number; readonly command: Command | undefined; readonly correctionCycles: number; readonly identityBase: IdentityBase; readonly operations: ReadonlyArray<typeof OperationSchema.Type>; readonly sequence: number; readonly status: 'Planning' | 'Completed' | 'Failed' };
+type Result =        Extract<typeof EnvelopeSchema.Type, {_tag: 'result'}>;
+type IdentityBase =  Pick<Command, 'appId' | 'runId' | 'sessionId' | 'traceId'>;
+type LoopState = typeof _restoredLoopStateSchema.Type & {
+    readonly command:      Command | undefined;
+    readonly identityBase: IdentityBase;
+};
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
-const _writeOperations = new Set<typeof OperationSchema.Type>(['write.annotation.update', 'write.layer.update', 'write.object.create', 'write.object.delete', 'write.object.update', 'write.viewport.update']);
+const _writeOperations = new Set<typeof OperationSchema.Type>(
+    ['write.annotation.update', 'write.layer.update', 'write.object.create', 'write.object.delete', 'write.object.update', 'write.viewport.update']
+);
+
+// --- [SCHEMA] ----------------------------------------------------------------
+
 const _restoredLoopStateSchema = S.Struct({
     attempt:          S.Int.pipe(S.greaterThanOrEqualTo(1)),
     correctionCycles: S.Int.pipe(S.greaterThanOrEqualTo(0)),
@@ -33,7 +41,13 @@ const _buildCheckpoint = (state: LoopState, sequence: number) => ({
     sessionId: state.identityBase.sessionId,
 });
 const _elapsed = (start: number) => Math.max(0, Math.round(performance.now() - start));
-const _planCommand = (input: { readonly deadline: number; readonly hash: (state: unknown) => string; readonly state: LoopState; readonly writeObjectRef: NonNullable<Command['objectRefs']>[number] }) =>
+const _planCommand = (input: {
+    readonly deadline:       number;
+    readonly idempotency:    (input: { readonly payload: unknown; readonly runId: string; readonly sequence: number }) =>
+        { readonly idempotencyKey: string; readonly payloadHash: string };
+    readonly state:          LoopState;
+    readonly writeObjectRef: NonNullable<Command['objectRefs']>[number];
+}) =>
     pipe(
         Option.fromNullable(input.state.command),
         Option.map((command) => ({ ...command, attempt: input.state.attempt }) satisfies Command),
@@ -46,9 +60,9 @@ const _planCommand = (input: { readonly deadline: number; readonly hash: (state:
             return {
                 _tag: 'command',
                 ...base,
-                attempt: input.state.attempt,
-                deadlineMs: input.deadline,
-                idempotency: isWrite ? { idempotencyKey: `run:${base.runId.slice(0, 8)}:seq:${String(sequence).padStart(4, '0')}`, payloadHash: input.hash(payload) } : undefined,
+                attempt:     input.state.attempt,
+                deadlineMs:  input.deadline,
+                idempotency: isWrite ? input.idempotency({ payload, runId: base.runId, sequence }) : undefined,
                 objectRefs: [input.writeObjectRef],
                 operation,
                 payload,
@@ -81,10 +95,10 @@ class AgentLoop extends Effect.Service<AgentLoop>()('kargadan/AgentLoop', {
                 const batchSummary = Match.value(eventEnvelope).pipe(
                     Match.when({ eventType: 'stream.compacted' }, (streamEvent) =>
                         Option.some({
-                            batchWindowMs: streamEvent.delta.batchWindowMs,
-                            categories: streamEvent.delta.categories,
+                            batchWindowMs:    streamEvent.delta.batchWindowMs,
+                            categories:       streamEvent.delta.categories,
                             containsUndoRedo: streamEvent.delta.containsUndoRedo,
-                            totalCount: streamEvent.delta.totalCount,
+                            totalCount:       streamEvent.delta.totalCount,
                         } satisfies typeof StreamCompactedDeltaSchema.Type),
                     ),
                     Match.orElse(() => Option.none<typeof StreamCompactedDeltaSchema.Type>()),
@@ -162,14 +176,14 @@ class AgentLoop extends Effect.Service<AgentLoop>()('kargadan/AgentLoop', {
                 checkpoint: _buildCheckpoint(nextState, seq),
                 toolCall: {
                     durationMs: _elapsed(start),
-                    error: verified ? Option.none() : Option.some(failureError.message),
-                    operation: verified ? 'command.completed' : 'command.failed',
-                    params: { dedupe: result.dedupe, operation: command.operation, status: result.status },
-                    result: Option.some({ dedupe: result.dedupe, status: result.status, verified }),
-                    runId: state.identityBase.runId,
-                    sequence: seq,
-                    sessionId: state.identityBase.sessionId,
-                    status: verified ? 'ok' as const : 'error' as const,
+                    error:      verified ? Option.none() : Option.some(failureError.message),
+                    operation:  verified ? 'command.completed' : 'command.failed',
+                    params:     { dedupe: result.dedupe, operation: command.operation, status: result.status },
+                    result:     Option.some({ dedupe: result.dedupe, status: result.status, verified }),
+                    runId:      state.identityBase.runId,
+                    sequence:   seq,
+                    sessionId:  state.identityBase.sessionId,
+                    status:     verified ? 'ok' as const : 'error' as const,
                 },
             }).pipe(Effect.andThen(decide));
         };
@@ -183,20 +197,20 @@ class AgentLoop extends Effect.Service<AgentLoop>()('kargadan/AgentLoop', {
         const plan = (state: LoopState): Effect.Effect<LoopState, unknown, unknown> =>
             Effect.gen(function* () {
                 const start = performance.now();
-                const command = yield* _planCommand({ deadline: commandDeadlineMs, hash: persistence.hash, state, writeObjectRef });
+                const command = yield* _planCommand({ deadline: commandDeadlineMs, idempotency: persistence.idempotency, state, writeObjectRef });
                 yield* persistence.persist({
                     appId: state.identityBase.appId,
                     checkpoint: _buildCheckpoint(state, state.sequence + 1),
                     toolCall: {
                         durationMs: _elapsed(start),
-                        error: Option.none(),
-                        operation: 'command.plan',
-                        params: { operation: command.operation, status: state.status },
-                        result: Option.some({ operation: command.operation }),
-                        runId: state.identityBase.runId,
-                        sequence: state.sequence + 1,
-                        sessionId: state.identityBase.sessionId,
-                        status: 'ok' as const,
+                        error:      Option.none(),
+                        operation:  'command.plan',
+                        params:     { operation: command.operation, status: state.status },
+                        result:     Option.some({ operation: command.operation }),
+                        runId:      state.identityBase.runId,
+                        sequence:   state.sequence + 1,
+                        sessionId:  state.identityBase.sessionId,
+                        status:     'ok' as const,
                     },
                 });
                 return yield* execute(state, command);
@@ -212,21 +226,21 @@ class AgentLoop extends Effect.Service<AgentLoop>()('kargadan/AgentLoop', {
                         S.decodeUnknown(_restoredLoopStateSchema)(state).pipe(
                             Effect.map((restored) =>
                                 ({
-                                    attempt: restored.attempt,
-                                    command: undefined,
+                                    attempt:          restored.attempt,
+                                    command:          undefined,
                                     correctionCycles: restored.correctionCycles,
-                                    identityBase: base,
-                                    operations: restored.operations,
-                                    sequence: Math.max(restored.sequence, sequence),
-                                    status: restored.status,
+                                    identityBase:     base,
+                                    operations:       restored.operations,
+                                    sequence:         Math.max(restored.sequence, sequence),
+                                    status:           restored.status,
                                 }) satisfies LoopState,
                             ),
                             Effect.tap((restored) =>
                                 Effect.log('kargadan.harness.resume.restored', {
                                     operations: restored.operations.length,
-                                    sequence: restored.sequence,
-                                    sessionId: restored.identityBase.sessionId,
-                                    status: restored.status,
+                                    sequence:   restored.sequence,
+                                    sessionId:  restored.identityBase.sessionId,
+                                    status:     restored.status,
                                 }),
                             ),
                             Effect.catchAll((error) =>
@@ -252,7 +266,7 @@ class AgentLoop extends Effect.Service<AgentLoop>()('kargadan/AgentLoop', {
                 const fibers = yield* Effect.all([Effect.fork(inboundLoop), Effect.fork(heartbeatLoop)]);
                 const finalState = yield* Effect.iterate(initialState, { body: plan, while: (state) => state.status !== 'Completed' && state.status !== 'Failed' }).pipe(Effect.ensuring(Effect.forEach(fibers, Fiber.interrupt, { discard: true })));
                 const trace = yield* persistence.sessionTrace({
-                    appId: finalState.identityBase.appId,
+                    appId:     finalState.identityBase.appId,
                     sessionId: finalState.identityBase.sessionId,
                 });
                 return { state: finalState, trace } as const;

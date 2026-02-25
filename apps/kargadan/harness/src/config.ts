@@ -1,4 +1,4 @@
-import { Config, Duration, Effect, Schema as S } from 'effect';
+import { Config, Duration, Effect, Match, Option, Schema as S } from 'effect';
 import { DEFAULT_LOOP_OPERATIONS, ObjectRefSchema, OperationSchema } from './protocol/schemas';
 
 // --- [FUNCTIONS] -------------------------------------------------------------
@@ -8,8 +8,21 @@ const _splitCsv = (s: string) => s.split(',').map((v) => v.trim()).filter(Boolea
 // --- [CONSTANTS] -------------------------------------------------------------
 
 const HarnessConfig = {
-    checkpointDatabaseUrl:   Config.redacted('KARGADAN_CHECKPOINT_DATABASE_URL'),
-    commandDeadlineMs:       Config.integer('KARGADAN_COMMAND_DEADLINE_MS').pipe(Config.withDefault(5_000)),
+    checkpointDatabaseUrl:     Config.redacted('KARGADAN_CHECKPOINT_DATABASE_URL'),
+    commandDeadlineMs:         Config.integer('KARGADAN_COMMAND_DEADLINE_MS').pipe(Config.withDefault(5_000)),
+    commandManifestEntityType: Config.string('KARGADAN_COMMAND_MANIFEST_ENTITY_TYPE').pipe(Config.withDefault('command')),
+    commandManifestJson:       Config.string('KARGADAN_COMMAND_MANIFEST_JSON').pipe(Config.withDefault('')),
+    commandManifestNamespace:  Config.string('KARGADAN_COMMAND_MANIFEST_NAMESPACE').pipe(Config.withDefault('kargadan')),
+    commandManifestScopeId:    Config.string('KARGADAN_COMMAND_MANIFEST_SCOPE_ID').pipe(
+        Config.withDefault(''),
+        Effect.flatMap((value) =>
+            Match.value(value.trim()).pipe(
+                Match.when('', () => Effect.succeed(Option.none<string>())),
+                Match.orElse((scopeId) => S.decodeUnknown(S.UUID)(scopeId).pipe(Effect.map(Option.some))),
+            ),
+        ),
+    ),
+    commandManifestVersion:  Config.string('KARGADAN_COMMAND_MANIFEST_VERSION').pipe(Config.withDefault('')),
     correctionCycles:        Config.integer('KARGADAN_CORRECTION_MAX_CYCLES').pipe(Config.withDefault(1)),
     heartbeatIntervalMs:     Config.integer('KARGADAN_HEARTBEAT_INTERVAL_MS').pipe(Config.withDefault(5_000)),
     heartbeatTimeoutMs:      Config.integer('KARGADAN_HEARTBEAT_TIMEOUT_MS').pipe(Config.withDefault(15_000)),

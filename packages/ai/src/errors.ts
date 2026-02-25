@@ -9,7 +9,6 @@ class AiError extends Data.TaggedError('AiError')<{
     readonly reason: 'budget_exceeded' | 'policy_denied' | 'rate_exceeded' | 'request_tokens_exceeded' | 'unknown';
 }> {
     override get message() {return `AiError[${this.operation}/${this.reason}]: ${String(this.cause)}`;}
-    // why: boundary collapse — SDK errors pass through untouched; domain errors pass through; unknown causes wrap with operation context
     static readonly from = (operation: string) => (cause: unknown): AiSdkError.AiError | AiError =>
         Match.value(cause).pipe(
             Match.when(AiSdkError.isAiError, (e) => e),

@@ -147,7 +147,7 @@ internal sealed class SessionEventPublisher {
         OperationTag operationTag) {
         Guid requestGuid = (Guid)requestId;
         string traceIdValue = requestGuid.ToString("N");
-        string spanIdValue = traceIdValue[..16];
+        string spanIdValue = Guid.NewGuid().ToString("N")[..16];
         return DomainBridge.ParseValueObject<TraceId, string>(traceIdValue).Bind((TraceId traceId) =>
             DomainBridge.ParseValueObject<SpanId, string>(spanIdValue).Bind((SpanId spanId) =>
                 TelemetryContext.Create(

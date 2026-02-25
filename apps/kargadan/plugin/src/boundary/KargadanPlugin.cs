@@ -42,9 +42,9 @@ public sealed class KargadanPlugin : PlugIn {
     public KargadanPlugin() : this(timeProvider: TimeProvider.System) { }
     internal KargadanPlugin(TimeProvider timeProvider) => _timeProvider = timeProvider;
     public override PlugInLoadTime LoadTime => PlugInLoadTime.AtStartup;
-    public static Fin<KargadanPlugin> Instance =>
+    internal static Fin<KargadanPlugin> Instance =>
         _instance.Value.ToFin(Error.New(message: "KargadanPlugin has not been loaded."));
-    public Fin<HandshakeEnvelope> HandleHandshake(HandshakeEnvelope.Init init) =>
+    private Fin<HandshakeEnvelope> HandleHandshake(HandshakeEnvelope.Init init) =>
         ReadState().Bind((BoundaryState state) => {
             Instant now = Instant.FromDateTimeOffset(_timeProvider.GetUtcNow());
             Fin<SessionSnapshot> opened = state.SessionHost.Open(
@@ -69,7 +69,7 @@ public sealed class KargadanPlugin : PlugIn {
                     _ => FinFail<HandshakeEnvelope>(Error.New(message: "Unexpected handshake envelope variant.")),
                 });
         });
-    public Fin<CommandResultEnvelope> HandleCommand(
+    private Fin<CommandResultEnvelope> HandleCommand(
         JsonElement envelope,
         EnvelopeIdentity sessionIdentity,
         Func<CommandEnvelope, Fin<CommandResultEnvelope>> onCommand) =>
@@ -80,7 +80,7 @@ public sealed class KargadanPlugin : PlugIn {
             .Bind(onCommand)
             .Bind((CommandResultEnvelope result) =>
                 state.SessionEvents.PublishLifecycleEvent(result: result).Map((_) => result)));
-    public Fin<HeartbeatEnvelope> HandleHeartbeat(HeartbeatEnvelope heartbeat) =>
+    private Fin<HeartbeatEnvelope> HandleHeartbeat(HeartbeatEnvelope heartbeat) =>
         ReadState().Bind((BoundaryState state) => {
             Instant now = Instant.FromDateTimeOffset(_timeProvider.GetUtcNow());
             return state.SessionHost.Timeout(now).Bind((_) =>
@@ -264,9 +264,11 @@ public sealed class KargadanPlugin : PlugIn {
                 timeProvider: _timeProvider);
             ObservationPipeline observationPipeline = new(
                 onBatchFlushed: (EventBatchSummary batch, Instant flushedAt) =>
-                    _ = sessionEvents.PublishBatchEvent(
+                    sessionEvents.PublishBatchEvent(
                         batch: batch,
-                        flushedAt: flushedAt),
+                        flushedAt: flushedAt)
+                    .IfFail(error => RhinoApp.WriteLine(
+                        $"[Kargadan] Batch publish failed: totalCount={batch.TotalCount}, flushedAt={flushedAt}, error={error}")),
                 timeProvider: _timeProvider);
             WebSocketHost webSocketHost = new(
                 dispatcher: DispatchMessageAsync,

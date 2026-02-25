@@ -3,248 +3,262 @@ name: ts-standards
 description: >-
   Sole authority on TypeScript + Effect style, type discipline, error handling,
   concurrency, and module organization in this workspace. MUST be loaded for
-  every TypeScript code interaction. Use when performing ANY TS-related task:
-  (1) writing, editing, creating, reviewing, refactoring, or debugging any
-  .ts/.tsx module, Effect.Service, Layer, tagged error algebra, or schema;
-  (2) implementing domain services, HTTP endpoints, cluster entities, RPC
-  groups, durable workflows, or repository factories;
-  (3) working with @effect/sql, @effect/platform, @effect/cluster,
-  @effect/opentelemetry, @effect/rpc, @effect/workflow, @effect/ai, or any
-  Effect ecosystem package in this monorepo;
-  (4) writing or editing Vitest spec files, @effect/vitest property tests,
-  or test configuration.
+  every TypeScript code interaction. Use when performing ANY TypeScript-related
+  task: (1) writing, editing, creating, reviewing, refactoring, or debugging
+  `.ts/.tsx` modules; (2) implementing domain models, Effect services,
+  persistence adapters, or boundary handlers; (3) configuring TypeScript,
+  Effect, or lint/type-check posture.
 metadata:
   token_estimates:
-    entry_point: 4500
-    full_load: 26500
-    max_load: 70000
+    entry_point: 4300
+    full_load: 18500
+    max_load: 58000
+  refreshed_at: 2026-02-24
 ---
 
 # [H1][TS-STANDARDS]
->**Dictum:** *Minimal-surface discipline unifies TypeScript 6.0 + Effect 3.19 authoring.*
+>**Dictum:** *Functional discipline keeps TypeScript + Effect modules explicit, branch-free, and boundary-safe.*
 
-Single dense style: polymorphic entrypoints over method families, schema only when codec/validation requires it, tagged-error algebras with exhaustive dispatch, Effect.Service capability groups, type inference from runtime values, zero imperative branching.
+<br>
+
+This skill enforces a single dense TypeScript style: runtime-first shapes via `Schema`, explicit error rails via `Data.TaggedError`, expression-only control flow via `Match` + monadic combinators, and boundary-safe services via `Effect.Service` + `Layer`.
 
 ---
 ## [1][LOAD_SEQUENCE]
->**Dictum:** *Selective loading creates blind spots -- load layered.*
+>**Dictum:** *Load references in order; selective loading weakens enforcement.*
 
-Hold all loaded references stable through task completion.
+<br>
 
-**Step 1 -- Foundation (always load first)**
+All steps are mandatory unless marked specialized.
 
-| [IDX] | [REFERENCE]     | [FOCUS]            |
-| :---: | --------------- | ------------------ |
-|  [1]  | `validation.md` | Compliance checks  |
-|  [2]  | `patterns.md`   | Anti-pattern codex |
+**Step 1 -- Foundation (always first)**
 
-**Step 2 -- Core (always load second)**
+| [INDEX] | [REFERENCE]     | [FOCUS]                        |
+| :-----: | :-------------- | ------------------------------ |
+|   [1]   | `validation.md` | Compliance and completion gate |
+|   [2]   | `patterns.md`   | Anti-bloat and module topology |
 
-| [IDX] | [REFERENCE]      | [FOCUS]                            |
-| :---: | ---------------- | ---------------------------------- |
-|  [3]  | `types.md`       | Inference, branded, TaggedEnum     |
-|  [4]  | `effects.md`     | Effect.gen/fn, Schedule, recovery  |
-|  [5]  | `matching.md`    | $match, Match.type/value/valueTags |
-|  [6]  | `composition.md` | Layer topology, pipe/flow, Stream  |
+**Step 2 -- Core (always second)**
+
+| [INDEX] | [REFERENCE]      | [FOCUS]                               |
+| :-----: | :--------------- | ------------------------------------- |
+|   [3]   | `types.md`       | Runtime-first shape design            |
+|   [4]   | `effects.md`     | Effect construction and error rails   |
+|   [5]   | `matching.md`    | Exhaustive expression control flow    |
+|   [6]   | `composition.md` | Layer and module boundary composition |
 
 **Step 3 -- Specialized (load when task requires)**
 
-| [IDX] | [REFERENCE]        | [LOAD_WHEN]                           |
-| :---: | ------------------ | ------------------------------------- |
-|  [7]  | `errors.md`        | Tagged error algebras, Cause/Exit     |
-|  [8]  | `services.md`      | Effect.Service, scoped, caps          |
-|  [9]  | `concurrency.md`   | STM, TMap, Fiber, Queue, Semaphore    |
-| [10]  | `persistence.md`   | @effect/sql, Model.Class, SqlClient   |
-| [11]  | `surface.md`       | HttpApi, @effect/rpc, @effect/cluster |
-| [12]  | `observability.md` | Tracing, metrics, FiberRef            |
-| [13]  | `testing.md`       | @effect/vitest, PBT, layer testing    |
-| [14]  | `algorithms.md`    | Stream, Chunk, transformations        |
-| [15]  | `performance.md`   | V8 optimization, Effect perf          |
+| [INDEX] | [REFERENCE]        | [LOAD_WHEN]                               |
+| :-----: | :----------------- | ----------------------------------------- |
+|   [7]   | `errors.md`        | Domain/persistence error mapping          |
+|   [8]   | `services.md`      | Service topology and dependency strategy  |
+|   [9]   | `persistence.md`   | SQL/model boundary work                   |
+|  [10]   | `concurrency.md`   | Streams, fibers, and bounded concurrency  |
+|  [11]   | `surface.md`       | Public API minimization                   |
+|  [12]   | `observability.md` | Logging, tracing, metrics                 |
+|  [13]   | `performance.md`   | Hot path and allocation discipline        |
+|  [14]   | `algorithms.md`    | Non-trivial transform and fold strategies |
 
-**Step 4 -- Template (scaffolding only)**
+**Step 4 -- Templates (scaffolding only)**
 
-| [IDX] | [TEMPLATE]                   | [ARCHETYPE] |
-| :---: | ---------------------------- | :---------: |
-| [16]  | `entity.module.template.md`  |   Entity    |
-| [17]  | `service.module.template.md` |   Service   |
-| [18]  | `utility.module.template.md` |   Utility   |
+| [INDEX] | [TEMPLATE]                   | [ARCHETYPE] |
+| :-----: | :--------------------------- | :---------: |
+|  [15]   | `entity.module.template.md`  |   Entity    |
+|  [16]   | `service.module.template.md` |   Service   |
+|  [17]   | `utility.module.template.md` |   Utility   |
+
+**Load parity rules**
+- Foundation + core are non-optional for every TypeScript task.
+- Specialized references must be loaded before editing matching surfaces.
+- Templates accelerate authoring; templates do not replace references.
+- If load order breaks, stop and reload from Step 1.
 
 ---
 ## [2][CONTRACTS]
->**Dictum:** *Structural invariants constrain all modules.*
+>**Dictum:** *Structural invariants are mandatory; policy violations are defects, not style choices.*
 
-**Density** -- ~225 LOC signals refactor. Dense polymorphic patterns compress well. File proliferation is always a smell.
+<br>
 
-**Single export** -- every module exports ONE `const` namespace (with merge) or ONE `Effect.Service` class. Internals use `_` prefix.
+**Density over volume**
+- `~300 LOC` is a refactor trigger for a single-module concept, leveraging polymorphism, optimized code, removing indirection, proper projection, and replacing all single-caller helpers, and other refinements.
+- Prefer extending the current module over creating helper files.
+- One module owns one concept and one public ownership surface.
 
-**Schema when needed** -- `S.Class`/`S.TaggedClass`/`Model.Class` only when: parsing external input, codec required, Hash/Equal needed, or validation pipeline. Plain objects + `typeof` otherwise.
+**External libraries are first-class**
+- Use upstream primitives directly: `Effect`, `Schema`, `Option`, `Either`, `Match`, `Stream`, `Layer`, `SqlClient`, `Model`.
+- Do not add convenience wrappers that only rename or forward external APIs.
+- Add custom code only when domain semantics are missing upstream.
 
-**Zero module-level `type` aliases** -- types are inline at call site (`typeof Schema.Type`, `Extract<...>`) or exported inside a `const+namespace` / `class+namespace` merge.
+**Shape and type discipline**
+- One canonical runtime anchor per concept (`S.Class`, `Model.Class`, or one tagged service contract).
+- Derive all projections from that anchor (`S.pick`, `S.omit`, `S.partial`), never parallel `S.Struct` variants.
+- One tagged failure rail per module (`Data.TaggedError` with bounded `reason` literals + one canonical `reason -> policy` projection table as the sole projection surface).
+- No inline status/retry/transport literals outside the canonical reason-policy table.
+- No parallel schemas/brands/types for the same domain concept.
+- Avoid module-level `type`/`interface` declarations when inference from runtime declarations is sufficient.
 
-**Inference over annotation** -- derive from runtime values (`typeof`, `ReturnType`, `Parameters`). Never redeclare what the compiler infers.
+**Control-flow discipline (anti-imperative)**
+- Zero statement-level `if`, `else`, `switch`, `for`, `while`, `try/catch`, `throw` in domain transforms and templates.
+- Use expression control flow: `Match.valueTags` / `Match.tagsExhaustive` for closed tagged domains, plus `Match`, `Option.match`, `Either.match`, `Effect.filterOrFail`, `Effect.catchTag`.
+- Boundary adapters may use required statement forms only with explicit marker comment: `[BOUNDARY ADAPTER -- reason]`.
 
-**Zero imperative branching** -- no `if`/`switch`/`try`/`catch`/`for`/`while`. Route through `Match.valueTags`, `$match`, `Option.match`, `Either.match`, `Effect.filterOrFail`, `Effect.catchTag`, ternary (binary only).
+**Surface and error discipline**
+- One polymorphic entrypoint per concern; avoid method-family inflation (`run`, `runSafe`, `runV2`).
+- Decode unknown input at boundaries and map unknown causes immediately.
+- Collapse optional/error channels explicitly; do not leak `unknown` across domain boundaries.
 
-**One service class per module** (`Effect.Service`). Capabilities as groups (`{ read, write, observe } as const`). Methods traced via `Effect.fn('Service.method')`.
-
-**One polymorphic entrypoint** per concern -- not method families. One function owns all modalities via generics, overloads, or tagged dispatch.
-
-**Tagged errors only** -- `Data.TaggedError` (internal), `Schema.TaggedError` (boundary). Zero `new Error(...)`, zero `throw`.
-
-**FiberRef** for context propagation -- not parameter drilling.
-
-**Imports convention**
-
-| [SCOPE]  | [IMPORT]                                              |
-| -------- | ----------------------------------------------------- |
-| Core     | `{ Effect, Schema as S, Match, Option, Data }` from   |
-|          | `'effect'`                                            |
-| Platform | `{ HttpApi, HttpApiGroup }` from `'@effect/platform'` |
-| SQL      | `{ SqlClient, Model }` from `'@effect/sql'`           |
-| Cluster  | `{ Sharding, Entity }` from `'@effect/cluster'`       |
-| RPC      | `{ Rpc, RpcGroup }` from `'@effect/rpc'`              |
-| Workflow | `{ Workflow, Activity }` from `'@effect/workflow'`    |
-| AI       | `{ AiChat }` from `'@effect/ai'`                      |
-| OTel     | `{ NodeSdk }` from `'@effect/opentelemetry'`          |
+**Resource and concurrency discipline**
+- Resource lifecycle goes through `Effect.acquireRelease`.
+- Retry, timeout, and concurrency policy are declarative (`Schedule`, `Effect.forEach`, `Stream`).
+- Hidden global state and untracked ambient dependencies are forbidden.
 
 ---
 ## [3][ROUTING]
->**Dictum:** *Foundation+core load unconditionally; routing selects specialization.*
+>**Dictum:** *Foundation/core always load; routing selects specialized references and template entrypoints.*
 
-| [IDX] | [TASK]                   | [ADD_SPECIALIZED]        | [TEMPLATE]       |
-| :---: | ------------------------ | ------------------------ | ---------------- |
-|  [1]  | Scaffold entity          | `errors` `matching`      | `entity.module`  |
-|  [2]  | Scaffold service         | `services`               | `service.module` |
-|  [3]  | Scaffold utility         | --                       | `utility.module` |
-|  [4]  | Error algebra            | `errors`                 | --               |
-|  [5]  | Dispatch logic           | `matching`               | --               |
-|  [6]  | Type organization        | --                       | --               |
-|  [7]  | Concurrency patterns     | `concurrency`            | --               |
-|  [8]  | Service layers           | `services` `composition` | --               |
-|  [9]  | Cluster/sharding         | `services` `surface`     | --               |
-| [10]  | HTTP API                 | `surface` `errors`       | --               |
-| [11]  | RPC contract             | `surface`                | --               |
-| [12]  | Persistence layer        | `persistence`            | --               |
-| [13]  | Observability/tracing    | `observability`          | --               |
-| [14]  | Write/review tests       | `testing`                | --               |
-| [15]  | Stream pipeline          | `algorithms`             | --               |
-| [16]  | Performance optimization | `performance`            | --               |
-| [17]  | Review existing module   | --                       | --               |
+<br>
+
+| [INDEX] | [TASK]                         | [ADD_SPECIALIZED]                          | [TEMPLATE]                   |
+| :-----: | ------------------------------ | ------------------------------------------ | ---------------------------- |
+|   [1]   | Create/refactor entity module  | `errors.md` `persistence.md`               | `entity.module.template.md`  |
+|   [2]   | Create/refactor service module | `errors.md` `services.md` `concurrency.md` | `service.module.template.md` |
+|   [3]   | Create/refactor utility module | `errors.md`                                | `utility.module.template.md` |
+|   [4]   | Public API surface refactor    | `surface.md` `errors.md`                   | --                           |
+|   [5]   | SQL/model boundary refactor    | `persistence.md` `errors.md`               | --                           |
+|   [6]   | Observability instrumentation  | `observability.md` `performance.md`        | --                           |
+|   [7]   | Performance optimization       | `performance.md`                           | --                           |
+|   [8]   | Algorithm-heavy transform      | `algorithms.md` `performance.md`           | --                           |
 
 ---
 ## [4][DECISION_TREES]
->**Dictum:** *Route decisions before loading references.*
+>**Dictum:** *Choose rails before coding; mismatched rails create drift and bloat.*
 
-**Schema family** -- choose minimal representation satisfying the constraint.
+<br>
 
-| [IDX] | [DATA_SHAPE]                   | [USE]             |
-| :---: | ------------------------------ | ----------------- |
-|  [1]  | Persistence model, field meta  | `Model.Class`     |
-|  [2]  | Domain object, codec/Hash/Eq   | `S.Class`         |
-|  [3]  | Union member (current/future)  | `S.TaggedClass`   |
-|  [4]  | Request/response + cache key   | `S.TaggedRequest` |
-|  [5]  | Config, internal state         | Plain object      |
-|  [6]  | Recursive/mutual tree          | `S.suspend`       |
-|  [7]  | Nominal refinement (Email, Id) | `S.brand`         |
-|  [8]  | Closed union with generics     | `Data.TaggedEnum` |
+**Module archetype**
 
-**Match API** -- see `matching.md` for full dispatch patterns.
+| [INDEX] | [WHAT_YOU_ARE_BUILDING]                   | [ARCHETYPE] | [PRIMARY_ANCHOR]             |
+| :-----: | ----------------------------------------- | :---------: | ---------------------------- |
+|   [1]   | Aggregate with lifecycle transitions      |   Entity    | `S.Class` + optional `Model` |
+|   [2]   | IO orchestration with lifecycle and DI    |   Service   | `Effect.Service` + `Layer`   |
+|   [3]   | Reusable canonicalization/parse transform |   Utility   | `Schema` + pure transforms   |
 
-| [IDX] | [SITUATION]                     | [USE]             |
-| :---: | ------------------------------- | ----------------- |
-|  [1]  | `Data.taggedEnum` with generics | `$match`          |
-|  [2]  | `S.TaggedClass/Error` union     | `Match.valueTags` |
-|  [3]  | Branches return Effects         | `Match.type`      |
-|  [4]  | Non-tagged structural matching  | `Match.value`     |
-|  [5]  | Type guard for `.filter`        | `$is`             |
+**Failure rail selection**
 
-**Service constructor mode** -- see `services.md` for anatomy.
+| [INDEX] | [FAILURE_SHAPE]                      | [USE]                | [BOUNDARY_RULE]                            |
+| :-----: | ------------------------------------ | -------------------- | ------------------------------------------ |
+|   [1]   | Decode/parse failures                | `ParseResult` + map  | Convert immediately to tagged module error |
+|   [2]   | Domain validation/business rejection | `Effect.fail` tagged | Keep bounded reason literals               |
+|   [3]   | Upstream/transport/persistence cause | `mapError` + matcher | Preserve cause in tagged failure           |
 
-| [IDX] | [SERVICE_NEEDS]                 | [MODE]    |
-| :---: | ------------------------------- | --------- |
-|  [1]  | No deps, no lifecycle, pure     | `succeed` |
-|  [2]  | Yields services, no resources   | `effect`  |
-|  [3]  | Connections, caches, finalizers | `scoped`  |
+**Shape strategy**
 
-**Module archetype** -- determines scaffold template.
-
-| [IDX] | [WHAT_YOU_ARE_BUILDING]            | [ARCHETYPE] |
-| :---: | ---------------------------------- | ----------- |
-|  [1]  | Domain object + command + dispatch | Entity      |
-|  [2]  | Managed resource + capability caps | Service     |
-|  [3]  | Pure `A -> B` + traced pipelines   | Utility     |
+| [INDEX] | [NEED]                | [USE]                                        |
+| :-----: | --------------------- | -------------------------------------------- |
+|   [1]   | Stable identity shape | canonical schema + decode gate               |
+|   [2]   | Aggregate state       | `S.Class`                                    |
+|   [3]   | Storage row           | `Model.Class` when persistence is co-located |
+|   [4]   | Operation dispatch    | Tagged command/event `S.Union`               |
 
 ---
 ## [5][ANTI_PATTERNS]
->**Dictum:** *Expert knowledge is knowing which landmines to avoid.*
+>**Dictum:** *Most regressions start as convenience shortcuts.*
 
-See `patterns.md [1-6]` for full codex; `validation.md [6]` for detection heuristics.
+<br>
 
-**Surface-area violations**
-- **SCHEMA_SPAM** -- schema for internal state/config that never serializes.
-- **API_SURFACE_INFLATION** -- method families instead of one polymorphic function.
-- **EXPORT_BLOAT** -- 5+ named exports per file. One namespace or service class.
-- **HELPER_SPAM** -- `helpers.ts`/`utils.ts`/`shared/`. Colocate in domain module.
-- **TYPE_PROLIFERATION** -- standalone `type X = {...}` at module scope.
+Each anti-pattern names a structural defect that propagates if left unchecked. See `validation.md` [7] for detection laws.
+
+**Type-system violations**
+- **SHAPE_PROLIFERATION** -- duplicate schema/type for one concept. Keep one runtime anchor and derive projections via `pick`/`omit`/`partial`.
+- **TYPE_PROLIFERATION** -- top-level `type`/`interface` aliases that mirror runtime shape. Derive from runtime declarations (`typeof XSchema.Type`).
+- **NULL_ARCHITECTURE** -- `null`/`undefined` leaking across domain boundaries. `Option<T>` for absence, tagged failure for errors.
 
 **Control-flow violations**
-- **IMPERATIVE_BRANCHING** -- `if`/`switch`/`for`/`while` in domain logic.
-- **EXCEPTION_CONTROL_FLOW** -- `try`/`catch`/`throw` hides failure from types.
+- **IMPERATIVE_BRANCH** -- statement branching (`if`/`else`/`switch`/`for`/`while`) in domain flow. Replace with `Match` + monadic operators.
+- **EARLY_MATCH_COLLAPSE** -- calling `match`/`Match.exhaustive` mid-pipeline and losing composition. Keep `map`/`flatMap`; match at boundaries.
+- **MUTABLE_ACCUMULATOR** -- `let` + loop accumulation breaks referential transparency. `Array.reduce`, `Effect.forEach`, or `Stream.runFold` replace it.
 
-**Effect-specific violations**
-- **UNBOUNDED_CONCURRENCY** -- unbounded `Effect.all` for database queries.
-- **GOD_SERVICE** -- 8+ capabilities spanning multiple concerns.
-- **INDIRECTION_FACTORY** -- wrapper adding zero logic.
-- **FORWARD_REFERENCE_STATIC** -- class static in `extends` clause.
-- **BOUNDARY_ERROR_NO_FACTORY** -- `Schema.TaggedError` without `of`/`from`.
-- **MIXED_TENANT_CONTEXT** -- `within()`/`withinSync()` in same path.
-- **SILENT_ERROR_SWALLOW** -- `Effect.catchAll` hiding failures.
-- **MATCH_TYPE_GENERIC_ENUM** -- `Match.type` re-specifying generics. Use `$match`.
+**Surface-area violations**
+- **SURFACE_INFLATION** -- multiple entrypoints for one concern (`run`, `runSafe`, `runV2`). Collapse to one polymorphic surface.
+- **WRAPPER_REDUNDANCY** -- thin wrappers around external library APIs. Call upstream primitives directly.
+- **HELPER_FILE_DRIFT** -- moving one-use logic into helper modules. Inline and keep ownership local.
+- **MODULE_CONST_SPAM** -- one-use top-level `const` values that are not semantic anchors (schemas, schedules, metrics, vocabularies). Inline into the owning rail.
+- **STRINGLY_TELEMETRY** -- repeated raw telemetry keys/values (`"operation"`, `"status_class"`, `"obs.outcome"`) across spans/metrics/logs. Define one bounded vocabulary object and project through it.
+- **GOD_FUNCTION** -- giant dispatch handling all variants in one function body. DU + exhaustive `Match.valueTags` makes extension additive.
+
+**Error-rail violations**
+- **ERROR_RAIL_FRAGMENTATION** -- separate error classes per method. Keep one tagged module failure rail with bounded `reason` literals.
+- **STRINGLY_POLICY_DRIFT** -- duplicate inline status/retry/transport literals in handlers. Project via one canonical `reason -> policy` table only.
+- **STRINGLY_SIGNATURE_DRIFT** -- delimiter-concatenated signatures (`${a}:${b}:${c}`) for equality/routing. Project structured tuples/records and compare fields directly.
+- **VARIABLE_REASSIGNMENT** -- `let value = x; value = process(value)` creates temporal coupling. `pipe` chains make the computation graph explicit.
+
+```ts
+// [ANTI-PATTERN] IMPERATIVE_BRANCH -- statement branching in domain flow
+if (status === 'active') { return handleActive(entity); }
+else if (status === 'archived') { return handleArchived(entity); }
+```
+```ts
+// [CORRECT] -- exhaustive expression dispatch
+const Status = {
+    active: 'active',
+    archived: 'archived',
+} as const satisfies Record<'active' | 'archived', string>;
+
+Match.value(status).pipe(
+    Match.when(Status.active, () => handleActive(entity)),
+    Match.when(Status.archived, () => handleArchived(entity)),
+    Match.exhaustive,
+);
+```
+
+```ts
+// [ANTI-PATTERN] SHAPE_PROLIFERATION -- parallel schema for same concept
+const UserCreate = S.Struct({ name: S.String, email: S.String });
+const UserUpdate = S.Struct({ name: S.String, email: S.String, id: S.UUID });
+const UserResponse = S.Struct({ name: S.String, email: S.String, id: S.UUID, createdAt: S.DateTimeUtc });
+```
+```ts
+// [CORRECT] -- one anchor, derived projections
+class User extends S.Class<User>('User')({
+    id: S.UUID, name: S.String, email: S.String, createdAt: S.DateTimeUtc,
+}) {}
+// derive: User.pipe(S.pick('name', 'email')) for create input
+```
+
+```ts
+// [ANTI-PATTERN] EARLY_MATCH_COLLAPSE -- match destroys monadic context
+const result = Option.match(maybeUser, {
+    onNone: () => Option.none(),
+    onSome: (user) => Option.some(user.email),
+});
+```
+```ts
+// [CORRECT] -- map preserves the functor
+const result = Option.map(maybeUser, (user) => user.email);
+```
 
 ---
-## [6][TEMPLATES]
->**Dictum:** *Scaffolds enforce structural compliance from first line.*
+## [6][TEMPLATE_GUIDANCE]
+>**Dictum:** *Templates are dense production scaffolds, not tutorial prose.*
 
-- **Entity** (`entity.module.template.md`) -- schema, projections, command algebra, failure algebra, single `execute` entrypoint, const+namespace export.
-- **Service** (`service.module.template.md`) -- deps, scoped acquisition, traced capability groups, stream batching, layer assembly.
-- **Utility** (`utility.module.template.md`) -- typed errors, pure `A -> B`, `Effect.fn` traced pipelines, const+namespace export.
+<br>
+
+- **Entity template** (`entity.module.template.md`) -- one aggregate anchor via `S.Class`, one command union via `S.Union`, one transition entrypoint (`evolve`) with exhaustive `Match.valueTags` routing, one `Data.TaggedError` failure rail with bounded reason literals.
+- **Service template** (`service.module.template.md`) -- one `Effect.Service` with grouped `read`/`write`/`observe` capability objects, scoped lifecycle via `acquireRelease`, retry-aware boundaries via `Schedule`, one tagged failure rail mapping every boundary operation.
+- **Utility template** (`utility.module.template.md`) -- one canonical schema as runtime anchor, parse/validate/canonicalize pipeline via `pipe`, optional lookup integration with `Option.match`, one tagged failure rail for parse/validation/lookup operations.
+
+**Post-scaffold checklist**
+- Remove all placeholder comments after instantiation.
+- Verify one canonical schema and one tagged failure rail per module.
+- Run `pnpm ts:check`.
+- Confirm zero `if`/`for`/`while`/`try` in domain transforms.
+- Confirm closed finite-domain tagged matchers use `Match.valueTags`/`Match.tagsExhaustive` (or `Match.exhaustive` for non-tag domains); use `Match.option`/`Match.either`/`Match.orElse` only when unmatched semantics are intentional and collapsed immediately.
 
 ---
-## [7][EFFECT_ECOSYSTEM]
->**Dictum:** *Leverage the ecosystem -- never hand-roll.*
+## [7][VALIDATION_GATE]
+>**Dictum:** *Completion requires policy compliance and executed checks.*
 
-**Installed packages**
-
-| [IDX] | [PACKAGE]               | [PROVIDES]                        |
-| :---: | ----------------------- | --------------------------------- |
-|  [1]  | `effect`                | Effect, Schema, Match, Data, etc. |
-|  [2]  | `@effect/platform`      | HTTP API, file system, workers    |
-|  [3]  | `@effect/sql`           | SqlClient, SqlSchema, Model       |
-|  [4]  | `@effect/sql-pg`        | PgClient, advisory locks          |
-|  [5]  | `@effect/cluster`       | Sharding, Entity, Singleton       |
-|  [6]  | `@effect/opentelemetry` | Tracing, metrics via OTel         |
-|  [7]  | `@effect/rpc`           | Typed RPC with schema validation  |
-|  [8]  | `@effect/workflow`      | Durable workflow execution        |
-|  [9]  | `@effect/ai`            | AI provider abstraction           |
-| [10]  | `@effect/ai-anthropic`  | Anthropic Claude integration      |
-
-**Core APIs** (from `effect`)
-
-| [IDX] | [API]            | [PURPOSE]                           |
-| :---: | ---------------- | ----------------------------------- |
-|  [1]  | `Effect.gen`     | Generator-based monadic composition |
-|  [2]  | `Effect.fn`      | Traced function with span           |
-|  [3]  | `Effect.Service` | Tag + constructor + Default layer   |
-|  [4]  | `Schema as S`    | Codec, validation, brand, class     |
-|  [5]  | `Match`          | Exhaustive structural dispatch      |
-|  [6]  | `Data`           | TaggedEnum, TaggedError, Case       |
-|  [7]  | `Stream`         | Lazy pull-based async sequences     |
-|  [8]  | `Schedule`       | Retry/repeat policies               |
-|  [9]  | `Layer`          | Dependency injection + lifecycle    |
-| [10]  | `FiberRef`       | Scoped context propagation          |
-| [11]  | `STM/TMap`       | Software transactional memory       |
-| [12]  | `Queue`          | Bounded concurrent message queues   |
-| [13]  | `Ref`            | Mutable reference in Effect context |
-| [14]  | `Duration`       | Type-safe time representation       |
-| [15]  | `Option`         | Typed absence                       |
-| [16]  | `Function`       | `pipe`, `flow`, `identity`          |
+- Required during TypeScript iteration: `pnpm ts:check`.
+- Required for final repo completion gate: `pnpm ts:check`, `pnpm cs:check`, `pnpm py:check`.
+- Reject completion when load order, contracts, or checks are not satisfied.

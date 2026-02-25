@@ -44,7 +44,7 @@ const UsersLive = HttpApiBuilder.group(ParametricApi, 'users', (handlers) =>
                     Effect.flatMap((session) => database.users.set(session.userId, { status: 'inactive' })),
                     HttpError.mapTo('Account deactivation failed'),
                     Effect.tap((user) => audit.log('User.update', {
-                        after: { status: 'inactive' },
+                        after:  { status: 'inactive'  },
                         before: { status: user.status },
                         subjectId: user.id,
                     })),
@@ -58,8 +58,8 @@ const UsersLive = HttpApiBuilder.group(ParametricApi, 'users', (handlers) =>
                     Effect.bindTo('user'),
                     Effect.bind('updatedUser', () => database.users.set(id, { role }).pipe(HttpError.mapTo('Role update failed'),)),
                     Effect.tap(({ user, updatedUser }) => audit.log('User.update', {
-                        after: { email: updatedUser.email, role: updatedUser.role },
-                        before: { email: user.email, role: user.role },
+                        after:  { email: updatedUser.email, role: updatedUser.role },
+                        before: { email: user.email,        role: user.role        },
                         subjectId: id,
                     })),
                     Effect.map(({ updatedUser }) => updatedUser),
@@ -73,10 +73,10 @@ const UsersLive = HttpApiBuilder.group(ParametricApi, 'users', (handlers) =>
             .handle('listNotifications', ({ urlParams }) =>
                 users.api('listNotifications', Middleware.feature('enableNotifications').pipe(
                     Effect.andThen(notifications.listMine({
-                        after: urlParams.after,
+                        after:  urlParams.after,
                         before: urlParams.before,
                         cursor: urlParams.cursor,
-                        limit: urlParams.limit,
+                        limit:  urlParams.limit,
                     })),
                 )))
             .handleRaw('subscribeNotifications', () =>

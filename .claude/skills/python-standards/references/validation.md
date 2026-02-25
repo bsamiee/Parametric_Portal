@@ -48,7 +48,7 @@ Checklist for auditing `.py` modules against python-standards contracts. Items b
 <br>
 
 - [ ] `ParamSpec` + `Concatenate` + `@wraps` on every decorator
-- [ ] Canonical ordering: trace > retry > cache > validate > authorize
+- [ ] Canonical ordering: trace > authorize > validate > cache > retry > operation
 - [ ] One concern per decorator; factories accept frozen `BaseModel` config
 - [ ] Class-based decorators implement descriptor protocol (`__set_name__` + `__get__`)
 

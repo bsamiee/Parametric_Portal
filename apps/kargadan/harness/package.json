@@ -13,7 +13,8 @@
     },
     "dependencies": {
         "@effect/platform": "catalog:",
-        "@parametric-portal/database": "catalog:",
+        "@parametric-portal/ai": "workspace:*",
+        "@parametric-portal/database": "workspace:*",
         "@parametric-portal/types": "workspace:*",
         "effect": "catalog:"
     },

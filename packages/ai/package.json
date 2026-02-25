@@ -3,20 +3,25 @@
     "version": "2.0.1",
     "type": "module",
     "exports": {
-        "./registry": {
-            "types": "./src/registry.ts",
-            "import": "./src/registry.ts",
-            "default": "./src/registry.ts"
+        ".": {
+            "types": "./src/service.ts",
+            "import": "./src/service.ts",
+            "default": "./src/service.ts"
         },
-        "./runtime": {
-            "types": "./src/runtime.ts",
-            "import": "./src/runtime.ts",
-            "default": "./src/runtime.ts"
+        "./errors": {
+            "types": "./src/errors.ts",
+            "import": "./src/errors.ts",
+            "default": "./src/errors.ts"
         },
-        "./search": {
-            "types": "./src/search.ts",
-            "import": "./src/search.ts",
-            "default": "./src/search.ts"
+        "./mcp": {
+            "types": "./src/mcp.ts",
+            "import": "./src/mcp.ts",
+            "default": "./src/mcp.ts"
+        },
+        "./service": {
+            "types": "./src/service.ts",
+            "import": "./src/service.ts",
+            "default": "./src/service.ts"
         }
     },
     "scripts": {

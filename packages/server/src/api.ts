@@ -123,7 +123,7 @@ const AuditLogWithDiff = S.extend(AuditLog.json, S.Struct({
         })),
     })),
 }));
-const SearchEntityType = S.Literal('app', 'asset', 'auditLog', 'user');
+const SearchEntityType = S.Literal('app', 'asset', 'auditLog', 'command', 'user');
 const _TenantOAuthProviderRead = S.Struct({ clientId: S.NonEmptyTrimmedString, clientSecretSet: S.Boolean, enabled: S.Boolean, keyId: S.optional(S.NonEmptyTrimmedString), provider: OAuthProviderSchema, scopes: S.optional(S.Array(S.String)), teamId: S.optional(S.NonEmptyTrimmedString), tenant: S.optional(S.NonEmptyTrimmedString) });
 
 // --- [GROUPS] ----------------------------------------------------------------
@@ -450,7 +450,7 @@ const _SearchGroup = HttpApiGroup.make('search')
                 entityTypes: S.optional(HttpApiSchema.param('entityTypes', S.transform(
                     S.String,
                     S.Array(SearchEntityType),
-                    { decode: (input) => input.split(',').filter((value): value is typeof SearchEntityType.Type => ['app', 'asset', 'auditLog', 'user'].includes(value)), encode: (values) => values.join(',') },
+                    { decode: (input) => input.split(',').filter((value): value is typeof SearchEntityType.Type => ['app', 'asset', 'auditLog', 'command', 'user'].includes(value)), encode: (values) => values.join(',') },
                 ))),
                 includeFacets: S.optional(HttpApiSchema.param('includeFacets', S.BooleanFromString)),
                 includeGlobal: S.optional(HttpApiSchema.param('includeGlobal', S.BooleanFromString)),

@@ -1,337 +1,306 @@
 # [H1][VALIDATION]
->**Dictum:** *Schema validates at boundaries, encodes at exits, and refines through typed pipelines -- never imperatively.*
+>**Dictum:** *Validation is one deterministic rail: decode unknown once, normalize in schema combinators, and project failures once at the boundary.*
 
-Cross-references: `types.md` (type definitions, brands), `errors.md` (error class definitions), `persistence.md` (field modifiers)
+Scope: `@effect/schema` + Effect rails for decode, normalization, accumulation, persistence, concurrency, and transport mapping.
+Cross-references: `types.md`, `surface.md`, `errors.md`, `matching.md`, `effects.md`, `composition.md`, `services.md`, `persistence.md`, `concurrency.md`, `performance.md`, `observability.md`, `patterns.md`, `algorithms.md`.
 
 ---
-## [1][DECODE_ENCODE]
->**Dictum:** *Trust level of input determines which decode variant to use.*
+## [1][CHANNEL_CONTRACTS]
+>**Dictum:** *Select APIs by channel semantics; sync collapse is explicit and local.*
 
-| [INDEX] | [FUNCTION]                 | [TRUST]          | [RETURNS]                     | [WHEN]                                    |
-| :-----: | -------------------------- | ---------------- | ----------------------------- | ----------------------------------------- |
-|   [1]   | `S.decodeUnknown(X)`       | Untrusted        | `Effect<Type, ParseError>`    | HTTP body, WebSocket msg, env vars, JSON  |
-|   [2]   | `S.decodeUnknownSync(X)`   | Untrusted (sync) | `Type` (throws `ParseError`)  | Startup config, CLI args -- no Effect ctx |
-|   [3]   | `S.decodeUnknownEither(X)` | Untrusted (pure) | `Either<Type, ParseError>`    | Validation without Effect or exceptions   |
-|   [4]   | `S.decodeSync(X)`          | Trusted          | `Type` (throws on violation)  | Known-valid defaults, test fixtures       |
-|   [5]   | `S.encodeSync(X)`          | Type -> Encoded  | `Encoded` (throws on failure) | Serialize for wire/storage                |
-|   [6]   | `S.encodeUnknownSync(X)`   | Relaxed encode   | `Encoded` (throws on failure) | Encode with relaxed input typing          |
+```ts
+import { Effect, Schema as S, pipe } from "effect";
 
-```typescript
-import { Effect, Match, ParseResult, Schema as S, pipe } from 'effect';
+const ChannelContracts = [
+  { need: "decode unknown in rail", api: "S.decodeUnknown", shape: "Effect<Type, ParseError, R>" },
+  { need: "decode unknown in pure pre-routing", api: "S.decodeUnknownEither", shape: "Either<Type, ParseError>" },
+  { need: "explicit sync decode collapse", api: "S.decodeUnknownSync", shape: "Type | throw" },
+  { need: "validate in rail", api: "S.validate", shape: "Effect<Type, ParseError, R>" },
+  { need: "explicit sync validation", api: "S.validateSync", shape: "Type | throw" },
+  { need: "encode in rail", api: "S.encode", shape: "Effect<Encoded, ParseError, R>" },
+  { need: "guard/assert edge collapse", api: "S.is / S.asserts", shape: "boolean / assertion" },
+] as const;
 
-// --- boundary: untrusted HTTP body -> Effect pipeline
-const parseBody = (raw: unknown) => pipe(
-    S.decodeUnknown(CreateOrder)(raw),
-    Effect.mapError((error) =>
-        Validation.of('parse_failed', ParseResult.TreeFormatter.formatErrorSync(error))
+const StrictIngress =       S.Struct({ id: S.UUID, namespace: S.String.pipe(S.pattern(/^[a-z0-9-]+$/)), limit: S.optionalWith(S.Int.pipe(S.between(1, 500)), { default: () => 100 }) });
+const decodeIngress =       S.decodeUnknown(StrictIngress);
+const decodeIngressEither = S.decodeUnknownEither(StrictIngress);
+const decodeIngressSync =   S.decodeUnknownSync(StrictIngress);
+const validateIngress =     S.validate(StrictIngress);
+const validateIngressSync = S.validateSync(StrictIngress);
+const encodeIngress =       S.encode(StrictIngress);
+const isIngress =           S.is(StrictIngress);
+const assertIngress =       S.asserts(StrictIngress);
+
+const ingressRail = (raw: unknown) => pipe(
+  decodeIngress(raw, { errors: "all", onExcessProperty: "error" }),
+  Effect.flatMap((decoded) => validateIngress(decoded)),
+);
+```
+
+---
+## [2][SINGLE_BOUNDARY_RAIL]
+>**Dictum:** *Decode once, normalize once, map once; every downstream module receives typed values only.*
+
+```ts
+import { Cause, Effect, Option, ParseResult, Schema as S, pipe } from "effect";
+
+class ValidationBoundaryError extends S.TaggedError<ValidationBoundaryError>()("ValidationBoundaryError", {
+  stage:   S.Literal("decode", "normalize", "upstream", "defect"),
+  reason:  S.Literal("invalid", "rejected", "failed", "unexpected"),
+  details: S.String,
+  cause:   S.optional(S.Unknown),
+}) {}
+
+const parseErrorAt =   (stage: "decode" | "normalize" | "upstream") => (error: ParseResult.ParseError) =>
+  new ValidationBoundaryError({ stage, reason: "invalid", details: ParseResult.TreeFormatter.formatErrorSync(error), cause: error });
+const unknownErrorAt = (stage: "upstream" | "defect", reason: "failed" | "unexpected") => (cause: unknown) =>
+  new ValidationBoundaryError({ stage, reason, details: String(cause), cause });
+
+const RawIngress =        S.Struct({ id: S.UUID, namespace: S.String, payload: S.Unknown });
+const NormalizedIngress = S.Struct({ id: S.UUID, namespace: S.String.pipe(S.pattern(/^[a-z0-9-]+$/)), payload: S.Unknown });
+const UpstreamResponse =  S.Struct({ accepted: S.Boolean, revision: S.Int.pipe(S.nonNegative()) });
+
+const decodeRawIngress = (raw: unknown) => pipe(
+  S.decodeUnknown(RawIngress)(raw, { errors: "all", onExcessProperty: "error" }),
+  Effect.mapError(parseErrorAt("decode")),
+);
+
+const normalizeIngress = (decoded: typeof RawIngress.Type) => pipe(
+  S.validate(NormalizedIngress)({ ...decoded, namespace: decoded.namespace.trim().toLowerCase().replaceAll("_", "-") }),
+  Effect.mapError(parseErrorAt("normalize")),
+);
+
+const callUpstream = (normalized: typeof NormalizedIngress.Type) => pipe(
+  Effect.tryPromise({
+    try: () => fetch("https://upstream.example/validate", { method: "POST", body: JSON.stringify(normalized) }).then((response) => response.json()),
+    catch: unknownErrorAt("upstream", "failed"),
+  }),
+  Effect.flatMap((raw) => S.decodeUnknown(UpstreamResponse)(raw, { errors: "all" })),
+  Effect.mapError(parseErrorAt("upstream")),
+  Effect.map((upstream) => ({ normalized, upstream }) as const),
+);
+
+const boundaryRail = (raw: unknown) => pipe(
+  decodeRawIngress(raw),
+  Effect.flatMap(normalizeIngress),
+  Effect.flatMap(callUpstream),
+  Effect.catchAllCause((cause) => pipe(
+    Cause.failureOption(cause),
+    Option.match({ onNone: () => Effect.fail(unknownErrorAt("defect", "unexpected")(Cause.pretty(cause))), onSome: Effect.fail }),
+  )),
+);
+```
+
+---
+## [3][NORMALIZATION_POLICY_AND_STAGE_WITNESS]
+>**Dictum:** *Use `transformOrFail` for fallible normalization and keep parse-stage reasons in the contract.*
+
+```ts
+import { Effect, Match, ParseResult, Schema as S, pipe } from "effect";
+
+const Namespace = S.transformOrFail(S.String, S.String.pipe(S.pattern(/^[a-z0-9-]+$/)), {
+  decode: (raw, options, ast) => pipe(
+    raw.trim().toLowerCase().replaceAll("_", "-"),
+    (normalized) => Match.value(normalized.length >= 3).pipe(
+      Match.when(true,  () => ParseResult.succeed(normalized)),
+      Match.when(false, () => ParseResult.fail(new ParseResult.Type(ast, raw, options?.errors === "all" ? "namespace.too_short" : "namespace.invalid"))),
+      Match.exhaustive,
     ),
+  ),
+  encode: ParseResult.succeed,
+  strict: true,
+});
+
+const TenantKey =      S.TemplateLiteral(S.Literal("tenant:"), S.String);
+const TenantKeyParts = S.TemplateLiteralParser(S.Literal("tenant:"), S.String);
+const Cursor = S.compose(S.StringFromBase64Url, S.parseJson(S.Struct({ sequence: S.Int.pipe(S.nonNegative()), ts: S.Int.pipe(S.nonNegative()) })));
+const CursorEnvelope = S.Struct({ tenantKey: TenantKey, namespace: Namespace, cursor: Cursor });
+
+const decodeCursorEnvelope = (raw: unknown) => pipe(
+  S.decodeUnknown(CursorEnvelope)(raw, { errors: "all", onExcessProperty: "error" }),
+  Effect.mapError(parseErrorAt("decode")),
+  Effect.flatMap((decoded) => pipe(
+    S.decodeUnknown(TenantKeyParts)(decoded.tenantKey),
+    Effect.map(([prefix, tenantId]) => ({ ...decoded, prefix, tenantId }) as const),
+    Effect.mapError(parseErrorAt("normalize")),
+  )),
 );
-
-// --- startup: sync decode, no Effect context available
-const _APP_CONFIG = S.decodeUnknownSync(AppConfigSchema)(process.env);
-
-// --- pure validation: no Effect, no exceptions
-const validateCursor = (raw: unknown) => pipe(
-    S.decodeUnknownEither(CursorSchema)(raw),
-    Either.mapLeft((error) => ParseResult.ArrayFormatter.formatErrorSync(error)),
-);
-
-// --- trusted: known-valid construction
-const defaultPage = S.decodeSync(PageSchema)({ limit: 25, offset: 0 });
-
-// --- encode for wire
-const toJson = S.encodeSync(OrderSchema)(order);
-```
-
-**Rule**: `decodeUnknown` at every boundary. `decodeSync` only for values the program itself constructed. `encode` when serializing outbound.
-
----
-## [2][VALIDATE_AND_GUARD]
->**Dictum:** *Type guards narrow without Effect; assertions fail-fast without wrapping.*
-
-| [INDEX] | [FUNCTION]      | [RETURNS]                        | [WHEN]                                       |
-| :-----: | --------------- | -------------------------------- | -------------------------------------------- |
-|   [1]   | `S.validate(X)` | Validates without transforms     | Check conformance; skip decode/encode codecs |
-|   [2]   | `S.is(X)`       | `(u: unknown) => u is Type`      | Type guard for conditional narrowing         |
-|   [3]   | `S.asserts(X)`  | `(u: unknown) => asserts u is T` | Fail-fast precondition; throws on violation  |
-
-```typescript
-const isEmail = S.is(Email);
-const assertEmail = S.asserts(Email);
-
-// type guard -- narrows without Effect wrapping
-const result = isEmail(input)
-    ? Effect.succeed(input)
-    : Effect.fail(Validation.of('invalid_email'));
-
-// assertion -- fail-fast in trusted internal paths
-assertEmail(config.adminEmail);
 ```
 
 ---
-## [3][FILTER]
->**Dictum:** *S.filter adds custom predicates beyond built-in refinements; message annotations produce human-readable errors.*
+## [4][ACCUMULATION_AND_EXHAUSTIVE_COLLAPSE]
+>**Dictum:** *Mode selection is product behavior: fail-fast, branch-visible, retained failures, or partitioned outputs.*
 
-### [3.1] Built-in filters -- use FIRST before custom `S.filter`
+```ts
+import { Either, Effect, Match, Option, Schema as S } from "effect";
 
-| [INDEX] | [FILTER]        | [APPLIES_TO] | [EXAMPLE]                           |
-| :-----: | --------------- | ------------ | ----------------------------------- |
-|   [1]   | `S.minLength`   | String/Array | `S.String.pipe(S.minLength(1))`     |
-|   [2]   | `S.maxLength`   | String/Array | `S.String.pipe(S.maxLength(255))`   |
-|   [3]   | `S.pattern`     | String       | `S.String.pipe(S.pattern(/^\d+$/))` |
-|   [4]   | `S.between`     | Number       | `S.Int.pipe(S.between(0, 100))`     |
-|   [5]   | `S.positive`    | Number       | `S.Number.pipe(S.positive())`       |
-|   [6]   | `S.nonNegative` | Number       | `S.Number.pipe(S.nonNegative())`    |
-|   [7]   | `S.int`         | Number       | `S.Number.pipe(S.int())`            |
-|   [8]   | `S.nonEmpty`    | String/Array | `S.String.pipe(S.nonEmpty())`       |
+const shards = ["shard-1", "shard-two", "shard-3", "invalid"] as const;
+const validateShard = (value: string) => Match.value(/^shard-\d+$/.test(value)).pipe(
+  Match.when(true,  () => Effect.succeed(value)),
+  Match.when(false, () => Effect.fail(new ValidationBoundaryError({ stage: "normalize", reason: "rejected", details: `invalid shard: ${value}` }))),
+  Match.exhaustive,
+);
 
-### [3.2] Custom filter -- predicate return types
+const failFast =         Effect.all(shards.map(validateShard));
+const branchVisible =    Effect.all(shards.map(validateShard), { mode: "either" });
+const retainedFailures = Effect.all(shards.map(validateShard), { mode: "validate" });
+const allOrErrors =      Effect.validateAll(shards, validateShard, { concurrency: 8 });
+const firstSuccessOrAllErrors = Effect.validateFirst(shards, validateShard, { concurrency: 8 });
+const partitioned =      Effect.partition(shards, validateShard, { concurrency: 8 });
 
-| [INDEX] | [RETURN]           | [MEANING]                                       |
-| :-----: | ------------------ | ----------------------------------------------- |
-|   [1]   | `true`/`undefined` | Passes validation                               |
-|   [2]   | `false`            | Fails with no custom message                    |
-|   [3]   | `string`           | Fails with returned string as error message     |
-|   [4]   | `ParseIssue`       | Fails with structured error including path info |
+const GateSignal = S.Union(
+  S.Struct({ _tag: S.Literal("Decoded"),    quotaOk: S.Boolean }),
+  S.Struct({ _tag: S.Literal("Normalized"), quotaOk: S.Boolean }),
+  S.Struct({ _tag: S.Literal("Upstream"),   status:  S.Literal(200, 409, 429, 503) }),
+);
 
-```typescript
-// approach 1: return string from predicate (inline message)
-const WebhookUrl = S.String.pipe(
-    S.filter((url) =>
-        (URL.canParse(url) && new URL(url).protocol === 'https:')
-        || 'Expected valid HTTPS URL'
+const routeGate = Match.type<typeof GateSignal.Type>().pipe(
+  Match.withReturnType<{ readonly rail: "accept" | "reject" | "retry"; readonly status: 200 | 400 | 409 | 429 | 503 }>(),
+  Match.tagsExhaustive({
+    Decoded: ({ quotaOk }) => Match.value(quotaOk).pipe(Match.when(true, () => ({ rail: "accept", status: 200 } as const)), Match.when(false, () => ({ rail: "reject", status: 400 } as const)), Match.exhaustive),
+    Normalized: ({ quotaOk }) => Match.value(quotaOk).pipe(Match.when(true, () => ({ rail: "accept", status: 200 } as const)), Match.when(false, () => ({ rail: "reject", status: 400 } as const)), Match.exhaustive),
+    Upstream: ({ status }) => Match.value(status).pipe(
+      Match.when(200, () => ({ rail: "accept", status: 200 } as const)),
+      Match.when(409, () => ({ rail: "reject", status: 409 } as const)),
+      Match.when(429, () => ({ rail: "retry",  status: 429 } as const)),
+      Match.when(503, () => ({ rail: "retry",  status: 503 } as const)),
+      Match.exhaustive,
     ),
-    S.brand('WebhookUrl'),
+  }),
 );
 
-// approach 2: message annotation (second argument -- supports override)
-const PortNumber = S.Int.pipe(
-    S.filter((port) => port >= 1 && port <= 65535, {
-        message: () => 'Port must be between 1 and 65535',
-    }),
-    S.brand('Port'),
-);
-
-// approach 3: structured ParseIssue for path-aware errors
-const PasswordStrength = S.String.pipe(
-    S.filter((value, _options, ast) =>
-        value.length >= 12
-            ? undefined
-            : new ParseResult.Type(ast, value, 'Password must be at least 12 characters'),
-    ),
-);
-```
-
-### [3.3] Annotations on filters
-
-```typescript
-// title + description for OpenAPI; message for validation errors
-const Percentage = S.Int.pipe(
-    S.between(0, 100),
-    S.annotations({
-        title: 'Percentage',
-        description: 'Integer between 0 and 100 inclusive',
-    }),
-);
-
-// message annotation with override: true replaces ALL nested messages
-const StrictEmail = S.String.pipe(
-    S.pattern(/^[^@]+@[^@]+\.[^@]+$/),
-    S.filter((value) => !value.includes('..'), {
-        message: () => 'Invalid email format',
-        override: true,
-    }),
-);
+const resolveRegion = Match.type<string>().pipe(Match.when((region) => region.startsWith("us-"), (region) => region), Match.when((region) => region.startsWith("eu-"), (region) => region), Match.option);
+const collapseRoute = (status: 200 | 400 | 409 | 429 | 503): Either.Either<"retry" | "reject", "accept"> => Match.value(status).pipe(Match.when(200, () => "accept" as const), Match.when(400, () => "reject" as const), Match.when(409, () => "reject" as const), Match.when(429, () => "retry" as const), Match.when(503, () => "retry" as const), Match.either);
+const requireRegion = (raw: string) => Option.match(resolveRegion(raw), { onNone: () => ({ _tag: "region.invalid" } as const), onSome: (value) => ({ _tag: "region.valid", value } as const) });
 ```
 
 ---
-## [4][TRANSFORM]
->**Dictum:** *Transforms are bidirectional codecs -- decode and encode are symmetric inverses.*
+## [5][PERSISTENCE_CURSOR_OCC_GATES]
+>**Dictum:** *Predicates, cursors, and writes are validation algebra over one canonical schema family.*
 
-### [4.1] S.transform -- infallible (pure A <-> B)
+```ts
+import { Array as A, Effect, Match, Option, Schema as S, pipe } from "effect";
+import { Model, SqlClient, SqlSchema, type Statement } from "@effect/sql";
+import { PgClient } from "@effect/sql-pg";
 
-```typescript
-const BoolFromString = S.transform(
-    S.Literal('on', 'off'), S.Boolean,
-    {
-        strict: true,
-        decode: (source) => source === 'on',
-        encode: (value) => value ? 'on' as const : 'off' as const,
-    },
-);
+class LedgerEntry extends Model.Class<LedgerEntry>("LedgerEntry")({
+  id: Model.Generated(S.UUID), tenantId: S.UUID, namespace: S.String.pipe(S.pattern(/^[a-z0-9-]+$/)), payload: Model.JsonFromString(S.Struct({ score: S.Number })), updatedAt: Model.DateTimeUpdateFromDate,
+}) {}
 
-const NormalizedHue = S.transform(S.Number, S.Number, {
-    strict: true,
-    decode: (hue) => ((hue % 360) + 360) % 360,
-    encode: (hue) => hue,
+const LedgerCursor = S.compose(S.StringFromBase64Url, S.parseJson(S.Struct({ id: S.UUID, updatedAt: S.String })));
+
+const makeLedgerRead = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  return (filter: { readonly tenantId?: string; readonly namespace?: string; readonly cursor?: string }) => pipe(
+    Effect.all({
+      cursor: pipe(Option.fromNullable(filter.cursor), Option.match({ onNone: () => Effect.succeed(Option.none<typeof LedgerCursor.Type>()), onSome: (raw) => pipe(S.decodeUnknown(LedgerCursor)(raw), Effect.map(Option.some), Effect.mapError(parseErrorAt("decode")))})),
+      tenantId:  Effect.succeed(Option.fromNullable(filter.tenantId)),
+      namespace: Effect.succeed(Option.fromNullable(filter.namespace)),
+    }),
+    Effect.flatMap(({ cursor, tenantId, namespace }) => {
+      const predicates = A.getSomes([
+        pipe(tenantId,  Option.map((value) => sql`tenant_id = ${value}`)),
+        pipe(namespace, Option.map((value) => sql`namespace = ${value}`)),
+        pipe(cursor,    Option.map((value) => sql`(updated_at, id) < (${value.updatedAt}, ${value.id})`)),
+      ]) as ReadonlyArray<Statement.Fragment>;
+      const where = Match.value(predicates.length > 0).pipe(Match.when(true, () => sql.and(predicates)), Match.when(false, () => sql`TRUE`), Match.exhaustive);
+      return SqlSchema.findAll({ Request: S.Void, Result: LedgerEntry, execute: () => sql`SELECT * FROM ledger_entry WHERE ${where} ORDER BY updated_at DESC, id DESC LIMIT 101` })(undefined);
+    }),
+  );
+});
+
+const makeLedgerWrite = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  const pg = yield* PgClient.PgClient;
+  return (id: string, expectedUpdatedAt: string, payload: { readonly score: number }) => pipe(
+    sql`UPDATE ledger_entry SET payload = ${pg.json(payload)}::jsonb, updated_at = NOW() WHERE id = ${id} AND updated_at = ${expectedUpdatedAt} RETURNING *`,
+    Effect.flatMap((rows) => pipe(
+      Option.fromNullable(rows.at(0)),
+      Option.match({
+        onNone: () => Effect.fail(new ValidationBoundaryError({ stage: "normalize", reason: "rejected", details: "occ.conflict" })),
+        onSome: Effect.succeed,
+      }),
+    )),
+  );
 });
 ```
 
-### [4.2] S.transformOrFail -- fallible (returns ParseResult)
-
-```typescript
-const SafeJsonParse = S.transformOrFail(S.String, S.Unknown, {
-    strict: true,
-    decode: (input, options, ast) => {
-        try { return ParseResult.succeed(JSON.parse(input)); }
-        catch { return ParseResult.fail(new ParseResult.Type(ast, input, 'Invalid JSON')); }
-    },
-    encode: (value) => ParseResult.succeed(JSON.stringify(value)),
-});
-```
-
-**Callback signature**: `(value, options: ParseOptions, ast: Transformation) => ParseResult`. The `options` parameter carries parse configuration -- do not discard with `_`.
-
 ---
-## [5][COMPOSE_AND_PARSEJSON]
->**Dictum:** *S.compose chains codecs end-to-end; S.parseJson decodes JSON strings in one step.*
+## [6][OWNERSHIP_PERMITS_OBSERVABILITY_AND_CAUSE]
+>**Dictum:** *Concurrent validation is valid only with explicit ownership, permit policy, queue outcome accounting, bounded telemetry, and exhaustive cause projection.*
 
-### [5.1] S.compose -- chain A->B with B->C to get A->C
+```ts
+import { Cause, Effect, Match, Metric, MetricLabel, Option, Queue, Schema as S, pipe } from "effect";
 
-```typescript
-// Base64URL string -> decoded string -> parsed JSON -> typed struct
-const Cursor = S.compose(
-    S.StringFromBase64Url,
-    S.parseJson(S.Struct({ id: S.String, version: S.optional(S.Int) })),
+const ValidationRuntimePolicy = S.Struct({ capacity: S.Int.pipe(S.between(32, 4096)), permits: S.Int.pipe(S.between(1, 512)) });
+const operationMetric =         Metric.frequency("validation.operation", { preregisteredWords: ["accept", "reject", "retry", "shed", "drain"] });
+const acceptedMetric =          Metric.counter("validation.accepted");
+const shedMetric =              Metric.counter("validation.shed");
+const queueDepthMetric =        Metric.gauge("validation.queue_depth");
+
+const runOwnedValidationIngress = (rawPolicy: unknown, inputs: ReadonlyArray<unknown>) => pipe(
+  S.decodeUnknown(ValidationRuntimePolicy)(rawPolicy, { errors: "all", onExcessProperty: "error" }),
+  Effect.mapError(parseErrorAt("decode")),
+  Effect.flatMap((policy) => Effect.acquireRelease(
+    Effect.all({ queue: Queue.dropping<unknown>(policy.capacity), semaphore: Effect.makeSemaphore(policy.permits) }),
+    ({ queue }) => pipe(Queue.shutdown(queue), Effect.zipRight(Queue.awaitShutdown(queue))),
+  )),
+  Effect.flatMap(({ queue, semaphore }) => Effect.gen(function* () {
+    yield* Effect.annotateLogsScoped({ module: "validation" });
+    yield* Effect.labelMetricsScoped([MetricLabel.make("rail", "boundary")]);
+    const _span = yield* Effect.option(Effect.currentSpan);
+    yield* Effect.forEach(inputs, (input) => pipe(
+      semaphore.withPermitsIfAvailable(1)(Queue.offer(queue, input)),
+      Effect.flatMap(Option.match({
+        onNone: () => pipe(Metric.increment(shedMetric), Effect.zipRight(Metric.update(operationMetric, "shed"))),
+        onSome: (accepted) => Match.value(accepted).pipe(
+          Match.when(true, () => pipe(Metric.increment(acceptedMetric), Effect.zipRight(Metric.update(operationMetric, "accept")))),
+          Match.when(false, () => pipe(Metric.increment(shedMetric), Effect.zipRight(Metric.update(operationMetric, "reject")))),
+          Match.exhaustive,
+        ),
+      })),
+      Effect.zipRight(Queue.size(queue)),
+      Effect.flatMap((depth) => Metric.set(queueDepthMetric, depth)),), { concurrency: policy.permits }),
+    Effect.withSpan("validation.ingress"),
+  })),
 );
-// Decode: "eyJpZCI6ImFiYyJ9" -> { id: "abc" }
-// Encode: { id: "abc" } -> "eyJpZCI6ImFiYyJ9" (bidirectional)
-```
 
-### [5.2] S.parseJson -- JSON string to typed value
-
-```typescript
-// single-step: raw JSON string -> validated typed object
-const EventPayload = S.parseJson(S.Struct({
-    type: S.Literal('webhook', 'cron', 'manual'),
-    data: S.Unknown,
-    timestamp: S.Number,
-}));
-// S.decodeUnknownSync(EventPayload)('{"type":"webhook","data":{},"timestamp":1}')
-```
-
----
-## [6][TEMPLATE_LITERAL_PARSER]
->**Dictum:** *S.TemplateLiteralParser validates AND extracts structured segments from strings.*
-
-```typescript
-// TemplateLiteral: validates pattern, returns raw string
-const UserKeyPattern = S.TemplateLiteral(S.Literal('user:'), S.String);
-type UserKeyPattern = typeof UserKeyPattern.Type; // `user:${string}`
-
-// TemplateLiteralParser: validates AND parses into tuple
-const UserKeyParser = S.TemplateLiteralParser(S.Literal('user:'), S.String);
-// S.decodeUnknownSync(UserKeyParser)('user:abc123') -> ['user:', 'abc123']
-// Use Parser when extracting segments; use plain TemplateLiteral for pattern validation only
-```
-
----
-## [7][ERROR_FORMATTING]
->**Dictum:** *TreeFormatter for human-readable logs; ArrayFormatter for structured error responses.*
-
-```typescript
-// TreeFormatter -- hierarchical string for logging
-const formatTree = (error: ParseResult.ParseError): string =>
-    ParseResult.TreeFormatter.formatErrorSync(error);
-// "Expected string, actual number
-//   └─ at path: /email"
-
-// ArrayFormatter -- structured array for API responses
-const formatArray = (error: ParseResult.ParseError) =>
-    ParseResult.ArrayFormatter.formatErrorSync(error);
-// [{ _tag: 'Type', path: ['email'], message: 'Expected string, actual number' }]
-
-// boundary pattern: decode + format in one pipeline
-const parseSafe = (schema: S.Schema<unknown>) => (raw: unknown) => pipe(
-    S.decodeUnknownEither(schema)(raw),
-    Either.mapLeft((error) => ParseResult.TreeFormatter.formatErrorSync(error)),
+const toHttpFailure = (error: ValidationBoundaryError) => Match.value(error.reason).pipe(
+  Match.when("invalid",    () => ({ status: 400, body: { code: "validation.invalid",    details: error.details } } as const)),
+  Match.when("rejected",   () => ({ status: 409, body: { code: "validation.rejected",   details: error.details } } as const)),
+  Match.when("failed",     () => ({ status: 503, body: { code: "validation.failed",     details: error.details } } as const)),
+  Match.when("unexpected", () => ({ status: 500, body: { code: "validation.unexpected", details: error.details } } as const)),
+  Match.exhaustive,
 );
-```
 
-**Import**: Both formatters accessed via `ParseResult` namespace from `effect` -- not direct path imports.
-
----
-## [8][BOUNDARY_RULES]
->**Dictum:** *Decode at ingress, brand through domain, encode at egress.*
-
-| [INDEX] | [LAYER]  | [PATTERN]                            | [RATIONALE]                                |
-| :-----: | -------- | ------------------------------------ | ------------------------------------------ |
-|   [1]   | Ingress  | `S.decodeUnknown(X)(raw)`            | Untrusted input enters typed domain        |
-|   [2]   | Domain   | Branded types flow; no re-validation | Schema validated at boundary; trust inside |
-|   [3]   | Egress   | `S.encodeSync(X)(value)`             | Typed value serialized for wire/storage    |
-|   [4]   | Internal | `S.decodeSync(X)(known)`             | Program-constructed values; trusted        |
-
-```typescript
-// ingress: HTTP handler decodes untrusted body
-const handler = Effect.gen(function* () {
-    const raw = yield* HttpServerRequest.schemaBodyJson(CreateOrder);
-    const result = yield* OrderService.create(raw);
-    return result;
-});
-
-// egress: encode for wire before sending
-const respond = (order: Order) => pipe(
-    S.encodeSync(Order.json)(order),
-    Effect.succeed,
-);
+const projectCause = (cause: Cause.Cause<ValidationBoundaryError>) => Cause.match({
+  onEmpty: { status: 500, body: { code: "cause.empty", details: "empty cause" } }, onFail: toHttpFailure,
+  onDie: (defect) => ({ status: 500, body: { code: "cause.defect",    details: String(defect) } }),
+  onInterrupt: () => ({ status: 499, body: { code: "cause.interrupt", details: "request interrupted" } }),
+  onSequential: (left) => left, onParallel: (left) => left,
+})(cause);
 ```
 
 ---
-## [9][ERROR_SYMPTOMS]
->**Dictum:** *Symptom table diagnoses structural defects -- consult FIRST when triaging.*
+## [7][NON_NEGOTIABLES]
+>**Dictum:** *Validation quality is enforced by immutable laws and explicit anti-pattern bans.*
 
-| [INDEX] | [SYMPTOM]                                    | [CAUSE]                          | [FIX]                                                     |
-| :-----: | :------------------------------------------- | :------------------------------- | :-------------------------------------------------------- |
-|   [1]   | `JSON.parse()` without schema                | Unvalidated deserialization      | `S.decodeUnknown(S.parseJson(X))(raw)`                    |
-|   [2]   | `as unknown as T` cast                       | Unsafe cast bypassing codec      | `S.decodeUnknown(X)(input)` at boundary                   |
-|   [3]   | `if (!valid) return Error`                   | Imperative validation            | `S.filter` with message annotation                        |
-|   [4]   | Manual JSON parse + validate in two steps    | Missing compose pipeline         | `S.parseJson(TargetSchema)` or `S.compose` chain          |
-|   [5]   | `unknown` param without decode               | Unvalidated boundary input       | `S.decodeUnknown(Schema)(input)` at entry                 |
-|   [6]   | `.catch` on decode with no formatting        | Opaque parse errors              | `ParseResult.TreeFormatter.formatErrorSync` at boundary   |
-|   [7]   | Raw `string` in domain function signatures   | Primitive obsession              | `S.brand('Name')` + decode at boundary                    |
-|   [8]   | `S.optional` when sensible default exists    | Missing default semantics        | `S.optionalWith(schema, { default: () => value })`        |
-|   [9]   | Separate `CreateX`/`UpdateX` schema files    | Projection proliferation         | `S.Struct(X.fields).pipe(S.pick(...))` at call site       |
-|  [10]   | `S.decodeUnknownSync` inside Effect pipeline | Sync decode losing error channel | `S.decodeUnknown(X)` returns `Effect` -- use in gen/pipe  |
-|  [11]   | `S.filter` when built-in suffices            | Redundant custom predicate       | `S.minLength`, `S.pattern`, `S.between`, `S.positive`     |
-|  [12]   | Missing `message` on custom `S.filter`       | Opaque "predicate failed" error  | Add `{ message: () => '...' }` or return string from pred |
-|  [13]   | Manual string splitting after validation     | Missing TemplateLiteralParser    | `S.TemplateLiteralParser(...)` extracts segments directly |
-|  [14]   | `S.Class` for internal config object         | Schema wrapping non-boundary     | Plain object + `typeof` + `as const`                      |
-|  [15]   | `try { JSON.parse } catch` in Effect code    | Exception-based JSON handling    | `S.parseJson(X)` or `S.transformOrFail` with ParseResult  |
+Validation gate matrix:
+- `VG-01` Decode-once detector: count decode boundaries in ingress path. Reject when payload is decoded more than once.
+- `VG-02` Boundary mapping detector: locate parse->tagged conversion site. Reject when mapping is duplicated across layers.
+- `VG-03` Exhaustive closure detector: finite union matchers. Reject when no exhaustive terminator or explicit collapse.
+- `VG-04` Rail ownership detector: module error tags. Reject when boundary exports raw string/unknown failures.
+- `VG-05` Queue/permit detector: ingress rails with queue policy. Reject when offer outcomes are ignored.
+- `VG-06` OCC detector: update paths with expected version/timestamp. Reject when zero-row conflict is not typed.
 
----
-## [10][DETECTION_HEURISTICS]
->**Dictum:** *Grep patterns flag validation-specific violations.*
-
-| [INDEX] | [PATTERN]                            | [DETECTS]                        | [SEV] |
-| :-----: | ------------------------------------ | -------------------------------- | :---: |
-|   [1]   | `JSON\.parse\(`                      | Unvalidated deserialization      | HIGH  |
-|   [2]   | `as unknown as`                      | Unsafe cast bypassing schema     | HIGH  |
-|   [3]   | `S\.decodeUnknownSync` in Effect gen | Sync decode losing error channel |  MED  |
-|   [4]   | `\.catch\(` near decode call         | Swallowed parse error            |  MED  |
-|   [5]   | `S\.filter` without `message`        | Missing human-readable error msg |  LOW  |
-|   [6]   | `S\.Class.*(?!Model\|Tagged)`        | Schema.Class for non-entity      |  MED  |
-|   [7]   | `try\s*\{` near `JSON`               | Exception-based JSON handling    | HIGH  |
-
----
-## [11][QUICK_REFERENCE]
->**Dictum:** *Decision table maps intent to Schema API.*
-
-| [INDEX] | [NEED]                       | [API]                                        | [SECTION] |
-| :-----: | ---------------------------- | -------------------------------------------- | :-------: |
-|   [1]   | Parse untrusted input        | `S.decodeUnknown(X)`                         |    [1]    |
-|   [2]   | Parse without Effect         | `S.decodeUnknownEither(X)`                   |    [1]    |
-|   [3]   | Construct known-valid value  | `S.decodeSync(X)`                            |    [1]    |
-|   [4]   | Serialize for wire           | `S.encodeSync(X)`                            |    [1]    |
-|   [5]   | Type guard                   | `S.is(X)`                                    |    [2]    |
-|   [6]   | Fail-fast assertion          | `S.asserts(X)`                               |    [2]    |
-|   [7]   | Custom predicate refinement  | `S.filter(pred, { message })`                |    [3]    |
-|   [8]   | Bidirectional pure codec     | `S.transform(From, To, { decode, encode })`  |    [4]    |
-|   [9]   | Bidirectional fallible codec | `S.transformOrFail(From, To, { ... })`       |    [4]    |
-|  [10]   | Chain two codecs             | `S.compose(A_to_B, B_to_C)`                  |    [5]    |
-|  [11]   | JSON string to typed value   | `S.parseJson(X)`                             |    [5]    |
-|  [12]   | Extract segments from string | `S.TemplateLiteralParser(...)`               |    [6]    |
-|  [13]   | Human-readable error string  | `ParseResult.TreeFormatter.formatErrorSync`  |    [7]    |
-|  [14]   | Structured error array       | `ParseResult.ArrayFormatter.formatErrorSync` |    [7]    |
-|  [15]   | Diagnose structural defect   | Error symptom table                          |    [9]    |
-
-**Last Verified:** 2026-02-23
+Anti-pattern bans:
+- Re-decoding payloads downstream.
+- Using `S.validate` as sync collapse.
+- Fallback routing over finite tagged unions.
+- String errors at boundary seams.
+- Parallel DTO families drifting from schema authority.
+- Detached fibers without scoped ownership.
+- Retries keyed by raw status code without typed reason.
+- Unbounded metric labels.
+- Ad-hoc `JSON.stringify` for JSONB writes.
+- Implicit OCC semantics.

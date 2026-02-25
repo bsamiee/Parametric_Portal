@@ -8,11 +8,7 @@ import { createConfig } from '../../vite.factory.ts';
 export default defineConfig(
     Effect.runSync(
         createConfig({
-            entry: {
-                registry: './src/registry.ts',
-                runtime: './src/runtime.ts',
-                search: './src/search.ts',
-            },
+            entry: './src/service.ts',
             external: [
                 '@effect/ai',
                 '@effect/ai-anthropic',
