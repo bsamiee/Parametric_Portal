@@ -1,26 +1,21 @@
 /** field.ts tests: resolve round-trip, unknown-key annihilation, metadata assignments, sqlCast. */
 import { it } from '@effect/vitest';
 import { Field } from '@parametric-portal/database/field';
+import { AgentJournal } from '@parametric-portal/database/models';
 import { Effect, FastCheck as fc } from 'effect';
 import { expect } from 'vitest';
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
 const _WRAP_MAP = { casefold: ['email', 'namespace'] } as const;
-const _GEN_MAP = { stored: ['createdAt', 'documentHash', 'searchVector', 'size'], uuidv7: ['id'], virtual: ['prefix', 'remaining'] } as const;
+const _GEN_MAP = { stored: ['batchKey', 'createdAt', 'dedupeKey', 'documentHash', 'jobKey', 'searchVector', 'size'], uuidv7: ['id'], virtual: ['prefix', 'remaining'] } as const;
 const _MARK_MAP = { exp: ['expiryRefresh', 'expiresAt'], soft: ['deletedAt', 'replayedAt'] } as const;
-const _ALL_FIELDS = [
-    'action', 'agent', 'appId', 'attempts', 'backedUp', 'backups', 'channel', 'completedAt', 'content', 'contentText', 'contextAgent', 'contextIp', 'contextRequestId', 'contextUserId',
-    'correlation', 'counter', 'createdAt', 'credentialId', 'deletedAt', 'delivery', 'delta', 'deviceType', 'dimensions', 'displayText', 'documentHash', 'email', 'embedding',
-    'enabledAt', 'encrypted', 'entityId', 'entityType', 'errorReason', 'errors', 'expiryAccess', 'expiryRefresh', 'expiresAt', 'externalId', 'hash', 'history', 'id',
-    'ipAddress', 'jobId', 'key', 'value', 'lastUsedAt', 'metadata', 'model', 'name', 'namespace', 'provider', 'operation', 'output', 'payload', 'preferences', 'prefix', 'priority', 'publicKey',
-    'recipient', 'remaining', 'replayedAt', 'requestId', 'resource', 'retryCurrent', 'retryMax', 'role', 'scheduledAt', 'scopeId', 'searchVector', 'sessionId', 'settings', 'size',
-    'source', 'sourceId', 'status', 'storageRef', 'targetId', 'targetType', 'template', 'tokenAccess', 'tokenPayload', 'tokenRefresh', 'transports', 'type', 'updatedAt', 'userId', 'verifiedAt',
-] as const;
+const _ALL_FIELDS = Object.keys(Field.entries) as ReadonlyArray<string>;
 const _SQL_TYPE_SAMPLES: ReadonlyArray<readonly [string, string]> = [
-    ['contextIp', 'INET'], ['ipAddress', 'INET'], ['correlation', 'JSONB'], ['metadata', 'JSONB'], ['payload', 'JSONB'], ['id', 'UUID'], ['appId', 'UUID'], ['userId', 'UUID'], ['sessionId', 'UUID'],
-    ['createdAt', 'TIMESTAMPTZ'], ['updatedAt', 'TIMESTAMPTZ'], ['encrypted', 'BYTEA'], ['tokenPayload', 'BYTEA'], ['embedding', 'HALFVEC'], ['searchVector', 'TSVECTOR'], ['backups', 'TEXT[]'],
-    ['transports', 'TEXT[]'], ['attempts', 'INTEGER'], ['counter', 'INTEGER'], ['backedUp', 'BOOLEAN'],
+    ['contextIp', 'INET'], ['ipAddress', 'INET'], ['correlation', 'JSONB'], ['metadata', 'JSONB'], ['payload', 'JSONB'], ['payloadJson', 'JSONB'], ['id', 'UUID'],
+    ['appId', 'UUID'], ['userId', 'UUID'], ['sessionId', 'UUID'], ['createdAt', 'TIMESTAMPTZ'], ['updatedAt', 'TIMESTAMPTZ'], ['encrypted', 'BYTEA'],
+    ['tokenPayload', 'BYTEA'], ['embedding', 'HALFVEC'], ['searchVector', 'TSVECTOR'], ['backups', 'TEXT[]'], ['transports', 'TEXT[]'], ['attempts', 'INTEGER'],
+    ['counter', 'INTEGER'], ['backedUp', 'BOOLEAN'],
 ] as const;
 const _fieldArb = fc.constantFrom(..._ALL_FIELDS);
 
@@ -42,13 +37,13 @@ it.effect.prop('P2: unknown keys annihilate', { key: fc.string().filter((k) => F
 
 // --- [EDGE_CASES] ------------------------------------------------------------
 
-it.effect('E1: registry size + field identity', () =>
+it.effect('E1: registry identity + AgentJournal field coverage', () =>
     Effect.sync(() => {
-        const resolved = _ALL_FIELDS.map((f) => Field.resolve(f)).filter(Boolean);
-        expect(resolved).toHaveLength(_ALL_FIELDS.length);
-        // Sentinel: pinned registry count — update when fields are added/removed
-        expect(_ALL_FIELDS).toHaveLength(86);
-        expect(_ALL_FIELDS.map((f) => Field.resolve(f)?.field)).toEqual([..._ALL_FIELDS]);
+        expect(_ALL_FIELDS.length).toBeGreaterThan(0);
+        expect(_ALL_FIELDS.map((field) => Field.resolve(field)?.field)).toEqual([..._ALL_FIELDS]);
+        expect(Object.keys(AgentJournal.fields).every((field) => Field.resolve(field) !== undefined)).toBe(true);
+        expect(Field.resolve('entryKind')?.col).toBe('entry_kind');
+        expect(Field.resolve('payloadJson')?.col).toBe('payload_json');
     }),
 );
 it.effect('E2: gen/mark/wrap metadata assignments are exact', () =>

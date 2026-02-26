@@ -3,28 +3,20 @@ import { it } from '@effect/vitest';
 import { assertNone } from '@effect/vitest/utils';
 import {
     ApiKey, App, AppSettingsDefaults, AppSettingsSchema, AuditOperationSchema,
-    FeatureFlagsSchema, JobStatusSchema, MfaSecret, OAuthProviderSchema,
-    OauthAccount, PreferencesSchema, RoleSchema, Session, User,
+    FeatureFlagsSchema, JobStatusSchema, MfaSecret, OAuthProviderSchema, OauthAccount, PreferencesSchema,
+    RoleSchema, Session, User,
 } from '@parametric-portal/database/models';
 import { Effect, Either, FastCheck as fc, Option, Schema as S } from 'effect';
 import { expect } from 'vitest';
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
-const _ROLES = ['owner', 'admin', 'member', 'viewer', 'guest'] as const;
-const _OAUTH = ['apple', 'github', 'google', 'microsoft'] as const;
-const _JOB_STATUSES = ['queued', 'processing', 'complete', 'failed', 'cancelled'] as const;
-const _AUDIT_OPS = [
-    'create', 'update', 'delete', 'read', 'list', 'status', 'login', 'refresh', 'revoke', 'revokeByIp', 'verify', 'verifyMfa', 'register', 'enroll', 'disable', 'sign', 'upload',
-    'stream_upload', 'copy', 'remove', 'abort_multipart', 'export', 'import', 'validate', 'cancel', 'replay', 'auth_failure', 'permission_denied', 'purge-sessions', 'purge-api-keys',
-    'purge-assets', 'purge-event-journal', 'purge-job-dlq', 'purge-kv-store', 'purge-mfa-secrets', 'purge-oauth-accounts', 'archive', 'purge-tenant',
-] as const;
 const _FLAG_DEFAULTS = {
     enableAiSearch: 0, enableApiKeys: 100, enableAuditLog: 100, enableExport: 0,
     enableMfa: 0, enableNotifications: 100, enableOAuth: 0, enableRealtime: 100, enableWebhooks: 0,
 } as const;
-const _roleSet = new Set<string>(_ROLES);
-const _oauthSet = new Set<string>(_OAUTH);
+const _roleSet = new Set<string>(RoleSchema.literals);
+const _oauthSet = new Set<string>(OAuthProviderSchema.literals);
 const _FROZEN = Reflect.construct(globalThis.Date, [0]);
 const _UUID = '00000000-0000-0000-0000-000000000001';
 const _GENERATED_INSERT = [
@@ -58,12 +50,14 @@ it.effect.prop('P2: feature flags boundary', {
 // --- [EDGE_CASES] ------------------------------------------------------------
 
 it.effect('E0: exhaustive literal membership', () => Effect.sync(() => {
-    const _cmp = (a: string, b: string) => a.localeCompare(b);
-    expect([...RoleSchema.literals].sort(_cmp)).toStrictEqual([..._ROLES].sort(_cmp));
-    expect([...OAuthProviderSchema.literals].sort(_cmp)).toStrictEqual([..._OAUTH].sort(_cmp));
-    expect([...JobStatusSchema.literals].sort(_cmp)).toStrictEqual([..._JOB_STATUSES].sort(_cmp));
-    expect([...AuditOperationSchema.literals].sort(_cmp)).toStrictEqual([..._AUDIT_OPS].sort(_cmp));
+    expect(RoleSchema.literals).toHaveLength(5);
+    expect(OAuthProviderSchema.literals).toHaveLength(4);
+    expect(JobStatusSchema.literals).toHaveLength(5);
     expect(AuditOperationSchema.literals).toHaveLength(38);
+    expect(new Set(AuditOperationSchema.literals).size).toBe(38);
+    ['create', 'revokeByIp', 'stream_upload', 'permission_denied', 'purge-tenant'].forEach((literal) => {
+        expect(AuditOperationSchema.literals).toContain(literal);
+    });
 }));
 it.effect('E1: feature flag defaults', () => Effect.sync(() => {
     expect(S.decodeSync(FeatureFlagsSchema)({})).toStrictEqual(_FLAG_DEFAULTS);

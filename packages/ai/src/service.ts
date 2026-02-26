@@ -35,68 +35,79 @@ const _ManifestSchema = S.parseJson(S.Array(_ManifestEntry));
 
 class AiService extends Effect.Service<AiService>()('ai/Service', {
     effect: Effect.gen(function* () {
-        const model = yield* AiRuntime;
+        const model    = yield* AiRuntime;
+        const audit    = yield* AuditService;
+        const database = yield* DatabaseService;
+        const metrics  = yield* MetricsService;
+        const _track = (label: string, details: Record<string, unknown>, subjectId: string, metricCounter: typeof metrics.search.queries, metricLabels: ReturnType<typeof MetricsService.label>) =>
+            Effect.all([
+                audit.log(label, { details, subjectId }),
+                MetricsService.inc(metricCounter, metricLabels),
+            ], { discard: true });
+        const _resolveSearchContext = (defaultSubject = 'anonymous') => Effect.gen(function* () {
+            const ctx = yield* Context.Request.current;
+            return {
+                ctx,
+                scopeId:   ctx.tenantId === Context.Request.Id.system ? null : ctx.tenantId,
+                subjectId: Option.map(ctx.session, (s) => s.userId).pipe(Option.getOrElse(() => defaultSubject)),
+            } as const;
+        });
         const seedKnowledge = Effect.fn('AiService.seedKnowledge')((input: {
             readonly entityType: string;
-            readonly entries:    ReadonlyArray<typeof _ManifestEntry.Type>;
+            readonly manifest:   ReadonlyArray<typeof _ManifestEntry.Type> | string;
             readonly namespace?: string | undefined;
             readonly scopeId?:   string | null | undefined;
-        }) => {
+        }) => Effect.gen(function* () {
+            const entries = typeof input.manifest === 'string' ? yield* S.decodeUnknown(_ManifestSchema)(input.manifest) : input.manifest;
             const namespace = input.namespace ?? 'ai';
-            const scopeId =   input.scopeId ?? null;
-            const batch =     A.map(input.entries, (e) => {
-                const parts = [
-                    e.name, ...e.aliases, e.category, e.description,
-                    ...e.params.map((p) => `${p.name}: ${p.description ?? p.type}`),
-                    ...e.examples.map((x) => x.description ?? x.input),
-                ];
-                const source = parts.filter((v): v is string => typeof v === 'string' && v.length > 0).join(' ');
+            const scopeId = input.scopeId ?? null;
+            const entityIds = A.map(entries, (e) => {
                 const hex = createHash('sha256').update(`${namespace}:${input.entityType}:${e.id}`).digest('hex');
-                const entityId = `${hex.slice(0, 8)}-${hex.slice(8, 12)}-8${hex.slice(13, 16)}-${(0x80 | (Number.parseInt(hex.slice(16, 18), 16) & 0x3f)).toString(16)}${hex.slice(18, 20)}-${hex.slice(20, 32)}`;
-                return { entityId, entry: e, source };
+                return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-8${hex.slice(13, 16)}-${(0x80 | (Number.parseInt(hex.slice(16, 18), 16) & 0x3f)).toString(16)}${hex.slice(18, 20)}-${hex.slice(20, 32)}`;
             });
-            return Effect.gen(function* () {
-                const database = yield* DatabaseService;
-                const settings = yield* model.settings();
-                const { dimensions, model: embeddingModel } = settings.embedding;
-                const vectors = yield* model.embed(A.map(batch, (b) => b.source)).pipe(
-                    Effect.filterOrFail(
-                        (v) => v.length === batch.length,
-                        (v) => new AiError({ cause: { actual: v.length, expected: batch.length }, operation: 'seedKnowledge', reason: 'unknown' }),
-                    ),
-                );
-                const items = A.zip(batch, vectors);
-                const docs = yield* Effect.forEach(items, ([b, _]) =>
-                    database.search.upsertDocument({
-                        contentText: b.entry.description, displayText: b.entry.name, entityId: b.entityId, entityType: input.entityType,
-                        metadata: { aliases: b.entry.aliases, category: b.entry.category, examples: b.entry.examples, isDestructive: b.entry.isDestructive, params: b.entry.params },
-                        scopeId,
-                    }), { concurrency: 10 });
-                yield* Effect.forEach(A.zip(items, docs), ([[b, vector], doc]) =>
-                    database.search.upsertEmbedding({ dimensions, documentHash: doc.documentHash, embedding: vector, entityId: b.entityId, entityType: input.entityType, model: embeddingModel, scopeId }),
-                    { concurrency: 10, discard: true });
-                return { upserted: input.entries.length } as const;
+            const sources = A.map(entries, (e) => {
+                const parts = [
+                    e.name,
+                    ...e.aliases,
+                    ...(e.category === undefined ? [] : [e.category]),
+                    e.description,
+                    ...e.params.map((p) => `${p.name}: ${p.description ?? p.type}`),
+                    ...e.examples.map((x) => x.description ?? x.input).filter((t): t is string => Boolean(t)),
+                ];
+                return parts.join(' ');
             });
-        });
-        const seedKnowledgeJson = Effect.fn('AiService.seedKnowledgeJson')((input: {
-            readonly entityType:   string;
-            readonly manifestJson: string;
-            readonly namespace?:   string | undefined;
-            readonly scopeId?:     string | null | undefined;
-        }) => S.decodeUnknown(_ManifestSchema)(input.manifestJson).pipe(Effect.flatMap((entries) => seedKnowledge({ ...input, entries })),),);
+            const settings = yield* model.settings();
+            const { dimensions, model: embeddingModel } = settings.embedding;
+            const vectors = yield* model.embed(sources).pipe(
+                Effect.filterOrFail(
+                    (v) => v.length === entries.length,
+                    (v) => new AiError({ cause: { actual: v.length, expected: entries.length }, operation: 'seedKnowledge', reason: 'unknown' }),
+                ),
+            );
+            const docs = yield* Effect.forEach(entries, (e, i) =>
+                database.search.upsertDocument({
+                    contentText: e.description, displayText: e.name, entityId: A.unsafeGet(entityIds, i), entityType: input.entityType,
+                    metadata: { aliases: e.aliases, category: e.category, examples: e.examples, isDestructive: e.isDestructive, params: e.params },
+                    scopeId,
+                }),
+                { concurrency: 10 },
+            );
+            yield* Effect.forEach(docs, (doc, i) =>
+                database.search.upsertEmbedding({ dimensions, documentHash: doc.documentHash, embedding: A.unsafeGet(vectors, i), entityId: A.unsafeGet(entityIds, i), entityType: input.entityType, model: embeddingModel, scopeId }),
+                { concurrency: 10, discard: true },
+            );
+            return { upserted: entries.length } as const;
+        }));
         const searchQuery = Effect.fn('AiService.searchQuery')(
             (options: {
-                readonly entityTypes?: readonly string[] | undefined;
+                readonly entityTypes?:     readonly string[] | undefined;
                 readonly includeFacets?:   boolean | undefined;
                 readonly includeGlobal?:   boolean | undefined;
                 readonly includeSnippets?: boolean | undefined;
                 readonly term: string;
             }, pagination?: { readonly cursor?: string | undefined; readonly limit?: number | undefined }) =>
                 Effect.gen(function* () {
-                    const [audit, database, metrics] = yield* Effect.all([AuditService, DatabaseService, MetricsService]);
-                    const ctx = yield* Context.Request.current;
-                    const scopeId = ctx.tenantId === Context.Request.Id.system ? null : ctx.tenantId;
-                    const subjectId = Option.match(ctx.session, { onNone: () => 'anonymous', onSome: (s) => s.userId });
+                    const { ctx, scopeId, subjectId } = yield* _resolveSearchContext();
                     const settings = yield* model.settings();
                     const { dimensions, model: embeddingModel } = settings.embedding;
                     const embedding = yield* model.embed(options.term).pipe(
@@ -107,36 +118,24 @@ class AiService extends Effect.Service<AiService>()('ai/Service', {
                         { ...options, scopeId, ...Option.match(embedding, { onNone: () => ({}), onSome: (vector) => ({ embedding: { dimensions, model: embeddingModel, vector } }) }) },
                         pagination,
                     );
-                    yield* Effect.all([
-                        audit.log('Search.read', { details: { entityTypes: options.entityTypes, resultCount: result.total, term: options.term }, subjectId }),
-                        MetricsService.inc(metrics.search.queries, MetricsService.label({ tenant: ctx.tenantId })),
-                    ], { discard: true });
+                    yield* _track('Search.read', { entityTypes: options.entityTypes, resultCount: result.total, term: options.term }, subjectId, metrics.search.queries, MetricsService.label({ tenant: ctx.tenantId }));
                     return result;
                 }).pipe(Telemetry.span('search.query', { 'search.term': options.term })),
         );
         const searchRefresh = Effect.fn('AiService.searchRefresh')((includeGlobal = false) =>
             Effect.gen(function* () {
-                const [audit, database, metrics] = yield* Effect.all([AuditService, DatabaseService, MetricsService]);
-                const ctx = yield* Context.Request.current;
-                const scopeId = ctx.tenantId === Context.Request.Id.system ? null : ctx.tenantId;
-                const subjectId = Option.match(ctx.session, { onNone: () => 'system', onSome: (s) => s.userId });
+                const { ctx, scopeId, subjectId } = yield* _resolveSearchContext('system');
                 yield* database.search.refresh(scopeId, includeGlobal);
-                yield* Effect.all([
-                    audit.log('Search.refresh', { details: { includeGlobal, kind: 'index', scopeId }, subjectId }),
-                    MetricsService.inc(metrics.search.refreshes, MetricsService.label({ tenant: ctx.tenantId })),
-                ], { discard: true });
+                yield* _track('Search.refresh', { includeGlobal, kind: 'index', scopeId }, subjectId, metrics.search.refreshes, MetricsService.label({ tenant: ctx.tenantId }));
             }).pipe(Telemetry.span('search.refresh', { 'search.includeGlobal': includeGlobal })),
         );
         const searchRefreshEmbeddings = Effect.fn('AiService.searchRefreshEmbeddings')((options?: {
-            readonly entityTypes?: readonly string[] | undefined;
+            readonly entityTypes?:   readonly string[] | undefined;
             readonly includeGlobal?: boolean | undefined;
-            readonly limit?: number | undefined;
+            readonly limit?:         number | undefined;
         }) =>
             Effect.gen(function* () {
-                const [audit, database, metrics] = yield* Effect.all([AuditService, DatabaseService, MetricsService]);
-                const ctx = yield* Context.Request.current;
-                const scopeId = ctx.tenantId === Context.Request.Id.system ? null : ctx.tenantId;
-                const subjectId = Option.match(ctx.session, { onNone: () => 'system', onSome: (s) => s.userId });
+                const { ctx, scopeId, subjectId } = yield* _resolveSearchContext('system');
                 const settings = yield* model.settings();
                 const { dimensions, model: embeddingModel } = settings.embedding;
                 const sources = yield* database.search.embeddingSources({
@@ -153,15 +152,16 @@ class AiService extends Effect.Service<AiService>()('ai/Service', {
                         (v) => new AiError({ cause: { actual: v.length, expected: sources.length }, operation: 'searchRefreshEmbeddings', reason: 'unknown' }),
                     ),
                 );
-                yield* Effect.forEach(
-                    A.zipWith(sources, embeddings, (source, embedding) => ({ ...source, embedding })),
-                    (s) => database.search.upsertEmbedding({ dimensions, documentHash: s.documentHash, embedding: s.embedding, entityId: s.entityId, entityType: s.entityType, model: embeddingModel, scopeId: s.scopeId }),
+                yield* Effect.forEach(sources, (s, i) =>
+                    database.search.upsertEmbedding({ dimensions, documentHash: s.documentHash, embedding: A.unsafeGet(embeddings, i), entityId: s.entityId, entityType: s.entityType, model: embeddingModel, scopeId: s.scopeId }),
                     { concurrency: 10, discard: true },
                 );
-                yield* Effect.all([
-                    audit.log('Search.refresh', { details: { count: sources.length, includeGlobal: options?.includeGlobal ?? false, kind: 'embeddings', scopeId }, subjectId }),
-                    MetricsService.inc(metrics.search.refreshes, MetricsService.label({ kind: 'embeddings', tenant: ctx.tenantId })),
-                ], { discard: true });
+                yield* _track('Search.refresh',
+                    {count: sources.length, includeGlobal: options?.includeGlobal ?? false, kind: 'embeddings', scopeId },
+                    subjectId,
+                    metrics.search.refreshes,
+                    MetricsService.label({ kind: 'embeddings', tenant: ctx.tenantId })
+                );
                 return { count: sources.length };
             }).pipe(Telemetry.span('search.refreshEmbeddings', { 'search.includeGlobal': options?.includeGlobal ?? false })),
         );
@@ -171,19 +171,13 @@ class AiService extends Effect.Service<AiService>()('ai/Service', {
             readonly prefix:         string;
         }) =>
             Effect.gen(function* () {
-                const [audit, database, metrics] = yield* Effect.all([AuditService, DatabaseService, MetricsService]);
-                const ctx = yield* Context.Request.current;
-                const scopeId = ctx.tenantId === Context.Request.Id.system ? null : ctx.tenantId;
-                const subjectId = Option.match(ctx.session, { onNone: () => 'anonymous', onSome: (s) => s.userId });
+                const { ctx, scopeId, subjectId } = yield* _resolveSearchContext();
                 const result = yield* database.search.suggest({ ...options, scopeId });
-                yield* Effect.all([
-                    audit.log('Search.list', { details: { prefix: options.prefix, resultCount: result.length }, subjectId }),
-                    MetricsService.inc(metrics.search.suggestions, MetricsService.label({ tenant: ctx.tenantId })),
-                ], { discard: true });
+                yield* _track('Search.list', { prefix: options.prefix, resultCount: result.length }, subjectId, metrics.search.suggestions, MetricsService.label({ tenant: ctx.tenantId }));
                 return result;
             }).pipe(Telemetry.span('search.suggest', { 'search.prefix': options.prefix })),
         );
-        return { model, searchQuery, searchRefresh, searchRefreshEmbeddings, searchSuggest, seedKnowledge, seedKnowledgeJson } as const;
+        return { model, searchQuery, searchRefresh, searchRefreshEmbeddings, searchSuggest, seedKnowledge } as const;
     }),
 }) {
     static readonly EmbeddingCron = ClusterService.Schedule.cron({

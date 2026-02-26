@@ -1,39 +1,29 @@
 import { Duration, Effect, Fiber, Match, Option, Ref, Schema as S, pipe } from 'effect';
 import { AgentPersistenceService } from '@parametric-portal/database/agent-persistence';
-import { type EnvelopeSchema, OperationSchema, type StreamCompactedDeltaSchema } from '../protocol/schemas';
+import { Operation, type Envelope } from '../protocol/schemas';
 import { HarnessConfig } from '../config';
 import { CommandDispatch, CommandDispatchError } from '../protocol/dispatch';
 
 // --- [TYPES] -----------------------------------------------------------------
 
-type Command =       Extract<typeof EnvelopeSchema.Type, {_tag: 'command'}>;
-type EventEnvelope = Extract<typeof EnvelopeSchema.Type, {_tag: 'event'}>;
-type Result =        Extract<typeof EnvelopeSchema.Type, {_tag: 'result'}>;
-type IdentityBase =  Pick<Command, 'appId' | 'runId' | 'sessionId' | 'traceId'>;
-type LoopState = typeof _restoredLoopStateSchema.Type & {
-    readonly command:      Command | undefined;
-    readonly identityBase: IdentityBase;
+type LoopState = typeof _LoopStateCodec.Type & {
+    readonly command:      Option.Option<Envelope.Command>;
+    readonly identityBase: Envelope.IdentityBase;
 };
-
-// --- [CONSTANTS] -------------------------------------------------------------
-
-const _writeOperations = new Set<typeof OperationSchema.Type>(
-    ['write.annotation.update', 'write.layer.update', 'write.object.create', 'write.object.delete', 'write.object.update', 'write.viewport.update']
-);
 
 // --- [SCHEMA] ----------------------------------------------------------------
 
-const _restoredLoopStateSchema = S.Struct({
+const _LoopStateCodec = S.Struct({
     attempt:          S.Int.pipe(S.greaterThanOrEqualTo(1)),
     correctionCycles: S.Int.pipe(S.greaterThanOrEqualTo(0)),
-    operations:       S.Array(OperationSchema),
+    operations:       S.Array(Operation),
     sequence:         S.Int.pipe(S.greaterThanOrEqualTo(0)),
     status:           S.Literal('Planning', 'Completed', 'Failed'),
 });
 
 // --- [FUNCTIONS] -------------------------------------------------------------
 
-const _buildCheckpoint = (state: LoopState, sequence: number) => ({
+const _buildCheckpoint =  (state: LoopState, sequence: number) => ({
     chatJson: '',
     loopState: { attempt: state.attempt, correctionCycles: state.correctionCycles, operations: state.operations, sequence: state.sequence, status: state.status },
     sceneSummary: Option.none(),
@@ -41,67 +31,24 @@ const _buildCheckpoint = (state: LoopState, sequence: number) => ({
     sessionId: state.identityBase.sessionId,
 });
 const _elapsed = (start: number) => Math.max(0, Math.round(performance.now() - start));
-const _planCommand = (input: {
-    readonly deadline:       number;
-    readonly idempotency:    (input: { readonly payload: unknown; readonly runId: string; readonly sequence: number }) =>
-        { readonly idempotencyKey: string; readonly payloadHash: string };
-    readonly state:          LoopState;
-    readonly writeObjectRef: NonNullable<Command['objectRefs']>[number];
-}) =>
-    pipe(
-        Option.fromNullable(input.state.command),
-        Option.map((command) => ({ ...command, attempt: input.state.attempt }) satisfies Command),
-        Option.orElse(() => Option.fromNullable(input.state.operations[0]).pipe(Option.map((operation) => {
-            const { identityBase: base, sequence } = input.state;
-            const isWrite = _writeOperations.has(operation);
-            const payload = isWrite
-                ? ({ operationId: `${base.runId}:${sequence}`, patch: { layer: 'default', name: 'phase-3' } } as const)
-                : ({ includeAttributes: true, scope: 'active' } as const);
-            return {
-                _tag: 'command',
-                ...base,
-                attempt:     input.state.attempt,
-                deadlineMs:  input.deadline,
-                idempotency: isWrite ? input.idempotency({ payload, runId: base.runId, sequence }) : undefined,
-                objectRefs: [input.writeObjectRef],
-                operation,
-                payload,
-                requestId: crypto.randomUUID(),
-                undoScope: isWrite ? 'kargadan.phase3' : undefined,
-            } satisfies Command;
-        }))),
-        Option.match({ onNone: () => Effect.fail(new CommandDispatchError({ details: { message: 'No operation available for PLAN' }, reason: 'protocol' })), onSome: Effect.succeed }),
-    );
 
 // --- [SERVICES] --------------------------------------------------------------
 
 class AgentLoop extends Effect.Service<AgentLoop>()('kargadan/AgentLoop', {
     effect: Effect.gen(function* () {
         const [dispatch, persistence, commandDeadlineMs, retryMax, correctionMax, heartbeatIntervalMs, operations, writeObjectRef] = yield* Effect.all([
-            CommandDispatch,
-            AgentPersistenceService,
-            HarnessConfig.commandDeadlineMs,
-            HarnessConfig.retryMaxAttempts,
-            HarnessConfig.correctionCycles,
-            HarnessConfig.heartbeatIntervalMs,
-            HarnessConfig.resolveLoopOperations,
+            CommandDispatch, AgentPersistenceService, HarnessConfig.commandDeadlineMs,   HarnessConfig.retryMaxAttempts,
+            HarnessConfig.correctionCycles,           HarnessConfig.heartbeatIntervalMs, HarnessConfig.resolveLoopOperations,
             HarnessConfig.resolveWriteObjectRef,
         ]);
         const eventSequence = yield* Ref.make(1_000_000);
-        const persistInboundEvent = (eventEnvelope: EventEnvelope) =>
+        const persistInboundEvent = (eventEnvelope: Envelope.Event) =>
             Effect.gen(function* () {
                 const start = performance.now();
                 const sequence = yield* Ref.modify(eventSequence, (current) => [current, current + 1] as const);
                 const batchSummary = Match.value(eventEnvelope).pipe(
-                    Match.when({ eventType: 'stream.compacted' }, (streamEvent) =>
-                        Option.some({
-                            batchWindowMs:    streamEvent.delta.batchWindowMs,
-                            categories:       streamEvent.delta.categories,
-                            containsUndoRedo: streamEvent.delta.containsUndoRedo,
-                            totalCount:       streamEvent.delta.totalCount,
-                        } satisfies typeof StreamCompactedDeltaSchema.Type),
-                    ),
-                    Match.orElse(() => Option.none<typeof StreamCompactedDeltaSchema.Type>()),
+                    Match.when({ eventType: 'stream.compacted' }, (streamEvent) => Option.some(streamEvent.delta)),
+                    Match.orElse(() => Option.none()),
                 );
                 yield* persistence.persist({
                     appId: eventEnvelope.appId,
@@ -113,154 +60,179 @@ class AgentLoop extends Effect.Service<AgentLoop>()('kargadan/AgentLoop', {
                         sessionId: eventEnvelope.sessionId,
                     },
                     toolCall: {
-                        durationMs: _elapsed(start),
-                        error: Option.none(),
-                        operation: `transport.event.${eventEnvelope.eventType}`,
-                        params: { causationRequestId: eventEnvelope.causationRequestId, delta: eventEnvelope.delta, eventType: eventEnvelope.eventType, sourceRevision: eventEnvelope.sourceRevision, ...(Option.isSome(batchSummary) ? { batchSummary: batchSummary.value } : {}) },
+                        correlationId: eventEnvelope.correlationId,
+                        durationMs:    _elapsed(start),
+                        error:         Option.none(),
+                        operation:     `transport.event.${eventEnvelope.eventType}`,
+                        params: {
+                            causationRequestId: eventEnvelope.causationRequestId,
+                            delta:              eventEnvelope.delta,
+                            eventType:          eventEnvelope.eventType,
+                            sourceRevision:     eventEnvelope.sourceRevision,
+                            ...(Option.isSome(batchSummary) ? { batchSummary: batchSummary.value } : {})
+                        },
                         result: Option.some({ eventId: eventEnvelope.eventId }),
-                        runId: eventEnvelope.runId,
                         sequence,
                         sessionId: eventEnvelope.sessionId,
-                        status: 'ok' as const,
+                        status: 'ok',
                     },
                 });
                 return { eventEnvelope, sequence, totalCount: Option.isSome(batchSummary) ? batchSummary.value.totalCount : 0 } as const;
             });
-        const dispatchFailure = (command: Command, error: unknown): Result => {
-            const dError = error instanceof CommandDispatchError ? error : new CommandDispatchError({ details: { error: String(error) }, reason: 'transport' });
-            return {
-                _tag:      'result',
-                appId:     command.appId,
-                dedupe: {  decision: 'rejected', originalRequestId: command.requestId },
-                error: {   details: dError, reason: { code: 'DISPATCH_ERROR', failureClass: dError.failureClass ?? 'retryable', message: dError.message } },
-                requestId: command.requestId,
-                runId:     command.runId,
-                sessionId: command.sessionId,
-                status:    'error',
-                traceId:   command.traceId,
-            };
-        };
-        const persistResult = (state: LoopState, command: Command, result: Result, start: number): Effect.Effect<LoopState, unknown, unknown> => {
+        const persistResult = (state: LoopState, command: Envelope.Command, result: Envelope.Result, start: number) => {
             const verified = result.status === 'ok';
-            const failureError = {
+            const failureReason: Envelope.FailureReason & { readonly details: unknown } = {
                 code:         result.error?.reason.code ?? ('UNKNOWN_FAILURE' as const),
                 details:      result.error?.details,
                 failureClass: result.error?.reason.failureClass ?? ('fatal' as const),
                 message:      result.error?.reason.message ?? 'Result error payload is missing',
             };
             const seq = state.sequence + 1;
-            const next = { ...state, command, sequence: seq };
+            const next = { ...state, command: Option.some(command), sequence: seq };
             const failed: LoopState = { ...next, status: 'Failed' };
             const remaining = state.operations.slice(1);
             const done: LoopState = remaining.length === 0
-                ? { ...next, command: undefined, operations: [], status: 'Completed' }
-                : { ...next, attempt: 1, command: undefined, correctionCycles: 0, operations: remaining, status: 'Planning' };
+                ? { ...next, command: Option.none(), operations: [], status: 'Completed' }
+                : { ...next, attempt: 1, command: Option.none(), correctionCycles: 0, operations: remaining, status: 'Planning' };
             const decide = verified
                 ? Effect.succeed(done)
-                : Match.value(failureError.failureClass).pipe(
+                : Match.value(failureReason.failureClass).pipe(
                     Match.when('compensatable', () =>
                         persistence.persist({
                             appId: state.identityBase.appId,
                             checkpoint: _buildCheckpoint(failed, seq + 1),
-                            toolCall: { durationMs: 0, error: Option.some(failureError.code), operation: 'command.compensate', params: { code: failureError.code, compensation: 'required' }, result: Option.none(), runId: state.identityBase.runId, sequence: seq + 1, sessionId: state.identityBase.sessionId, status: 'error' as const },
+                            toolCall: {
+                                correlationId: state.identityBase.correlationId,
+                                durationMs:    0,
+                                error:         Option.some(failureReason.code),
+                                operation:     'command.compensate',
+                                params: {      code: failureReason.code, compensation: 'required' },
+                                result:        Option.none(),
+                                sequence:      seq + 1,
+                                sessionId:     state.identityBase.sessionId,
+                                status:        'error' as const
+                            },
                         }).pipe(Effect.as(failed)),
                     ),
-                    Match.when('correctable', () => Effect.succeed(state.correctionCycles < correctionMax ? ({ ...next, attempt: state.attempt + 1, correctionCycles: state.correctionCycles + 1, status: 'Planning' } as LoopState) : failed)),
-                    Match.when('fatal', () => Effect.logError('kargadan.fatal', failureError).pipe(Effect.as(failed))),
-                    Match.when('retryable', () => Effect.succeed(state.attempt < retryMax ? ({ ...next, attempt: state.attempt + 1, status: 'Planning' } as LoopState) : failed)),
+                    Match.when('correctable', () =>
+                        Effect.succeed(
+                            state.correctionCycles < correctionMax
+                                ? ({ ...next, attempt: state.attempt + 1, correctionCycles: state.correctionCycles + 1, status: 'Planning' } satisfies LoopState)
+                                : failed,
+                        ),
+                    ),
+                    Match.when('fatal', () => Effect.logError('kargadan.fatal', failureReason).pipe(Effect.as(failed))),
+                    Match.when('retryable', () =>
+                        Effect.succeed(
+                            state.attempt < retryMax
+                                ? ({ ...next, attempt: state.attempt + 1, status: 'Planning' } satisfies LoopState)
+                                : failed,
+                        ),
+                    ),
                     Match.exhaustive,
                 );
-            const nextState = verified ? done : failed;
-            return persistence.persist({
-                appId: state.identityBase.appId,
-                checkpoint: _buildCheckpoint(nextState, seq),
-                toolCall: {
-                    durationMs: _elapsed(start),
-                    error:      verified ? Option.none() : Option.some(failureError.message),
-                    operation:  verified ? 'command.completed' : 'command.failed',
-                    params:     { dedupe: result.dedupe, operation: command.operation, status: result.status },
-                    result:     Option.some({ dedupe: result.dedupe, status: result.status, verified }),
-                    runId:      state.identityBase.runId,
-                    sequence:   seq,
-                    sessionId:  state.identityBase.sessionId,
-                    status:     verified ? 'ok' as const : 'error' as const,
-                },
-            }).pipe(Effect.andThen(decide));
+            return decide.pipe(
+                Effect.flatMap((resolvedState) =>
+                    persistence.persist({
+                        appId: state.identityBase.appId,
+                        checkpoint: _buildCheckpoint(resolvedState, seq),
+                        toolCall: {
+                            correlationId: state.identityBase.correlationId,
+                            durationMs:    _elapsed(start),
+                            error:         verified ? Option.none() : Option.some(failureReason.message),
+                            operation:     verified ? 'command.completed' : 'command.failed',
+                            params:        { dedupe: result.dedupe, operation: command.operation, status: result.status },
+                            result:        Option.some({ dedupe: result.dedupe, status: result.status, verified }),
+                            sequence:      seq,
+                            sessionId:     state.identityBase.sessionId,
+                            status:        verified ? 'ok' as const : 'error' as const,
+                        },
+                    }).pipe(Effect.as(resolvedState)),
+                ),
+            );
         };
-        const execute = (state: LoopState, command: Command): Effect.Effect<LoopState, unknown, unknown> => {
+        const execute = (state: LoopState, command: Envelope.Command) => {
             const start = performance.now();
             return dispatch.execute(command).pipe(
-                Effect.catchAll((error) => Effect.succeed(dispatchFailure(command, error))),
+                Effect.catchTag('CommandDispatchError', (error) =>
+                    Effect.succeed({
+                        _tag:          'result',
+                        appId:         command.appId,
+                        correlationId: command.correlationId,
+                        dedupe:        { decision: 'rejected', originalRequestId: command.requestId },
+                        error:         { details: error, reason: { code: 'DISPATCH_ERROR', failureClass: error.failureClass ?? 'retryable', message: error.message } },
+                        requestId:     command.requestId,
+                        sessionId:     command.sessionId,
+                        status:        'error',
+                    } satisfies Envelope.Result),
+                ),
                 Effect.flatMap((result) => persistResult(state, command, result, start)),
             );
         };
-        const plan = (state: LoopState): Effect.Effect<LoopState, unknown, unknown> =>
+        const plan = (state: LoopState) =>
             Effect.gen(function* () {
                 const start = performance.now();
-                const command = yield* _planCommand({ deadline: commandDeadlineMs, idempotency: persistence.idempotency, state, writeObjectRef });
+                const { identityBase: base, sequence } = state;
+                const existingCommand = pipe(state.command, Option.map((cmd) => ({ ...cmd, attempt: state.attempt })));
+                const buildFallback = (operation: typeof Operation.Type): Envelope.Command => {
+                    const isWrite = operation.startsWith('write.');
+                    const payload = isWrite
+                        ? ({ operationId: `${base.correlationId}:${sequence}`, patch: { layer: 'default', name: 'phase-3' } } as const)
+                        : ({ includeAttributes: true, scope: 'active' } as const);
+                    return {
+                        _tag:        'command', ...base, attempt: state.attempt, deadlineMs: commandDeadlineMs,
+                        idempotency: isWrite ? persistence.idempotency({ correlationId: base.correlationId, payload, sequence }) : undefined,
+                        objectRefs:  [writeObjectRef], operation, payload, requestId: crypto.randomUUID(),
+                        undoScope:   isWrite ? 'kargadan.phase3' : undefined,
+                    };
+                };
+                const fallbackCommand = pipe(Option.fromNullable(state.operations[0]), Option.map(buildFallback));
+                const command = yield* pipe(
+                    existingCommand,
+                    Option.orElse(() => fallbackCommand),
+                    Option.match({ onNone: () => Effect.fail(new CommandDispatchError({ details: { message: 'No operation available for PLAN' }, reason: 'protocol' })), onSome: Effect.succeed }),
+                );
                 yield* persistence.persist({
                     appId: state.identityBase.appId,
                     checkpoint: _buildCheckpoint(state, state.sequence + 1),
                     toolCall: {
-                        durationMs: _elapsed(start),
-                        error:      Option.none(),
-                        operation:  'command.plan',
-                        params:     { operation: command.operation, status: state.status },
-                        result:     Option.some({ operation: command.operation }),
-                        runId:      state.identityBase.runId,
-                        sequence:   state.sequence + 1,
-                        sessionId:  state.identityBase.sessionId,
-                        status:     'ok' as const,
+                        correlationId: state.identityBase.correlationId,
+                        durationMs:    _elapsed(start),
+                        error:         Option.none(),
+                        operation:     'command.plan',
+                        params:        { operation: command.operation, status: state.status },
+                        result:        Option.some({ operation: command.operation }),
+                        sequence:      state.sequence + 1,
+                        sessionId:     state.identityBase.sessionId,
+                        status:        'ok' as const,
                     },
                 });
                 return yield* execute(state, command);
             });
-        const run = Effect.fn('AgentLoop.handle')((input: { readonly identityBase: IdentityBase; readonly resume: Option.Option<AgentLoop.ResumeState>; readonly token: string }) =>
+        const run = Effect.fn('AgentLoop.handle')((input: { readonly identityBase: Envelope.IdentityBase; readonly resume: Option.Option<{ readonly sequence: number; readonly state: unknown }>; readonly token: string }) =>
             Effect.gen(function* () {
                 const ack = yield* dispatch.handshake({ ...input.identityBase, requestId: crypto.randomUUID(), token: input.token });
-                const base: IdentityBase = { ...input.identityBase, appId: ack.appId, runId: ack.runId, sessionId: ack.sessionId, traceId: ack.traceId };
-                const baselineState: LoopState = { attempt: 1, command: undefined, correctionCycles: 0, identityBase: base, operations, sequence: 0, status: 'Planning' };
-                const initialState = yield* Option.match(input.resume, {
-                    onNone: () => Effect.succeed(baselineState),
-                    onSome: ({ sequence, state }) =>
-                        S.decodeUnknown(_restoredLoopStateSchema)(state).pipe(
-                            Effect.map((restored) =>
-                                ({
-                                    attempt:          restored.attempt,
-                                    command:          undefined,
-                                    correctionCycles: restored.correctionCycles,
-                                    identityBase:     base,
-                                    operations:       restored.operations,
-                                    sequence:         Math.max(restored.sequence, sequence),
-                                    status:           restored.status,
-                                }) satisfies LoopState,
-                            ),
-                            Effect.tap((restored) =>
-                                Effect.log('kargadan.harness.resume.restored', {
-                                    operations: restored.operations.length,
-                                    sequence:   restored.sequence,
-                                    sessionId:  restored.identityBase.sessionId,
-                                    status:     restored.status,
-                                }),
-                            ),
-                            Effect.catchAll((error) =>
-                                Effect.logWarning('kargadan.harness.resume.decode.failed', { error: String(error), sequence, sessionId: base.sessionId }).pipe(
-                                    Effect.as({ ...baselineState, sequence }),
-                                ),
-                            ),
-                        ),
-                });
+                const base: Envelope.IdentityBase = { ...input.identityBase, appId: ack.appId, correlationId: ack.correlationId, sessionId: ack.sessionId };
+                const baselineState: LoopState = { attempt: 1, command: Option.none(), correctionCycles: 0, identityBase: base, operations, sequence: 0, status: 'Planning' };
+                const resumeData = Option.getOrNull(input.resume);
+                const initialState: LoopState = resumeData === null
+                    ? baselineState
+                    : yield* S.decodeUnknown(_LoopStateCodec)(resumeData.state).pipe(
+                        Effect.map((restored): LoopState => ({ ...restored, command: Option.none(), identityBase: base, sequence: Math.max(restored.sequence, resumeData.sequence) })),
+                        Effect.tap((r) => Effect.log('kargadan.harness.resume.restored', { operations: r.operations.length, sequence: r.sequence, sessionId: r.identityBase.sessionId, status: r.status })),
+                        Effect.catchAll((e) => Effect.logWarning('kargadan.harness.resume.decode.failed', { error: String(e), sequence: resumeData.sequence, sessionId: base.sessionId }).pipe(Effect.as({ ...baselineState, sequence: resumeData.sequence }))),
+                    );
                 yield* Ref.set(eventSequence, Math.max(1_000_000, initialState.sequence + 1));
                 const heartbeatLoop = dispatch.heartbeat(base).pipe(
-                    Effect.tap((hb) => Effect.logDebug('kargadan.harness.heartbeat', { mode: hb.mode, requestId: hb.requestId, runId: hb.runId })),
-                    Effect.catchAll((error) => Effect.logWarning('kargadan.harness.heartbeat.failed', { error: String(error), runId: base.runId })),
+                    Effect.tap((hb) => Effect.logDebug('kargadan.harness.heartbeat', { correlationId: hb.correlationId, mode: hb.mode, requestId: hb.requestId })),
+                    Effect.catchAll((error) => Effect.logWarning('kargadan.harness.heartbeat.failed', { correlationId: base.correlationId, error: String(error) })),
                     Effect.zipRight(Effect.sleep(Duration.millis(heartbeatIntervalMs))),
                     Effect.forever,
                 );
                 const inboundLoop = dispatch.takeEvent().pipe(
                     Effect.flatMap(persistInboundEvent),
-                    Effect.tap((es) => Effect.logDebug('kargadan.harness.transport.event', { batchCount: es.totalCount, eventId: es.eventEnvelope.eventId, eventType: es.eventEnvelope.eventType, requestId: es.eventEnvelope.requestId, runId: es.eventEnvelope.runId, sequence: es.sequence })),
-                    Effect.catchAll((error) => Effect.logWarning('kargadan.harness.transport.event.failed', { error: String(error), runId: base.runId })),
+                    Effect.tap((es) => Effect.logDebug('kargadan.harness.transport.event', { batchCount: es.totalCount, correlationId: es.eventEnvelope.correlationId, eventId: es.eventEnvelope.eventId, eventType: es.eventEnvelope.eventType, requestId: es.eventEnvelope.requestId, sequence: es.sequence })),
+                    Effect.catchAll((error) => Effect.logWarning('kargadan.harness.transport.event.failed', { correlationId: base.correlationId, error: String(error) })),
                     Effect.forever,
                 );
                 const fibers = yield* Effect.all([Effect.fork(inboundLoop), Effect.fork(heartbeatLoop)]);
@@ -277,10 +249,5 @@ class AgentLoop extends Effect.Service<AgentLoop>()('kargadan/AgentLoop', {
 }) {}
 
 // --- [EXPORT] ----------------------------------------------------------------
-
-namespace AgentLoop {
-    export type IdentityBase = { readonly appId: string; readonly runId: string; readonly sessionId: string; readonly traceId: string };
-    export type ResumeState = { readonly sequence: number; readonly state: unknown };
-}
 
 export { AgentLoop };

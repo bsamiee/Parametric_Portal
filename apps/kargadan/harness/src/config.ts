@@ -1,9 +1,18 @@
-import { Config, Duration, Effect, Match, Option, Schema as S } from 'effect';
-import { DEFAULT_LOOP_OPERATIONS, ObjectRefSchema, OperationSchema } from './protocol/schemas';
+import { Config, Data, Duration, Effect, Match, Option, Schema as S } from 'effect';
+import { DEFAULT_LOOP_OPERATIONS, ObjectTypeTag, Operation } from './protocol/schemas';
+
+// --- [ERRORS] ----------------------------------------------------------------
+
+class HarnessConfigError extends Data.TaggedError('HarnessConfigError')<{
+    readonly reason: 'invalid_protocol_version';
+    readonly input:  string;
+}> {
+    override get message() {return `HarnessConfig/${this.reason}: '${this.input}'`;}
+}
 
 // --- [FUNCTIONS] -------------------------------------------------------------
 
-const _splitCsv = (s: string) => s.split(',').map((v) => v.trim()).filter(Boolean);
+const _splitCsv = (value: string) => value.split(',').map((entry) => entry.trim()).filter(Boolean);
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
@@ -17,7 +26,7 @@ const HarnessConfig = {
         Config.withDefault(''),
         Effect.flatMap((value) =>
             Match.value(value.trim()).pipe(
-                Match.when('', () => Effect.succeed(Option.none<string>())),
+                Match.when('', () => Effect.succeed(Option.none())),
                 Match.orElse((scopeId) => S.decodeUnknown(S.UUID)(scopeId).pipe(Effect.map(Option.some))),
             ),
         ),
@@ -29,9 +38,18 @@ const HarnessConfig = {
     pgConnectTimeout:        Config.duration('KARGADAN_PG_CONNECT_TIMEOUT').pipe(Config.withDefault(Duration.seconds(10))),
     pgIdleTimeout:           Config.duration('KARGADAN_PG_IDLE_TIMEOUT').pipe(Config.withDefault(Duration.seconds(30))),
     pgMaxConnections:        Config.integer('KARGADAN_PG_MAX_CONNECTIONS').pipe(Config.withDefault(5)),
-    protocolVersion:         Config.string('KARGADAN_PROTOCOL_VERSION').pipe(Config.withDefault('1.0'),
-        Effect.filterOrFail((v) => /^\d+\.\d+$/.test(v), (v) => new Error(`Invalid KARGADAN_PROTOCOL_VERSION: '${v}'`)),
-        Effect.map((v) => { const [major = '0', minor = '0'] = v.split('.'); return { major: Number.parseInt(major, 10), minor: Number.parseInt(minor, 10) }; })),
+    protocolVersion:         Config.string('KARGADAN_PROTOCOL_VERSION').pipe(
+        Config.withDefault('1.0'),
+        Effect.flatMap((value) =>
+            Match.value(value.trim().split('.')).pipe(
+                Match.when(
+                    (parts): parts is [string, string] => parts.length === 2 && parts.every((part) => /^\d+$/.test(part)),
+                    ([major, minor]) => Effect.succeed({ major: Number.parseInt(major, 10), minor: Number.parseInt(minor, 10) }),
+                ),
+                Match.orElse(() => Effect.die(new HarnessConfigError({ input: value, reason: 'invalid_protocol_version' }))),
+            ),
+        ),
+    ),
     reconnectBackoffBaseMs:  Config.integer('KARGADAN_RECONNECT_BACKOFF_BASE_MS').pipe(Config.withDefault(500)),
     reconnectBackoffMaxMs:   Config.integer('KARGADAN_RECONNECT_BACKOFF_MAX_MS').pipe(Config.withDefault(30_000)),
     reconnectMaxAttempts:    Config.integer('KARGADAN_RECONNECT_MAX_ATTEMPTS').pipe(Config.withDefault(50)),
@@ -42,12 +60,19 @@ const HarnessConfig = {
     resolveLoopOperations: Config.string('KARGADAN_LOOP_OPERATIONS').pipe(
         Config.withDefault(DEFAULT_LOOP_OPERATIONS.join(',')),
         Config.map(_splitCsv),
-        Effect.flatMap(S.decodeUnknown(S.Array(OperationSchema))),
+        Effect.flatMap(S.decodeUnknown(S.Array(Operation))),
     ),
     resolveWriteObjectRef: Effect.all({
         objectId:       Config.string('KARGADAN_WRITE_OBJECT_ID').pipe(Config.withDefault('00000000-0000-0000-0000-000000000100')),
         sourceRevision: Config.integer('KARGADAN_WRITE_OBJECT_SOURCE_REVISION').pipe(Config.withDefault(0)),
-        typeTag:        Config.string('KARGADAN_WRITE_OBJECT_TYPE_TAG').pipe(Config.withDefault('Brep')),}).pipe(Effect.flatMap(S.decodeUnknown(ObjectRefSchema))),
+        typeTag:        Config.string('KARGADAN_WRITE_OBJECT_TYPE_TAG').pipe(Config.withDefault('Brep')),
+    }).pipe(Effect.flatMap((objectRef) =>
+        Effect.all({
+            objectId:       S.decodeUnknown(S.UUID)(objectRef.objectId),
+            sourceRevision: S.decodeUnknown(S.Int.pipe(S.greaterThanOrEqualTo(0)))(objectRef.sourceRevision),
+            typeTag:        S.decodeUnknown(ObjectTypeTag)(objectRef.typeTag),
+        }),
+    )),
     retryMaxAttempts:   Config.integer('KARGADAN_RETRY_MAX_ATTEMPTS').pipe(Config.withDefault(5)),
     sessionToken:       Config.string('KARGADAN_SESSION_TOKEN').pipe(Config.withDefault('kargadan-local-token')),
 } as const;

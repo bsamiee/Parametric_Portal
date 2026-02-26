@@ -13,8 +13,8 @@ import { expect, vi } from 'vitest';
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
-const _EXPECTED_DB_KEYS = ['apiKeys', 'apps', 'assets', 'audit', 'jobDlq', 'jobs', 'kvStore', 'mfaSecrets', 'notifications', 'oauthAccounts', 'observability', 'permissions', 'search', 'sessions', 'users', 'webauthnCredentials', 'withTransaction'] as const;
-const _EXPECTED_SEARCH_KEYS = ['embeddingSources', 'refresh', 'search', 'suggest', 'upsertEmbedding'] as const;
+const _EXPECTED_DB_KEYS = ['agentJournal', 'apiKeys', 'apps', 'assets', 'audit', 'jobDlq', 'jobs', 'kvStore', 'mfaSecrets', 'notifications', 'oauthAccounts', 'observability', 'permissions', 'search', 'sessions', 'users', 'webauthnCredentials', 'withTransaction'] as const;
+const _EXPECTED_SEARCH_KEYS = ['embeddingSources', 'refresh', 'search', 'suggest', 'upsertDocument', 'upsertEmbedding'] as const;
 const _row = { _action: 'insert', appId: 'tenant-a', count: 2, deletedAt: null, exists: true, expiresAt: null, id: 'id-1', name: 'name-1', settings: Option.none(), totalCount: 2, updatedAt: '2024-01-01T00:00:00.000Z', value: '{"ok":true}' } as const;
 const _sqlClient = Object.assign(
     (_strings: TemplateStringsArray, ..._values: ReadonlyArray<unknown>) => Object.assign(Effect.succeed([_row]), { stream: Stream.fromIterable([_row]) }) as never,
@@ -51,7 +51,7 @@ it.effect.prop('P1: exported literal schemas roundtrip via decode', {
 
 // --- [EDGE_CASES] ------------------------------------------------------------
 
-it.effect('E1: DatabaseService tag exposes exactly 17 keys', () =>
+it.effect('E1: DatabaseService tag exposes exactly 18 keys', () =>
     Effect.gen(function* () {
         const service = yield* DatabaseService;
         expect(Object.keys(service).sort((a, b) => a.localeCompare(b))).toEqual([..._EXPECTED_DB_KEYS]);
@@ -60,7 +60,7 @@ it.effect('E2: SearchRepo Test shape + SearchError tag', () =>
     Effect.gen(function* () {
         const repo = yield* SearchRepo;
         expect(Object.keys(repo).sort((a, b) => a.localeCompare(b))).toEqual([..._EXPECTED_SEARCH_KEYS]);
-        const error = new SearchError({ cause: 'test-cause', operation: 'search' });
+        const error = new SearchError({ cause: 'test-cause', operation: 'search', reason: 'unknown' });
         expect(error._tag).toBe('SearchError');
         expect(error.operation).toBe('search');
         expect(error.cause).toBe('test-cause');

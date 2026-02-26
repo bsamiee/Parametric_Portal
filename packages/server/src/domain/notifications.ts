@@ -3,7 +3,7 @@
  * Domain: Multi-channel service (email, webhook, inApp) with preference filtering.
  */
 import { Update } from '@parametric-portal/database/factory';
-import { Notification, type NotificationDeliveryErrorSchema, PreferencesSchema } from '@parametric-portal/database/models';
+import { Notification, PreferencesSchema } from '@parametric-portal/database/models';
 import { DatabaseService } from '@parametric-portal/database/repos';
 import { Cause, Duration, Effect, Match, Metric, Option, Schema as S, Stream, pipe } from 'effect';
 import { constant } from 'effect/Function';
@@ -45,13 +45,6 @@ const _correlation = {
         job,
     }),
 } as const;
-const _deliveryError = (error: unknown): typeof NotificationDeliveryErrorSchema.Type =>
-    Match.value(error as { readonly _tag: string; readonly reason?: string; readonly provider?: string; readonly deliveryId?: string }).pipe(
-        Match.when({ _tag: 'NotificationError' }, (tagged) => ({ message: tagged.reason ?? 'NotificationError', tag: 'NotificationError' })),
-        Match.when({ _tag: 'EmailError' }, (tagged) => ({ message: tagged.reason ?? 'EmailError', provider: tagged.provider, tag: 'EmailError' })),
-        Match.when({ _tag: 'WebhookError' }, (tagged) => ({ deliveryId: tagged.deliveryId, message: tagged.reason ?? 'WebhookError', tag: 'WebhookError' })),
-        Match.orElse((other) => ({ message: String(other), tag: MetricsService.errorTag(other) })),
-    );
 
 // --- [SERVICES] --------------------------------------------------------------
 
@@ -88,7 +81,7 @@ class NotificationService extends Effect.Service<NotificationService>()('server/
                 })),
                 Effect.flatMap((jobId) => database.notifications.set(row.id, {
                     correlation: _correlation.withJob(jobId, row.correlation),
-                    delivery: Option.some({ error: _deliveryError(error) }),
+                    delivery: Option.some({ error: MetricsService.errorTag(error) }),
                     retryCurrent: Update.inc(),
                     retryMax: row.retryMax,
                     status: 'queued' as const,
@@ -127,10 +120,10 @@ class NotificationService extends Effect.Service<NotificationService>()('server/
                 Effect.catchAll(Effect.fn(function* (error) {
                     yield* pipe(
                         Effect.gen(function* () {
-                            const deliveryError = _deliveryError(error);
-                            yield* database.notifications.set(row.id, { delivery: Option.some({ error: deliveryError }), retryCurrent: Update.inc(), retryMax: row.retryMax, status: 'dlq' as const });
+                            const errorTag = MetricsService.errorTag(error);
+                            yield* database.notifications.set(row.id, { delivery: Option.some({ error: errorTag }), retryCurrent: Update.inc(), retryMax: row.retryMax, status: 'dlq' as const });
                             yield* MetricsService.inc(metrics.notification.failed, MetricsService.label({ channel, status: 'dlq' }));
-                            yield* eventBus.publish({ aggregateId: row.id, payload: { _tag: 'notification', action: 'status', error: deliveryError, status: 'dlq' }, tenantId: row.appId }).pipe(Effect.ignore);
+                            yield* eventBus.publish({ aggregateId: row.id, payload: { _tag: 'notification', action: 'status', error: errorTag, status: 'dlq' }, tenantId: row.appId }).pipe(Effect.ignore);
                         }),
                         Effect.when(() => row.retryCurrent + 1 >= row.retryMax || Resilience.is(error, 'CircuitError')),
                         Effect.asVoid,
@@ -235,7 +228,7 @@ class NotificationService extends Effect.Service<NotificationService>()('server/
                     yield* pipe(
                         jobs.submit('notification.send', { notificationId: staged.row.id }, { dedupeKey: dedupeKeyStr, maxAttempts: 1 }).pipe(
                             Effect.catchAll(Effect.fn(function* (error) {
-                                yield* database.notifications.transition(staged.row.id, { delivery: Option.some({ error: _deliveryError(error) }), status: 'failed' });
+                                yield* database.notifications.transition(staged.row.id, { delivery: Option.some({ error: MetricsService.errorTag(error) }), status: 'failed' });
                                 return yield* Effect.fail(error);
                             })),
                             Effect.flatMap((jobId) => database.notifications.transition(staged.row.id, { correlation: _correlation.withJob(jobId, staged.row.correlation), delivery: Option.some({ error: undefined }), status: 'queued' }, 'queued')),

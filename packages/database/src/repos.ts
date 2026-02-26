@@ -4,24 +4,20 @@
  */
 import { SqlClient } from '@effect/sql';
 import { Clock, Effect, Option, Record as R, Schema as S } from 'effect';
-import { repo, routine, Update } from './factory.ts';
+import { repo, routine, Update, type RepoPredicate } from './factory.ts';
+import { Page } from './page.ts';
 import {
     AgentJournal, ApiKey, App, AppSettingsDefaults, AppSettingsSchema, Asset, AuditLog, type AuditOperationSchema,
     Job, JobDlq, KvStore, MfaSecret, Notification, OauthAccount, Permission, Session, User, WebauthnCredential,
 } from './models.ts';
 import { SearchRepo } from './search.ts';
 
-// --- [SCHEMA] ----------------------------------------------------------------
+// --- [FUNCTIONS] -------------------------------------------------------------
 
-const _ObservabilitySectionSchema = S.Struct({
-    name:    S.String,
-    options: S.optional(S.Record({ key: S.String, value: S.Unknown })),
-});
-const _ObservabilitySectionsSchema = S.Array(_ObservabilitySectionSchema);
-
-// --- [CONSTANTS] -------------------------------------------------------------
-
-const _LIMITS: { defaultPage: number } = { defaultPage: 100 };
+const _byActiveDedupe =
+    <R>(one: (predicate: readonly RepoPredicate[]) => R) =>
+    (statuses: readonly string[]) =>
+    (dedupe: string): R => one([{ field: 'dedupeKey', value: dedupe }, { field: 'status', op: 'in', values: [...statuses] }]);
 
 // --- [REPOSITORIES] ----------------------------------------------------------
 
@@ -32,8 +28,8 @@ const makeUserRepo = Effect.gen(function* () {
 const makePermissionRepo = Effect.gen(function* () {
     const repository = yield* repo(Permission, 'permissions', {
         conflict: { keys: ['appId', 'role', 'resource', 'action'], only: ['deletedAt'] },
-        resolve: { byRole: { field: 'role', many: true } },
-        scoped: 'appId',
+        resolve:  { byRole: { field: 'role', many: true } },
+        scoped:   'appId',
     });
     return { ...repository,
         grant:      (payload: { appId: string; role: S.Schema.Type<typeof Permission.fields.role>; resource: string; action: string }) => repository.upsert({action: payload.action, appId: payload.appId, deletedAt: Option.none(), resource: payload.resource, role: payload.role, updatedAt: undefined,}),
@@ -98,7 +94,7 @@ const makeAuditRepo = Effect.gen(function* () {
 });
 const makeMfaSecretRepo = Effect.gen(function* () {
     const repository = yield* repo(MfaSecret, 'mfa_secrets', {
-        conflict: { keys: ['userId'], only: ['backups', 'enabledAt', 'encrypted'] },
+        conflict: { keys: ['userId'],    only: ['backups', 'enabledAt', 'encrypted']                          },
         purge:    { column: 'deletedAt', defaultDays: 90, table: 'mfa_secrets' }, resolve: { byUser: 'userId' },
     });
     return { ...repository, softDelete: (userId: string) => repository.drop([{ field: 'userId', value: userId }]),};
@@ -112,13 +108,12 @@ const makeWebauthnCredentialRepo = Effect.gen(function* () {
 });
 const makeJobRepo = Effect.gen(function* () {
     const repository = yield* repo(Job, 'jobs', {
-        pk: { column: 'job_id' },
+        pk:      { column: 'job_id' },
         resolve: { byBatch: { field: 'batchKey', many: true }, byDedupe: 'dedupeKey' },
-        scoped: 'appId',
+        scoped:  'appId',
     });
-    const _activeStatuses = ['queued', 'processing'] as const;
     return { ...repository,
-        byActiveDedupe: (dedupe: string) => repository.one([{ field: 'dedupeKey', value: dedupe }, { field: 'status', op: 'in', values: [..._activeStatuses] }]),
+        byActiveDedupe: _byActiveDedupe(repository.one)(['queued', 'processing']),
         countByStatuses: (...statuses: readonly string[]) => repository.count([{ field: 'status', op: 'in', values: [...statuses] }]),
     };
 });
@@ -133,9 +128,8 @@ const makeJobDlqRepo = Effect.gen(function* () {
 });
 const makeNotificationRepo = Effect.gen(function* () {
     const repository = yield* repo(Notification, 'notifications', { resolve: { byDedupe: 'dedupeKey', byJob: { field: 'jobKey', many: true } }, scoped: 'appId' });
-    const _activeStatuses = ['queued', 'sending'] as const;
     return { ...repository,
-        byActiveDedupe: (dedupe: string) => repository.one([{ field: 'dedupeKey', value: dedupe }, { field: 'status', op: 'in', values: [..._activeStatuses] }]),
+        byActiveDedupe: _byActiveDedupe(repository.one)(['queued', 'sending']),
         transition: (id: string, updates: { status: S.Schema.Type<typeof Notification.fields.status>; delivery?: S.Schema.Type<typeof Notification.fields.delivery>; correlation?: S.Schema.Type<typeof Notification.fields.correlation>; retryCurrent?: S.Schema.Type<typeof Notification.fields.retryCurrent>; retryMax?: S.Schema.Type<typeof Notification.fields.retryMax> }, whenStatus?: S.Schema.Type<typeof Notification.fields.status>) =>
             repository.set(
                 id,
@@ -150,13 +144,6 @@ const makeNotificationRepo = Effect.gen(function* () {
                 ),
             ),
     };
-});
-const makeAgentJournalRepo = Effect.gen(function* () {
-    const repository = yield* repo(AgentJournal, 'agent_journal', {
-        resolve: { byRunId: { field: 'runId', many: true }, bySession: { field: 'sessionId', many: true } },
-        scoped: 'appId',
-    });
-    return repository;
 });
 const makeKvStoreRepo = Effect.gen(function* () {
     const repository = yield* repo(KvStore, 'kv_store', {
@@ -179,13 +166,13 @@ const makeSystemRepo = Effect.gen(function* () {
                 schema: S.Struct({ payload: S.String, primaryKey: S.String }),
             },
             outbox_count:  { mode: 'scalar',  schema: S.Int },
-            purge_journal: { args: ['days'],  params: S.Struct({ days: S.Number }) },
-            purge_tenant:  { args: ['appId'], params: S.Struct({ appId: S.UUID }) },
+            purge_journal: { args: ['days'],  params: S.Struct({ days:  S.Number }) },
+            purge_tenant:  { args: ['appId'], params: S.Struct({ appId: S.UUID   }) },
             query_db_observability: {
                 args: [{ cast: 'jsonb', field: 'sections' }, 'limit'],
                 mode: 'typed',
-                params: S.Struct({ limit: S.Number, sections: S.parseJson(_ObservabilitySectionsSchema) }),
-                schema: S.Record({ key: S.String, value: S.Unknown }),
+                params: S.Struct({ limit: S.Number, sections: S.parseJson(S.Array(S.Struct({ name: S.String, options: S.optional(S.Record({ key: S.String, value: S.Unknown })) }))) }),
+                schema: S.Record({ key:   S.String, value:    S.Unknown                                 }),
             },
         },
     });
@@ -194,18 +181,18 @@ const makeSystemRepo = Effect.gen(function* () {
         journalPurge:  (days: number) => repository.fn<number>('purge_journal', { days }),
         journalReplay: (input: { batchSize: number; eventType?: string | undefined; sinceSequenceId: string; sinceTimestamp?: number | undefined }) => repository.fn<readonly { payload: string; primaryKey: string }[]>(
             'list_journal_entries', {
-                batchSize: input.batchSize,
-                eventType: Option.getOrNull(Option.fromNullable(input.eventType)),
+                batchSize:       input.batchSize,
+                eventType:       Option.getOrNull(Option.fromNullable(input.eventType)),
                 sinceSequenceId: input.sinceSequenceId,
-                sinceTimestamp: Option.getOrNull(Option.fromNullable(input.sinceTimestamp)),
+                sinceTimestamp:  Option.getOrNull(Option.fromNullable(input.sinceTimestamp)),
             },
         ),
         outboxCount: () => repository.fn<number>('outbox_count', {}),
         query: (input: {
-            limit?: number | undefined;
-            sections: readonly S.Schema.Type<typeof _ObservabilitySectionSchema>[];
+            limit?:   number | undefined;
+            sections: readonly { readonly name: string; readonly options?: { readonly [x: string]: unknown } | undefined }[];
         }) => repository.fn<Record<string, unknown>>('query_db_observability', {
-            limit: input.limit ?? _LIMITS.defaultPage,
+            limit:    input.limit ?? Page.bounds.default,
             sections: input.sections,
         }),
         tenantPurge: (appId: string) => repository.fn<number>('purge_tenant', { appId }),
@@ -218,13 +205,16 @@ class DatabaseService extends Effect.Service<DatabaseService>()('database/Databa
     dependencies: [SearchRepo.Default],
     effect: Effect.gen(function* () {
         const [searchRepo, sqlClient] = yield* Effect.all([SearchRepo, SqlClient.SqlClient]);
-        const [users, permissions, apps, sessions, apiKeys, oauthAccounts, assets, audit, mfaSecrets, webauthnCredentials, jobs, jobDlq, notifications, agentJournal, kvStore, system] = yield* Effect.all([
+        const [users, permissions, apps, sessions, apiKeys, oauthAccounts, assets, audit, mfaSecrets, webauthnCredentials, jobs, jobDlq, notifications, kvStore, system] = yield* Effect.all([
             makeUserRepo, makePermissionRepo, makeAppRepo, makeSessionRepo, makeApiKeyRepo,
             makeOauthAccountRepo, makeAssetRepo, makeAuditRepo, makeMfaSecretRepo, makeWebauthnCredentialRepo,
             makeJobRepo, makeJobDlqRepo, makeNotificationRepo,
-            makeAgentJournalRepo,
             makeKvStoreRepo, makeSystemRepo,
         ]);
+        const agentJournal = yield* repo(AgentJournal, 'agent_journal', {
+            resolve: { byRunId: { field: 'runId', many: true }, bySession: { field: 'sessionId', many: true } },
+            scoped: 'appId',
+        });
         return {
             agentJournal,
             apiKeys, apps, assets, audit, jobDlq, jobs, kvStore, mfaSecrets, notifications, oauthAccounts, observability: system, permissions, search: searchRepo, sessions,

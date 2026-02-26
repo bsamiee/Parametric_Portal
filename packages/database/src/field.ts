@@ -51,6 +51,7 @@ const _REGISTRY = {
     email:            { col: 'email',              field: 'email',            sql: 'TEXT',      wrap: 'casefold'   },
     embedding:        { col: 'embedding',          field: 'embedding',        sql: 'HALFVEC'                       },
     enabledAt:        { col: 'enabled_at',         field: 'enabledAt',        sql: 'TIMESTAMPTZ'                   },
+    entryKind:        { col: 'entry_kind',         field: 'entryKind',        sql: 'TEXT'                          },
     error:            { col: 'error',              field: 'error',            sql: 'TEXT'                          },
     encrypted:        { col: 'encrypted',          field: 'encrypted',        sql: 'BYTEA'                         },
     entityId:         { col: 'entity_id',          field: 'entityId',         sql: 'UUID'                          },
@@ -79,6 +80,7 @@ const _REGISTRY = {
     operation:        { col: 'operation',          field: 'operation',        sql: 'TEXT'                          },
     output:           { col: 'output',             field: 'output',           sql: 'JSONB'                         },
     payload:          { col: 'payload',            field: 'payload',          sql: 'JSONB'                         },
+    payloadJson:      { col: 'payload_json',       field: 'payloadJson',      sql: 'JSONB'                         },
     params:           { col: 'params',             field: 'params',           sql: 'JSONB'                         },
     preferences:      { col: 'preferences',        field: 'preferences',      sql: 'JSONB'                         },
     prefix:           { col: 'prefix',             field: 'prefix',           gen: 'virtual',   sql: 'TEXT'        },
@@ -130,6 +132,7 @@ const _resolve = (fieldOrCol: string): FieldEntry | undefined => _REGISTRY[field
 // --- [OBJECT] ----------------------------------------------------------------
 
 const Field = {
+    entries:  _REGISTRY,
     resolve:  _resolve,
     sqlCast:  _SQL_CAST,
 } as const;

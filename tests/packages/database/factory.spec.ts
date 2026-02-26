@@ -60,10 +60,10 @@ it.effect.prop('P2: routine error tags partition (no-fns=ConfigError, unknown=Un
     Effect.gen(function* () {
         const noFns = yield* Effect.exit((yield* routine('t', {}).pipe(_provide)).fn(fnName, {}));
         const withFns = yield* Effect.exit((yield* routine('t', { functions: { known: { mode: 'scalar' } } }).pipe(_provide)).fn(fnName, {}));
-        expect(Exit.isFailure(noFns) && String(noFns).includes('RepoConfigError')).toBe(true);
+        expect(Exit.isFailure(noFns) && String(noFns).includes('RepoError')).toBe(true);
         (fnName === 'known')
             ? expect(Exit.isSuccess(withFns)).toBe(true)
-            : expect(String(withFns)).toContain('RepoUnknownFnError');
+            : expect(String(withFns)).toContain('RepoError');
     }));
 
 // --- [EDGE_CASES] ------------------------------------------------------------
@@ -76,9 +76,9 @@ it.effect('E1: scope enforcement + config errors', () =>
         _tenantState.current = '00000000-0000-7000-8000-000000000000';
         const systemOk = yield* Effect.exit(api.find([_pred]));
         _tenantState.current = 'tenant-a';
-        expect(Exit.isFailure(scopeFail) && String(scopeFail).includes('RepoScopeError')).toBe(true);
+        expect(Exit.isFailure(scopeFail) && String(scopeFail).includes('RepoError')).toBe(true);
         expect(Exit.isSuccess(systemOk)).toBe(true);
-        expect(String(yield* Effect.exit(api.by('missing' as never, 'n')))).toContain('RepoConfigError');
+        expect(String(yield* Effect.exit(api.by('missing' as never, 'n')))).toContain('RepoError');
         const bare = yield* repo(_model, 'items', {}).pipe(_provide);
         const hard = yield* repo(_hardModel, 'items', {}).pipe(_provide);
         const exits = yield* Effect.all([
@@ -86,7 +86,7 @@ it.effect('E1: scope enforcement + config errors', () =>
             Effect.exit(bare.merge({ appId: 'a', name: 'n' } as never)),
             Effect.exit(hard.drop('id-1')), Effect.exit(hard.lift(['id-1'])),
         ]);
-        expect(exits.map(String).every((s) => s.includes('RepoConfigError'))).toBe(true);
+        expect(exits.map(String).every((s) => s.includes('RepoError'))).toBe(true);
     }));
 it.effect('E2: CRUD ops + pagination + streaming + JSON codec + function dispatch', () =>
     Effect.gen(function* () {

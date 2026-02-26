@@ -50,7 +50,7 @@ vi.mock('@effect/sql', async (importOriginal) => {
 // --- [ALGEBRAIC] -------------------------------------------------------------
 
 it.effect.prop('P1: SearchError tag + fields preserved', { cause: fc.anything(), operation: fc.constantFrom('search', 'suggest', 'refresh', 'embeddingSources', 'upsertEmbedding') }, ({ cause, operation }) =>
-    Effect.sync(() => { const error = new SearchError({ cause, operation }); expect(error._tag).toBe('SearchError'); expect(error.operation).toBe(operation); expect(error.cause).toBe(cause); }));
+    Effect.sync(() => { const error = new SearchError({ cause, operation, reason: 'unknown' }); expect(error._tag).toBe('SearchError'); expect(error.operation).toBe(operation); expect(error.cause).toBe(cause); expect(error.reason).toBe('unknown'); }));
 it.effect.prop('P2: suggest limit clamped to [1..20]', { raw: fc.integer({ max: 999, min: -10 }) }, ({ raw }) =>
     _live(Effect.gen(function* () {
         _calls.splice(0);

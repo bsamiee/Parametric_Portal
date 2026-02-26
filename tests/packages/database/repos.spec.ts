@@ -11,7 +11,7 @@ import { expect, vi } from 'vitest';
 
 const _row =  { _action: 'insert', appId: 'tenant-a', count: 2, deletedAt: null, exists: true, expiresAt: null, id: 'id-1', name: 'name-1', settings: Option.none(), totalCount: 2, updatedAt: '2024-01-01T00:00:00.000Z', value: '{"ok":true}' } as const;
 const _rows = [_row, { ..._row, id: 'id-2', name: 'name-2' }] as const;
-const _EXPECTED_KEYS = ['apiKeys', 'apps', 'assets', 'audit', 'jobDlq', 'jobs', 'kvStore', 'mfaSecrets', 'notifications', 'oauthAccounts', 'observability', 'permissions', 'search', 'sessions', 'users', 'webauthnCredentials', 'withTransaction'] as const;
+const _EXPECTED_KEYS = ['agentJournal', 'apiKeys', 'apps', 'assets', 'audit', 'jobDlq', 'jobs', 'kvStore', 'mfaSecrets', 'notifications', 'oauthAccounts', 'observability', 'permissions', 'search', 'sessions', 'users', 'webauthnCredentials', 'withTransaction'] as const;
 
 // --- [FUNCTIONS] -------------------------------------------------------------
 
@@ -56,7 +56,7 @@ vi.mock('@parametric-portal/database/page', async () => {
 
 // --- [EDGE_CASES] ------------------------------------------------------------
 
-it.effect('E1: composition exposes exactly 17 keys', () => _service.pipe(Effect.tap((service) => {expect(Object.keys(service).sort((a, b) => a.localeCompare(b))).toStrictEqual([..._EXPECTED_KEYS]);}), Effect.asVoid));
+it.effect('E1: composition exposes exactly 18 keys', () => _service.pipe(Effect.tap((service) => {expect(Object.keys(service).sort((a, b) => a.localeCompare(b))).toStrictEqual([..._EXPECTED_KEYS]);}), Effect.asVoid));
 it.effect('E2: auth delegates resolve correctly', () =>
     Effect.gen(function* () {
         const service = yield* _service;

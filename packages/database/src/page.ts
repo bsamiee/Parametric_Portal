@@ -6,14 +6,16 @@ import { Effect, Option, Schema as S } from 'effect';
 
 // --- [SCHEMA] ----------------------------------------------------------------
 
-const _PAGE_BOUNDS = { default: 100, max: 1000, min: 1 } as const;
-const Limit = S.optionalWith(S.Int.pipe(S.between(_PAGE_BOUNDS.min, _PAGE_BOUNDS.max)), { default: () => _PAGE_BOUNDS.default });
-const Asc = S.optionalWith(S.Boolean, { default: () => false });
-const Keyset = S.Struct({ cursor: S.optional(S.String), limit: Limit });
-const Offset = S.Struct({ limit: Limit, offset: S.optionalWith(S.NonNegativeInt, { default: () => 0 }) });
-const KeysetInput = S.Struct({ asc: Asc, cursor: S.optional(S.String), limit: Limit });
-const OffsetInput = S.Struct({ asc: Asc, limit: Limit, offset: S.optionalWith(S.NonNegativeInt, { default: () => 0 }) });
-const _idCursor = S.compose(S.StringFromBase64Url, S.parseJson(S.Struct({ id: S.String })));
+const bounds = { default: 100, max: 1000, min: 1 } as const;
+const _Limit = S.optionalWith(S.Int.pipe(S.between(bounds.min, bounds.max)), { default: () => bounds.default });
+const _Asc =   S.optionalWith(S.Boolean, { default: () => false });
+// Base schemas (response/runtime shape)
+const Keyset = S.Struct({ cursor: S.optional(S.String), limit: _Limit });
+const Offset = S.Struct({ limit: _Limit, offset: S.optionalWith(S.NonNegativeInt, { default: () => 0 }) });
+// Input schemas extend base with sort direction
+const KeysetInput = S.extend(Keyset, S.Struct({ asc: _Asc }));
+const OffsetInput = S.extend(Offset, S.Struct({ asc: _Asc }));
+const _idCursor =   S.compose(S.StringFromBase64Url, S.parseJson(S.Struct({ id: S.String })));
 const _compoundCursor = <V, I>(vSchema: S.Schema<V, I, never>) => S.compose(S.StringFromBase64Url, S.parseJson(S.Struct({ id: S.String, v: vSchema })));
 
 // --- [FUNCTIONS] -------------------------------------------------------------
@@ -55,8 +57,7 @@ const offset = <T>(items: readonly T[], total: number, start: number, limit: num
 // --- [OBJECT] ----------------------------------------------------------------
 
 const Page = {
-    Asc, bounds: _PAGE_BOUNDS, decode, encode, Keyset, KeysetInput, keyset, Limit, Offset,
-    OffsetInput, offset, strip
+    bounds, decode, encode, Keyset, KeysetInput, keyset, Offset, OffsetInput, offset, strip,
 } as const;
 
 // --- [EXPORT] ----------------------------------------------------------------

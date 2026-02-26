@@ -9,7 +9,7 @@ type _Transport = Data.TaggedEnum<{
     readonly HttpRouter: { readonly options: Parameters<typeof McpServer.layerHttpRouter>[0] };
 }>;
 
-// --- [ENTRY_POINT] -----------------------------------------------------------
+// --- [FUNCTIONS] -------------------------------------------------------------
 
 // biome-ignore lint/correctness/noUnusedVariables: const+namespace merge pattern
 const Mcp = {
@@ -21,8 +21,8 @@ const Mcp = {
     }) =>
         A.reduce(
             A.appendAll(
-                A.ensure(input.toolkits ?? []).map((t): Layer.Layer<never, never, unknown> => McpServer.toolkit(t)),
-                A.ensure(input.layers ?? []),
+                A.ensure(input.toolkits ?? []).map(McpServer.toolkit),
+                A.ensure(input.layers   ?? []),
             ),
             Match.valueTags(input.transport, {
                 Http:       ({ options }) => McpServer.layerHttp(options),
