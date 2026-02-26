@@ -46,7 +46,7 @@ const HarnessConfig = {
                     (parts): parts is [string, string] => parts.length === 2 && parts.every((part) => /^\d+$/.test(part)),
                     ([major, minor]) => Effect.succeed({ major: Number.parseInt(major, 10), minor: Number.parseInt(minor, 10) }),
                 ),
-                Match.orElse(() => Effect.die(new HarnessConfigError({ input: value, reason: 'invalid_protocol_version' }))),
+                Match.orElse(() => Effect.fail(new HarnessConfigError({ input: value, reason: 'invalid_protocol_version' }))),
             ),
         ),
     ),

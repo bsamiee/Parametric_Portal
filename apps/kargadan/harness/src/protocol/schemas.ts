@@ -35,9 +35,13 @@ const Envelope = S.Union(
         protocolVersion: S.Struct({ major: S.Int.pipe(S.greaterThanOrEqualTo(0)), minor: S.Int.pipe(S.greaterThanOrEqualTo(0)) }),
     })),
     S.extend(_Identity, S.Struct({ _tag: S.Literal('handshake.ack') })),
-    S.extend(_Identity, S.Struct({ _tag: S.Literal('handshake.reject'), code: S.NonEmptyTrimmedString, failureClass: _FailureClass, message: S.NonEmptyTrimmedString })),
-    S.extend(_Identity, S.Struct({ _tag: S.Literal('command.ack')                                         })),
-    S.extend(_Identity, S.Struct({ _tag: S.Literal('heartbeat'),        mode: S.Literal('ping', 'pong')   })),
+    S.extend(_Identity, S.Struct({ _tag: S.Literal('handshake.reject'),
+        code:         S.NonEmptyTrimmedString,
+        failureClass: _FailureClass,
+        message:      S.NonEmptyTrimmedString
+    })),
+    S.extend(_Identity, S.Struct({ _tag: S.Literal('command.ack') })),
+    S.extend(_Identity, S.Struct({ _tag: S.Literal('heartbeat'), mode: S.Literal('ping', 'pong') })),
     S.Union(
         S.extend(_EventBase, S.Struct({
             delta: S.Struct({

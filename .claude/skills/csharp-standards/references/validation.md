@@ -68,7 +68,7 @@ Diagnostic table for structural issues. Consult FIRST when triaging code review 
 ---
 ## [6][DENSITY]
 
-- [ ] **~400 LOC refactoring signal** (domain modules -- skill reference files use 175 LOC cap): a module approaching 400 lines signals multiple domain concerns; NOT a hard cap -- a single complex DU hierarchy with 450 lines of exhaustive pattern matching may be correct
+- [ ] **~400 LOC refactoring signal** (domain modules -- skill reference files use 450 LOC cap): a module approaching 400 lines signals multiple domain concerns; NOT a hard cap -- a single complex DU hierarchy with 450 lines of exhaustive pattern matching may be correct
 - [ ] **Dense logic, not brute-force inlining**: algebraic composition (Bind/Map/Pipe chains, DU folds, applicative validation) over verbose mechanical repetition; repetitive switch arms with near-identical bodies indicate a missing abstraction
 - [ ] **No wrapper/indirection spam**: single-use `private` methods wrapping a library call with no additional logic should be inlined -- wrappers justified only when adding validation, error translation, or span-based optimization
 

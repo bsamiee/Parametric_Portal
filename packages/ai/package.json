@@ -8,11 +8,6 @@
             "import": "./src/service.ts",
             "default": "./src/service.ts"
         },
-        "./errors": {
-            "types": "./src/errors.ts",
-            "import": "./src/errors.ts",
-            "default": "./src/errors.ts"
-        },
         "./mcp": {
             "types": "./src/mcp.ts",
             "import": "./src/mcp.ts",

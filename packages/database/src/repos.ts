@@ -53,7 +53,7 @@ const makeSessionRepo = Effect.gen(function* () {
     const repository = yield* repo(Session, 'sessions', {
         purge: 'purge_sessions',
         resolve: {
-            byAccessToken:  { field: 'tokenAccess', through: { table: 'session_tokens', target: 'sessionId' } },
+            byAccessToken:  { field: 'tokenAccess',  through: { table: 'session_tokens', target: 'sessionId' } },
             byRefreshToken: { field: 'tokenRefresh', through: { table: 'session_tokens', target: 'sessionId' } },
             byUser:         { field: 'userId', many: true },
         },
@@ -212,7 +212,7 @@ class DatabaseService extends Effect.Service<DatabaseService>()('database/Databa
             makeKvStoreRepo, makeSystemRepo,
         ]);
         const agentJournal = yield* repo(AgentJournal, 'agent_journal', {
-            resolve: { byRunId: { field: 'runId', many: true }, bySession: { field: 'sessionId', many: true } },
+            resolve: { byRunId: { field: 'runId', many: true }, bySession: { field: 'sessionId', many: true }, bySessionKind: ['sessionId', 'entryKind'] },
             scoped: 'appId',
         });
         return {

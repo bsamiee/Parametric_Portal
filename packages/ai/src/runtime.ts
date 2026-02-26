@@ -1,8 +1,7 @@
 import { AiError as AiSdkError, Chat, EmbeddingModel, LanguageModel, type Response, type Tool } from '@effect/ai';
 import { Array as A, Effect, Layer, Match, Stream } from 'effect';
-import { AiError } from './errors.ts';
 import { AiRegistry } from './registry.ts';
-import { AiRuntimeProvider } from './runtime-provider.ts';
+import { AiError, AiRuntimeProvider } from './runtime-provider.ts';
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
@@ -26,12 +25,24 @@ const _operationMeta = (descriptor: AI_OPERATIONS.Descriptor, context: AI_OPERAT
     Match.value(descriptor.kind).pipe(
         Match.when('embedding', () => ({
             annotation: { operation: { name: 'embeddings' as const }, request: { model: context.appSettings.embedding.model }, system: context.appSettings.embedding.provider },
-            labels:     { dimensions: String(context.appSettings.embedding.dimensions), model: context.appSettings.embedding.model, operation: descriptor.id, provider: context.appSettings.embedding.provider, tenant: context.tenantId },
+            labels:     {
+                dimensions: String(context.appSettings.embedding.dimensions),
+                model:      context.appSettings.embedding.model,
+                operation:  descriptor.id,
+                provider:   context.appSettings.embedding.provider,
+                tenant:     context.tenantId
+            },
         })),
         Match.when('language', () => ({
             annotation: {
                 operation: { name: 'chat' as const },
-                request:   { maxTokens: context.appSettings.language.maxTokens, model: context.appSettings.language.model, temperature: context.appSettings.language.temperature, topK: context.appSettings.language.topK, topP: context.appSettings.language.topP },
+                request:   {
+                    maxTokens:   context.appSettings.language.maxTokens,
+                    model:       context.appSettings.language.model,
+                    temperature: context.appSettings.language.temperature,
+                    topK:        context.appSettings.language.topK,
+                    topP:        context.appSettings.language.topP
+                },
                 system:    context.appSettings.language.provider },
             labels:        { model: context.appSettings.language.model, operation: descriptor.id, provider: context.appSettings.language.provider, tenant: context.tenantId },
         })),

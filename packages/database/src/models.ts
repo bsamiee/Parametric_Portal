@@ -262,7 +262,7 @@ class AgentJournal extends Model.Class<AgentJournal>('AgentJournal')({
     runId:       S.UUID,
     sequence:    S.Int.pipe(S.greaterThanOrEqualTo(0)),
     entryKind:   S.Literal('session_start', 'tool_call', 'checkpoint', 'session_complete'),
-    status:      Model.FieldOption(S.Literal('running', 'completed', 'failed', 'interrupted', 'ok', 'error')),
+    status:      Model.FieldOption(S.Literal('running', 'completed', 'failed', 'interrupted')),
     operation:   Model.FieldOption(S.NonEmptyTrimmedString),
     payloadJson: S.Unknown,
     stateHash:   Model.FieldOption(S.String),

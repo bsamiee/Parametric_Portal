@@ -1,11 +1,27 @@
-import { Telemetry as AiTelemetry, type Response } from '@effect/ai';
+import { AiError as AiSdkError, Telemetry as AiTelemetry, type Response } from '@effect/ai';
 import { DatabaseService } from '@parametric-portal/database/repos';
 import { Context } from '@parametric-portal/server/context';
 import { MetricsService } from '@parametric-portal/server/observe/metrics';
 import { CacheService } from '@parametric-portal/server/platform/cache';
-import { Duration, Effect, Layer, Option, PrimaryKey, Ref, Schema as S, Stream } from 'effect';
-import { AiError } from './errors.ts';
+import { Data, Duration, Effect, Layer, Match, Option, PrimaryKey, Ref, Schema as S, Stream } from 'effect';
+import { identity } from 'effect/Function';
 import { AiRegistry } from './registry.ts';
+
+// --- [ERRORS] ----------------------------------------------------------------
+
+class AiError extends Data.TaggedError('AiError')<{
+    readonly cause:     unknown;
+    readonly operation: string;
+    readonly reason:    'budget_exceeded' | 'policy_denied' | 'rate_exceeded' | 'request_tokens_exceeded' | 'unknown';
+}> {
+    override get message() { return `AiError[${this.operation}/${this.reason}]: ${String(this.cause)}`; }
+    static readonly from = (operation: string) => Match.type<unknown>().pipe(
+        Match.withReturnType<AiSdkError.AiError | AiError>(),
+        Match.when(AiSdkError.isAiError, identity),
+        Match.when(Match.instanceOf(AiError), identity),
+        Match.orElse((cause) => new AiError({ cause, operation, reason: 'unknown' })),
+    );
+}
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
@@ -95,4 +111,4 @@ class AiRuntimeProvider extends Effect.Service<AiRuntimeProvider>()('ai/RuntimeP
 
 // --- [EXPORT] ----------------------------------------------------------------
 
-export { AiRuntimeProvider };
+export { AiError, AiRuntimeProvider };

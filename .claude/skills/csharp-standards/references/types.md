@@ -1,262 +1,359 @@
 # [H1][TYPES]
->**Dictum:** *Types are closed proofs; primitives eradicate obsession; DUs exhaust state space.*
+>**Dictum:** *Types are executable contracts: invariants at construction, explicit capabilities, exhaustive state spaces.*
 
-Domain types in C# 14 / .NET 10 encode invariants at construction time via `Fin<T>` factories, prevent invalid states via sealed hierarchies, and align with JIT struct promotion for zero-heap value carriers. All snippets assume `using static LanguageExt.Prelude;` and `using LanguageExt;`.
-For object-shape selection and Thinktecture routing, load `objects.md` first.
+Baseline used for this reference:
+- `.NET 10`, `C# 14`
+- `LanguageExt.Core 5.0.0-beta-77`
+- `Thinktecture.Runtime.Extensions 10.0.0`
+- `Scrutor 7.0.0`
+- `NodaTime 3.3.0`
+- `Microsoft.Extensions.DependencyInjection.Abstractions` from the .NET shared framework
+- Last verified: `2026-02-26`
+
+Verification anchors:
+- `LanguageExt.Core 5.0.0-beta-77`: `https://api.nuget.org/v3/registration5-semver1/languageext.core/page/5.0.0-beta-58/5.0.0-beta-77.json`
+- `Thinktecture.Runtime.Extensions 10.0.0`: `https://api.nuget.org/v3/registration5-semver1/thinktecture.runtime.extensions/page/8.7.0-beta01/10.0.0.json`
+- `Scrutor 7.0.0`: `https://api.nuget.org/v3/registration5-semver1/scrutor/index.json`
+This file is self-contained and implementation-oriented. Each rule is written as an executable constraint, not a preference.
 
 ---
 ## [1][DOMAIN_PRIMITIVES]
->**Dictum:** *Primitives validate inline; construction is total.*
+>**Dictum:** *Validated primitives expose total factories; invalid values never escape construction.*
 
-`readonly record struct` + `field` keyword + `private` constructor + `static Fin<T>` factory. Invalid construction is unrepresentable.
+Design rules:
+- Use private constructors on validated primitives.
+- Keep construction in `Fin<T>` factories.
+- Keep normalization-only transport shapes separate from validated domain types.
+- Use `NodaTime.Instant` + injected `IClock` for temporal primitives.
 
 ```csharp
 namespace Domain.Types;
 
+using System;
+using LanguageExt;
+using LanguageExt.Common;
 using NodaTime;
-using static LanguageExt.Prelude;
 
-// --- [VALIDATED_SCALARS] -----------------------------------------------------
+// --- [VALIDATED_PRIMITIVES] ---
 
 public readonly record struct DomainIdentity {
-    // { get; } only -- no init accessor. Prevents with-expression bypass
-    // of smart constructor validation (CSP0720).
     public Guid Value { get; }
-    private DomainIdentity(Guid value) { Value = value; }
+    private DomainIdentity(Guid value) => Value = value;
     public static Fin<DomainIdentity> Create(Guid candidate) =>
-        candidate.Equals(g: Guid.Empty) switch {
-            true => Fin.Fail<DomainIdentity>(Error.New(message: "Identity must not be empty.")),
-            false => Fin.Succ(new DomainIdentity(value: candidate))
-        };
-}
-public readonly record struct TransactionAmount {
-    public decimal Value { get; }
-    private TransactionAmount(decimal value) { Value = value; }
-    public static Fin<TransactionAmount> Create(decimal candidate) =>
-        (candidate > 0.0m) switch {
-            true => Fin.Succ(new TransactionAmount(
-                value: decimal.Round(d: candidate, decimals: 4))),
-            false => Fin.Fail<TransactionAmount>(Error.New(message: "Amount must be strictly positive."))
-        };
+        candidate == Guid.Empty
+            ? Fin.Fail<DomainIdentity>(Error.New(message: "Identity must not be empty."))
+            : Fin.Succ(new DomainIdentity(candidate));
 }
 
-// --- [TEMPORAL_PRIMITIVES] ---------------------------------------------------
-// Time is a typed dependency; wall-clock reads are boundary concerns.
-// Domain types use Instant + injected IClock; avoid DateTime*/DateTimeOffset*.
+public readonly record struct TransactionAmount {
+    public decimal Value { get; }
+    private TransactionAmount(decimal value) => Value = value;
+    public static Fin<TransactionAmount> Create(decimal candidate) =>
+        candidate > 0m
+            ? Fin.Succ(new TransactionAmount(decimal.Round(d: candidate, decimals: 4)))
+            : Fin.Fail<TransactionAmount>(Error.New(message: "Amount must be strictly positive."));
+}
 
 public readonly record struct OccurredAt {
     public Instant Value { get; }
     private OccurredAt(Instant value) => Value = value;
     public static Fin<OccurredAt> Create(Instant value) => Fin.Succ(new OccurredAt(value));
-    // FromClock returns Fin<OccurredAt> for API uniformity -- clock reads are infallible,
-    // but consistent Fin<T> surface lets callers compose via Bind/Map without special-casing.
-    public static Fin<OccurredAt> FromClock(IClock clock) =>
-        Fin.Succ(new OccurredAt(clock.GetCurrentInstant()));
+    public static Fin<OccurredAt> FromClock(IClock clock) => Fin.Succ(new OccurredAt(clock.GetCurrentInstant()));
+}
+
+// --- [NORMALIZATION_SURFACE] ---
+// Non-validated shape for boundary/view normalization only.
+
+public sealed class CustomerSnapshot {
+    public string DisplayName { get; private set => field = (value ?? string.Empty).Trim(); } = string.Empty;
+    public CustomerSnapshot(string displayName) => DisplayName = displayName;
 }
 ```
 
-[CRITICAL]: Every domain primitive follows this shape. No public constructors on validated types. Temporal primitives use `NodaTime.Instant` with injected `IClock` -- never `DateTime*`/`DateTimeOffset*`.
+```csharp
+using System;
+using Thinktecture;
 
-[IMPORTANT]: For high-volume primitives with simple constraints, Thinktecture Runtime Extensions (`[ValueObject<T>]`) source-generates wrappers. Use manual `Fin<T>` factory when validation logic is custom.
+// --- [SOURCE_GENERATED_PRIMITIVE] ---
+// Attribute is metadata; Thinktecture generators/analyzers consume it.
 
+[ValueObject<Guid>(KeyMemberName = "Value")]
+public readonly partial struct OrderId {
+    static partial void ValidateFactoryArguments(ref ValidationError? validationError, ref Guid value) =>
+        validationError = value == Guid.Empty
+            ? new ValidationError("OrderId must not be empty.")
+            : null;
+}
+```
 
 ---
-## [2][NEWTYPE_GENERIC]
->**Dictum:** *One wrapper serves many domain atoms.*
+## [2][TYPE_LEVEL_DISTINCTION]
+>**Dictum:** *Semantic tags and compile-time states encode intent without runtime branching.*
 
-`Newtype<TTag, TRepr>` is a zero-alloc generic wrapper. The `TTag` phantom type parameter exists solely for compile-time differentiation -- never instantiated. Sealed tag classes act as phantom discriminators.
+Use newtypes for semantic separation and phantom-state types for compile-time workflow gates.
 
-[IMPORTANT]: LanguageExt v5 ships `NewType<SELF, A>` (CRTP inheritance) requiring a `class` inheritor (heap allocation). This codebase uses a zero-alloc `readonly record struct` alternative with phantom tag discrimination. Do not mix the two in the same bounded context.
-[IMPORTANT]: `using` aliases are file-scoped in C# 14. Each consuming file must redeclare them. `global using` aliases cannot reference generic types -- prefer `readonly record struct` with source generator for cross-file usage.
+Alias precision:
+- Using alias directives must precede namespace members in their scope.
+- Global using directives must appear before nonglobal using directives in the file.
+- Closed generic aliases are valid.
+- Open generic aliases are invalid.
+- Alias-of-alias in another using-alias declaration is invalid.
 
 ```csharp
-public readonly record struct Newtype<TTag, TRepr>(TRepr Value)
-    where TRepr : notnull {
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public override string ToString() => Value.ToString() ?? string.Empty;
-}
-public sealed class UserIdTag;
-public sealed class EmailTag;
-public sealed class NonEmptyTextTag;
-public sealed class MoneyCentsTag;
+using System;
+using LanguageExt;
+using LanguageExt.Common;
 using UserId = Domain.Types.Newtype<Domain.Types.UserIdTag, System.Guid>;
 using Email = Domain.Types.Newtype<Domain.Types.EmailTag, string>;
-using NonEmptyText = Domain.Types.Newtype<Domain.Types.NonEmptyTextTag, string>;
-using MoneyCents = Domain.Types.Newtype<Domain.Types.MoneyCentsTag, long>;
-```
 
----
-## [3][SMART_CONSTRUCTORS]
->**Dictum:** *Construction is validated composition; two primitives compose all factories.*
+namespace Domain.Types;
 
-`Domain.Make` validates and wraps in one step. `Domain.Require` converts `bool` to `Fin<A>` via pattern match. Typed factories compose these two primitives at call site -- no per-type wrapper functions.
+// --- [NEWTYPE_AND_PHANTOM_STATE] ---
 
-```csharp
-public static class Domain {
-    public static class Errors {
-        public static readonly Error EmptyText = Error.New(message: "text must be non-empty");
-        public static readonly Error InvalidEmail = Error.New(message: "email is invalid");
-        public static readonly Error InvalidGuid = Error.New(message: "guid is invalid");
-    }
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static Fin<A> Require<A>(bool predicate, Func<Error> onFalse, Func<A> onTrue) =>
-        predicate switch {
-            true => onTrue(),
-            false => onFalse()
-        };
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static Fin<Newtype<TTag, TRepr>> Make<TTag, TRepr>(
-        TRepr value,
-        Func<TRepr, Fin<TRepr>> validate) where TRepr : notnull =>
-        validate(value).Map((TRepr ok) => new Newtype<TTag, TRepr>(Value: ok));
-}
-```
+public readonly record struct Newtype<TTag, TRepr>(TRepr Value)
+    where TRepr : notnull;
 
-**Call-site composition** -- typed factories compose `Make` + `Require` at the entity level:
+public sealed class UserIdTag;
+public sealed class EmailTag;
 
-```csharp
-Fin<UserId> userId = Domain.Make<UserIdTag, Guid>(
-    value: rawGuid,
-    validate: (Guid candidate) => Domain.Require(
-        predicate: candidate != Guid.Empty,
-        onFalse: () => Domain.Errors.InvalidGuid,
-        onTrue: () => candidate));
-Fin<NonEmptyText> name = Domain.Make<NonEmptyTextTag, string>(
-    value: raw,
-    validate: (string candidate) => Domain.Require(
-        predicate: candidate.Length > 0,
-        onFalse: () => Domain.Errors.EmptyText,
-        onTrue: () => candidate));
-```
-
-Span-based parsing via `ISpanParsable<TSelf>` is canonicalized in `algorithms.md` [4] `SpanParsing.ParseSpannable` -- the `Fin<T>`-wrapped `TryParse` factory using `CultureInfo.InvariantCulture`. Import from there; do not redefine.
-
----
-## [4][DISCRIMINATED_UNIONS]
->**Dictum:** *Sealed hierarchies exhaust state space; the compiler enforces totality.*
-
-Sealed abstract record with `private protected` constructor closes the hierarchy. C# 14 extension members project behavior without inheritance. Until C# ships first-class DU exhaustiveness (targeted C# 15), include `_ => throw new UnreachableException()` defensively.
-**C# 14 extension block supported members**: static/instance methods, properties, operators, conversions. **Not supported**: fields, events, indexers, nested types, constructors. Extension indexers were proposed but did not ship in C# 14.
-
-```csharp
-using NodaTime;
-using static LanguageExt.Prelude;
-
-public abstract record TransactionState {
-    private protected TransactionState() { }
-    public sealed record Pending(
-        DomainIdentity Id, TransactionAmount Amount, Instant InitiatedAt) : TransactionState;
-    public sealed record Authorized(
-        DomainIdentity Id, string AuthorizationToken) : TransactionState;
-    public sealed record Settled(
-        DomainIdentity Id, string ReceiptHash) : TransactionState;
-    public sealed record Faulted(
-        DomainIdentity Id, Error Reason) : TransactionState;
-}
-// Extension members require C# 14 (<LangVersion>preview</LangVersion> with .NET 10 SDK).
-public static class TransactionLifecycleRole {
-    extension(TransactionState state) {
-        public bool IsTerminal =>
-            state switch {
-                TransactionState.Settled => true,
-                TransactionState.Faulted => true,
-                TransactionState.Pending => false,
-                TransactionState.Authorized => false,
-                _ => throw new UnreachableException(message: "Exhaustive: all variants handled")
-            };
-        public Fin<TransactionState> Authorize(string token) =>
-            state switch {
-                TransactionState.Pending pending =>
-                    Fin.Succ<TransactionState>(
-                        new TransactionState.Authorized(Id: pending.Id, AuthorizationToken: token)),
-                TransactionState.Authorized authorized =>
-                    Fin.Succ<TransactionState>(authorized),
-                _ => Fin.Fail<TransactionState>(
-                    Error.New(message: "Only pending transactions can be authorized."))
-            };
-    }
-}
-```
-
-[IMPORTANT]: `private protected` guarantees no external derivation. The `_` arm is defensive until C# ships DU exhaustiveness -- remove when the compiler enforces totality. See `effects.md` [2] for `Eff` pipelines over DU transitions.
-
----
-## [5][PHANTOM_TYPES]
->**Dictum:** *Compile-time state is zero-cost; runtime enforcement is unnecessary.*
-
-Empty `readonly struct` markers parameterize a generic record. Method signatures accept only the validated variant -- compile-time enforcement with zero runtime overhead.
-
-```csharp
 public readonly struct Unvalidated;
 public readonly struct Validated;
-public readonly record struct UserId<TState> {
+
+public readonly record struct TypedUserId<TState> {
     public Guid Value { get; }
-    private UserId(Guid value) => Value = value;
-    // UnsafeWrap: internal factory for validated construction only.
-    // All external callers go through UserIdOps.Validate().
-    internal static UserId<TState> UnsafeWrap(Guid value) => new(value);
+    private TypedUserId(Guid value) => Value = value;
+    internal static TypedUserId<TState> UnsafeWrap(Guid value) => new(value);
 }
-public static class UserIdOps {
-    public static Fin<UserId<Validated>> Validate(UserId<Unvalidated> raw) =>
-        (raw.Value != Guid.Empty) switch {
-            true => Fin.Succ(UserId<Validated>.UnsafeWrap(value: raw.Value)),
-            false => Fin.Fail<UserId<Validated>>(
-                Error.New(message: "UserId cannot be empty"))
+
+public static class TypedUserIdOps {
+    public static TypedUserId<Unvalidated> FromRaw(Guid raw) => TypedUserId<Unvalidated>.UnsafeWrap(raw);
+    public static Fin<TypedUserId<Validated>> Validate(TypedUserId<Unvalidated> raw) =>
+        raw.Value != Guid.Empty
+            ? Fin.Succ(TypedUserId<Validated>.UnsafeWrap(raw.Value))
+            : Fin.Fail<TypedUserId<Validated>>(Error.New(message: "UserId cannot be empty."));
+}
+
+// Invalid alias chaining:
+// using A = System.Collections.Generic.List<int>;
+// using B = System.Collections.Generic.Dictionary<string, A>;
+```
+
+---
+## [3][SMART_CONSTRUCTORS_AND_SERVICE_TOPOLOGY]
+>**Dictum:** *Construction logic stays pure; object-level cross-cutting is composition-root decoration.*
+
+Service-level cross-cutting policy:
+- Required wrappers use `Decorate`.
+- Optional wrappers use `TryDecorate`.
+- Optional wrappers require their own dependencies to be registered and their `TryDecorate` result to be observed.
+- Idempotency wrapper should be inner to telemetry/audit wrappers.
+- Cancellation should remain in typed channels (`Fin.Fail`), not thrown exceptions.
+- Callback dependencies should be total (`Fin.Fail` on fault), not throw-based delegates.
+
+```csharp
+using System;
+using System.Threading;
+using LanguageExt;
+using LanguageExt.Common;
+using Microsoft.Extensions.DependencyInjection;
+using Scrutor;
+
+// --- [CONSTRUCTION_PRIMITIVES] ---
+
+public static class Domain {
+    public static Fin<A> Require<A>(bool predicate, Func<Error> onFalse, Func<A> onTrue) =>
+        predicate ? Fin.Succ(onTrue()) : Fin.Fail<A>(onFalse());
+
+    public static Fin<Newtype<TTag, TRepr>> Make<TTag, TRepr>(
+        TRepr value,
+        Func<TRepr, Fin<TRepr>> validate)
+        where TRepr : notnull =>
+        validate(value).Map(static ok => new Newtype<TTag, TRepr>(ok));
+}
+
+// --- [IDEMPOTENCY_CONTRACT] ---
+
+public abstract record IdempotencyAcquireResult {
+    private IdempotencyAcquireResult() { }
+    public sealed record Acquired : IdempotencyAcquireResult;
+    public sealed record CompletedReplay : IdempotencyAcquireResult;
+    public sealed record InFlightConflict : IdempotencyAcquireResult;
+    public sealed record PayloadMismatch : IdempotencyAcquireResult;
+}
+
+public interface IIdempotencyGate {
+    Fin<IdempotencyAcquireResult> TryAcquire(string key, CancellationToken ct);
+}
+
+public interface ITraceWriter {
+    Fin<Unit> Write(string message, CancellationToken ct);
+}
+
+public interface IUserIdCreationService {
+    Fin<Newtype<UserIdTag, Guid>> Create(Guid candidate, string idempotencyKey, CancellationToken ct);
+}
+
+public sealed class UserIdCreationService : IUserIdCreationService {
+    public Fin<Newtype<UserIdTag, Guid>> Create(Guid candidate, string idempotencyKey, CancellationToken ct) =>
+        ct.IsCancellationRequested
+            ? Fin.Fail<Newtype<UserIdTag, Guid>>(Error.New(message: "Operation cancelled."))
+            : Domain.Make<UserIdTag, Guid>(
+                value: candidate,
+                validate: value => value == Guid.Empty
+                    ? Fin.Fail<Guid>(Error.New(message: "UserId must not be empty."))
+                    : Fin.Succ(value));
+}
+
+public sealed class IdempotentUserIdCreationDecorator(
+    IUserIdCreationService inner,
+    IIdempotencyGate gate) : IUserIdCreationService {
+    public Fin<Newtype<UserIdTag, Guid>> Create(Guid candidate, string idempotencyKey, CancellationToken ct) =>
+        ct.IsCancellationRequested
+            ? Fin.Fail<Newtype<UserIdTag, Guid>>(Error.New(message: "Operation cancelled."))
+            : gate.TryAcquire(idempotencyKey, ct).Bind(result =>
+                result switch {
+                    IdempotencyAcquireResult.Acquired => inner.Create(candidate, idempotencyKey, ct),
+                    IdempotencyAcquireResult.CompletedReplay => Fin.Fail<Newtype<UserIdTag, Guid>>(Error.New(message: "Completed replay should return prior result at boundary level.")),
+                    IdempotencyAcquireResult.InFlightConflict => Fin.Fail<Newtype<UserIdTag, Guid>>(Error.New(message: "Request already in-flight.")),
+                    IdempotencyAcquireResult.PayloadMismatch => Fin.Fail<Newtype<UserIdTag, Guid>>(Error.New(message: "Idempotency key reused with mismatched payload.")),
+                    _ => Fin.Fail<Newtype<UserIdTag, Guid>>(Error.New(message: "Unknown idempotency result."))
+                });
+}
+
+public sealed class TracingUserIdCreationDecorator(
+    IUserIdCreationService inner,
+    ITraceWriter traceWriter) : IUserIdCreationService {
+    public Fin<Newtype<UserIdTag, Guid>> Create(Guid candidate, string idempotencyKey, CancellationToken ct) =>
+        ct.IsCancellationRequested
+            ? Fin.Fail<Newtype<UserIdTag, Guid>>(Error.New(message: "Operation cancelled."))
+            : inner.Create(candidate, idempotencyKey, ct).Bind(value =>
+                ct.IsCancellationRequested
+                    ? Fin.Fail<Newtype<UserIdTag, Guid>>(Error.New(message: "Operation cancelled."))
+                    : traceWriter.Write($"created-user-id:{value.Value}", ct).Map(_ => value));
+}
+
+public static class TypeServiceRegistration {
+    public static IServiceCollection AddTypeFactories(this IServiceCollection services) {
+        services.AddScoped<IUserIdCreationService, UserIdCreationService>();
+        services.Decorate<IUserIdCreationService, IdempotentUserIdCreationDecorator>();
+
+        bool optionalTracingApplied = services.TryDecorate<IUserIdCreationService, TracingUserIdCreationDecorator>();
+        _ = optionalTracingApplied switch {
+            true => 0,
+            false => 0 // Optional path intentionally absent; track in startup diagnostics.
         };
-    // Entry point: wrap raw Guid as Unvalidated for pipeline intake.
-    public static UserId<Unvalidated> FromRaw(Guid raw) =>
-        UserId<Unvalidated>.UnsafeWrap(value: raw);
+
+        return services;
+    }
 }
 ```
 
-[CRITICAL]: `LoadUser(UserId<Validated> id)` rejects `UserId<Unvalidated>` at compile time. Private constructor prevents bypass -- all construction routes through `UnsafeWrap` (internal) gated by `Validate`.
-
 ---
-## [6][GENERIC_MATH]
->**Dictum:** *Algorithms constrain to capabilities, not concrete types.*
+## [4][DISCRIMINATED_UNIONS_AND_METHOD_WRAPPERS]
+>**Dictum:** *Union closure is structural; method-level behavior is projection or explicit wrappers, never attribute magic.*
 
-
-`INumber<T>` / `IFloatingPoint<T>` enable generic numeric algorithms. Prefer fine-grained constraints (`IAdditiveIdentity`, `IAdditionOperators`) when the full `INumber<T>` surface is unnecessary.
-
-[CONDITIONAL]: `for` is permitted over `ReadOnlySpan<T>` -- spans have no `IEnumerable<T>` and no fold surface. Use `Seq<T>.Fold` for all non-span collections.
+Method-level model:
+- Projection: extension methods for pure view/shape behavior.
+- Interception: typed wrappers/delegates or explicit AOP toolchains (`Metalama`/`PostSharp`).
 
 ```csharp
-// Requires: using static LanguageExt.Prelude; -- Fail and Pure in WeightedAverage resolve from Prelude.
+using System;
+using System.Threading;
+using LanguageExt;
+using LanguageExt.Common;
+using NodaTime;
+using Thinktecture;
+
+// --- [CLOSED_UNION] ---
+// Attribute is metadata; Thinktecture generators/analyzers consume it.
+
+[Union]
+public abstract partial record TransactionState {
+    private TransactionState() { }
+    public sealed record Pending(DomainIdentity Id, TransactionAmount Amount, Instant InitiatedAt) : TransactionState;
+    public sealed record Authorized(DomainIdentity Id, string AuthorizationToken) : TransactionState;
+    public sealed record Settled(DomainIdentity Id, string ReceiptHash) : TransactionState;
+    public sealed record Faulted(DomainIdentity Id, Error Reason) : TransactionState;
+}
+
+// --- [PROJECTION_EXTENSION] ---
+// Prefer generated exhaustive APIs where available.
+
+public static class TransactionStateProjection {
+    public static bool IsTerminal(this TransactionState state) =>
+        state.Switch(
+            pending: static _ => false,
+            authorized: static _ => false,
+            settled: static _ => true,
+            faulted: static _ => true);
+}
+
+// --- [TRANSITION_WRAPPER] ---
+
+public interface IAuditWriter {
+    Fin<Unit> Write(string message, CancellationToken ct);
+}
+
+public interface ITransactionTransitionService {
+    Fin<TransactionState> Authorize(TransactionState current, string token, string idempotencyKey, CancellationToken ct);
+}
+
+public sealed class AuditTransitionWrapper(
+    ITransactionTransitionService inner,
+    IAuditWriter auditWriter) : ITransactionTransitionService {
+    public Fin<TransactionState> Authorize(TransactionState current, string token, string idempotencyKey, CancellationToken ct) =>
+        ct.IsCancellationRequested
+            ? Fin.Fail<TransactionState>(Error.New(message: "Operation cancelled."))
+            : inner.Authorize(current, token, idempotencyKey, ct).Bind(next =>
+                ct.IsCancellationRequested
+                    ? Fin.Fail<TransactionState>(Error.New(message: "Operation cancelled."))
+                    : auditWriter.Write($"authorize:{idempotencyKey}:{next.GetType().Name}", ct).Map(_ => next));
+}
+```
+
+---
+## [5][GENERIC_MATH]
+>**Dictum:** *Constrain algorithms to capabilities, not concrete types.*
+
+Use narrow interfaces (`IAdditionOperators`, `IComparisonOperators`, `IMinMaxValue`) unless full `INumber<TSelf>` semantics are required.
+
+```csharp
+using System;
+using System.Numerics;
+using LanguageExt;
+using LanguageExt.Common;
+
+// --- [WEIGHTED_AVERAGE] ---
+
 public static class NumericAggregates {
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static Fin<double> WeightedAverage(Seq<(double Value, double Weight)> items) =>
         items.Fold(
             (sum: 0.0, weight: 0.0),
-            static ((double sum, double weight) acc, (double Value, double Weight) pair) =>
-                (acc.sum + pair.Value * pair.Weight, acc.weight + pair.Weight)
-        ) switch
-        {
-            (_, 0.0) => Fail(Error.New("WeightedAverage: zero total weight")),
-            var (sum, weight) => Pure(sum / weight)
-        };
+            static (acc, pair) => (acc.sum + pair.Value * pair.Weight, acc.weight + pair.Weight)) switch {
+                (_, 0.0) => Fin.Fail<double>(Error.New(message: "WeightedAverage: total weight is zero.")),
+                var (sum, weight) => Fin.Succ(sum / weight)
+            };
 }
-```
 
-**Domain Type with Generic Math** -- implement only the interfaces your type needs:
+// --- [CAPABILITY_TYPE] ---
 
-```csharp
 public readonly record struct Percentage :
     IAdditionOperators<Percentage, Percentage, Percentage>,
     IComparisonOperators<Percentage, Percentage, bool>,
-    IComparable<Percentage>,
     IMinMaxValue<Percentage> {
     private readonly decimal _value;
     private Percentage(decimal value) => _value = value;
+
     public static Fin<Percentage> Create(decimal value) =>
-        value switch {
-            >= 0m and <= 100m => Fin.Succ(new Percentage(value: value)),
-            _ => Fin.Fail<Percentage>(Error.New(message: "Percentage must be 0-100."))
-        };
-    public int CompareTo(Percentage other) => _value.CompareTo(other._value);
+        value is >= 0m and <= 100m
+            ? Fin.Succ(new Percentage(value))
+            : Fin.Fail<Percentage>(Error.New(message: "Percentage must be between 0 and 100."));
+
     public static Percentage operator +(Percentage left, Percentage right) =>
         new(Math.Clamp(value: left._value + right._value, min: 0m, max: 100m));
-    public static Percentage MinValue => new(value: 0m);
-    public static Percentage MaxValue => new(value: 100m);
+
+    public static Percentage MinValue => new(0m);
+    public static Percentage MaxValue => new(100m);
     public static bool operator >(Percentage left, Percentage right) => left._value > right._value;
     public static bool operator >=(Percentage left, Percentage right) => left._value >= right._value;
     public static bool operator <(Percentage left, Percentage right) => left._value < right._value;
@@ -264,93 +361,90 @@ public readonly record struct Percentage :
 }
 ```
 
-[IMPORTANT]: Full `INumber<Percentage>` only when the type participates in generic numeric algorithms. Target: O(log n) persistent operations; benchmark via BenchmarkDotNet before claiming specific ratios. For algebraic monoid abstraction over these same interfaces (`IAlgebraicMonoid<TSelf>`), see `composition.md` [3] arity collapse -- same Generic Math foundation, monoid-constrained fold.
+---
+## [6][LANGUAGEEXT_COLLECTIONS_AND_BOUNDARIES]
+>**Dictum:** *Use trait-integrated collections in domain transforms; adapt at boundaries explicitly.*
 
-**Typeclass Encoding via Static Abstract** -- `static abstract` members encode Haskell-style typeclasses in C#. The CRTP constraint `TSelf : ITypeclass<TSelf>` enables generic algorithms to call static members on the implementing type without boxing. This is how `INumber<T>`, `IParsable<T>`, and `ISpanParsable<T>` work internally.
+Boundary discipline:
+- Keep domain operations in `Seq<T>`, `HashMap<K,V>`, `HashSet<T>`.
+- Materialize to BCL collections at adapters.
+- Keep wrappers typed and cancellation-aware.
+- Do not collapse `Fin.Fail` into success-like empty outputs.
+- Treat `QueryAll<T>` and writer dependencies as total contracts (convert throws to `Fin.Fail` at boundaries).
 
 ```csharp
-// Custom typeclass: domain primitives that can create themselves from a validated raw value.
-public interface IValidatedFactory<TSelf, TRaw>
-    where TSelf : IValidatedFactory<TSelf, TRaw> {
-    static abstract Fin<TSelf> Create(TRaw candidate);
-    static abstract TRaw Extract(TSelf value);
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
+using LanguageExt;
+using LanguageExt.Common;
+
+// --- [DOMAIN_COLLECTIONS] ---
+
+public static class CollectionPatterns {
+    public static Seq<int> EvenValues(Seq<int> values) => values.Filter(static x => x % 2 == 0);
+    public static HashMap<string, decimal> MergeBalances(HashMap<string, decimal> left, HashMap<string, decimal> right) => left + right;
 }
-public readonly record struct OrderQuantity : IValidatedFactory<OrderQuantity, int> {
-    private readonly int _value;
-    private OrderQuantity(int value) => _value = value;
-    public static Fin<OrderQuantity> Create(int candidate) =>
-        (candidate > 0 && candidate <= 10_000) switch {
-            true => Fin.Succ(new OrderQuantity(value: candidate)),
-            false => Fin.Fail<OrderQuantity>(Error.New(message: "Quantity must be 1-10000."))
-        };
-    public static int Extract(OrderQuantity value) => value._value;
+
+// --- [DELEGATE_WRAPPER] ---
+
+public delegate Task<Fin<Seq<T>>> QueryAll<T>(CancellationToken ct);
+
+public interface IMetricRecorder {
+    Fin<Unit> RecordCount(int count, CancellationToken ct);
 }
-// Generic algorithm dispatches via typeclass constraint -- zero boxing.
-public static class ValidatedOps {
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static Fin<TSelf> ClampAndCreate<TSelf, TRaw>(
-        TRaw candidate, Func<TRaw, TRaw> clamp)
-        where TSelf : IValidatedFactory<TSelf, TRaw> =>
-        TSelf.Create(clamp(candidate));
+
+public static class QueryWrappers {
+    public static QueryAll<T> WithMetrics<T>(QueryAll<T> next, IMetricRecorder recorder) =>
+        async ct =>
+            ct.IsCancellationRequested
+                ? Fin.Fail<Seq<T>>(Error.New(message: "Operation cancelled."))
+                : (await next(ct)).Bind(result =>
+                    ct.IsCancellationRequested
+                        ? Fin.Fail<Seq<T>>(Error.New(message: "Operation cancelled."))
+                        : recorder.RecordCount(result.Count, ct).Map(_ => result));
+
+    public static async Task<Fin<IReadOnlyList<T>>> MaterializeBoundary<T>(QueryAll<T> query, CancellationToken ct) =>
+        (await query(ct)).Map(seq => (IReadOnlyList<T>)seq.ToList());
 }
 ```
 
-[IMPORTANT]: Use `static abstract` typeclass encoding when 3+ domain primitives share a creation/extraction protocol. For fewer types, direct `Fin<T>` factories (section [1]) are simpler.
-
 ---
-## [7][LANGUAGEEXT_COLLECTIONS]
->**Dictum:** *Prefer trait-integrated collections over BCL immutable types.*
+## [7][RULES]
+>**Dictum:** *Rules are valid only when mechanism, scope, and failure behavior are explicit.*
 
-LanguageExt provides CHAMP-based `HashMap<K,V>`, `HashSet<T>`, and array-backed `Seq<T>` implementing `K<F,A>` traits (`Foldable`, `Traversable`, `Monad`). BCL immutable types lack HKT trait integration.
+Construction:
+- [ALWAYS] Validate through `Fin<T>` factories.
+- [ALWAYS] Keep validated constructors private.
+- [ALWAYS] Keep source-generated value object attributes explicitly metadata-only in wording.
+- [ALWAYS] Keep error messages stable and domain-specific for consistent telemetry aggregation.
+- [ALWAYS] Keep factory signatures deterministic (`input -> Fin<T>`) to preserve composability under refactoring.
+- [NEVER] Expose raw `string`/`Guid`/`decimal` where a domain type exists.
 
-| [INDEX] | [COLLECTION]       | [BACKING]   | [USE_WHEN]                                                   |
-| :-----: | :----------------- | :---------- | ------------------------------------------------------------ |
-|   [1]   | **`Seq<T>`**       | Array, lazy | Default ordered sequence; array-backed, faster than `Lst<T>` |
-|   [2]   | **`HashMap<K,V>`** | CHAMP trie  | Key-value lookup; competitive immutable perf via CHAMP trie  |
-|   [3]   | **`HashSet<T>`**   | CHAMP trie  | Membership testing; unsorted                                 |
-|   [4]   | **`Map<K,V>`**     | AVL tree    | Only when sorted key order is required                       |
+Type distinction:
+- [ALWAYS] Use closed generic aliases for semantic clarity when appropriate.
+- [ALWAYS] Keep `UnsafeWrap` internal and restricted to factory/test internals.
+- [NEVER] Use open generic aliases.
 
-```csharp
-Seq<int> numbers = Seq(1, 2, 3, 4, 5);
-Seq<int> evens = numbers.Filter((int n) => n % 2 == 0);
-int total = numbers.Fold(0, (int acc, int n) => acc + n);
-HashMap<string, decimal> balances = HashMap(("alice", 1000m), ("bob", 500m));
-Option<decimal> alice = balances.Find(key: "alice");
-```
+Union and transition behavior:
+- [ALWAYS] Keep union targets `abstract partial` class/record hierarchies with private base constructors.
+- [ALWAYS] Treat extension methods as projection, not interception.
+- [ALWAYS] Prefer generated exhaustive `Switch`/`Map` for unions where available.
+- [ALWAYS] Use typed wrappers or explicit AOP toolchains (`Metalama`/`PostSharp`) for interception.
+- [NEVER] Assume plain attributes intercept runtime behavior by themselves.
 
-**Boundary materialization** -- EF Core / async queries return `List<T>`. Convert at the persistence boundary:
+Decorator topology:
+- [ALWAYS] Use `Decorate` for required wrappers.
+- [ALWAYS] Use `TryDecorate` for optional wrappers.
+- [ALWAYS] Put idempotency before outer telemetry/audit wrappers.
+- [ALWAYS] Keep cancellation in typed failure channels (`Fin.Fail`) and propagate token intent (`CA2016` discipline).
+- [ALWAYS] Document required vs optional decorators at registration sites to prevent topology drift.
+- [NEVER] Inject throw-oriented side-effect delegates into `Fin` wrappers; use typed dependencies that return `Fin<Unit>`.
 
-```csharp
-Seq<TEntity> entities = toSeq(await query.ToListAsync(ct));
-```
-
-[CRITICAL]: `Seq<T>` over `List<T>` / `IEnumerable<T>`; `HashMap<K,V>` over `Dictionary` / `ImmutableDictionary`. LanguageExt collections compose with `Traverse`, `Sequence`, `Bind` via the trait system. See `persistence.md` [1] `DbAccess.QueryAll` for the canonical `toSeq(await query.ToListAsync(ct))` pattern.
-
----
-## [8][RULES]
->**Dictum:** *Rules compress into constraints.*
-
-- [ALWAYS] One canonical type per concept -- derive variants at call site.
-- [ALWAYS] `readonly` on every field and record -- immutability is default.
-- [ALWAYS] `Fin<T>` factory for every validated type -- construction is typed.
-- [ALWAYS] `field` keyword for inline property normalization on non-validated types only (CSP0720: `init` accessor on `Fin<T>` types enables `with`-expression bypass; use `{ get; }` only and normalize in factory).
-- [ALWAYS] `using static LanguageExt.Prelude;` in every domain file.
-- [ALWAYS] LanguageExt collections (`Seq`, `HashMap`, `HashSet`) over BCL immutable types.
-- [ALWAYS] Temporal primitives use `NodaTime.Instant` with injected `IClock`/`TimeProvider`.
-- [NEVER] Public constructors on validated domain primitives.
-- [NEVER] `string`/`int`/`Guid` as parameters where a domain primitive exists.
-- [NEVER] `DateTime.Now`/`DateTime.UtcNow`/`DateTimeOffset.Now`/`DateTimeOffset.UtcNow` in domain code.
-- [NEVER] Full `INumber<T>` when narrower interfaces suffice.
-
----
-## [9][QUICK_REFERENCE]
-
-| [INDEX] | [PATTERN]                   | [WHEN]                        | [KEY_TRAIT]                                          |
-| :-----: | :-------------------------- | ----------------------------- | ---------------------------------------------------- |
-|   [1]   | **Domain primitive**        | Validated scalar (ID, amount) | `readonly record struct` + `Fin`                     |
-|   [2]   | **Newtype wrapper**         | Semantic alias, zero-alloc    | `Newtype<TTag,TRepr>` + `Make`/`Require`             |
-|   [3]   | **Discriminated union**     | Exhaustive state space        | Sealed abstract record + `_ => UnreachableException` |
-|   [4]   | **Phantom type**            | Compile-time state tracking   | Empty `readonly struct` marker                       |
-|   [5]   | **Generic math**            | Numeric algorithm over any T  | `INumber<T>` / fine-grained interfaces               |
-|  [5A]   | **Typeclass encoding**      | Shared protocol across types  | `static abstract` + CRTP constraint                  |
-|   [6]   | **LanguageExt collections** | Domain sequences and maps     | `Seq<T>` / `HashMap<K,V>`                            |
+Collection boundaries:
+- [ALWAYS] Keep domain transforms on LanguageExt collections.
+- [ALWAYS] Materialize boundary shapes explicitly at adapters.
+- [NEVER] Collapse `Fin.Fail` to empty “success-like” values at boundaries.
+- [NEVER] Blur domain collection rules with persistence/transport adapter choreography.

@@ -7,9 +7,8 @@ import { AuditService } from '@parametric-portal/server/observe/audit';
 import { MetricsService } from '@parametric-portal/server/observe/metrics';
 import { Telemetry } from '@parametric-portal/server/observe/telemetry';
 import { Array as A, Cron, Effect, Layer, Option, Schema as S } from 'effect';
-import { AiError } from './errors.ts';
 import { AiRuntime } from './runtime.ts';
-import { AiRuntimeProvider } from './runtime-provider.ts';
+import { AiError, AiRuntimeProvider } from './runtime-provider.ts';
 
 // --- [SCHEMA] ----------------------------------------------------------------
 

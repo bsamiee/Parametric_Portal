@@ -59,7 +59,7 @@ const _embedFields =  { dimensions:    S.Int, model: S.String               };
 // --- [FUNCTIONS] -------------------------------------------------------------
 
 const _clamp =  (v: number | undefined, d: number, max: number) =>  Math.min(Math.max(v ?? d, 1), max);
-const _mapErr = (op: string) => Effect.mapError((cause: unknown) => new SearchError({ cause, operation: op, reason: 'unknown' }));
+const _mapErr = (op: string) => Effect.mapError((cause: unknown) => cause instanceof SearchError ? cause : new SearchError({ cause, operation: op, reason: 'unknown' }));
 
 // --- [SERVICES] --------------------------------------------------------------
 
