@@ -52,6 +52,23 @@ class AiService extends Effect.Service<AiService>()('ai/Service', {
                 subjectId: Option.map(ctx.session, (s) => s.userId).pipe(Option.getOrElse(() => defaultSubject)),
             } as const;
         });
+        const _embedAndUpsert = (
+            operation: string,
+            items: ReadonlyArray<{ readonly documentHash: string; readonly entityId: string; readonly entityType: string; readonly scopeId: string | null }>,
+            texts: readonly string[],
+            embeddingSettings: { readonly dimensions: number; readonly model: string },
+        ) => model.embed(texts).pipe(
+            Effect.filterOrFail(
+                (v) => v.length === items.length,
+                (v) => new AiError({ cause: { actual: v.length, expected: items.length }, operation, reason: 'unknown' }),
+            ),
+            Effect.flatMap((vectors) =>
+                Effect.forEach(items, (item, i) =>
+                    database.search.upsertEmbedding({ dimensions: embeddingSettings.dimensions, documentHash: item.documentHash, embedding: A.unsafeGet(vectors, i), entityId: item.entityId, entityType: item.entityType, model: embeddingSettings.model, scopeId: item.scopeId }),
+                    { concurrency: 10, discard: true },
+                ),
+            ),
+        );
         const seedKnowledge = Effect.fn('AiService.seedKnowledge')((input: {
             readonly entityType: string;
             readonly manifest:   ReadonlyArray<typeof _ManifestEntry.Type> | string;
@@ -78,12 +95,6 @@ class AiService extends Effect.Service<AiService>()('ai/Service', {
             });
             const settings = yield* model.settings();
             const { dimensions, model: embeddingModel } = settings.embedding;
-            const vectors = yield* model.embed(sources).pipe(
-                Effect.filterOrFail(
-                    (v) => v.length === entries.length,
-                    (v) => new AiError({ cause: { actual: v.length, expected: entries.length }, operation: 'seedKnowledge', reason: 'unknown' }),
-                ),
-            );
             const docs = yield* Effect.forEach(entries, (e, i) =>
                 database.search.upsertDocument({
                     contentText: e.description, displayText: e.name, entityId: A.unsafeGet(entityIds, i), entityType: input.entityType,
@@ -92,9 +103,11 @@ class AiService extends Effect.Service<AiService>()('ai/Service', {
                 }),
                 { concurrency: 10 },
             );
-            yield* Effect.forEach(docs, (doc, i) =>
-                database.search.upsertEmbedding({ dimensions, documentHash: doc.documentHash, embedding: A.unsafeGet(vectors, i), entityId: A.unsafeGet(entityIds, i), entityType: input.entityType, model: embeddingModel, scopeId }),
-                { concurrency: 10, discard: true },
+            yield* _embedAndUpsert(
+                'seedKnowledge',
+                A.map(docs, (doc, i) => ({ documentHash: doc.documentHash, entityId: A.unsafeGet(entityIds, i), entityType: input.entityType, scopeId })),
+                sources,
+                { dimensions, model: embeddingModel },
             );
             return { upserted: entries.length } as const;
         }));
@@ -146,16 +159,7 @@ class AiService extends Effect.Service<AiService>()('ai/Service', {
                     model:         embeddingModel,
                     scopeId,
                 });
-                const embeddings = yield* model.embed(A.map(sources, (s) => s.embeddingSource)).pipe(
-                    Effect.filterOrFail(
-                        (v) => v.length === sources.length,
-                        (v) => new AiError({ cause: { actual: v.length, expected: sources.length }, operation: 'searchRefreshEmbeddings', reason: 'unknown' }),
-                    ),
-                );
-                yield* Effect.forEach(sources, (s, i) =>
-                    database.search.upsertEmbedding({ dimensions, documentHash: s.documentHash, embedding: A.unsafeGet(embeddings, i), entityId: s.entityId, entityType: s.entityType, model: embeddingModel, scopeId: s.scopeId }),
-                    { concurrency: 10, discard: true },
-                );
+                yield* _embedAndUpsert('searchRefreshEmbeddings', sources, A.map(sources, (s) => s.embeddingSource), { dimensions, model: embeddingModel });
                 yield* _track('Search.refresh',
                     {count: sources.length, includeGlobal: options?.includeGlobal ?? false, kind: 'embeddings', scopeId },
                     subjectId,

@@ -48,10 +48,7 @@ const _cfg = {
     trigram: { minLen: 2 },
     vector:  { efSearch: 120,  maxTuples: 40_000, memMult: 2, mode: 'relaxed_order' as const },
 } as const;
-const _stratKeys =    Object.keys(_cfg.rrf.strategies) as ReadonlyArray<keyof typeof _cfg.rrf.strategies>;
-const _scoreCols =    Object.fromEntries(_stratKeys.map((k) => { const s = _cfg.rrf.strategies[k] as _Strat; return [k, 'score' in s ? s.score : `${k}_score`]; })) as Record<keyof typeof _cfg.rrf.strategies, string | null>;
 const _snippetOpts =  `MaxWords=${_cfg.snippet.maxW},MinWords=${_cfg.snippet.minW},MaxFragments=${_cfg.snippet.frags},FragmentDelimiter=${_cfg.snippet.delim},StartSel=${_cfg.snippet.start},StopSel=${_cfg.snippet.stop}`;
-const _trgmKnnOps =   [['similarity', '<->'], ['word', '<<->'], ['strictWord', '<<<->']] as const;
 
 // --- [SCHEMA] ----------------------------------------------------------------
 
@@ -87,15 +84,18 @@ class SearchRepo extends Effect.Service<SearchRepo>()('database/Search', {
                 }))),
             );
         const _buildCtes = (p: { readonly embeddingJson?: string; readonly dimensions?: number; readonly entityTypes: readonly string[]; readonly includeGlobal: boolean; readonly model?: string; readonly scopeId: string | null; readonly term: string }) => {
+            const stratKeys =  Object.keys(_cfg.rrf.strategies) as ReadonlyArray<keyof typeof _cfg.rrf.strategies>;
+            const scoreCols =  Object.fromEntries(stratKeys.map((k) => { const s = _cfg.rrf.strategies[k] as _Strat; return [k, 'score' in s ? s.score : `${k}_score`]; })) as Record<keyof typeof _cfg.rrf.strategies, string | null>;
+            const trgmKnnOps = [['similarity', '<->'], ['word', '<<->'], ['strictWord', '<<<->']] as const;
             const hasEmbed = p.embeddingJson !== undefined, where = _filters(p);
             const norm = sql`left(normalize_search_text(${p.term}, NULL, NULL), ${_cfg.fuzzy.maxLen})`, q = sql`websearch_to_tsquery(${_cfg.regconfig}::regconfig, ${p.term})`;
-            const trgmKnnCtes = _trgmKnnOps.map(([key, op]) => {
+            const trgmKnnCtes = trgmKnnOps.map(([key, op]) => {
                 const snake = `trgm_knn_${Str.camelToSnake(key)}`, dist = sql.unsafe(`documents.normalized_text ${op} `) as unknown as Statement.Fragment;
                 return sql`${sql.literal(snake)}_candidates AS (SELECT documents.entity_type, documents.entity_id, documents.normalized_text, ${1} - (${dist}${norm}) AS ${sql.literal(snake)}_score FROM ${sql(_cfg.table)} documents WHERE ${where} AND char_length(${norm}) >= ${_cfg.trigram.minLen} ORDER BY ${dist}${norm}, documents.entity_id DESC LIMIT ${_cfg.limits.candidate})`;
             });
-            const activeKeys = _stratKeys.filter((k) => k !== 'semantic' || hasEmbed);
+            const activeKeys = stratKeys.filter((k) => k !== 'semantic' || hasEmbed);
             const rankedCtes = activeKeys.map((k) => {
-                const s = _cfg.rrf.strategies[k] as _Strat, tbl = s.tbl ?? `${k}_candidates`, sc = _scoreCols[k], ord = sc ? `${sc} ${s.ord ?? 'DESC'} NULLS LAST, entity_id DESC` : 'entity_id DESC';
+                const s = _cfg.rrf.strategies[k] as _Strat, tbl = s.tbl ?? `${k}_candidates`, sc = scoreCols[k], ord = sc ? `${sc} ${s.ord ?? 'DESC'} NULLS LAST, entity_id DESC` : 'entity_id DESC';
                 const fltExpr = k === 'fuzzy' ? `fuzzy_distance <= ${_cfg.fuzzy.maxDist}` : s.flt;
                 const flt = fltExpr ? sql` WHERE ${sql.unsafe(fltExpr)}` : sql``;
                 return sql`${sql.literal(k)}_ranked AS (SELECT entity_type, entity_id, ROW_NUMBER() OVER (ORDER BY ${sql.unsafe(ord)}) AS ${sql.literal(k)}_rank FROM ${sql.literal(tbl)}${flt})`;

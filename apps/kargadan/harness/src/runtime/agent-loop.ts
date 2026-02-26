@@ -23,13 +23,8 @@ const _LoopStateCodec = S.Struct({
 
 // --- [FUNCTIONS] -------------------------------------------------------------
 
-const _buildCheckpoint =  (state: LoopState, sequence: number) => ({
-    chatJson: '',
-    loopState: { attempt: state.attempt, correctionCycles: state.correctionCycles, operations: state.operations, sequence: state.sequence, status: state.status },
-    sceneSummary: Option.none(),
-    sequence,
-    sessionId: state.identityBase.sessionId,
-});
+const _loopSnapshot = ({ attempt, correctionCycles, operations, sequence, status }: LoopState) =>
+    ({ attempt, correctionCycles, operations, sequence, status });
 const _elapsed = (start: number) => Math.max(0, Math.round(performance.now() - start));
 
 // --- [SERVICES] --------------------------------------------------------------
@@ -42,6 +37,15 @@ class AgentLoop extends Effect.Service<AgentLoop>()('kargadan/AgentLoop', {
             HarnessConfig.resolveWriteObjectRef,
         ]);
         const eventSequence = yield* Ref.make(1_000_000);
+        const _persistCall = (
+            identity: { readonly appId: string; readonly correlationId: string; readonly sessionId: string },
+            loopState: unknown,
+            call: { readonly durationMs: number; readonly error: Option.Option<string>; readonly operation: string; readonly params: Record<string, unknown>; readonly result: Option.Option<unknown>; readonly sequence: number; readonly status: 'ok' | 'error' },
+        ) => persistence.persist({
+            appId: identity.appId,
+            checkpoint: { chatJson: '', loopState, sceneSummary: Option.none(), sequence: call.sequence, sessionId: identity.sessionId },
+            toolCall: { ...call, correlationId: identity.correlationId, sessionId: identity.sessionId },
+        });
         const persistInboundEvent = (eventEnvelope: Envelope.Event) =>
             Effect.gen(function* () {
                 const start = performance.now();
@@ -50,42 +54,30 @@ class AgentLoop extends Effect.Service<AgentLoop>()('kargadan/AgentLoop', {
                     Match.when({ eventType: 'stream.compacted' }, (streamEvent) => Option.some(streamEvent.delta)),
                     Match.orElse(() => Option.none()),
                 );
-                yield* persistence.persist({
-                    appId: eventEnvelope.appId,
-                    checkpoint: {
-                        chatJson: '',
-                        loopState: { eventType: eventEnvelope.eventType, sequence },
-                        sceneSummary: Option.none(),
-                        sequence,
-                        sessionId: eventEnvelope.sessionId,
+                yield* _persistCall(eventEnvelope, { eventType: eventEnvelope.eventType, sequence }, {
+                    durationMs: _elapsed(start),
+                    error:      Option.none(),
+                    operation:  `transport.event.${eventEnvelope.eventType}`,
+                    params:     {
+                        causationRequestId: eventEnvelope.causationRequestId,
+                        delta:              eventEnvelope.delta,
+                        eventType:          eventEnvelope.eventType,
+                        sourceRevision:     eventEnvelope.sourceRevision,
+                        ...(Option.isSome(batchSummary) ? { batchSummary: batchSummary.value } : {}),
                     },
-                    toolCall: {
-                        correlationId: eventEnvelope.correlationId,
-                        durationMs:    _elapsed(start),
-                        error:         Option.none(),
-                        operation:     `transport.event.${eventEnvelope.eventType}`,
-                        params: {
-                            causationRequestId: eventEnvelope.causationRequestId,
-                            delta:              eventEnvelope.delta,
-                            eventType:          eventEnvelope.eventType,
-                            sourceRevision:     eventEnvelope.sourceRevision,
-                            ...(Option.isSome(batchSummary) ? { batchSummary: batchSummary.value } : {})
-                        },
-                        result: Option.some({ eventId: eventEnvelope.eventId }),
-                        sequence,
-                        sessionId: eventEnvelope.sessionId,
-                        status: 'ok',
-                    },
+                    result:   Option.some({ eventId: eventEnvelope.eventId }),
+                    sequence,
+                    status:   'ok',
                 });
                 return { eventEnvelope, sequence, totalCount: Option.isSome(batchSummary) ? batchSummary.value.totalCount : 0 } as const;
             });
         const persistResult = (state: LoopState, command: Envelope.Command, result: Envelope.Result, start: number) => {
             const verified = result.status === 'ok';
-            const failureReason: Envelope.FailureReason & { readonly details: unknown } = {
-                code:         result.error?.reason.code ?? ('UNKNOWN_FAILURE' as const),
+            const failureReason = {
+                code:         result.error?.code ?? ('UNKNOWN_FAILURE' as const),
                 details:      result.error?.details,
-                failureClass: result.error?.reason.failureClass ?? ('fatal' as const),
-                message:      result.error?.reason.message ?? 'Result error payload is missing',
+                failureClass: result.error?.failureClass ?? ('fatal' as const),
+                message:      result.error?.message ?? 'Result error payload is missing',
             };
             const seq = state.sequence + 1;
             const next = { ...state, command: Option.some(command), sequence: seq };
@@ -98,20 +90,14 @@ class AgentLoop extends Effect.Service<AgentLoop>()('kargadan/AgentLoop', {
                 ? Effect.succeed(done)
                 : Match.value(failureReason.failureClass).pipe(
                     Match.when('compensatable', () =>
-                        persistence.persist({
-                            appId: state.identityBase.appId,
-                            checkpoint: _buildCheckpoint(failed, seq + 1),
-                            toolCall: {
-                                correlationId: state.identityBase.correlationId,
-                                durationMs:    0,
-                                error:         Option.some(failureReason.code),
-                                operation:     'command.compensate',
-                                params: {      code: failureReason.code, compensation: 'required' },
-                                result:        Option.none(),
-                                sequence:      seq + 1,
-                                sessionId:     state.identityBase.sessionId,
-                                status:        'error' as const
-                            },
+                        _persistCall(state.identityBase, _loopSnapshot(failed), {
+                            durationMs: 0,
+                            error:      Option.some(failureReason.code),
+                            operation:  'command.compensate',
+                            params:     { code: failureReason.code, compensation: 'required' },
+                            result:     Option.none(),
+                            sequence:   seq + 1,
+                            status:     'error' as const,
                         }).pipe(Effect.as(failed)),
                     ),
                     Match.when('correctable', () =>
@@ -133,20 +119,14 @@ class AgentLoop extends Effect.Service<AgentLoop>()('kargadan/AgentLoop', {
                 );
             return decide.pipe(
                 Effect.flatMap((resolvedState) =>
-                    persistence.persist({
-                        appId: state.identityBase.appId,
-                        checkpoint: _buildCheckpoint(resolvedState, seq),
-                        toolCall: {
-                            correlationId: state.identityBase.correlationId,
-                            durationMs:    _elapsed(start),
-                            error:         verified ? Option.none() : Option.some(failureReason.message),
-                            operation:     verified ? 'command.completed' : 'command.failed',
-                            params:        { dedupe: result.dedupe, operation: command.operation, status: result.status },
-                            result:        Option.some({ dedupe: result.dedupe, status: result.status, verified }),
-                            sequence:      seq,
-                            sessionId:     state.identityBase.sessionId,
-                            status:        verified ? 'ok' as const : 'error' as const,
-                        },
+                    _persistCall(state.identityBase, _loopSnapshot(resolvedState), {
+                        durationMs: _elapsed(start),
+                        error:      verified ? Option.none() : Option.some(failureReason.message),
+                        operation:  verified ? 'command.completed' : 'command.failed',
+                        params:     { dedupe: result.dedupe, operation: command.operation, status: result.status },
+                        result:     Option.some({ dedupe: result.dedupe, status: result.status, verified }),
+                        sequence:   seq,
+                        status:     verified ? 'ok' as const : 'error' as const,
                     }).pipe(Effect.as(resolvedState)),
                 ),
             );
@@ -160,7 +140,7 @@ class AgentLoop extends Effect.Service<AgentLoop>()('kargadan/AgentLoop', {
                         appId:         command.appId,
                         correlationId: command.correlationId,
                         dedupe:        { decision: 'rejected', originalRequestId: command.requestId },
-                        error:         { details: error, reason: { code: 'DISPATCH_ERROR', failureClass: error.failureClass ?? 'retryable', message: error.message } },
+                        error:         { code: 'DISPATCH_ERROR', details: error, failureClass: error.failureClass ?? 'retryable', message: error.message },
                         requestId:     command.requestId,
                         sessionId:     command.sessionId,
                         status:        'error',
@@ -173,14 +153,14 @@ class AgentLoop extends Effect.Service<AgentLoop>()('kargadan/AgentLoop', {
             Effect.gen(function* () {
                 const start = performance.now();
                 const { identityBase: base, sequence } = state;
-                const existingCommand = pipe(state.command, Option.map((cmd) => ({ ...cmd, attempt: state.attempt })));
+                const existingCommand = state.command;
                 const buildFallback = (operation: typeof Operation.Type): Envelope.Command => {
                     const isWrite = operation.startsWith('write.');
                     const payload = isWrite
                         ? ({ operationId: `${base.correlationId}:${sequence}`, patch: { layer: 'default', name: 'phase-3' } } as const)
                         : ({ includeAttributes: true, scope: 'active' } as const);
                     return {
-                        _tag:        'command', ...base, attempt: state.attempt, deadlineMs: commandDeadlineMs,
+                        _tag:        'command', ...base, deadlineMs: commandDeadlineMs,
                         idempotency: isWrite ? persistence.idempotency({ correlationId: base.correlationId, payload, sequence }) : undefined,
                         objectRefs:  [writeObjectRef], operation, payload, requestId: crypto.randomUUID(),
                         undoScope:   isWrite ? 'kargadan.phase3' : undefined,
@@ -192,20 +172,14 @@ class AgentLoop extends Effect.Service<AgentLoop>()('kargadan/AgentLoop', {
                     Option.orElse(() => fallbackCommand),
                     Option.match({ onNone: () => Effect.fail(new CommandDispatchError({ details: { message: 'No operation available for PLAN' }, reason: 'protocol' })), onSome: Effect.succeed }),
                 );
-                yield* persistence.persist({
-                    appId: state.identityBase.appId,
-                    checkpoint: _buildCheckpoint(state, state.sequence + 1),
-                    toolCall: {
-                        correlationId: state.identityBase.correlationId,
-                        durationMs:    _elapsed(start),
-                        error:         Option.none(),
-                        operation:     'command.plan',
-                        params:        { operation: command.operation, status: state.status },
-                        result:        Option.some({ operation: command.operation }),
-                        sequence:      state.sequence + 1,
-                        sessionId:     state.identityBase.sessionId,
-                        status:        'ok' as const,
-                    },
+                yield* _persistCall(state.identityBase, _loopSnapshot(state), {
+                    durationMs: _elapsed(start),
+                    error:      Option.none(),
+                    operation:  'command.plan',
+                    params:     { operation: command.operation, status: state.status },
+                    result:     Option.some({ operation: command.operation }),
+                    sequence:   state.sequence + 1,
+                    status:     'ok' as const,
                 });
                 return yield* execute(state, command);
             });

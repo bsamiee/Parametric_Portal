@@ -43,23 +43,6 @@ const _operationMeta = (descriptor: AI_OPERATIONS.Descriptor, context: AI_OPERAT
 class AiRuntime extends Effect.Service<AiRuntime>()('ai/Runtime', {
     effect: Effect.gen(function* () {
         const provider = yield* AiRuntimeProvider;
-        const checkBudget = (descriptor: AI_OPERATIONS.Descriptor, tenantId: string, policy: AiRegistry.Settings['policy']) =>
-            provider.readBudget(tenantId).pipe(
-                Effect.filterOrFail(
-                    (b) => b.dailyTokens < policy.maxTokensPerDay && b.rateCount < policy.maxRequestsPerMinute,
-                    (b) => new AiError({
-                        cause:     { dailyTokens: b.dailyTokens, limits: { daily: policy.maxTokensPerDay, rate: policy.maxRequestsPerMinute }, rateCount: b.rateCount, tenantId },
-                        operation: descriptor.id,
-                        reason:    b.dailyTokens >= policy.maxTokensPerDay ? 'budget_exceeded' : 'rate_exceeded',
-                    }),
-                ),
-                Effect.asVoid,
-                Effect.tapError(() => provider.observePolicyDenied(descriptor.id, tenantId)),
-            );
-        const policyDenied = (descriptor: AI_OPERATIONS.Descriptor, tenantId: string, cause: Record<string, unknown>) =>
-            provider.observePolicyDenied(descriptor.id, tenantId).pipe(
-                Effect.zipRight(Effect.fail(new AiError({ cause: { ...cause, tenantId }, operation: descriptor.id, reason: 'policy_denied' }))),
-            );
         const enforceRequestTokens = (descriptor: AI_OPERATIONS.Descriptor, context: AI_OPERATIONS.Context, source: string, totalTokens: number) =>
             Effect.filterOrFail(
                 Effect.succeed(totalTokens),
@@ -79,14 +62,27 @@ class AiRuntime extends Effect.Service<AiRuntime>()('ai/Runtime', {
             provider.resolveTenantId.pipe(
                 Effect.bindTo('tenantId'),
                 Effect.bind('appSettings', ({ tenantId }) => provider.resolveSettings(tenantId).pipe(Effect.map(_capMaxTokens))),
-                Effect.tap(({ tenantId, appSettings }) => checkBudget(descriptor, tenantId, appSettings.policy)),
+                Effect.tap(({ tenantId, appSettings }) =>
+                    provider.readBudget(tenantId).pipe(
+                        Effect.filterOrFail(
+                            (b) => b.dailyTokens < appSettings.policy.maxTokensPerDay && b.rateCount < appSettings.policy.maxRequestsPerMinute,
+                            (b) => new AiError({
+                                cause:     { dailyTokens: b.dailyTokens, limits: { daily: appSettings.policy.maxTokensPerDay, rate: appSettings.policy.maxRequestsPerMinute }, rateCount: b.rateCount, tenantId },
+                                operation: descriptor.id,
+                                reason:    b.dailyTokens >= appSettings.policy.maxTokensPerDay ? 'budget_exceeded' : 'rate_exceeded',
+                            }),
+                        ),
+                        Effect.asVoid,
+                        Effect.tapError(() => provider.observePolicyDenied(descriptor.id, tenantId)),
+                    ),
+                ),
                 Effect.mapError(AiError.from(descriptor.id)),
             );
         const runEffectOperation = <A, E, R>(
             descriptor: AI_OPERATIONS.Descriptor,
             context:    AI_OPERATIONS.Context,
             effect:     Effect.Effect<A, E, R>,
-            onSuccess: (value: A, meta: ReturnType<typeof _operationMeta>) => Effect.Effect<void, unknown, never> = () => Effect.void,
+            onSuccess:  (value: A, meta: ReturnType<typeof _operationMeta>) => Effect.Effect<void, unknown, never> = () => Effect.void,
         ) => {
             const meta = _operationMeta(descriptor, context);
             return provider.trackEffect(descriptor.id, meta.labels, effect).pipe(
@@ -101,7 +97,10 @@ class AiRuntime extends Effect.Service<AiRuntime>()('ai/Runtime', {
             const policy = context.appSettings.policy.tools;
             const toolChoice = options.toolChoice as LanguageModel.ToolChoice<string> | undefined;
             type PolicyMeta = { policy: typeof policy; reason: 'required_without_allowed_tools' | 'tool_not_allowed' | 'required_subset_empty'; requestedTool?: string; requestedTools?: readonly string[] };
-            const deny = (meta: PolicyMeta) => policyDenied(descriptor, context.tenantId, meta as Record<string, unknown>);
+            const deny = (meta: PolicyMeta) =>
+                provider.observePolicyDenied(descriptor.id, context.tenantId).pipe(
+                    Effect.zipRight(Effect.fail(new AiError({ cause: { ...meta, tenantId: context.tenantId }, operation: descriptor.id, reason: 'policy_denied' }))),
+                );
             const constrainOneOf = (v: { readonly mode?: 'auto' | 'required'; readonly oneOf: readonly string[] }, allowedNames: readonly string[]): Effect.Effect<LanguageModel.ToolChoice<string> | undefined, AiError, never> =>
                 Match.value(v.oneOf.filter((n) => allowedNames.includes(n))).pipe(
                     Match.when((f) => f.length === 0 && v.mode === 'required', () => deny({ policy, reason: 'required_subset_empty', requestedTools: v.oneOf })),
@@ -186,22 +185,18 @@ class AiRuntime extends Effect.Service<AiRuntime>()('ai/Runtime', {
         function embed(input: string): Effect.Effect<readonly number[], AiSdkError.AiError | AiError, never>;
         function embed(input: readonly string[]): Effect.Effect<readonly (readonly number[])[], AiSdkError.AiError | AiError, never>;
         function embed(input: string | readonly string[]): Effect.Effect<readonly number[] | readonly (readonly number[])[], unknown, unknown> {
-            const usage = Match.value(input).pipe(
-                Match.when(Match.string, (s) => ({ count: 1, estimatedTokens: Math.ceil(s.length / 4), input: s as string | readonly string[] })),
-                Match.orElse((arr) => ({ count: arr.length, estimatedTokens: Math.ceil(arr.join('').length / 4), input: arr as string | readonly string[] })),
+            type _EmbedRun = (m: EmbeddingModel.Service) => Effect.Effect<readonly number[] | readonly (readonly number[])[], AiSdkError.AiError>;
+            const resolved = Match.value(input).pipe(
+                Match.when(Match.string, (s) => ({ count: 1, estimatedTokens: Math.ceil(s.length / 4), run: ((m) => m.embed(s)) as _EmbedRun })),
+                Match.orElse((arr) => ({ count: arr.length, estimatedTokens: Math.ceil(arr.join('').length / 4), run: ((m) => m.embedMany(arr)) as _EmbedRun })),
             );
-            const embedDispatch = (model: EmbeddingModel.Service): Effect.Effect<readonly number[] | readonly (readonly number[])[], AiSdkError.AiError> =>
-                Match.value(usage.input).pipe(
-                    Match.when(Match.string, (s) => model.embed(s)),
-                    Match.orElse((arr) => model.embedMany(arr)),
-                );
             return resolveContext(AI_OPERATIONS.embed).pipe(
                 Effect.flatMap((context) => {
                     const layers = AiRegistry.layers(context.appSettings);
-                    const embedOp = EmbeddingModel.EmbeddingModel.pipe(Effect.flatMap(embedDispatch), Effect.provide(layers.embedding));
-                    return enforceRequestTokens(AI_OPERATIONS.embed, context, 'embedding.estimatedTokens', usage.estimatedTokens).pipe(
+                    const embedOp = EmbeddingModel.EmbeddingModel.pipe(Effect.flatMap(resolved.run), Effect.provide(layers.embedding));
+                    return enforceRequestTokens(AI_OPERATIONS.embed, context, 'embedding.estimatedTokens', resolved.estimatedTokens).pipe(
                         Effect.zipRight(runEffectOperation(AI_OPERATIONS.embed, context, embedOp, (_result, meta) =>
-                            Effect.all([provider.observeEmbedding(meta.labels, usage.count), incrementBudget(context.tenantId, usage.estimatedTokens)], { discard: true }))),
+                            Effect.all([provider.observeEmbedding(meta.labels, resolved.count), incrementBudget(context.tenantId, resolved.estimatedTokens)], { discard: true }))),
                     );
                 }),
             );

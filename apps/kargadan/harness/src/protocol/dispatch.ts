@@ -44,7 +44,7 @@ class CommandDispatch extends Effect.Service<CommandDispatch>()('kargadan/Comman
                             Match.tag('handshake.ack', (ack) =>
                                 Ref.set(phaseRef, 'active').pipe(Effect.andThen(Effect.log('kargadan.session.authenticated')), Effect.as(ack))),
                             Match.tag('handshake.reject', (reject) =>
-                                Effect.fail(new CommandDispatchError({ details: reject.reason, failureClass: reject.reason.failureClass, reason: 'rejected' }))),
+                                Effect.fail(new CommandDispatchError({ details: { code: reject.code, message: reject.message }, failureClass: reject.failureClass, reason: 'rejected' }))),
                             Match.orElse((other) =>
                                 Effect.fail(new CommandDispatchError({ details: { expected: 'handshake.ack|handshake.reject', received: other._tag }, reason: 'protocol' }))),
                         ),

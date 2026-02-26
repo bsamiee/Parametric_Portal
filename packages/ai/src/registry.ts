@@ -41,13 +41,13 @@ const _PolicySettingsSchema = S.Struct({
         names: S.Array(S.String),
     }), { default: () => ({ mode: 'allow' as const, names: [] as Array<string> }) }),
 });
-const _EmbeddingDefaults = { cacheCapacity: 1000, cacheTtlMinutes: 30, dimensions: 1536, maxBatchSize: 256, mode: 'batched' as const, model: 'text-embedding-3-small', provider: 'openai' as const, windowMs: 200 };
-const _LanguageDefaults =  { fallback: [] as const, maxTokens: 4096, model: 'gpt-4o', provider: 'openai' as const, temperature: 1, topK: 40, topP: 1 };
-const _PolicyDefaults =    { maxRequestsPerMinute: 60, maxTokensPerDay: 1_000_000, maxTokensPerRequest: 16384, tools: { mode: 'allow' as const, names: [] as const } };
+const _embeddingDefaults = S.decodeUnknownSync(_EmbeddingSettingsSchema)({});
+const _languageDefaults  = S.decodeUnknownSync(_LanguageSettingsSchema)({});
+const _policyDefaults    = S.decodeUnknownSync(_PolicySettingsSchema)({});
 const _SettingsSchema = S.Struct({
-    embedding: S.optionalWith(_EmbeddingSettingsSchema, { default: () => _EmbeddingDefaults }),
-    language:  S.optionalWith(_LanguageSettingsSchema,  { default: () => _LanguageDefaults  }),
-    policy:    S.optionalWith(_PolicySettingsSchema,    { default: () => _PolicyDefaults    }),
+    embedding: S.optionalWith(_EmbeddingSettingsSchema, { default: () => _embeddingDefaults }),
+    language:  S.optionalWith(_LanguageSettingsSchema,  { default: () => _languageDefaults  }),
+    policy:    S.optionalWith(_PolicySettingsSchema,    { default: () => _policyDefaults    }),
 });
 
 // --- [FUNCTIONS] -------------------------------------------------------------
