@@ -1,5 +1,8 @@
 {
-  "permissions": {
+    "disabledMcpjsonServers": ["playwright-test", "React Aria", "tailwindcss-server"],
+    "enabledMcpjsonServers": [],
+    "outputStyle": "functional-purist",
+    "permissions": {
     "allow": [
       "Read",
       "Write",
@@ -17,11 +20,13 @@
       "Skill",
       "SlashCommand",
       "Bash",
+      "Bash(curl:*)",
       "Bash(pnpm:*)",
       "Bash(nx:*)",
       "Bash(git:*)",
       "Bash(gh:*)",
       "Bash(node:*)",
+      "Bash(ty:*)",
       "Bash(uv:*)",
       "mcp__playwright-test__*",
       "mcp__playwright__browser_*"

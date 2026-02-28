@@ -33,13 +33,14 @@ cache-dir = ".cache/uv"
 
 # --- [TY] ------------------------------------------------------------------
 [tool.ty.environment]
+python-version = "3.14"
 python-platform = "all"
 
 [tool.ty.analysis]
 respect-type-ignore-comments = false
 
 [tool.ty.src]
-exclude = [".cache", ".nx", "_TMP", "coverage", "test-results", "tmp",]
+exclude = [".cache", ".nx", ".venv", "_TMP", "coverage", "node_modules", "test-results", "tmp"]
 
 [tool.ty.rules]
 all = "error"
