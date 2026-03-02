@@ -214,8 +214,8 @@ public static class PaymentResultRole {
 }
 ```
 
-Thinktecture `Switch`/`Map` returns `Fin<T>` -- compose directly into LanguageExt `Bind`/`Map` chains or `Eff` pipelines.<br>
-Every case branch **must** return the same `Fin<T>` instantiation (identical `T` type parameter) so the overall expression unifies to a single `Fin<T>`.<br>
+Thinktecture `Switch`/`Map` unifies to the common return type of all branches — when each branch returns `Fin<T>`, the expression becomes `Fin<T>` and composes directly into LanguageExt `Bind`/`Map` chains or `Eff` pipelines.<br>
+All case branches **must** return the same type (identical generic parameters) so the overall expression unifies to a single result type.<br>
 Mixing return types across branches (e.g., `Fin<string>` in one arm and `Fin<Unit>` in another) prevents composition and produces compilation errors.
 
 ```csharp

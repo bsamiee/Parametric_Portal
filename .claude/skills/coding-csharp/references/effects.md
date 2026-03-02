@@ -51,16 +51,19 @@ using NodaTime;
 
 // --- [CONTRACTS] -------------------------------------------------------------
 
-public interface IGatewayProvider {
-    Eff<string> TransmitPayload(TransactionState.Pending pendingState);
+public interface IGatewayProvider<RT> {
+    Eff<RT, string> TransmitPayload(TransactionState.Pending pendingState);
 }
-public interface IOrderService {
-    Eff<OrderRequest> ValidateOrder(OrderRequest request);
-    Eff<OrderRequest> EnrichWithPricing(OrderRequest order);
-    Eff<OrderRequest> PersistOrder(OrderRequest order);
-    Eff<Unit> NotifyCustomer(OrderRequest order);
+public interface IOrderService<RT> {
+    Eff<RT, OrderRequest> ValidateOrder(OrderRequest request);
+    Eff<RT, OrderRequest> EnrichWithPricing(OrderRequest order);
+    Eff<RT, OrderRequest> PersistOrder(OrderRequest order);
+    Eff<RT, Unit> NotifyCustomer(OrderRequest order);
 }
-public sealed record AppRuntime(IGatewayProvider Gateway, IClock Clock, IOrderService OrderService);
+public sealed record AppRuntime(
+    IGatewayProvider<AppRuntime> Gateway,
+    IClock Clock,
+    IOrderService<AppRuntime> OrderService);
 
 // --- [PIPELINE] --------------------------------------------------------------
 
@@ -73,8 +76,8 @@ public static class OrchestrationPipeline {
                 Error.New(message: "Validation fault", inner: error))
             .ToEff()
             .Bind(f: (TransactionState.Pending pending) =>
-                Eff<AppRuntime, IGatewayProvider>.Asks(static (AppRuntime rt) => rt.Gateway)
-                    .Bind(f: (IGatewayProvider gw) => gw.TransmitPayload(pendingState: pending))
+                Eff<AppRuntime, IGatewayProvider<AppRuntime>>.Asks(static (AppRuntime rt) => rt.Gateway)
+                    .Bind(f: (IGatewayProvider<AppRuntime> gw) => gw.TransmitPayload(pendingState: pending))
                     .Map(f: (string token) =>
                         (TransactionState)new TransactionState.Authorized(
                             Id: pending.Id, AuthorizationToken: token)))
@@ -211,13 +214,16 @@ public static class TransactionValidator {
 namespace Domain.Effects;
 
 public static class ConsoleIO {
-    public static IO<string> ReadLine => IO.lift(static () => Console.ReadLine()!);
+    public static IO<Option<string>> ReadLine => IO.lift(static () =>
+        Console.ReadLine() is { } line ? Some(line) : Option<string>.None);
     public static IO<Unit> WriteLine(string message) =>
         IO.lift(() => { Console.WriteLine(message); return unit; });
     public static IO<Unit> Program =>
         from _ in WriteLine(message: "Enter name:")
-        from name in ReadLine
-        from __ in WriteLine(message: $"Hello, {name}")
+        from maybeName in ReadLine
+        from __ in maybeName.Match(
+            Some: name => WriteLine(message: $"Hello, {name}"),
+            None: () => WriteLine(message: "No input received"))
         select unit;
 }
 // Boundary: Program.Run() or await Program.RunAsync()
@@ -240,9 +246,11 @@ public static class GameLoop {
     public static StateT<GameState, IO, Unit> Step =>
         from state in StateT<GameState, IO>.get
         from _ in liftIO(ConsoleIO.WriteLine(message: $"Score: {state.Score}"))
-        from input in liftIO(ConsoleIO.ReadLine)
-        from __ in StateT<GameState, IO>.modify(
-            (GameState s) => s with { Score = s.Score + input.Length })
+        from maybeInput in liftIO(ConsoleIO.ReadLine)
+        from __ in maybeInput.Match(
+            Some: input => StateT<GameState, IO>.modify(
+                (GameState s) => s with { Score = s.Score + input.Length }),
+            None: () => StateT<GameState, IO>.Pure(unit))
         select unit;
 }
 public readonly record struct GameState(int Score);

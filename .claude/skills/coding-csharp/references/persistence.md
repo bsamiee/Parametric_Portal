@@ -57,10 +57,11 @@ public static class ContextConfiguration {
     // Named query filters (EF Core 10): selective disable without removing the global filter.
     // HasQueryFilter(name, lambda) associates a filter name; IgnoreQueryFilters(name) disables it
     // at query scope. Use for soft-delete and tenant-scoping filters in multi-tenant contexts.
-    public static void ConfigureNamedFilters(ModelBuilder modelBuilder) {
+    // Tenant filter requires DbContext instance property (not static) for EF translation.
+    public static void ConfigureNamedFilters(ModelBuilder modelBuilder, AppDbContext context) {
         modelBuilder.Entity<OrderEntity>()
             .HasQueryFilter(name: "active", filter: static (OrderEntity o) => o.DeletedAt == null)
-            .HasQueryFilter(name: "tenant", filter: (OrderEntity o) => o.TenantId == TenantContext.CurrentId);
+            .HasQueryFilter(name: "tenant", filter: (OrderEntity o) => o.TenantId == context.CurrentTenantId);
     }
     // Usage: dbContext.Orders.IgnoreQueryFilters(name: "active").Where(...) -- bypasses soft-delete only.
 }
@@ -102,6 +103,11 @@ public static class OrderFilters {
 }
 
 // --- [KEYSET_PAGINATION] -----------------------------------------------------
+// NOTE: OrderBy(entity.Id) uses lexicographic (byte-by-byte) Guid ordering, not chronological.
+// For time-based pagination order:
+// - Use sequential GUIDs (newsequentialid() SQL Server, uuid_generate_v1() Postgres), OR
+// - Switch cursor to a timestamp column (CreatedAt) for true chronological ordering.
+// Non-sequential GUIDs (Guid.NewGuid()) produce pseudo-random order — stable but unrelated to insert time.
 public static class KeysetPagination {
     public static Eff<PersistenceRuntime, (Seq<TEntity> Items, bool HasNext)>
         GetPage<TEntity>(IQueryable<TEntity> source, Option<Guid> cursor, int pageSize)

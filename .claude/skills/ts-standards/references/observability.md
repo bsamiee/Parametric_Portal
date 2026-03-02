@@ -1,15 +1,9 @@
 # [H1][OBSERVABILITY]
->**Dictum:** *Observability is a deterministic projection contract: one operation rail, one bounded telemetry vocabulary, one failure-preserving cause matrix.*
-
-<br>
 
 This chapter owns projection and transport composition for traces, metrics, and logs in Effect systems. It does not own domain failure taxonomy (`errors.md`), route ownership (`surface.md`), or throughput tuning policy (`performance.md`). Every section is executable reference material for production-grade telemetry decisions.
 
 ---
 ## [1][OPERATION_RAIL_AND_METRIC_ALGEBRA]
->**Dictum:** *One operation identifier drives all channels: span name, metric dimensions, and structured log vocabulary.*
-
-<br>
 
 - Execution law: canonicalize operation and rail once, then reuse the same dimension set in span, metrics, and logs.
 - Failure law: classify outcomes from `Exit`/`Cause`, never from ad-hoc branch-local status strings.
@@ -21,9 +15,9 @@ import { Cause, Effect, Exit, Metric, MetricLabel, Option } from "effect";
 // --- [CONSTANTS] -------------------------------------------------------------
 
 const telemetryVocab = {
-  attr: { operation: "obs.operation", rail: "obs.rail" },
-  event: { outcome: "obs.outcome", profileLoaded: "profile.loaded" },
-  label: { operation: "operation", rail: "rail", status: "status" },
+  attr:  { operation: "obs.operation", rail: "obs.rail"                },
+  event: { outcome:   "obs.outcome",   profileLoaded: "profile.loaded" },
+  label: { operation: "operation",     rail: "rail", status: "status"  },
   operation: {
     httpRequest:      "http.request",
     jobsReconcile:    "jobs.reconcile",
@@ -31,11 +25,11 @@ const telemetryVocab = {
     unknown:          "operation.unknown",
   },
   outcome: { defect: "defect", error: "error", interrupt: "interrupt", ok: "ok" },
-  rail: { job: "job", rpc: "rpc", unknown: "unknown" },
+  rail:    { job:    "job",    rpc:   "rpc",   unknown:   "unknown"             },
 } as const;
 const operationProjection = {
-  [telemetryVocab.operation.httpRequest]: telemetryVocab.operation.httpRequest,
-  [telemetryVocab.operation.jobsReconcile]: telemetryVocab.operation.jobsReconcile,
+  [telemetryVocab.operation.httpRequest]:      telemetryVocab.operation.httpRequest,
+  [telemetryVocab.operation.jobsReconcile]:    telemetryVocab.operation.jobsReconcile,
   [telemetryVocab.operation.usersLoadProfile]: telemetryVocab.operation.usersLoadProfile,
 } as const;
 const railProjection = {
@@ -52,8 +46,8 @@ const signal = {
 // --- [FUNCTIONS] -------------------------------------------------------------
 
 type TelemetryOperation = (typeof operationProjection)[keyof typeof operationProjection] | typeof telemetryVocab.operation.unknown;
-type TelemetryRail = (typeof railProjection)[keyof typeof railProjection] | typeof telemetryVocab.rail.unknown;
-type TelemetryOutcome = (typeof telemetryVocab.outcome)[keyof typeof telemetryVocab.outcome];
+type TelemetryRail      = (typeof railProjection)[keyof typeof railProjection] | typeof telemetryVocab.rail.unknown;
+type TelemetryOutcome   = (typeof telemetryVocab.outcome)[keyof typeof telemetryVocab.outcome];
 
 const labels = (operation: TelemetryOperation, rail: TelemetryRail) =>
   [MetricLabel.make(telemetryVocab.label.operation, operation), MetricLabel.make(telemetryVocab.label.rail, rail)] as const;
@@ -80,7 +74,7 @@ const observeOperation = <A, E, R>(operation: string, rail: string, program: Eff
   return program.pipe(
     Effect.withSpan(op, { attributes: { [telemetryVocab.attr.operation]: op, [telemetryVocab.attr.rail]: railTag } }),
     Metric.trackDuration(duration),
-    Metric.trackErrorWith(errors, () => telemetryVocab.outcome.error),
+    Metric.trackErrorWith(errors,   () => telemetryVocab.outcome.error),
     Metric.trackDefectWith(defects, () => telemetryVocab.outcome.defect),
     Effect.onExit((exit) =>
       Exit.match(exit, {
@@ -105,9 +99,6 @@ Projection rules stay deterministic: operation and rail are finite vocabularies,
 
 ---
 ## [2][SCOPED_CORRELATION_AND_OPTIONAL_SPAN_SAFETY]
->**Dictum:** *Correlation is scope-bound, inherited by rails, and safe when a span context is absent.*
-
-<br>
 
 - Correlation writes once at ingress and propagates by scope; inner rails consume but do not mutate correlation shape.
 - Span enrichment stays optional-safe because detached/test rails can run without an active span.
@@ -147,9 +138,6 @@ Scope is the only writable correlation boundary: ingress writes once, downstream
 
 ---
 ## [3][CAUSE_PROJECTION_MATRIX_AND_ERROR_SEMANTICS]
->**Dictum:** *Cause projection is compact and bounded for spans/metrics, verbose and lossless in logs.*
-
-<br>
 
 - Channel matrix: spans get compact bounded keys, metrics get bounded vocab values, logs keep full causal detail.
 - Composition law: `parallel` and `sequential` preserve left/right shape in the compact projection.
@@ -164,10 +152,10 @@ const errorTopology = Metric.frequency("operation_error_topology");
 const causeFingerprintVocab = {
   key: {
     composition: "error.composition",
-    kind: "error.kind",
-    leftKind: "error.left.kind",
-    present: "error.present",
-    rightKind: "error.right.kind",
+    kind:        "error.kind",
+    leftKind:    "error.left.kind",
+    present:     "error.present",
+    rightKind:   "error.right.kind",
   },
   value: {
     none: "none",
@@ -192,10 +180,10 @@ const fingerprint = (kind: string, composition: string, leftKind: string, rightK
   ]);
 const causeFingerprint = (cause: Cause.Cause<unknown>) =>
   Cause.match(cause, {
-    onDie:        () => fingerprint("defect",    "none", "none", "none", true ),
-    onEmpty:            fingerprint("none",      "none", "none", "none", false),
-    onFail:       () => fingerprint("failure",   "none", "none", "none", true ),
-    onInterrupt:  () => fingerprint("interrupt", "none", "none", "none", true ),
+    onDie:        () => fingerprint("defect",    "none", "none", "none", true  ),
+    onEmpty:            fingerprint("none",      "none", "none", "none", false ),
+    onFail:       () => fingerprint("failure",   "none", "none", "none", true  ),
+    onInterrupt:  () => fingerprint("interrupt", "none", "none", "none", true  ),
     onParallel:   (left, right) => fingerprint("parallel", "parallel",     kind(left), kind(right), true),
     onSequential: (left, right) => fingerprint("sequential", "sequential", kind(left), kind(right), true),
   });
@@ -217,9 +205,6 @@ Projection policy is explicit: spans receive bounded keys, metrics receive bound
 
 ---
 ## [4][BOUNDARY_INSTRUMENTATION_HTTP]
->**Dictum:** *Boundary observability consumes canonical route templates and emits status-class telemetry without branchy adapters.*
-
-<br>
 
 - Input contract: `routeTemplate` is already canonical from `surface.md`; this section does not derive routes from URLs.
 - Boundary law: active gauge lifecycle, duration timing, and request counters are emitted from one composed rail.
@@ -233,21 +218,21 @@ import { Effect, Exit, Layer, Match, Metric, MetricLabel, Option } from "effect"
 // --- [CONSTANTS] -------------------------------------------------------------
 
 const httpVocab = {
-  attr: { method: "http.request.method", route: "http.route" },
-  label: { method: "method", route: "route", statusClass: "status_class", outcome: "outcome" },
-  method: { DELETE: "DELETE", GET: "GET", HEAD: "HEAD", OTHER: "OTHER", PATCH: "PATCH", POST: "POST", PUT: "PUT" },
-  outcome: { error: "error", ok: "ok" },
-  route: { health: "/health", ready: "/ready" },
-  span: { client: "http.client", prefix: "http." },
+  attr:    { method: "http.request.method", route: "http.route" },
+  label:   { method: "method", route: "route", statusClass: "status_class", outcome: "outcome" },
+  method:  { DELETE: "DELETE", GET: "GET", HEAD: "HEAD", OTHER: "OTHER", PATCH: "PATCH", POST: "POST", PUT: "PUT" },
+  outcome: { error:  "error", ok: "ok" },
+  route:   { health: "/health", ready: "/ready" },
+  span:    { client: "http.client", prefix: "http." },
   statusClass: { class2xx: "2xx", class4xx: "4xx", class5xx: "5xx", other: "other", unknown: "unknown" },
 } as const;
 const methodProjection = {
   [httpVocab.method.DELETE]: httpVocab.method.DELETE,
-  [httpVocab.method.GET]: httpVocab.method.GET,
-  [httpVocab.method.HEAD]: httpVocab.method.HEAD,
-  [httpVocab.method.PATCH]: httpVocab.method.PATCH,
-  [httpVocab.method.POST]: httpVocab.method.POST,
-  [httpVocab.method.PUT]: httpVocab.method.PUT,
+  [httpVocab.method.GET]:    httpVocab.method.GET,
+  [httpVocab.method.HEAD]:   httpVocab.method.HEAD,
+  [httpVocab.method.PATCH]:  httpVocab.method.PATCH,
+  [httpVocab.method.POST]:   httpVocab.method.POST,
+  [httpVocab.method.PUT]:    httpVocab.method.PUT,
 } as const;
 const httpSignal = {
   active:     Metric.gauge("http_requests_active"),
@@ -262,14 +247,14 @@ const outboundClient = Effect.map(HttpClient.HttpClient, HttpClient.withSpanName
 
 // --- [FUNCTIONS] -------------------------------------------------------------
 
-type HttpMethod = (typeof methodProjection)[keyof typeof methodProjection] | typeof httpVocab.method.OTHER;
+type HttpMethod      = (typeof methodProjection)[keyof typeof methodProjection] | typeof httpVocab.method.OTHER;
 type HttpStatusClass = (typeof httpVocab.statusClass)[keyof typeof httpVocab.statusClass];
 
 const statusClass = (status: number): HttpStatusClass =>
   Match.value(status).pipe(
-    Match.when((n) => n >= 200 && n < 300, () => httpVocab.statusClass.class2xx),
-    Match.when((n) => n >= 400 && n < 500, () => httpVocab.statusClass.class4xx),
-    Match.when((n) => n >= 500 && n < 600, () => httpVocab.statusClass.class5xx),
+    Match.when((n)  => n >= 200 && n < 300, () => httpVocab.statusClass.class2xx),
+    Match.when((n)  => n >= 400 && n < 500, () => httpVocab.statusClass.class4xx),
+    Match.when((n)  => n >= 500 && n < 600, () => httpVocab.statusClass.class5xx),
     Match.orElse(() => httpVocab.statusClass.other),
   );
 const canonicalMethod = (method: string): HttpMethod =>
@@ -297,9 +282,6 @@ Route production belongs to `surface.md`; this chapter consumes pre-shaped route
 
 ---
 ## [5][PROPAGATION_AND_OTLP_TOPOLOGY_DECISIONS]
->**Dictum:** *Topology is explicit policy: choose unified OTLP layer for compact setup, split layers for transport isolation.*
-
-<br>
 
 - Unified mode minimizes wiring and suits single-collector deployments with shared retry/backoff behavior.
 - Split mode isolates logger/metrics/tracer exporters for independent transport and failure blast-radius control.
@@ -315,7 +297,7 @@ import * as OtlpTracer from "@effect/opentelemetry/OtlpTracer";
 import { Layer, Match } from "effect";
 
 const telemetryLayer = (mode: "split" | "unified", collector: string, token: string, serviceName: string, serviceVersion: string) => {
-  const headers = { authorization: `Bearer ${token}` };
+  const headers  = { authorization: `Bearer ${token}` };
   const resource = { serviceName, serviceVersion };
   return Match.value(mode).pipe(
     Match.when("unified", () =>
@@ -325,9 +307,9 @@ const telemetryLayer = (mode: "split" | "unified", collector: string, token: str
     ),
     Match.when("split", () =>
       Layer.mergeAll(
-        OtlpLogger.layer({ url: `${collector}/v1/logs`, headers, excludeLogSpans: true, exportInterval: "1 second", maxBatchSize: 512, resource, shutdownTimeout: "5 seconds" }),
+        OtlpLogger.layer({  url: `${collector}/v1/logs`, headers, excludeLogSpans: true, exportInterval: "1 second", maxBatchSize: 512, resource, shutdownTimeout: "5 seconds" }),
         OtlpMetrics.layer({ url: `${collector}/v1/metrics`, headers, exportInterval: "10 seconds", resource, shutdownTimeout: "5 seconds" }),
-        OtlpTracer.layer({ url: `${collector}/v1/traces`, headers, exportInterval: "3 seconds", maxBatchSize: 512, resource, shutdownTimeout: "5 seconds" }),
+        OtlpTracer.layer({  url: `${collector}/v1/traces`, headers, exportInterval: "3 seconds", maxBatchSize: 512, resource, shutdownTimeout: "5 seconds" }),
       ).pipe(Layer.provide(OtlpSerialization.layerProtobuf), Layer.provide(FetchHttpClient.layer)),
     ),
     Match.exhaustive,
@@ -341,9 +323,6 @@ const telemetryLive = telemetryLayer("unified", "http://127.0.0.1:4318", "runtim
 
 ---
 ## [6][STREAM_SCHEDULE_STM_TMAP_OBSERVABILITY_BLUEPRINT]
->**Dictum:** *Batching, retries, lag metrics, and aggregate snapshots must live in one effect graph.*
-
-<br>
 
 - Read this rail in three phases: retry decision policy, stream batch instrumentation, STM snapshot projection.
 - Aggregation law: all counters update transactionally inside STM before external projection to metrics/logs.

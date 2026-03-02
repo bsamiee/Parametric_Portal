@@ -1,333 +1,286 @@
-# [H1][PATTERNS]
->**Dictum:** *Patterns are cross-boundary contracts: one canonical model family, one explicit rail taxonomy, one inspectable runtime graph.*
+# Patterns
 
-<br>
-
-This file is for integration points where one module spans multiple boundaries (HTTP, RPC, workflow, persistence, cluster, telemetry, STM). It specifies the minimal contracts that keep those boundaries aligned through refactors.
+Cross-boundary integration contracts. Each section addresses a single topology where schema authority, error classification, or runtime policy must align across transport/persistence/cluster boundaries.
 
 ---
-## [1][CONTRACT_CONVERGENCE]
->**Dictum:** *Model, RPC, and HTTP must project from one runtime schema family or drift is guaranteed.*
+## Schema convergence
 
-<br>
+Model projections derive RPC and HTTP contracts — the model IS the schema authority. Protocol errors share a vocabulary with status codes; the vocabulary drives both transport binding and error serialization.
 
 ```ts
-import { HttpApi, HttpApiEndpoint, HttpApiGroup } from "@effect/platform";
-import * as Model from "@effect/sql/Model";
-import * as Rpc from "@effect/rpc/Rpc";
-import * as RpcGroup from "@effect/rpc/RpcGroup";
-import { Effect, Schema as S } from "effect";
+import { HttpApi, HttpApiClient, HttpApiEndpoint, HttpApiGroup, HttpClient } from "@effect/platform"
+import * as BrowserHttpClient from "@effect/platform-browser/BrowserHttpClient"
+import * as Model from "@effect/sql/Model"
+import * as Rpc from "@effect/rpc/Rpc"
+import * as RpcGroup from "@effect/rpc/RpcGroup"
+import { Effect, Schema as S } from "effect"
 
-// --- [SCHEMA] ----------------------------------------------------------------
-class Tenant extends Model.Class<Tenant>("PatternTenant")({
-  id: Model.GeneratedByApp(S.UUID), slug: S.NonEmptyTrimmedString, plan: S.Literal("starter", "pro", "enterprise"), createdAt: Model.DateTimeInsertFromDate, updatedAt: Model.DateTimeUpdateFromDate,
+class Tenant extends Model.Class<Tenant>("Tenant")({
+  id: Model.GeneratedByApp(S.UUID), slug: S.NonEmptyTrimmedString, plan: S.Literal("starter", "pro", "enterprise"),
 }) {}
-const TenantConflict = S.Struct({ _tag: S.Literal("TenantConflict"), message: S.String });
+const Err = { conflict: { status: 409, _tag: "TenantConflict" }, notFound: { status: 404, _tag: "TenantNotFound" } } as const
+type ErrKey = keyof typeof Err
+const TenantErr = <K extends ErrKey>(k: K) => S.TaggedError<{ _tag: (typeof Err)[K]["_tag"]; tenantId: S.UUID["Type"] }>()(Err[k]._tag, { tenantId: Tenant.fields.id })
+const Rpc_ = {
+  create: Rpc.make("tenant.create", { payload: Tenant.jsonCreate, success: Tenant.json, error: TenantErr("conflict") }),
+  read:   Rpc.make("tenant.read", { payload: S.Struct({ id: Tenant.fields.id }), success: Tenant.json, error: TenantErr("notFound") }),
+} as const
+const Api = HttpApi.make("Api").add(HttpApiGroup.make("tenant")
+  .add(HttpApiEndpoint.post("create", "/tenants").setPayload(Rpc_.create.payload).addSuccess(Rpc_.create.success).addError(Rpc_.create.error, { status: Err.conflict.status }))
+  .add(HttpApiEndpoint.get("read", "/tenants/:id").setPath(Rpc_.read.payload).addSuccess(Rpc_.read.success).addError(Rpc_.read.error, { status: Err.notFound.status })))
+const Protocol = { rpc: RpcGroup.make(Rpc_.create, Rpc_.read), api: Api, decode: { create: S.decodeUnknown(Tenant.jsonCreate), read: S.decodeUnknown(Rpc_.read.payload) } } as const
 
-// --- [SERVICES] --------------------------------------------------------------
-const CreateTenant =   Rpc.make("tenant.create", { payload: Tenant.jsonCreate, success: Tenant.json, error: TenantConflict });
-const TenantProtocol = RpcGroup.make(CreateTenant);
-const TenantApi =      HttpApi.make("PortalApi").add(HttpApiGroup.make("tenant").add(HttpApiEndpoint.post("create", "/tenants").setPayload(Tenant.jsonCreate).addSuccess(Tenant.json).addError(TenantConflict, { status: 409 })));
-
-// --- [FUNCTIONS] -------------------------------------------------------------
-const contractSurface = Effect.succeed({ api: TenantApi, rpc: TenantProtocol, decodeTenantCreate: (raw: unknown) => S.decodeUnknown(Tenant.jsonCreate)(raw) } as const);
+const httpClient = (baseUrl: string) => Effect.gen(function* () {
+  const http = yield* HttpClient.HttpClient
+  return yield* HttpApiClient.group(Api, { group: "tenant", httpClient: http, baseUrl })
+}).pipe(Effect.provide(BrowserHttpClient.layerXMLHttpRequest))
 ```
 
-Contracts:
-- `Model.Class` projection is the single schema authority for RPC payloads and HTTP payloads.
-- Decode ingress from the exact projection used by the transports.
-- Shared error payload (`TenantConflict`) stays structurally identical across protocols.
+**Contracts:**
+- `Err` vocabulary unifies error tag and HTTP status — `TenantErr(k)` factory derives `S.TaggedError` from vocabulary lookup; adding an error requires one entry.
+- `Tenant.fields.id` extracts field schema for reuse in payload structs — no parallel `S.UUID` declarations.
+- `Protocol` aggregates RPC group, HTTP API, and decode functions — single import surface for consumers; all three derive from `Rpc_` definitions.
+- `httpClient` factory demonstrates browser client construction via `HttpApiClient.group` with `BrowserHttpClient.layerXMLHttpRequest` — platform runtime explicit.
 
-Failure modes prevented:
-- Parallel DTO families with field drift.
-- Transport-specific "almost the same" payloads.
-- Decode logic diverging from exposed contracts.
-
-Escalate to:
-- `surface.md` for route/middleware/client internals.
-- `persistence.md` for storage modeling and repository semantics.
+**Failure modes prevented:**
+- Status code drift between error vocabulary and HTTP binding.
+- Parallel error classes with duplicated field definitions.
+- Decode functions diverging from transport schemas.
 
 ---
-## [2][SERVICE_RAIL_CONSTRUCTION]
->**Dictum:** *Constructor rail owns dependency acquisition, classification algebra, and retry policy as typed data.*
+## Transport classification
 
-<br>
+Status classification is a closed algebra — the vocabulary maps status ranges to policy bundles. `Effect.filterOrFail` gates success/failure; metrics and logging derive from the same lookup with zero conditional branching.
 
 ```ts
-import * as HttpClient from "@effect/platform/HttpClient";
-import * as HttpClientRequest from "@effect/platform/HttpClientRequest";
-import * as HttpClientResponse from "@effect/platform/HttpClientResponse";
-import * as SqlClient from "@effect/sql/SqlClient";
-import { Data, Effect, Match, Schedule, Schema as S } from "effect";
+import { HttpClient, HttpClientRequest, HttpClientResponse } from "@effect/platform"
+import { Data, Duration, Effect, Metric, MetricLabel, Schedule, Schema as S, Tuple } from "effect"
 
-// --- [SCHEMA] ----------------------------------------------------------------
-const UpstreamTenant = S.Struct({ id: S.UUID, slug: S.NonEmptyTrimmedString, plan: S.Literal("starter", "pro", "enterprise") });
-class UpstreamError extends Data.TaggedError("UpstreamError")<{ readonly reason: "rate" | "timeout" | "fatal"; readonly detail: string; }> {}
+const Status = {
+  ok:      { range: [200, 299] as const, retry: false, log: Effect.logDebug },
+  client:  { range: [400, 428] as const, retry: false, log: Effect.logWarning },
+  rate:    { range: [429, 429] as const, retry: true,  log: Effect.logWarning },
+  server:  { range: [500, 599] as const, retry: true,  log: Effect.logError },
+} as const satisfies Record<string, { range: readonly [number, number]; retry: boolean; log: (..._: ReadonlyArray<unknown>) => Effect.Effect<void> }>
+type StatusKey = keyof typeof Status
+const classify = (code: number): StatusKey => (Object.entries(Status).find(([, { range: [lo, hi] }]) => code >= lo && code <= hi)?.[0] ?? "server") as StatusKey
 
-// --- [FUNCTIONS] -------------------------------------------------------------
-const upstreamReasonPolicy = {
-  fatal:   { retryable: false },
-  rate:    { retryable: true  },
-  timeout: { retryable: true  },
-} as const satisfies Record<UpstreamError["reason"], { readonly retryable: boolean }>;
-const classifyStatus = (status: number) => Match.value(status).pipe(Match.when((n) => n === 429, () => "rate" as const), Match.when((n) => n >= 500 && n < 600, () => "timeout" as const), Match.orElse(() => "fatal" as const));
-const retryPolicy = Schedule.recurWhile((error: UpstreamError) => upstreamReasonPolicy[error.reason].retryable);
+class TransportFault extends Data.TaggedError("TransportFault")<{ readonly code: number; readonly key: StatusKey; readonly url: string }> {
+  get policy() { return Status[this.key] }
+}
+const Signals = Tuple.make(Metric.counter("http_requests_total"), Metric.histogram("http_latency_ms", Metric.Boundaries.exponential({ start: 1, factor: 2, count: 10 })))
 
-// --- [SERVICES] --------------------------------------------------------------
-class TenantSync extends Effect.Service<TenantSync>()("Patterns/TenantSync", {
-  effect: Effect.gen(function* () {
-    const sql = yield* SqlClient.SqlClient;
-    const http = yield* HttpClient.HttpClient;
-    return {
-      pull: (baseUrl: string, tenantId: string) => http.execute(HttpClientRequest.get(`${baseUrl}/tenants/${tenantId}`)).pipe(Effect.flatMap((response) => Match.value(response.status).pipe(Match.when((s) => s >= 200 && s < 300, () => HttpClientResponse.schemaBodyJson(UpstreamTenant)(response)), Match.orElse(() => Effect.fail(new UpstreamError({ reason: classifyStatus(response.status), detail: `status:${response.status}` }))))), Effect.mapError((error) => Match.value(error).pipe(Match.when((e): e is UpstreamError => e instanceof UpstreamError, (e) => e), Match.orElse((cause) => new UpstreamError({ reason: "fatal", detail: String(cause) })))), Effect.retry(retryPolicy)),
-      markSynced: (tenantId: string) => sql`update tenant set synced_at = now() where id = ${tenantId}`.pipe(Effect.asVoid),
-    } as const;
-  }),
-}) {}
+const execute = <A>(req: HttpClientRequest.HttpClientRequest, schema: S.Schema<A, unknown>) =>
+  Effect.gen(function* () {
+    const [count, lat] = Signals
+    const http = yield* HttpClient.HttpClient
+    const [res, ms] = yield* Effect.timedWith(http.execute(req), Effect.clockWith((c) => c.currentTimeMillis))
+    const key = classify(res.status)
+    yield* Effect.all([Metric.increment(Metric.taggedWithLabels(count, [MetricLabel.make("status_class", key)])), Metric.update(lat, Number(Duration.toMillis(ms)))])
+    yield* Status[key].log(req.url, { status: res.status, ms: Duration.toMillis(ms) })
+    yield* Effect.filterOrFail(Effect.succeed(res), () => key === "ok", () => new TransportFault({ code: res.status, key, url: req.url }))
+    return yield* HttpClientResponse.schemaBodyJson(schema)(res)
+  }).pipe(Effect.retry(Schedule.exponential(Duration.millis(50)).pipe(Schedule.intersect(Schedule.recurs(3)), Schedule.whileInput((e: TransportFault) => e.policy.retry))))
 ```
 
-Contracts:
-- Constructor acquires dependencies once and returns a closed capability surface.
-- Status classification is a total mapping from transport status to bounded reasons.
-- Retry policy is defined from typed reasons, not ad-hoc call-site conditionals.
+**Contracts:**
+- `Status` vocabulary with tuple ranges — `classify` performs single scan; `Status[key]` projects retry eligibility AND log function from same lookup.
+- `MetricLabel.make` for explicit label construction — `Metric.taggedWithLabels` accepts label array, enabling multi-dimensional tagging without string concatenation.
+- `Tuple.make` for metric pair — destructured once, no repeated object access.
+- `Effect.filterOrFail` replaces ternary — success path continues pipeline, failure path short-circuits with `TransportFault`. No `if`/ternary.
+- `Effect.timedWith` returns `[A, Duration]` — single timing invocation instead of start/end clock reads.
 
-Failure modes prevented:
-- Retrying terminal failures.
-- Unbounded or inconsistent retry behavior per call site.
-- Mixed transport/decode failures leaking as unclassified errors.
-
-Escalate to:
-- `services.md` for service catalog/topology.
-- `errors.md` for module-wide error family design.
+**Failure modes prevented:**
+- Ternary/conditional branching for success/failure dispatch.
+- Duplicated timing logic across transport functions.
+- Metric tagging diverging from classification vocabulary.
 
 ---
-## [3][TRANSPORT_PARITY_HTTP_RPC]
->**Dictum:** *Parity means HTTP client and RPC handler are derived from the same contract family and validated together.*
+## Stream persistence window
 
-<br>
+Windowed persistence composes three boundaries: decode (unknown → typed), window (time/count aggregation), and transaction (batch atomicity). `Sink.foldWeighted` with `aggregateWithin` provides algebraic control over batch formation; transaction scope matches exactly one aggregated chunk.
 
 ```ts
-import { HttpApi, HttpApiClient, HttpApiEndpoint, HttpApiGroup } from "@effect/platform";
-import * as HttpClient from "@effect/platform/HttpClient";
-import * as BrowserHttpClient from "@effect/platform-browser/BrowserHttpClient";
-import * as BrowserKeyValueStore from "@effect/platform-browser/BrowserKeyValueStore";
-import * as Rpc from "@effect/rpc/Rpc";
-import * as RpcGroup from "@effect/rpc/RpcGroup";
-import { Effect, Schema as S } from "effect";
+import * as SqlClient from "@effect/sql/SqlClient"
+import { PgClient } from "@effect/sql-pg"
+import { Chunk, Data, DateTime, Duration, Effect, Number as N, Schedule, Schema as S, Sink, Stream } from "effect"
 
-// --- [SCHEMA] ----------------------------------------------------------------
-const TenantRead =     Rpc.make("tenant.read", { payload: S.Struct({ id: S.UUID }), success: S.Struct({ id: S.UUID, slug: S.NonEmptyTrimmedString, plan: S.Literal("starter", "pro", "enterprise") }), error: S.Struct({ _tag: S.Literal("TenantNotFound"), message: S.String }) });
-const TenantRpc =      RpcGroup.make(TenantRead);
-const TenantApi =      HttpApi.make("PortalApi").add(HttpApiGroup.make("tenant").add(HttpApiEndpoint.get("read", "/tenants/:id").setPath(TenantRead.payload).addSuccess(TenantRead.success).addError(TenantRead.error, { status: 404 })));
+const Event = S.Struct({ tenantId: S.UUID, metric: S.String, value: S.Number })
+class PersistFault extends Data.TaggedError("PersistFault")<{ readonly stage: "decode" | "write"; readonly cause: unknown }> {
+  get retry() { return Schedule.exponential(Duration.millis(50)).pipe(Schedule.intersect(Schedule.recurs(4)), Schedule.whileInput(() => this.stage === "write")) }
+}
+const Batch = { maxCost: 10_000, cost: (e: typeof Event.Type) => N.abs(e.value), schedule: Schedule.spaced(Duration.millis(250)) } as const
+const stamp = <A>(a: A) => DateTime.now.pipe(Effect.map((at) => ({ ...a, observedAt: DateTime.toEpochMillis(at) })))
 
-// --- [LAYERS] ----------------------------------------------------------------
-const TenantRpcLive = TenantRpc.toLayer({ "tenant.read": ({ id }) => Effect.succeed({ id, slug: `tenant-${id.slice(0, 8)}`, plan: "starter" as const }) });
-const TenantHttpClient = Effect.gen(function* () { const httpClient = yield* HttpClient.HttpClient; return yield* HttpApiClient.group(TenantApi, { group: "tenant", httpClient, baseUrl: "https://api.parametric.dev" }); }).pipe(Effect.provide(BrowserHttpClient.layerXMLHttpRequest), Effect.provide(BrowserKeyValueStore.layerSessionStorage));
-const paritySurface = Effect.all({ http: TenantHttpClient, rpc: TenantRpc.accessHandler("tenant.read").pipe(Effect.provide(TenantRpcLive)) }, { concurrency: 2 });
+const persist = (raw: Stream.Stream<unknown>) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const pg = yield* PgClient.PgClient
+    const sink = Sink.foldWeighted({ initial: Chunk.empty<typeof Event.Type & { observedAt: number }>(), maxCost: Batch.maxCost, cost: (_, e) => Batch.cost(e), body: Chunk.append })
+    const decoded = raw.pipe(
+      Stream.mapEffect((r) => S.decodeUnknown(Event)(r).pipe(Effect.mapError((cause) => new PersistFault({ stage: "decode", cause })))),
+      Stream.mapEffect(stamp), Stream.aggregateWithin(sink, Batch.schedule))
+    return yield* decoded.pipe(Stream.runForEach((batch) => sql.withTransaction(
+      Effect.forEach(batch, (e) => sql`insert into event (tenant_id, metric, value, payload, observed_at_ms) values (${e.tenantId}, ${e.metric}, ${e.value}, ${pg.json({ metric: e.metric })}, ${e.observedAt})`.pipe(Effect.asVoid, Effect.mapError((cause) => new PersistFault({ stage: "write", cause }))), { discard: true })
+    ).pipe(Effect.retry(Schedule.exponential(Duration.millis(50)).pipe(Schedule.intersect(Schedule.recurs(4)), Schedule.whileInput((e: PersistFault) => e.stage === "write"))))))
+  })
 ```
 
-Contracts:
-- RPC and HTTP surfaces share the exact success/error schema family.
-- Parity checks construct both paths (`HttpApiClient` and RPC access handler) in one effect.
-- Browser runtime dependencies are explicit and local to the parity graph.
+**Contracts:**
+- `Sink.foldWeighted` with `cost` function — batch forms when cumulative cost exceeds `maxCost` OR schedule elapses. `Batch.cost` derives from domain semantics (value magnitude), not arbitrary count.
+- `PgClient.PgClient` acquired for Postgres-specific features — `pg.json()` serializes JSONB payloads with proper type handling.
+- `Schedule.whileInput` with inline predicate gates retry on `stage === "write"` — decode failures (malformed input) are terminal, write failures (transient) retry.
+- `aggregateWithin(sink, schedule)` — sink controls batch capacity, schedule controls flush interval. Both configurable independently via `Batch` object.
+- `sql.withTransaction` ensures batch atomicity — partial batch failure triggers full rollback, no orphaned rows.
 
-Failure modes prevented:
-- Schema drift hidden by one-sided tests.
-- Runtime-only integration breaks between RPC and HTTP callers.
-- Implicit browser dependency assumptions.
-
-Escalate to:
-- `surface.md` for route design, middleware policy, and client architecture.
+**Failure modes prevented:**
+- Hardcoded batch sizes ignoring domain cost semantics.
+- Retry schedules that conflict with error stage classification.
+- Manual SQL column enumeration drifting from schema.
 
 ---
-## [4][STREAMED_PERSISTENCE_WINDOWS]
->**Dictum:** *Windowing policy, decode boundary, and transaction scope must compose as one rail.*
+## Workflow compensation
 
-<br>
+Saga compensation is vocabulary-driven — each activity maps to a rollback policy. `Effect.when` gates compensation execution; the vocabulary determines both eligibility and rollback action label. Activity definitions inline their compensation policy.
 
 ```ts
-import * as SqlClient from "@effect/sql/SqlClient";
-import { PgClient } from "@effect/sql-pg";
-import { Chunk, Data, DateTime, Effect, Schedule, Schema as S, Stream } from "effect";
+import * as Activity from "@effect/workflow/Activity"
+import * as Workflow from "@effect/workflow/Workflow"
+import { Effect, Option, pipe, Schema as S } from "effect"
 
-// --- [SCHEMA] ----------------------------------------------------------------
-const IngestedEvent = S.Struct({ tenantId: S.UUID, payload: S.Record({ key: S.String, value: S.Unknown }) });
+const Act = {
+  charge:  { reversible: true,  action: "refund",  schema: S.Struct({ receiptId: S.UUID, amount: S.Number }) },
+  reserve: { reversible: true,  action: "release", schema: S.Struct({ reservationId: S.UUID, sku: S.String }) },
+  notify:  { reversible: false, action: "no-op",   schema: S.Struct({ delivered: S.Boolean }) },
+} as const satisfies Record<string, { reversible: boolean; action: string; schema: S.Schema.AnyNoContext }>
+type ActKey = keyof typeof Act
 
-// --- [CLASSES] ---------------------------------------------------------------
+const activity = <K extends ActKey>(k: K, exec: Effect.Effect<S.Schema.Type<(typeof Act)[K]["schema"]>>) =>
+  Activity.make({ name: k, success: Act[k].schema, execute: exec })
+const compensate = <K extends ActKey>(k: K, v: S.Schema.Type<(typeof Act)[K]["schema"]>, ctx: { orderId: string }) =>
+  Effect.when(Effect.logWarning(Act[k].action, { activity: k, ...ctx, value: v }), () => Act[k].reversible)
 
-class PersistEventsError extends Data.TaggedError("PersistEventsError")<{ readonly reason: "decode" | "write"; readonly cause?: unknown }> {}
+const Charge  = activity("charge", Effect.sync(() => ({ receiptId: S.decodeSync(S.UUID)(crypto.randomUUID()), amount: 100 })))
+const Reserve = activity("reserve", Effect.sync(() => ({ reservationId: S.decodeSync(S.UUID)(crypto.randomUUID()), sku: "SKU-001" })))
+const Notify  = activity("notify", Effect.succeed({ delivered: true }))
 
-// --- [FUNCTIONS] -------------------------------------------------------------
-const persistEvents = (input: Stream.Stream<unknown>) => Effect.gen(function* () {
-  const sql = yield* SqlClient.SqlClient;
-  const pg = yield* PgClient.PgClient;
-  const retry = Schedule.exponential("20 millis").pipe(Schedule.intersect(Schedule.recurs(5)));
-  const stamped = input.pipe(Stream.mapEffect((raw) => S.decodeUnknown(IngestedEvent)(raw).pipe(Effect.mapError((cause) => new PersistEventsError({ reason: "decode", cause })))), Stream.mapEffect((event) => DateTime.now.pipe(Effect.map((at) => [event, at] as const))), Stream.groupedWithin(128, "250 millis"));
-  return yield* stamped.pipe(Stream.runForEach((batch) => sql.withTransaction(Effect.forEach(Chunk.toReadonlyArray(batch), ([event, at]) => sql`insert into tenant_event (tenant_id, payload, observed_at_ms) values (${event.tenantId}, ${pg.json(event.payload)}, ${DateTime.toEpochMillis(at)})`.pipe(Effect.asVoid, Effect.mapError((cause) => new PersistEventsError({ reason: "write", cause }))), { concurrency: 1 })).pipe(Effect.retry(retry))));
-});
+const Fulfill = Workflow.make({ name: "Fulfill", payload: { orderId: S.UUID }, idempotencyKey: ({ orderId }) => orderId,
+  success: S.Struct({ receiptId: S.UUID, reservationId: S.UUID }), error: S.TaggedError<{ _tag: "FulfillFailed" }>()("FulfillFailed", {}) })
+const FulfillLive = Fulfill.toLayer(({ orderId }) => Effect.gen(function* () {
+  const ctx = { orderId }
+  const c = yield* Charge.execute.pipe(Workflow.withCompensation((v) => compensate("charge", v, ctx)))
+  const r = yield* Reserve.execute.pipe(Workflow.withCompensation((v) => compensate("reserve", v, ctx)))
+  yield* Notify.execute
+  return { receiptId: c.receiptId, reservationId: r.reservationId }
+}))
 ```
 
-Contracts:
-- Unknown ingress is decoded before timestamping and windowing.
-- Window policy is explicit in count and duration (`groupedWithin`).
-- Transaction scope encloses one batch unit; retry wraps that unit.
+**Contracts:**
+- `Act` vocabulary unifies schema, reversibility, and action label — `activity(k, exec)` factory derives `Activity.make` config from vocabulary; type parameter `K` constrains to valid keys.
+- `Effect.when(effect, predicate)` replaces ternary — returns `Option<void>` when false, executes effect when true. No conditional branching.
+- `compensate` function is polymorphic over activity key — type parameter `K` ensures value type matches activity schema via `S.Schema.Type<(typeof Act)[K]["schema"]>`.
+- `Notify.execute` has no `withCompensation` wrapper — `Act.notify.reversible = false` makes this explicit in vocabulary, not implicit in missing code.
 
-Failure modes prevented:
-- Mixed decoded/undecoded items inside the same persistence path.
-- Partial batch semantics without explicit retry boundaries.
-- Time-window behavior changing silently with refactors.
-
-Escalate to:
-- `persistence.md` for repositories, DDL, pagination, and OCC policy.
+**Failure modes prevented:**
+- Ternary/if-else for compensation eligibility.
+- Activity schema diverging from compensation value type.
+- Implicit non-reversibility via missing wrapper.
 
 ---
-## [5][WORKFLOW_COMPENSATION_RAIL]
->**Dictum:** *Compensation is typed workflow data attached at top-level effects, not side-channel rollback glue.*
+## Cluster entity topology
 
-<br>
-
-```ts
-import * as Activity from "@effect/workflow/Activity";
-import * as Workflow from "@effect/workflow/Workflow";
-import { Effect, Schema as S } from "effect";
-
-// --- [SERVICES] --------------------------------------------------------------
-const Charge = Activity.make({ name: "payment.charge", success: S.Struct({ receiptId: S.UUID }), execute: Effect.succeed({ receiptId: "00000000-0000-4000-8000-000000000010" }) });
-const ReserveInventory = Activity.make({ name: "inventory.reserve", success: S.Struct({ reservationId: S.UUID }), execute: Effect.succeed({ reservationId: "00000000-0000-4000-8000-000000000011" }) });
-const FulfillOrder = Workflow.make({ name: "FulfillOrder", payload: { orderId: S.UUID }, idempotencyKey: ({ orderId }) => orderId, success: S.Struct({ receiptId: S.UUID, reservationId: S.UUID }), error: S.Struct({ _tag: S.Literal("FulfillFailed"), message: S.String }) });
-
-// --- [LAYERS] ----------------------------------------------------------------
-const FulfillOrderLive = FulfillOrder.toLayer((payload) => Effect.gen(function* () {
-  const charge = yield* Charge.execute.pipe(Workflow.withCompensation((value, _cause) => Effect.logWarning("payment.refund", { receiptId: value.receiptId, orderId: payload.orderId })));
-  const reservation = yield* ReserveInventory.execute.pipe(Workflow.withCompensation((value, _cause) => Effect.logWarning("inventory.release", { reservationId: value.reservationId, orderId: payload.orderId })));
-  return { receiptId: charge.receiptId, reservationId: reservation.reservationId } as const;
-}));
-```
-
-Contracts:
-- Each side effect registers compensation at the call site of the activity.
-- Workflow idempotency key derives from business identity (`orderId`).
-- Workflow success shape is assembled only from activity outputs.
-
-Failure modes prevented:
-- Hidden rollback logic outside the workflow graph.
-- Non-deterministic retries without stable idempotency identity.
-- Compensation paths that are not co-located with the forward action.
-
-Escalate to:
-- `services.md` and infra docs for runtime engine topology/deployment policy.
-
----
-## [6][CLUSTER_ENTITY_TOPOLOGY]
->**Dictum:** *Entity protocol and singleton duties belong in one explicit layer graph with bounded leadership behavior.*
-
-<br>
+Entity protocols aggregate RPC capabilities into sharded actors. Singleton duties run at most once cluster-wide. Layer composition makes the runtime graph explicit — no implicit startup glue.
 
 ```ts
-import * as Entity from "@effect/cluster/Entity";
-import * as Singleton from "@effect/cluster/Singleton";
-import * as Rpc from "@effect/rpc/Rpc";
-import { Effect, Layer, Schedule, Schema as S } from "effect";
+import * as Entity from "@effect/cluster/Entity"
+import * as Singleton from "@effect/cluster/Singleton"
+import * as Rpc from "@effect/rpc/Rpc"
+import { Data, Duration, Effect, Layer, Option, Ref, Schedule, Schema as S } from "effect"
 
-// --- [SCHEMA] ----------------------------------------------------------------
-const JobProgress = Rpc.make("job.progress", { payload: S.Struct({ jobId: S.UUID }), success: S.Struct({ pct: S.Int }), error: S.Struct({ _tag: S.Literal("JobMissing"), message: S.String }) });
-const JobCancel =   Rpc.make("job.cancel", { payload: JobProgress.payload, success: S.Void, error: JobProgress.error });
+const JobState = Data.taggedEnum<Data.TaggedEnum<{
+  Pending:  {}
+  Running:  { readonly pct: number }
+  Complete: { readonly result: string }
+  Failed:   { readonly reason: string }
+}>>()
+type JobState = Data.TaggedEnum.Value<typeof JobState>
 
-// --- [LAYERS] ----------------------------------------------------------------
-const JobEntity =       Entity.make("Job", [JobProgress, JobCancel]);
-const JobEntityLive =   JobEntity.toLayer({ "job.progress": ({ payload }) => Effect.succeed({ pct: payload.jobId.length % 100 }), "job.cancel": () => Effect.void });
-const RebalanceLeader = Singleton.make("cluster.rebalance", Effect.logDebug("cluster.rebalance.tick").pipe(Effect.repeat(Schedule.spaced("15 seconds"))));
-const ClusterTopology = Layer.mergeAll(JobEntityLive, RebalanceLeader);
+const JobRpc = {
+  progress: Rpc.make("job.progress", { payload: S.Struct({ jobId: S.UUID }), success: S.Struct({ state: S.Unknown }), error: S.Struct({ _tag: S.Literal("JobMissing") }) }),
+  cancel:   Rpc.make("job.cancel", { payload: S.Struct({ jobId: S.UUID }), success: S.Void, error: S.Struct({ _tag: S.Literal("JobMissing") }) }),
+  advance:  Rpc.make("job.advance", { payload: S.Struct({ jobId: S.UUID, pct: S.Int }), success: S.Void, error: S.Struct({ _tag: S.Literal("JobMissing") }) }),
+} as const
+
+const JobEntity = Entity.make("Job", [JobRpc.progress, JobRpc.cancel, JobRpc.advance])
+const JobEntityLive = JobEntity.toLayer((jobId, state: Ref.Ref<JobState>) => ({
+  "job.progress": () => state.pipe(Ref.get, Effect.map((s) => ({ state: s }))),
+  "job.cancel":   () => state.pipe(Ref.set(JobState.Failed({ reason: "cancelled" }))),
+  "job.advance":  ({ pct }) => state.pipe(Ref.update(JobState.$match({
+    Pending:  () => JobState.Running({ pct }),
+    Running:  (s) => pct >= 100 ? JobState.Complete({ result: "done" }) : JobState.Running({ pct }),
+    Complete: (s) => s,
+    Failed:   (s) => s,
+  }))),
+}))
+
+const RebalanceLeader = Singleton.make("cluster.rebalance", Effect.logDebug("cluster.rebalance.tick").pipe(Effect.repeat(Schedule.spaced(Duration.seconds(15)))))
+const ClusterTopology = Layer.mergeAll(JobEntityLive, RebalanceLeader)
 ```
 
-Contracts:
-- Entity protocol is defined as explicit RPC capability set.
-- Singleton duties are isolated as separately named leadership tasks.
-- Cluster runtime graph is declared via layer composition, not implicit startup glue.
+**Contracts:**
+- `JobState` is a `TaggedEnum` — `$match` provides exhaustive dispatch over state transitions. State machine logic lives in the entity handler, not scattered across RPCs.
+- `JobRpc` object aggregates protocol — `Entity.make` receives the array, `toLayer` implements the handler contract with access to entity-local `Ref<JobState>`.
+- `Singleton.make` for cluster-wide leader duty — `Schedule.spaced` without jitter for deterministic tick behavior. `Schedule.jittered` applies when staggering is desirable.
+- `Layer.mergeAll` assembles entity + singleton into one graph — no implicit startup order, no hidden bootstrap code.
 
-Failure modes prevented:
-- Leadership behavior hidden in transport handlers.
+**Failure modes prevented:**
+- State machine transitions scattered across handler methods.
 - Entity responsibilities spread across unrelated modules.
-- Runtime graphs that cannot be inspected from layer composition.
-
-Escalate to:
-- `surface.md` and infra docs for transport/server/deployment wiring.
+- Singleton duties with non-deterministic scheduling.
 
 ---
-## [7][OBSERVABILITY_POLICY_SURFACE]
->**Dictum:** *Telemetry policy is a stable contract: metric vocabulary, cardinality mapping, and exporter layer composition.*
+## STM coordination
 
-<br>
-
-```ts
-import * as FetchHttpClient from "@effect/platform/FetchHttpClient";
-import * as Otlp from "@effect/opentelemetry/Otlp";
-import { Effect, Layer, Match, Metric, MetricLabel } from "effect";
-
-// --- [CONSTANTS] -------------------------------------------------------------
-const syncTelemetryVocab = {
-  label: { statusClass: "status_class" },
-  resource: { serviceName: "portal-api" },
-  statusClass: { class2xx: "2xx", class4xx: "4xx", class5xx: "5xx", other: "other" },
-} as const;
-const syncSignals = {
-  requests: Metric.counter("tenant_sync_requests_total"),
-  latency:  Metric.withNow(Metric.summaryTimestamp({ name: "tenant_sync_latency_ms", maxAge: "5 minutes", maxSize: 2048, error: 0.01, quantiles: [0.5, 0.9, 0.99] })),
-} as const;
-const statusClass = (status: number) => Match.value(status).pipe(Match.when((n) => n >= 200 && n < 300, () => syncTelemetryVocab.statusClass.class2xx), Match.when((n) => n >= 400 && n < 500, () => syncTelemetryVocab.statusClass.class4xx), Match.when((n) => n >= 500 && n < 600, () => syncTelemetryVocab.statusClass.class5xx), Match.orElse(() => syncTelemetryVocab.statusClass.other));
-
-// --- [FUNCTIONS] -------------------------------------------------------------
-const observeTenantSync = (status: number, durationMs: number) => Effect.all([Metric.increment(Metric.taggedWithLabels(syncSignals.requests, [MetricLabel.make(syncTelemetryVocab.label.statusClass, statusClass(status))])), Metric.update(syncSignals.latency, durationMs)], { concurrency: 2 });
-const telemetryLayer = (cfg: { readonly baseUrl: string; readonly authorization: string; readonly serviceVersion: string }) => Otlp.layerJson({ baseUrl: cfg.baseUrl, headers: { authorization: cfg.authorization }, resource: { serviceName: syncTelemetryVocab.resource.serviceName, serviceVersion: cfg.serviceVersion } }).pipe(Layer.provide(FetchHttpClient.layer));
-```
-
-Contracts:
-- Metric names and label vocabulary are bounded and reviewable.
-- Status classification is canonicalized once before emission.
-- Exporter layer is parameterized by explicit config payload.
-
-Failure modes prevented:
-- Cardinality blowups from free-form labels.
-- Divergent status bucketing across call sites.
-- Telemetry transport configuration hidden in ambient process state.
-
-Escalate to:
-- `observability.md` for tracing policy, dashboards, and alerts.
-
----
-## [8][STM_LEDGER_COORDINATION]
->**Dictum:** *High-contention coordination stays deterministic when queue strategy, transactional mutation, and snapshot projection live in one STM rail.*
-
-<br>
+High-contention coordination requires transactional atomicity — `TMap` for ledger state, `TQueue` for ingestion policy. Queue strategy (bounded/dropping/sliding) is a vocabulary choice evaluated once at construction.
 
 ```ts
-import { Chunk, Clock, DateTime, Effect, HashMap, Match, Option, Order, STM, TMap, TQueue } from "effect";
+import { Chunk, Clock, DateTime, Effect, HashMap, Option, Order, STM, TMap, TQueue } from "effect"
 
-// --- [FUNCTIONS] -------------------------------------------------------------
-const ledgerProgram = (policy: "bounded" | "dropping" | "sliding") => Effect.gen(function* () {
-  const queue = yield* STM.commit(Match.value(policy).pipe(Match.when("bounded", () => TQueue.bounded<readonly [tenant: string, delta: bigint]>(128)), Match.when("dropping", () => TQueue.dropping<readonly [tenant: string, delta: bigint]>(128)), Match.when("sliding", () => TQueue.sliding<readonly [tenant: string, delta: bigint]>(128)), Match.exhaustive));
-  const ledger = yield* STM.commit(TMap.fromIterable<string, bigint>([["tenant-a", 0n], ["tenant-b", 0n], ["tenant-c", 0n]]));
-  yield* STM.commit(TQueue.offerAll(queue, [["tenant-a", 4n], ["tenant-b", -2n], ["tenant-c", 3n], ["tenant-a", -1n], ["tenant-b", 5n], ["tenant-c", -1n]]));
-  const drain = STM.commit(TQueue.takeUpTo(queue, 64).pipe(STM.flatMap((items) => STM.forEach(items, ([tenant, delta]) => TMap.updateWith(ledger, tenant, (current) => Option.some(Option.getOrElse(current, () => 0n) + delta))))));
-  yield* Effect.all([drain, drain, drain], { concurrency: 3 });
-  const nowMs = yield* Clock.currentTimeMillis;
-  const snapshot = yield* STM.commit(TMap.toHashMap(ledger));
-  const ordered = Chunk.fromIterable(HashMap.toEntries(snapshot)).pipe(Chunk.sortWith(([tenant]) => tenant, Order.string), Chunk.toReadonlyArray);
-  const totals = ordered.reduce((acc, [, delta]) => acc + delta, 0n);
-  const asOf = DateTime.make(nowMs).pipe(Option.map(DateTime.formatIso), Option.getOrElse(() => "invalid-time"));
-  return { asOf, ordered, totals, status: Match.value(totals >= 0n).pipe(Match.when(true, () => "balanced" as const), Match.when(false, () => "drift" as const), Match.exhaustive) } as const;
-});
+const QueuePolicy = {
+  bounded:  <A>(cap: number) => TQueue.bounded<A>(cap),
+  dropping: <A>(cap: number) => TQueue.dropping<A>(cap),
+  sliding:  <A>(cap: number) => TQueue.sliding<A>(cap),
+} as const satisfies Record<string, <A>(cap: number) => STM.STM<TQueue.TQueue<A>>>
+type QueueMode = keyof typeof QueuePolicy
+
+type Entry = readonly [tenant: string, delta: bigint]
+const ledgerProgram = (mode: QueueMode, capacity: number, seed: ReadonlyArray<Entry>) =>
+  Effect.gen(function* () {
+    const queue = yield* STM.commit(QueuePolicy[mode]<Entry>(capacity))
+    const ledger = yield* STM.commit(TMap.empty<string, bigint>())
+    yield* STM.commit(TQueue.offerAll(queue, seed))
+    const drain = STM.gen(function* () {
+      const items = yield* TQueue.takeUpTo(queue, 64)
+      yield* STM.forEach(items, ([tenant, delta]) => TMap.updateWith(ledger, tenant, (opt) => Option.some(Option.getOrElse(opt, () => 0n) + delta)))
+    })
+    yield* Effect.all([STM.commit(drain), STM.commit(drain), STM.commit(drain)], { concurrency: 3 })
+    const nowMs = yield* Clock.currentTimeMillis
+    const snapshot = yield* STM.commit(TMap.toHashMap(ledger))
+    const entries = Chunk.fromIterable(HashMap.toEntries(snapshot)).pipe(Chunk.sortWith(([t]) => t, Order.string), Chunk.toReadonlyArray)
+    const total = entries.reduce((acc, [, d]) => acc + d, 0n)
+    const asOf = DateTime.unsafeMake(nowMs).pipe(DateTime.formatIso)
+    return { asOf, entries, total, balanced: total >= 0n } as const
+  })
 ```
 
-Contracts:
-- Queue policy selection is exhaustive and value-driven.
-- Ledger mutation occurs only inside committed STM transactions.
-- Snapshot projection is ordered deterministically before externalization.
+**Contracts:**
+- `QueuePolicy` vocabulary maps mode to constructor — `QueuePolicy[mode]<Entry>(capacity)` produces the configured queue without `Match` chains. Adding a mode requires one vocabulary entry.
+- `STM.gen` inside `drain` composes transactional reads and updates — the entire sequence runs atomically. `STM.commit` executes the transaction.
+- `TMap.updateWith` with `Option.some(...)` return — insert-or-update semantics. Returning `Option.none` would delete the key.
+- Snapshot ordering via `Chunk.sortWith` before externalization — deterministic output regardless of internal HashMap iteration order.
+- `DateTime.unsafeMake` for clock-derived timestamps (known valid) — `DateTime.make` returns `Option` for potentially invalid inputs.
 
-Failure modes prevented:
-- Lost updates from non-transactional mutation paths.
+**Failure modes prevented:**
+- Lost updates from non-transactional mutation.
 - Non-deterministic snapshot order in downstream consumers.
 - Queue behavior changes that bypass compile-time policy selection.
-
-Escalate to:
-- `concurrency.md` for fiber/queue runtime strategy beyond STM coordination.

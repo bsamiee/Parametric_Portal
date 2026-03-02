@@ -53,7 +53,7 @@ public static class Coordination {
         Seq<TInput> inputs, int maxConcurrency,
         CancellationToken cancellationToken,
         Func<TInput, CancellationToken, Task<TResult>> operation) =>
-        IO.lift(async () => {
+        liftIO(async () => {
             // [BOUNDARY ADAPTER -- semaphore lifecycle + try/finally
             //  for deterministic release on success, fault, cancel]
             using SemaphoreSlim gate = new(maxConcurrency, maxConcurrency);
@@ -107,13 +107,14 @@ public static class ChannelTopology {
             // [BOUNDARY ADAPTER -- async enumeration + writer lifecycle]
             await foreach (TIn input in reader
                 .ReadAllAsync(cancellationToken).ConfigureAwait(false)) {
-                await transform(input).Match(
-                    Succ: (TOut output) =>
-                        writer.WriteAsync(output, cancellationToken),
-                    Fail: (Error error) => {
-                        writer.Complete(error.ToException());
-                        return default(ValueTask);
-                    }).ConfigureAwait(false);
+                Fin<TOut> result = transform(input);
+                // [BOUNDARY ADAPTER -- conditional exit on failure]
+                if (result.IsFail) {
+                    writer.Complete(result.FailValue().ToException());
+                    return unit;
+                }
+                await writer.WriteAsync(result.SuccValue(), cancellationToken)
+                    .ConfigureAwait(false);
             }
             writer.Complete();
             return unit;
@@ -143,27 +144,26 @@ using static LanguageExt.Prelude;
 
 // --- [FUNCTIONS] -------------------------------------------------------------
 public static class AsyncStreams {
-    extension<T>(IAsyncEnumerable<T> stream) {
-        // [BOUNDARY ADAPTER -- yield-based accumulation; Seq<T> immutable binding evolves]
-        public async IAsyncEnumerable<Seq<T>> Batch(
-            int batchSize,
-            [EnumeratorCancellation]
-            CancellationToken cancellationToken = default) {
-            Seq<T> batch = Empty;
-            await foreach (T item in stream
-                .WithCancellation(cancellationToken)
-                .ConfigureAwait(false)) {
-                batch = batch.Add(item);
-                // [BOUNDARY ADAPTER -- conditional yield; yield
-                //  cannot appear in expression-bodied constructs]
-                if (batch.Count >= batchSize) {
-                    yield return batch;
-                    batch = Empty;
-                }
+    // [BOUNDARY ADAPTER -- yield-based accumulation; Seq<T> immutable binding evolves]
+    public static async IAsyncEnumerable<Seq<T>> Batch<T>(
+        this IAsyncEnumerable<T> stream,
+        int batchSize,
+        [EnumeratorCancellation]
+        CancellationToken cancellationToken = default) {
+        Seq<T> batch = Empty;
+        await foreach (T item in stream
+            .WithCancellation(cancellationToken)
+            .ConfigureAwait(false)) {
+            batch = batch.Add(item);
+            // [BOUNDARY ADAPTER -- conditional yield; yield
+            //  cannot appear in expression-bodied constructs]
+            if (batch.Count >= batchSize) {
+                yield return batch;
+                batch = Empty;
             }
-            // [BOUNDARY ADAPTER -- terminal flush]
-            if (!batch.IsEmpty) { yield return batch; }
         }
+        // [BOUNDARY ADAPTER -- terminal flush]
+        if (!batch.IsEmpty) { yield return batch; }
     }
     // [BOUNDARY ADAPTER -- async enumeration materialization]
     public static IO<Seq<T>> Collect<T>(
@@ -187,7 +187,7 @@ public static class AsyncStreams {
     public static Eff<RT, Seq<T>> ConsumeChannel<RT, T>(
         ChannelReader<T> reader, Func<RT, CancellationToken> tokenAccessor) =>
         from token in Eff<RT, CancellationToken>.Asks(tokenAccessor)
-        from items in liftIO(IO.liftAsync(async () => {
+        from items in liftIO(async () => {
             // [BOUNDARY ADAPTER -- async enumeration over channel with runtime token]
             Seq<T> acc = Empty;
             await foreach (T item in reader
@@ -195,7 +195,7 @@ public static class AsyncStreams {
                 acc = acc.Add(item);
             }
             return acc;
-        }))
+        })
         select items;
 }
 ```
@@ -273,9 +273,7 @@ public readonly record struct SessionState(
 public static class AtomicCoordination {
     // --- [SESSION_TRACKING] --------------------------------------------------
     public static readonly Atom<HashMap<SessionId, SessionState>> Sessions = Atom(
-        HashMap<SessionId, SessionState>(),
-        (HashMap<SessionId, SessionState> state) => state.ForAll(
-            (SessionId _, SessionState session) => session.IsActive));
+        HashMap<SessionId, SessionState>());
     public static Unit Register(SessionState session) =>
         Sessions.Swap(
             (HashMap<SessionId, SessionState> current) =>
@@ -314,18 +312,18 @@ public static class AtomicCoordination {
             return !ReferenceEquals(snapshot, after);
         }).Bind((bool isNew) => isNew
             ? (from result in process
-                   | @catch(static (Error _) => true, liftEff<RT, TResult>(() => {
+                   | @catch((Error err) => true, (Error err) => liftEff<RT, TResult>(() => {
                          Processed.Swap((HashMap<EventId, Instant> current) =>
                              current.Remove(eventId));
                          return Prelude.raise<TResult>(
-                             Error.New("TryProcess: rolled back reservation"));
+                             Error.New("TryProcess: rolled back reservation", err));
                      }))
                select Some(result))
             : Eff<RT, Option<TResult>>.Pure(Option<TResult>.None));
     public static Unit Purge(IClock clock, Duration retention) =>
         Processed.Swap((HashMap<EventId, Instant> current) => {
             Instant cutoff = clock.GetCurrentInstant() - retention;
-            return current.Filter((Instant processedAt) => processedAt > cutoff);
+            return current.Filter((EventId _, Instant processedAt) => processedAt > cutoff);
         });
 }
 ```

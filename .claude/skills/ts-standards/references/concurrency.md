@@ -1,366 +1,155 @@
-# [H1][CONCURRENCY]
->**Dictum:** *Concurrency is explicit coordination plus explicit ownership: signal once, bound contention, and encode cancellation paths in the rail.*
+# Concurrency
 
-<br>
+## Fiber ownership algebra
 
-Concurrency here is ownership algebra, not syntax sugar. Every fork, queue, permit, and transport is an allocation event that must declare lifetime, interruption, and contention policy. The sections below encode those decisions as values so pressure, shutdown, and cancellation remain inspectable and composable.
-
----
-## [1][FIBER_OWNERSHIP_AND_HANDSHAKE]
->**Dictum:** *Fork is allocation; every fork requires an ownership decision (`join`, `awaitAll`, `interruptAll`, or scoped lifetime).*
-
-<br>
+Fiber ownership is a compile-time commitment encoded by fork strategy and resolved by join semantics. Three fork strategies (`fork`, `forkScoped`, `forkDaemon`) pair with three join semantics (`join`, `await`, `interruptFork`) — nine combinatorial outcomes collapsed to vocabulary-driven dispatch. `Deferred` provides one-shot handshake synchronization; scope binding determines automatic vs manual lifetime management.
 
 ```ts
-import { Chunk, Deferred, Effect, Fiber, Queue } from "effect";
+import { Chunk, Deferred, Effect, Exit, Fiber, Scope } from "effect"
 
-const workerGraph = Effect.scoped(
+const ForkStrategy = {
+  ephemeral: <A, E, R>(e: Effect.Effect<A, E, R>) => Effect.fork(e),
+  scoped:    <A, E, R>(e: Effect.Effect<A, E, R>) => Effect.forkScoped(e),
+  daemon:    <A, E, R>(e: Effect.Effect<A, E, R>) => Effect.forkDaemon(e),
+} as const satisfies Record<string, <A, E, R>(e: Effect.Effect<A, E, R>) => Effect.Effect<Fiber.RuntimeFiber<A, E>, never, unknown>>
+
+const JoinStrategy = {
+  unwrap:  <A, E>(f: Fiber.RuntimeFiber<A, E>) => Fiber.join(f),
+  exit:    <A, E>(f: Fiber.RuntimeFiber<A, E>) => Fiber.await(f),
+  discard: <A, E>(f: Fiber.RuntimeFiber<A, E>) => Fiber.interruptFork(f),
+} as const satisfies Record<string, <A, E>(f: Fiber.RuntimeFiber<A, E>) => Effect.Effect<unknown>>
+
+const spawnPool = <A, E, R>(tasks: ReadonlyArray<Effect.Effect<A, E, R>>, strategy: keyof typeof ForkStrategy) =>
   Effect.gen(function* () {
-    const start = yield* Deferred.make<void>();
-    const queue = yield* Queue.bounded<number>(64);
-    const workers = yield* Effect.forEach(
-      [1, 2, 3, 4] as const,
-      (lane) =>
-        Effect.forkScoped(
-          Deferred.await(start).pipe(
-            Effect.zipRight(Queue.offer(queue, lane * 10)),
-            Effect.zipRight(Queue.offer(queue, lane * 10 + 1)),
-            Effect.as(lane),
-          ),
-        ),
-      { concurrency: "unbounded" },
-    );
-    yield* Deferred.succeed(start, undefined);
-    const lanes = yield* Effect.all(workers.map(Fiber.join), { concurrency: "unbounded" });
-    const values = yield* Queue.takeAll(queue);
-    return {
-      lanes,
-      values:    Chunk.toReadonlyArray(values),
-      invariant: lanes.length === 4 && Chunk.size(values) === 8,
-    } as const;
-  }),
-);
+    const gate = yield* Deferred.make<void>()
+    const fibers = yield* Effect.forEach(tasks, (task) => ForkStrategy[strategy](task))
+    yield* Deferred.succeed(gate, void 0)
+    const exits = yield* Fiber.awaitAll(fibers)
+    return { fibers, exits, firstFailure: Chunk.findFirst(exits, Exit.isFailure) } as const
+  })
 ```
 
-**Ownership laws:**<br>
-- `forkScoped` ties worker lifetime to scope; detached fibers require explicit finalizers.
-- `Effect.all(workers.map(Fiber.join))` keeps failure propagation in-rail without detached exit post-processing.
-- one-shot `Deferred` handshakes remove ambient start ordering.
+**Ownership contracts:**
+- `ForkStrategy` encodes lifetime as vocabulary: `ephemeral` binds to parent fiber (auto-interrupted on parent exit), `scoped` binds to explicit `Scope` (interrupted on scope close), `daemon` binds to global scope (outlives parent, requires manual interrupt). Strategy selection is a single lookup.
+- `JoinStrategy` encodes completion semantics: `unwrap` awaits and extracts value (`Effect<A, E>`), `exit` awaits and preserves exit structure (`Effect<Exit<A, E>>`), `discard` fires interrupt without blocking. The vocabulary makes join policy a call-site decision.
+- `Deferred.succeed(gate, void 0)` before `Fiber.awaitAll` implements the handshake pattern: gate signals spawn completion, consumers block on `Deferred.await` until pool ready. One-shot semantics make subsequent `succeed` calls no-ops.
+- `Fiber.awaitAll(fibers)` returns `Chunk<Exit>` preserving per-fiber exit status. `Chunk.findFirst(exits, Exit.isFailure)` surfaces first failure for fail-fast propagation. Use `Fiber.all` when you need to compose N fibers into a single joinable fiber.
 
-**Invariant:** worker completion count and emitted queue cardinality are both explicit output values.
 
----
-## [2][QUEUE_STRATEGY_AND_SHUTDOWN_PROTOCOL]
->**Dictum:** *Queue strategy is data-loss policy: `bounded` backpressures, `dropping` sheds, `sliding` preserves recency.*
+## Contention algebra
 
-<br>
+Queue strategy (bounded/dropping/sliding) and semaphore usage (blocking/shedding) are the same contention algebra — different resource shapes, identical policy vocabulary. `bounded` backpressures (producer waits), `dropping` sheds oldest (offer returns false), `sliding` evicts head (preserves recency). Semaphore `withPermits` blocks until permits available; `withPermitsIfAvailable` returns `Option.none` when denied.
 
 ```ts
-import { Chunk, Duration, Effect, Option, Queue } from "effect";
+import { Chunk, Effect, Number as N, Option, Queue, Ref } from "effect"
 
-const queuePolicySurface = Effect.scoped(
-  Effect.gen(function* () {
-  const bounded = yield* Effect.acquireRelease(Queue.bounded<number>(2), Queue.shutdown);
-  const dropping = yield* Effect.acquireRelease(Queue.dropping<number>(2), Queue.shutdown);
-  const sliding = yield* Effect.acquireRelease(Queue.sliding<number>(2), Queue.shutdown);
-  yield* Effect.all([
-    Queue.offer(bounded,  1),  Queue.offer(bounded, 2), Queue.offer(dropping, 1),
-    Queue.offer(dropping, 2),  Queue.offer(sliding, 1), Queue.offer(sliding,  2),
-  ]);
-  const boundedThird = yield* Queue.offer(bounded, 3).pipe(Effect.timeoutOption(Duration.millis(5)),);
-  const droppingThird = yield* Queue.offer(dropping, 3);
-  const slidingThird = yield* Queue.offer(sliding, 3);
-  const boundedValues = yield* Queue.takeAll(bounded);
-  const droppingValues = yield* Queue.takeAll(dropping);
-  const slidingValues = yield* Queue.takeAll(sliding);
-  const boundedSnapshot =  Chunk.toReadonlyArray(boundedValues);
-  const droppingSnapshot = Chunk.toReadonlyArray(droppingValues);
-  const slidingSnapshot =  Chunk.toReadonlyArray(slidingValues);
-  return {
-    boundedThird, droppingThird, slidingThird, boundedSnapshot, droppingSnapshot, slidingSnapshot,
-    invariant:
-      Option.isNone(boundedThird) &&
-      droppingThird === false &&
-      slidingSnapshot[0] === 2 &&
-      slidingSnapshot[1] === 3,
-  } as const;
-}),
-);
+const QueuePolicy = {
+  bounded:  <A>(cap: number) => Queue.bounded<A>(cap),
+  dropping: <A>(cap: number) => Queue.dropping<A>(cap),
+  sliding:  <A>(cap: number) => Queue.sliding<A>(cap),
+} as const satisfies Record<string, <A>(cap: number) => Effect.Effect<Queue.Queue<A>>>
+
+const withContention = <A, E, R>(
+  sem: Effect.Semaphore, permits: number, shedRef: Ref.Ref<number>,
+  effect: Effect.Effect<A, E, R>,
+) =>
+  sem.withPermitsIfAvailable(permits)(effect).pipe(
+    Effect.flatMap(Option.match({
+      onNone: () => Ref.update(shedRef, N.increment).pipe(Effect.as(Option.none<A>())),
+      onSome: (a) => Effect.succeed(Option.some(a)),
+    })),
+  )
+
+const contentionSurface = Effect.gen(function* () {
+  const sem = yield* Effect.makeSemaphore(2)
+  const shed = yield* Ref.make(0)
+  const queue = yield* QueuePolicy.sliding<number>(4)
+  const results = yield* Effect.forEach([1, 2, 3, 4, 5, 6], (n) =>
+    withContention(sem, 1, shed, Queue.offer(queue, n).pipe(Effect.as(n))), { concurrency: "unbounded" })
+  const values = yield* Queue.takeAll(queue).pipe(Effect.map(Chunk.toReadonlyArray))
+  const shedCount = yield* Ref.get(shed)
+  return { results, values, shedCount, admitted: results.filter(Option.isSome).length } as const
+})
 ```
 
-**Queue laws:**<br>
-- bounded policy must declare what waits and for how long.
-- dropping/sliding semantics are product behavior, not logging behavior.
-- `acquireRelease` finalizers keep shutdown ownership explicit even on failure paths.
+**Contention contracts:**
+- `QueuePolicy` vocabulary encodes data-loss semantics: `bounded` never loses data (backpressures), `dropping` discards on full (oldest), `sliding` evicts head on full (preserves recency). Strategy selection is a single lookup, not runtime conditional.
+- `withContention` abstracts the shed-or-admit pattern: `withPermitsIfAvailable` returns `Option<A>`, `Option.none` increments shed counter via `Ref.update(shed, N.increment)`. `N.increment` is the Effect-native `n + 1` combinator.
+- `Option.match` replaces `if/else` for permit result handling — exhaustive pattern match, not boolean branch. The shed path and admit path are both effectful, composed in the match arms.
+- Shed count plus admitted count equals request count — the invariant is compositional, not asserted imperatively.
 
-**Invariant:** backpressure, shedding, and recency outcomes are returned as first-class booleans and snapshots.
 
----
-## [3][PERMIT_ALGEBRA_AND_LOAD_SHEDDING]
->**Dictum:** *Use permits as the canonical contention model; shape admission with blocking (`withPermits`) or shedding (`withPermitsIfAvailable`).*
+## Transactional coordination
 
-<br>
+STM composes reads and writes across disjoint transactional structures into a single atomic commit — no locks, no race windows, no partial state. `TQueue.take` + `TMap.set` in the same `STM.gen` guarantees atomic dequeue plus state registration; `TSemaphore` provides transactional admission; `TDeferred` provides one-shot completion signaling. The transaction retries automatically on conflict.
 
 ```ts
-import { Duration, Effect, Option, Ref } from "effect";
+import { Effect, Option, STM, TDeferred, TMap, TQueue, TSemaphore } from "effect"
 
-const permitPolicySurface = Effect.gen(function* () {
-  const semaphore = yield* Effect.makeSemaphore(2);
-  const admitted = yield* Ref.make(0);
-  const shed = yield* Ref.make(0);
-  const BlockingDelay = Duration.millis(8);
-  const SheddingDelay = Duration.millis(2);
-  const blockingRun = yield* Effect.all(
-    [1, 2, 3, 4].map((id) =>
-      semaphore.withPermits(1)(
-        Effect.sleep(BlockingDelay).pipe(
-          Effect.zipRight(Ref.update(admitted, (n) => n + 1)),
-          Effect.as(id),
-        ),
-      ),
-    ),
-    { concurrency: "unbounded" },
-  );
-  const shedRun = yield* Effect.all(
-    [11, 12, 13, 14].map((id) =>
-      semaphore.withPermitsIfAvailable(1)(
-        Effect.sleep(SheddingDelay).pipe(
-          Effect.zipRight(Ref.update(admitted, (n) => n + 1)),
-          Effect.as(id),
-        ),
-      ).pipe(
-        Effect.tap((result) =>
-          Option.match(result, {
-            onNone: () => Ref.update(shed, (n) => n + 1),
-            onSome: () => Effect.void,
-          }),
-        ),
-      ),
-    ),
-    { concurrency: "unbounded" },
-  );
-  const admittedCount = yield* Ref.get(admitted);
-  const shedCount = yield* Ref.get(shed);
-  return {
-    blockingRun, shedRun, admittedCount, shedCount,
-    invariant:
-      admittedCount === blockingRun.length + shedRun.filter(Option.isSome).length &&
-      shedCount === shedRun.filter(Option.isNone).length,
-  } as const;
-});
+type Task<A>   = { readonly id: string; readonly payload: A }
+type TaskState = "pending" | "active" | "done"
+
+const coordinator = <A>(concurrency: number) => Effect.gen(function* () {
+  const sem = yield* TSemaphore.make(concurrency)
+  const queue = yield* TQueue.unbounded<Task<A>>()
+  const state = yield* TMap.empty<string, TaskState>()
+  const done = yield* TDeferred.make<void>()
+  const acquire = STM.gen(function* () {
+    yield* TSemaphore.acquire(sem)
+    const task = yield* TQueue.take(queue)
+    yield* TMap.set(state, task.id, "active" as TaskState)
+    return task
+  })
+  const release = (id: string) => TMap.set(state, id, "done" as TaskState).pipe(STM.zipRight(TSemaphore.release(sem)))
+  const submit = (task: Task<A>) => TQueue.offer(queue, task).pipe(STM.zipRight(TMap.set(state, task.id, "pending" as TaskState)))
+  return { acquire: STM.commit(acquire), release: (id: string) => STM.commit(release(id)), submit: (t: Task<A>) => STM.commit(submit(t)), signal: STM.commit(TDeferred.succeed(done, void 0)), await: STM.commit(TDeferred.await(done)) } as const
+})
 ```
 
-**Permit laws:**<br>
-- switch from blocking to shedding only with explicit product policy.
-- shed counts are primary runtime signals.
-- semaphore boundaries must wrap the critical section itself.
+**STM contracts:**
+- `acquire` transaction composes three structures atomically — `TSemaphore.acquire` + `TQueue.take` + `TMap.set` execute as one commit. No task dequeued without permit acquisition and state registration; transaction retries if permits or tasks unavailable.
+- `release` via `STM.zipRight` chains state update → permit release — both mutations commit together. Permit cannot orphan if state update fails.
+- `TDeferred` for one-shot completion — `TDeferred.succeed` resolves waiters transactionally; multiple calls are idempotent (first wins). `TDeferred.await` blocks until resolved.
+- Return bundle of committed effects — caller composes `acquire`/`release`/`submit`/`signal`/`await` at call site. Orchestration logic remains explicit, not hidden in the coordinator.
 
-**Invariant:** admissions and sheds reconcile exactly against observed optional results.
 
----
-## [4][STM_COORDINATION_WITH_TRANSACTIONAL_SIGNALING]
->**Dictum:** *Cross-structure consistency (`TQueue` + `TMap` + `TSemaphore` + `TDeferred`) belongs in one transactional model.*
+## Resource lifecycle algebra
 
-<br>
+Resources — pools, streams, workers — share a single lifecycle algebra: acquire → use → release, with interruption as a first-class rail. `acquireRelease` encodes the three-phase contract; `onInterrupt` registers handlers for cancellation exclusively; `ensuring` guarantees finalization regardless of exit path. Pool TTL strategies (`usage` vs `creation`) and stream broadcast parameters are lifecycle policy values.
 
 ```ts
-import { Duration, Effect, Fiber, Option, STM, TDeferred, TMap, TQueue, TSemaphore } from "effect";
+import { Deferred, Duration, Effect, Fiber, Number as N, Pool, Ref, Stream } from "effect"
 
-const transactionalCoordinator = Effect.gen(function* () {
-  const jobs = yield* STM.commit(TQueue.bounded<readonly [string, number]>(32));
-  const inFlight = yield* STM.commit(TMap.empty<string, number>());
-  const permits = yield* STM.commit(TSemaphore.make(2));
-  const done = yield* STM.commit(TDeferred.make<void>());
-  const CompletionSignal = "observed" as const;
-  const WorkerDelay = Duration.millis(3);
-  yield* STM.commit(
-    TQueue.offerAll(jobs, [
-      ["tenant-a", 1], ["tenant-b", 1], ["tenant-a", 2],
-      ["tenant-c", 1], ["tenant-b", 3], ["tenant-a", 1],
-    ]),
-  );
-  const completionObserver = yield* Effect.fork(
-    STM.commit(TDeferred.await(done)).pipe(Effect.as(CompletionSignal)),
-  );
-  const fibers = yield* Effect.forEach(
-    [0, 1, 2, 3, 4, 5] as const,
-    () =>
-      Effect.fork(
-        TSemaphore.withPermits(
-          STM.commit(
-            TQueue.take(jobs).pipe(
-              STM.flatMap(([tenant, delta]) =>
-                TMap.updateWith(inFlight, tenant, (current) =>
-                  Option.some(Option.getOrElse(current, () => 0) + delta),
-                ).pipe(STM.as(tenant)),
-              ),
-            ),
-          ).pipe(Effect.zipLeft(Effect.sleep(WorkerDelay))),
-          permits,
-          1,
-        ),
-      ),
-    { concurrency: "unbounded" },
-  );
-  yield* Fiber.awaitAll(fibers);
-  yield* STM.commit(TDeferred.succeed(done, undefined));
-  const completionSignal = yield* Fiber.join(completionObserver);
-  const snapshot = yield* STM.commit(TMap.toArray(inFlight));
-  const available = yield* STM.commit(TSemaphore.available(permits));
-  return {
-    completionSignal, snapshot, available,
-    invariant: completionSignal === CompletionSignal && snapshot.length === 3 && available === 2,
-  } as const;
-});
+const LifecyclePolicy = {
+  poolMin: 1, poolMax: 4, ttl: Duration.seconds(30), ttlStrategy: "usage",
+  broadcastN: 2, broadcastCap: 16, replay: 0,
+} as const
+
+const lifecycleSurface = Effect.scoped(Effect.gen(function* () {
+  const shutdown = yield* Deferred.make<void>()
+  const processed = yield* Ref.make(0)
+  const pool = yield* Pool.makeWithTTL({
+    acquire:    Effect.succeed({ id: crypto.randomUUID() }),
+    min:        LifecyclePolicy.poolMin, max: LifecyclePolicy.poolMax,
+    timeToLive: LifecyclePolicy.ttl, timeToLiveStrategy: LifecyclePolicy.ttlStrategy,
+  })
+  const source = Stream.range(1, 100)
+  const [fast, slow] = yield* source.pipe(Stream.broadcast(LifecyclePolicy.broadcastN, { capacity: LifecyclePolicy.broadcastCap, replay: LifecyclePolicy.replay }))
+  const sumFiber = yield* fast.pipe(Stream.interruptWhenDeferred(shutdown), Stream.runFold(0, N.sum), Effect.fork)
+  const processFiber = yield* slow.pipe(
+    Stream.mapEffect((n) => Pool.get(pool).pipe(Effect.flatMap(() => Ref.update(processed, N.increment)), Effect.as(n)), { concurrency: LifecyclePolicy.poolMax }),
+    Stream.runFold(0, N.sum),
+    Effect.ensuring(Deferred.succeed(shutdown, void 0).pipe(Effect.ignore)),
+    Effect.onInterrupt(() => Ref.set(processed, -1)),
+    Effect.fork,
+  )
+  const [fastSum, slowSum, count] = yield* Effect.all([Fiber.join(sumFiber), Fiber.join(processFiber), Ref.get(processed)])
+  return { fastSum, slowSum, count } as const
+}))
 ```
 
-**STM laws:**<br>
-- dequeue plus state transition belongs in the same committed transaction.
-- admission remains explicit and separate in `TSemaphore` permits.
-- `TDeferred` completion is useful only when at least one distinct observer awaits it.
-
-**Invariant:** transactional cardinality and restored permit count are explicit outputs.
-
----
-## [5][INTERRUPTION_PATHS_AND_RELEASE_GUARANTEES]
->**Dictum:** *Interruption is a first-class runtime event; cleanup must be encoded in the effect graph.*
-
-<br>
-
-```ts
-import { Deferred, Effect, Fiber, Queue } from "effect";
-
-const interruptionSurface = Effect.scoped(
-  Effect.gen(function* () {
-    const queue = yield* Queue.bounded<number>(16);
-    const cleaned = yield* Deferred.make<void>();
-    const worker = Queue.take(queue).pipe(
-      Effect.tap((n) => Effect.logDebug(`worker:${n}`)),
-      Effect.forever,
-      Effect.onInterrupt(() =>
-        Queue.shutdown(queue).pipe(
-          Effect.zipRight(Deferred.succeed(cleaned, undefined)),
-          Effect.asVoid,
-        ),
-      ),
-    );
-    const fiber = yield* Effect.forkScoped(worker);
-    yield* Queue.offerAll(queue, [1, 2, 3, 4]);
-    yield* Fiber.interrupt(fiber);
-    yield* Deferred.await(cleaned);
-    const closed = yield* Queue.isShutdown(queue);
-    return { closed, invariant: closed } as const;
-  }),
-);
-```
-
-**Interruption laws:**<br>
-- interruption handlers are business policy when resources are shared.
-- cleanup effects must be idempotent and local to interrupted scope.
-- interruption correctness is observable through closure and signals.
-
-**Invariant:** cleanup signal completion and queue shutdown state converge to one outcome.
-
----
-## [6][SCOPED_FANOUT_AND_POOL_CONTENTION]
->**Dictum:** *Fan-out and pooling are scope-bound resources; lag, replay, and contention limits must be explicit at the call site.*
-
-<br>
-
-```ts
-import { randomUUID } from "node:crypto";
-import { Deferred, Duration, Effect, Fiber, Pool, Ref, Schedule, Stream } from "effect";
-
-const fanoutAndPool = Effect.scoped(
-  Effect.gen(function* () {
-    const done = yield* Deferred.make<void>();
-    const BroadcastStrategy = "suspend" as const;
-    const PoolTtlStrategy = "usage" as const;
-    const PoolStepDelay = Duration.millis(1);
-    const streams = yield* Stream.range(1, 60).pipe(
-      Stream.schedule(Schedule.spaced(Duration.millis(2))),
-      Stream.broadcast(2, { capacity: 32, strategy: BroadcastStrategy, replay: 0 }),
-    );
-    const [slow, fast] = streams;
-    const pool = yield* Pool.makeWithTTL({
-      acquire: Effect.sync(() => ({ id: randomUUID(), closed: false } as const)),
-      min: 1,
-      max: 4,
-      concurrency: 4,
-      timeToLive: Duration.seconds(20),
-      timeToLiveStrategy: PoolTtlStrategy,
-    });
-    const invalidated = yield* Ref.make(0);
-    const sumFiber = yield* Effect.fork(
-      fast.pipe(
-        Stream.interruptWhenDeferred(done),
-        Stream.runFold(0, (sum, n) => sum + n),
-      ),
-    );
-    const processedFiber = yield* Effect.fork(
-      slow.pipe(
-        Stream.mapEffect(
-          (n) =>
-            Pool.get(pool).pipe(
-              Effect.flatMap((resource) =>
-                Effect.sleep(PoolStepDelay).pipe(
-                  Effect.zipRight(Pool.invalidate(pool, resource)),
-                  Effect.zipRight(Ref.update(invalidated, (x) => x + 1)),
-                  Effect.as(n),
-                ),
-              ),
-            ),
-          { concurrency: 4 },
-        ),
-        Stream.runFold(0, (count) => count + 1),
-        Effect.ensuring(Deferred.succeed(done, undefined).pipe(Effect.ignore)),
-      ),
-    );
-    const [sum, processed, invalidationCount] = yield* Effect.all([
-      Fiber.join(sumFiber),
-      Fiber.join(processedFiber),
-      Ref.get(invalidated),
-    ]);
-    return {
-      sum, processed, invalidationCount,
-      invariant: processed === invalidationCount && processed <= 60,
-    } as const;
-  }),
-);
-```
-
-**Concurrency laws:**<br>
-- fan-out lag strategy and replay budget define causal pressure boundaries.
-- pool `max` and stream map concurrency must communicate one contention policy.
-- termination signaling (`Deferred`) should govern consumer shutdown explicitly.
-
-**Invariant:** invalidation count and processed cardinality remain policy-aligned under bounded contention.
-
----
-## [7][WORKER_RUNNER_AND_BROWSER_TRANSPORT_BRIDGES]
->**Dictum:** *Cross-runtime lanes (`@effect/platform`, `@effect/platform-browser`) must share one ownership contract for close-latch and interruption semantics.*
-
-<br>
-
-```ts
-import * as WorkerRunner from "@effect/platform/WorkerRunner";
-import * as BrowserWorkerRunner from "@effect/platform-browser/BrowserWorkerRunner";
-import * as Transferable from "@effect/platform/Transferable";
-import { Effect, Layer } from "effect";
-
-const workerLane = WorkerRunner.layer((payload: Uint8Array) =>
-  Transferable.addAll([payload.buffer]).pipe(Effect.zipRight(Effect.succeed(payload.byteLength * 2)),),
-);
-const launchWorkerLane = (port: MessagePort | Window) =>
-  WorkerRunner.launch(workerLane).pipe(
-    Effect.provide(Layer.mergeAll(BrowserWorkerRunner.layerMessagePort(port), WorkerRunner.layerCloseLatch)),
-    Effect.provideServiceEffect(Transferable.Collector, Transferable.makeCollector),
-  );
-```
-
-**Bridge laws:**<br>
-- `layerCloseLatch` is the canonical close signal across worker lanes.
-- browser runner binding is transport ownership, not business logic.
-- transferables are explicit payload policy, not implicit transport side effects.
-
-**Invariant:** worker launch, browser transport, and transferable collection are composed through one close-latch contract.
+**Lifecycle contracts:**
+- `Pool.makeWithTTL` with `timeToLiveStrategy: "usage"` resets TTL on each `Pool.get`, keeping hot resources alive; `"creation"` evicts at fixed age regardless of access frequency. The value determines cache vs ephemeral semantics.
+- `Effect.ensuring` guarantees `Deferred.succeed(shutdown, ...)` executes on success, failure, or interruption — unifies fan-out termination signaling across all exit paths.
+- `Effect.onInterrupt` registers a cleanup handler that fires exclusively on cancellation — distinct from `ensuring` which fires on all exits. The `Ref.set(processed, -1)` sentinel distinguishes interrupt-path finalization.
+- `Stream.broadcast(n, { capacity, replay })` materializes n independent downstream streams with bounded backpressure; `replay: 0` means late subscribers see only elements after subscription. Replay budget is lifecycle policy.

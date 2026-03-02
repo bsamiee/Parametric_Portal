@@ -1,459 +1,219 @@
-# [H1][PERFORMANCE]
+# Performance
 
->**Dictum:** *Performance is an executable contract: define workload physics, enforce typed budget failures, and reject drift deterministically.*
-<br>
+Typed budget enforcement, saturation discipline, transactional contention, and CI gate algebra. Measurements are first-class values. Failures are typed evidence.
 
-Performance guidance in this reference owns workload shape, budget thresholds, and CI gate determinism; it does not own tracing topology or broad service lifecycle modeling. Every snippet is written as a compositional rail where measurements are first-class values, not logging side effects. Use this document to fail regressions early with typed evidence and reproducible execution surfaces.
 
----
-## [1][BUDGET_REGISTRY_AND_WORKLOAD_MODELS]
+## Budget algebra
 
->**Dictum:** *Budgets without a workload model are theater; workload without a metric namespace is noise.*
+Budget vocabulary maps operation discriminants to pipeline-composable constructs — timeout bounds, failure classification, metric projectors. One lookup resolves every downstream axis. Discriminant type derives from `keyof typeof Budget`. Vocabulary values are Effect-native (`Duration`, `Schedule`).
 
-<br>
+`classify` returns composite `{ label, severity, retry }` — one invocation resolves metric tag, log selection, and retry schedule. `measure` is the sole entrypoint: composes denominator metric, timeout, latency tracking, and severity-driven retry.
 
 ```ts
-import { Metric } from "effect";
+import { Data, Duration, Effect, Metric, Schedule, pipe } from "effect"
 
-// --- [CONSTANTS] -------------------------------------------------------------
-
-const budget = {
-  ingest: { p95Ms: 85, timeoutMs: 900, maxQueueDepth: 256 },
-  emit:   { p95Ms: 65, timeoutMs: 700, maxQueueDepth: 192 },
-} as const;
-const workload = {
-  ci: {
-    items:        1600,
-    cadence:      "2 millis",
-    batchSize:    128,
-    within:       "35 millis",
-    warmupRuns:   [1] as const,
-    measuredRuns: [1, 2, 3, 4] as const,
+const Budget = {
+  ingest: {
+    timeout: Duration.millis(900),
+    classify: (cause: "upstream" | "terminal") => ({
+      upstream: { label: "upstream", severity: "warn" as const,  retry: Schedule.exponential("50 millis").pipe(Schedule.intersect(Schedule.recurs(3))) },
+      terminal: { label: "terminal", severity: "error" as const, retry: Schedule.stop },
+    })[cause],
   },
-  local: {
-    items:        600,
-    cadence:      "1 millis",
-    batchSize:    128,
-    within:       "35 millis",
-    warmupRuns:   [1] as const,
-    measuredRuns: [1, 2] as const,
+  emit: {
+    timeout: Duration.millis(700),
+    classify: (cause: "throttle" | "terminal") => ({
+      throttle: { label: "throttle", severity: "warn" as const,  retry: Schedule.spaced("100 millis").pipe(Schedule.intersect(Schedule.recurs(5))) },
+      terminal: { label: "terminal", severity: "error" as const, retry: Schedule.stop },
+    })[cause],
   },
-} as const;
-const perf = {
-  operationAttempts: Metric.counter("perf_operation_attempts_total"),
-  operationFailures: Metric.frequency("perf_operation_failures_total", { preregisteredWords: ["throttle", "upstream", "terminal"] }),
-  operationLatency:  Metric.timerWithBoundaries("perf_operation_latency_seconds", [0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 1, 3]),
-  queueDepth:        Metric.gauge("perf_queue_depth"),
-  queueDropped:      Metric.counter("perf_queue_dropped_total"),
-  queueDrained:      Metric.counter("perf_queue_drained_total"),
-  gateP95Ms:         Metric.gauge("perf_gate_p95_ms"),
-  gateLatency:       Metric.timerWithBoundaries("perf_gate_latency_seconds", [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 1, 2, 5]),
-  gateFailures:      Metric.frequency("perf_gate_failures_total", { preregisteredWords: ["ingest", "emit"] }),
-  cacheHits:         Metric.gauge("perf_cache_hits"),
-  poolInvalidations: Metric.counter("perf_pool_invalidations_total"),
-} as const;
+} as const satisfies Record<string, {
+  timeout: Duration.Duration
+  classify: (cause: string) => { label: string; severity: "warn" | "error"; retry: Schedule.Schedule<number> }
+}>
 
-export { budget, perf, workload };
+type Op = keyof typeof Budget
+type Cause<O extends Op> = Parameters<(typeof Budget)[O]["classify"]>[0]
+type Policy = ReturnType<(typeof Budget)[Op]["classify"]>
+
+class BudgetFault<O extends Op> extends Data.TaggedError("BudgetFault")<{ readonly op: O; readonly cause: Cause<O> }> {
+  get policy(): Policy { return Budget[this.op].classify(this.cause) }
+}
+
+const Log = { warn: Effect.logWarning, error: Effect.logError } as const
+
+const measure = <O extends Op, A, R>(op: O, work: Effect.Effect<A, BudgetFault<O>, R>) => {
+  const retry = <E extends BudgetFault<O>>(e: E) => e.policy.retry
+  return pipe(
+    Metric.increment(Metric.tagged(Metric.counter("budget_attempts"), "op", op)),
+    Effect.zipRight(work),
+    Effect.timeoutFail({ duration: Budget[op].timeout, onTimeout: () => new BudgetFault({ op, cause: "terminal" as Cause<O> }) }),
+    Effect.tapError((e) => Log[e.policy.severity](`${op}:${e.policy.label}`)),
+    Effect.retry({ schedule: Schedule.passthrough(retry), while: (e) => e.policy.severity === "warn" }),
+    Metric.trackDuration(Metric.tagged(Metric.timerWithBoundaries("budget_latency_s", [.001, .01, .05, .1, .5, 1, 3]), "op", op)),
+    Metric.trackErrorWith(Metric.tagged(Metric.frequency("budget_faults", { preregisteredWords: ["upstream", "throttle", "terminal"] }), "op", op), (e) => e.policy.label),
+  )
+}
 ```
 
-**Ownership laws:**<br>
-- this section defines canonical default budgets/workload profiles; standalone snippets may use local profiles for independent compilation,
-- histogram boundaries are SLO-resolution policy and are versioned with budgets,
-- local and CI workloads are both declared and intentionally non-equivalent.
+**Budget contracts:**
+- `classify` returns composite — no parallel `severities`, `retryPolicies` tables.
+- `Log` is severity → Effect dispatcher map; index selection, no branching. Closed discriminant makes map exhaustive.
+- `Schedule.passthrough(retry)` extracts schedule from error at retry-time. `while` gates on severity: `"warn"` = retry, `"error"` = fail-fast.
 
----
-## [2][TYPED_OPERATION_BUDGET_ENFORCEMENT]
 
->**Dictum:** *Count attempts before work, classify failures on typed rails, and never recover through unsafe casts.*
+## Saturation discipline
 
-<br>
+Queue backpressure requires typed offer outcomes — dropping queue's `boolean` is the loss boundary. Two patterns: `Ref` accumulation for completion-time statistics (batch jobs); `Stream.mapAccum` with state/emission decoupling for real-time emission.
+
+`saturateBatch` reads statistics after drain. `saturateLive` emits running statistics per-element via Mealy-machine — state fields (`n`, `drops`, `peak`) serve algorithm, emission fields (`item`, `depth`, `running`) serve downstream. Zero shared members; decoupling is load-bearing.
 
 ```ts
-import { Data, Effect, Match, Metric } from "effect";
+import { Chunk, Duration, Effect, Fiber, Metric, Number as N, Queue, Ref, Stream } from "effect"
 
-const perfVocab = {
-  label: { operation: "operation" },
-  operation: { emit: "emit", ingest: "ingest" },
-  reason: { terminal: "terminal", throttle: "throttle", upstream: "upstream" },
-  selector: { ok: "ok", terminal: "terminal", throttle: "throttle", upstream: "upstream" },
-} as const;
-type OpErrorReason = (typeof perfVocab.reason)[keyof typeof perfVocab.reason];
-type OperationName = (typeof perfVocab.operation)[keyof typeof perfVocab.operation];
-type Selector = (typeof perfVocab.selector)[keyof typeof perfVocab.selector];
+type Stats   = { n:    number; drops: number; peak:    number }
+type Live<A> = { item: A;      depth: number; running: Stats  }
 
-// --- [ERRORS] ----------------------------------------------------------------
+const saturateBatch = <A>(cfg: { maxDepth: number; batchSize: number; within: Duration.Duration }) =>
+  (source: Stream.Stream<A>, dropped: Metric.Metric.Counter<number>) => Effect.scoped(Effect.gen(function* () {
+    const queue = yield* Queue.dropping<A>(cfg.maxDepth)
+    const stats = yield* Ref.make<Stats>({ n: 0, drops: 0, peak: 0 })
+    const offer = (a: A) => Queue.offer(queue, a).pipe(
+      Effect.zip(Queue.size(queue)),
+      Effect.tap(([ok, d]) => Ref.update(stats, (s) => ({ n: s.n + 1, drops: s.drops + +!ok, peak: N.max(s.peak, d) }))),
+      Effect.tap(([ok]) => Effect.when(Metric.increment(dropped), () => !ok)))
+    const producer = yield* Stream.runForEach(source, offer).pipe(Effect.ensuring(Queue.shutdown(queue)), Effect.forkScoped)
+    const drained = yield* Stream.fromQueue(queue, { maxChunkSize: cfg.batchSize }).pipe(
+      Stream.groupedWithin(cfg.batchSize, cfg.within), Stream.mapChunks((c) => Chunk.flatMap(c, (x) => x)), Stream.runCollect)
+    yield* Fiber.join(producer)
+    return { drained, stats: yield* Ref.get(stats) }
+  }))
 
-class OpError extends Data.TaggedError("OpError")<{
-  readonly reason: OpErrorReason;
-}> {}
-
-// --- [CONSTANTS] -------------------------------------------------------------
-
-const operationAttempts = Metric.counter("perf_operation_attempts_total");
-const operationFailures = Metric.frequency("perf_operation_failures_total", { preregisteredWords: [perfVocab.reason.throttle, perfVocab.reason.upstream, perfVocab.reason.terminal] });
-const operationLatency =  Metric.timerWithBoundaries("perf_operation_latency_seconds", [0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 1, 3]);
-
-// --- [FUNCTIONS] -------------------------------------------------------------
-
-const raw = (selector: Selector) =>
-  Match.value(selector).pipe(
-    Match.when(perfVocab.selector.ok, () => Effect.succeed(perfVocab.selector.ok)),
-    Match.when(perfVocab.selector.throttle, () => Effect.fail(new OpError({ reason: perfVocab.reason.throttle }))),
-    Match.when(perfVocab.selector.upstream, () => Effect.fail(new OpError({ reason: perfVocab.reason.upstream }))),
-    Match.when(perfVocab.selector.terminal, () => Effect.fail(new OpError({ reason: perfVocab.reason.terminal }))),
-    Match.exhaustive,
-  );
-const classify = (error: OpError) => error.reason;
-const runMeasured = (operation: OperationName, selector: Selector) =>
-  Metric.increment(Metric.tagged(operationAttempts, perfVocab.label.operation, operation)).pipe(
-    Effect.zipRight(raw(selector)),
-    Metric.trackDuration(Metric.tagged(operationLatency, perfVocab.label.operation, operation)),
-    Metric.trackErrorWith(Metric.tagged(operationFailures, perfVocab.label.operation, operation), classify),
-  );
+const saturateLive = <A>(cfg: { maxDepth: number }) =>
+  (source: Stream.Stream<A>): Stream.Stream<Live<A>> =>
+    source.pipe(
+      Stream.mapAccum({ n: 0, drops: 0, peak: 0 } as Stats, (s, item) => {
+        const nextCount = s.n + 1
+        const willDrop = nextCount > cfg.maxDepth
+        const next: Stats = { n: nextCount, drops: s.drops + (willDrop ? 1 : 0), peak: Math.max(s.peak, nextCount) }
+        return [next, { item, depth: nextCount, running: next }] as const
+      }),
+      Stream.filterMap(({ item, depth, running }) =>
+        depth <= cfg.maxDepth
+          ? { _tag: "Some" as const, value: { item, depth, running } }
+          : { _tag: "None" as const }))
 ```
 
-**Enforcement laws:**<br>
-- denominator metrics (`attempts`) are side-channel independent and must execute even on failure,
-- failure vocabulary is closed and pre-registered to avoid cardinality drift,
-- this section owns failure classification for budgeting, not cross-cutting trace/log projection.
+**Saturation contracts:**
+- `saturateBatch`: `Ref.update` for scalar accumulation — statistics read once at completion. `Effect.when` conditionally increments; `+!ok` coerces `boolean` to `0 | 1`.
+- `saturateLive`: pure `Stream.mapAccum` — no queue. `filterMap` drops items exceeding depth without queue overhead.
+- Choose `saturateBatch` when backpressure requires queue semantics. `saturateLive` when depth tracking suffices.
+- `running` in emission is snapshot copy — downstream never holds reference to accumulator internals.
 
----
-## [3][QUEUE_SATURATION_WITH_TERMINATION_GUARANTEE]
 
->**Dictum:** *Backpressure guidance is invalid unless the drain path has a deterministic termination contract.*
+## Transactional contention
 
-<br>
+STM serializes concurrent accounting via optimistic locks — conflicts trigger automatic retry. TRef for single-counter hot paths; TMap for keyed aggregation.
 
-```ts
-import { Chunk, Effect, Fiber, Match, Metric, Queue, Schedule, Stream } from "effect";
+Two composition patterns: `STM.all` batches independent reads into one atomic observation. `STM.gen` with named bindings for derived computations where intermediate values appear in predicates or multiple expressions.
 
-// --- [CONSTANTS] -------------------------------------------------------------
-
-const queueDepth =   Metric.gauge("perf_queue_depth");
-const queueDropped = Metric.counter("perf_queue_dropped_total");
-const queueDrained = Metric.counter("perf_queue_drained_total");
-const shape = { items: 1600, batchSize: 128, within: "35 millis", maxQueueDepth: 256 } as const;
-
-// --- [FUNCTIONS] -------------------------------------------------------------
-
-const runSaturation = Effect.scoped(
-  Effect.gen(function* () {
-    const queue = yield* Queue.dropping<number>(shape.maxQueueDepth);
-    const offerMeasured = (n: number) =>
-      Queue.offer(queue, n).pipe(
-        Effect.tap((accepted) =>
-          Match.value(accepted).pipe(
-            Match.when(true, () => Effect.void),
-            Match.orElse(() => Metric.increment(queueDropped)),
-          )),
-      );
-    const depthSampler = yield* Stream.repeatEffect(Queue.size(queue)).pipe(
-      Stream.schedule(Schedule.spaced("25 millis")),
-      Stream.runForEach((depth) => Metric.set(queueDepth, depth)),
-      Effect.forkScoped,
-    );
-    const producer = yield* Stream.range(1, shape.items).pipe(
-      Stream.runForEach(offerMeasured),
-      Effect.ensuring(Queue.shutdown(queue)),
-      Effect.forkScoped,
-    );
-    const drained = yield* Stream.fromQueue(queue, { maxChunkSize: shape.batchSize }).pipe(
-      Stream.groupedWithin(shape.batchSize, shape.within),
-      Stream.tap((batch) => Metric.incrementBy(queueDrained, Chunk.size(batch))),
-      Stream.runCollect,
-    );
-    yield* Fiber.join(producer);
-    yield* Fiber.interrupt(depthSampler);
-    return drained;
-  }),
-);
-```
-
-**Saturation laws:**<br>
-- `Queue.offer` result is the loss boundary for dropping queues and must be captured,
-- depth signals without offer outcomes are incomplete under burst pressure,
-- termination must be scope-bounded and explicit; `runCollect` without lifecycle closure is a defect.
-
----
-## [4][PARALLELISM_SHAPING_AND_CHUNK_ECONOMICS]
-
->**Dictum:** *Concurrency, cadence, and chunk boundaries are one policy surface; tuning one in isolation is invalid.*
-
-<br>
+Vocabulary maps strategy discriminants to pool configuration, threshold predicate, invalidation policy — one lookup resolves all axes.
 
 ```ts
-import { Chunk, Effect, Metric, Stream } from "effect";
+import { Data, Duration, Effect, Pool, STM, TRef, pipe } from "effect"
 
-// --- [CONSTANTS] -------------------------------------------------------------
+const Strategy = {
+  usage: {
+    ttlStrategy:      "usage" as const, utilization: 0.7,
+    threshold:        (hit: number, total: number) => total > 0 && hit / total >= 0.7,
+    shouldInvalidate: (n:   number) => n % 11 === 0,
+  },
+  creation: {
+    ttlStrategy:      "creation" as const, utilization: 0.5,
+    threshold:        (hit: number, total: number) => total > 0 && hit / total >= 0.5,
+    shouldInvalidate: (n:   number) => n % 7 === 0,
+  },
+} as const satisfies Record<string, {
+  ttlStrategy:      "usage" | "creation"; utilization: number
+  threshold:        (hit: number, total: number) => boolean
+  shouldInvalidate: (n:   number) => boolean
+}>
 
-const transformOut =     Metric.counter("perf_transform_out_total");
-const transformLatency = Metric.timerWithBoundaries("perf_transform_stage_seconds", [0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 1]);
+class ResourceId extends Data.Class<{ readonly id: string }> {}
 
-// --- [FUNCTIONS] -------------------------------------------------------------
-
-const square = (n: number) => n * n;
-const shaped = Stream.range(1, 4000).pipe(
-  Stream.rechunk(256),
-  Stream.mapChunks((batch) => Chunk.map(batch, square)),
-  Stream.mapChunksEffect((batch) =>
-    Effect.succeed(batch).pipe(
-      Metric.trackDuration(transformLatency),
-      Effect.tap(() => Metric.incrementBy(transformOut, Chunk.size(batch))),
-    ),
-  ),
-);
-const runShaped = shaped.pipe(Stream.runFold(0, (count, _elem) => count + 1));
-```
-
-**Shaping laws:**<br>
-- millisecond/second duration literals may stay as strings for compact policy readability,
-- `Stream.mapChunks`/`Stream.mapChunksEffect` keep hot-path transforms allocation-aware and chunk-local,
-- throughput should be measured per chunk, not per element, on hot paths.
-
----
-## [5][REQUEST_BATCHING_WITH_PLATFORM_HTTPCLIENT]
-
->**Dictum:** *Remote latency guidance must include data-source batching and one transformed client choke point.*
-
-<br>
-
-```ts
-import * as FetchHttpClient from "@effect/platform/FetchHttpClient";
-import * as HttpClient from "@effect/platform/HttpClient";
-import * as HttpClientRequest from "@effect/platform/HttpClientRequest";
-import * as HttpClientResponse from "@effect/platform/HttpClientResponse";
-import { Data, Effect, HashMap, Match, Metric, Option, Request, RequestResolver, Schedule, Schema } from "effect";
-
-// --- [ERRORS] ----------------------------------------------------------------
-
-class UsageError extends Data.TaggedError("UsageError")<{
-  readonly reason: "decode" | "http" | "transport";
-}> {}
-class FetchUsage extends Request.TaggedClass("FetchUsage")<{
-  readonly tenantId: string;
-  readonly used:     number;
-}, UsageError, {readonly tenantId: string;}> {}
-
-// --- [CONSTANTS] -------------------------------------------------------------
-
-const usageSchema =      Schema.Array(Schema.Struct({ tenantId: Schema.String, used: Schema.Number }));
-const httpBatchLatency = Metric.timerWithBoundaries("perf_http_batch_seconds", [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 1, 2]);
-
-// --- [FUNCTIONS] -------------------------------------------------------------
-
-const resolver = RequestResolver.fromEffectTagged<FetchUsage>()({
-  FetchUsage: (requests) =>
-    HttpClient.HttpClient.pipe(
-      Effect.map((base) =>
-    base.pipe(
-      HttpClient.mapRequest(HttpClientRequest.prependUrl("https://svc.internal")),
-      HttpClient.withTracerPropagation(true),
-      HttpClient.retry({ schedule: Schedule.exponential("50 millis"), times: 3 }),
-          HttpClient.filterStatusOk,
-        )),
-      Effect.flatMap((client) =>
-        client.get("/usage", { urlParams: requests.map((request) => ["tenantId", request.tenantId] as const) }).pipe(
-          Effect.flatMap(HttpClientResponse.schemaBodyJson(usageSchema)),
-          Effect.mapError((error) =>
-            Match.value(error._tag).pipe(
-              Match.when("ParseError", () => new UsageError({ reason: "decode" })),
-              Match.when("ResponseError", () => new UsageError({ reason: "http" })),
-              Match.orElse(() => new UsageError({ reason: "transport" })),
-            )),
-          Effect.flatMap((rows) => {
-            const byTenant = HashMap.fromIterable(rows.map((row) => [row.tenantId, row.used] as const));
-            return Effect.forEach(requests, (request) =>
-              Option.match(HashMap.get(byTenant, request.tenantId), {
-                onNone: () => Effect.fail(new UsageError({ reason: "decode" })),
-                onSome: (used) => Effect.succeed({ tenantId: request.tenantId, used }),
-              }));
-          }),
-        )),
-    ),
-}).pipe(RequestResolver.batchN(64));
-const loadUsage = (tenantId: string) =>
-  Effect.request(new FetchUsage({ tenantId }), RequestResolver.contextFromEffect(resolver)).pipe(
-    Metric.trackDuration(httpBatchLatency),
-  );
-const tenantIds = ["acme", "globex", "initech", "umbrella"] as const;
-const runBatchedUsage = Effect.gen(function* () {
-  const cache = yield* Request.makeCache({ capacity: 10_000, timeToLive: "3 minutes" });
-  return yield* Effect.forEach(tenantIds, loadUsage, { concurrency: "unbounded" }).pipe(
-    Effect.withRequestBatching(true),
-    Effect.withRequestCaching(true),
-    Effect.withRequestCache(cache),
-  );
-}).pipe(Effect.provide(FetchHttpClient.layer));
-```
-
-**Boundary laws:**<br>
-- request batching belongs to performance only when tied to measurable latency/cost outcomes,
-- client transformation is centralized to keep retry/timeout/projection policy coherent,
-- deep trace/export topology is out of scope here and belongs to `observability.md`.
-
----
-## [6][STM_DRIFT_LEDGER_FOR_CACHE_AND_POOL_POLICY]
-
->**Dictum:** *Cache and pool policy tuning is incomplete unless drift is measured atomically under concurrency.*
-
-<br>
-
-```ts
-import { randomUUID } from "node:crypto";
-import { Data, Effect, Match, Metric, Pool, STM, TMap, Schedule } from "effect";
-
-// --- [ERRORS] ----------------------------------------------------------------
-
-class TransportError extends Data.TaggedError("TransportError")<{
-  readonly reason: "timeout" | "upstream";
-}> {}
-
-// --- [CONSTANTS] -------------------------------------------------------------
-
-const cacheHits =         Metric.gauge("perf_cache_hits");
-const poolInvalidations = Metric.counter("perf_pool_invalidations_total");
-
-// --- [FUNCTIONS] -------------------------------------------------------------
-
-const cachePoolPolicy = Effect.scoped(
-  Effect.gen(function* () {
-    const ledger = yield* STM.commit(TMap.make(
-      ["requests", 0], ["misses", 0], ["invalidations", 0],
-    ));
-    const cachedToken = yield* Effect.cachedWithTTL(
-      Effect.sync(randomUUID).pipe(
-        Effect.tap(() => STM.commit(TMap.merge(ledger, "misses", 1, (x, y) => x + y))),
-      ),
-      "15 seconds",
-    );
+const accounting = <K extends keyof typeof Strategy>(strategy: K, poolSize: number, ttl: Duration.Duration) =>
+  Effect.scoped(Effect.gen(function* () {
+    const cfg = Strategy[strategy]
+    const requests = yield* TRef.make(0)
+    const hits = yield* TRef.make(0)
+    const invalidations = yield* TRef.make(0)
     const pool = yield* Pool.makeWithTTL({
-      acquire: Effect.sync(() => ({ id: randomUUID() } as const)),
-      min: 1,
-      max: 8,
-      concurrency: 2,
-      targetUtilization: 0.7,
-      timeToLive: "30 seconds",
-      timeToLiveStrategy: "usage",
-    });
-    const request = (n: number) =>
-      STM.commit(TMap.merge(ledger, "requests", 1, (x, y) => x + y)).pipe(
-        Effect.zipRight(cachedToken),
-        Effect.flatMap((token) =>
-          Effect.scoped(
-            Pool.get(pool).pipe(
-              Effect.flatMap((resource) => {
-                const invalidateIfNeeded = Match.value(n % 9 === 0).pipe(
-                  Match.when(true, () =>
-                    Pool.invalidate(pool, resource).pipe(
-                      Effect.zipRight(Metric.increment(poolInvalidations)),
-                      Effect.zipRight(STM.commit(TMap.merge(ledger, "invalidations", 1, (x, y) => x + y))),
-                    )),
-                  Match.orElse(() => Effect.void),
-                );
-                const failIfUpstream = Match.value(n % 17 === 0).pipe(
-                  Match.when(true, () => Effect.fail(new TransportError({ reason: "upstream" }))),
-                  Match.orElse(    () => Effect.void),
-                );
-                return Effect.sleep("2 millis").pipe(
-                  Effect.zipRight(invalidateIfNeeded),
-                  Effect.zipRight(failIfUpstream),
-                  Effect.map(() => ({ token, resourceId: resource.id, n } as const)),
-                );
-              }),
-            ),
-          )),
-        Effect.timeoutFail({ duration: "900 millis", onTimeout: () => new TransportError({ reason: "timeout" }) }),
-        Effect.retry({ schedule: Schedule.exponential("20 millis"), times: 4, until: (error: TransportError) => error.reason === "upstream" }),
-      );
-    yield* Effect.all(Array.from({ length: 120 }, (_, index) => request(index + 1)), { concurrency: 24 });
-    const summary = yield* STM.gen(function* () {
-      const requests = yield* TMap.getOrElse(ledger, "requests", () => 0);
-      const misses = yield* TMap.getOrElse(ledger, "misses", () => 0);
-      const invalidations = yield* TMap.getOrElse(ledger, "invalidations", () => 0);
-      return { requests, misses, invalidations } as const;
-    }).pipe(STM.commit);
-    yield* Metric.set(cacheHits, summary.requests - summary.misses);
-    return summary;
-  }),
-);
+      acquire: Effect.sync(() => new ResourceId({ id: crypto.randomUUID() })),
+      min: 1, max: poolSize, timeToLive: ttl, timeToLiveStrategy: cfg.ttlStrategy, targetUtilization: cfg.utilization,
+    })
+    const execute = pipe(
+      STM.commit(TRef.updateAndGet(requests, (n) => n + 1)),
+      Effect.flatMap((n) => Effect.scoped(Pool.get(pool).pipe(
+        Effect.tap((r) => Effect.when(Pool.invalidate(pool, r).pipe(
+          Effect.zipRight(STM.commit(TRef.update(invalidations, (i) => i + 1)))), () => cfg.shouldInvalidate(n))),
+        Effect.tap(() => STM.commit(TRef.update(hits, (h) => h + (n % 3 === 0 ? 0 : 1))))))))
+    const awaitThreshold = (minRequests: number) => STM.gen(function* () {
+      const h = yield* TRef.get(hits)
+      const t = yield* TRef.get(requests)
+      yield* STM.check(t >= minRequests && cfg.threshold(h, t))
+      return { hitRate: h / t, hits: h, total: t }
+    }).pipe(STM.commit)
+    const snapshot = STM.all([TRef.get(requests), TRef.get(hits), TRef.get(invalidations)]).pipe(
+      STM.map(([total, hit, inv]) => ({ total, hit, inv, hitRate: total > 0 ? hit / total : 0 })), STM.commit)
+    return { execute, awaitThreshold, snapshot, pool }
+  }))
 ```
 
-**Drift laws:**<br>
-- shared counters for contention surfaces are transactional state, not mutable process variables,
-- retry predicates must be typed and explicit (`until: (error: TransportError) => ...`),
-- transient timeout rails retry; terminal upstream rails stop retry,
-- hit accounting is derived from request/miss rails, not guessed from call frequency.
+**Contention contracts:**
+- `STM.gen` with named bindings when values appear in predicate AND return. `STM.all` → `map` when values feed single aggregate.
+- `shouldInvalidate` as function — per-strategy logic without branching at call site. Adding strategy requires one entry with all axes.
+- `STM.check` blocks until predicate succeeds — cleaner than `retryWhile` with negation.
 
----
-## [7][DETERMINISTIC_CI_GATES_WITH_TYPED_FAILURES]
 
->**Dictum:** *A gate is valid only when sample policy is explicit, percentile math is reproducible, and failures are typed artifacts.*
+## Gate discipline
 
-<br>
+Performance gates compute order-statistic aggregates over timed samples, compare against budget policy, reject regressions with typed evidence. Vocabulary encodes operation → (percentile function, budget, workload shape) as single lookup.
+
+`Array.get` returns `Option`, surfacing out-of-bounds as typed failure. `filterOrFail` converts threshold breach to `GateFault` without branching.
 
 ```ts
-import { Array as Arr, Chunk, Data, Duration, Effect, Match, Metric, Schedule, Stream } from "effect";
+import { Array as A, Data, Duration, Effect, Metric, Number as N, Order, Schedule, Stream, pipe } from "effect"
 
-// --- [ERRORS] ----------------------------------------------------------------
+const Gates = {
+  ingest: { budgetMs: 140, p: 0.95, warmup: 8, measured: 64, items: 80, batchSize: 32, within: Duration.millis(20) },
+  emit:   { budgetMs: 110, p: 0.95, warmup: 8, measured: 64, items: 80, batchSize: 32, within: Duration.millis(20) },
+} as const satisfies Record<string, { budgetMs: number; p: number; warmup: number; measured: number; items: number; batchSize: number; within: Duration.Duration }>
 
-class BudgetExceeded extends Data.TaggedError("BudgetExceeded")<{
-  readonly operation:     "ingest" | "emit";
-  readonly measuredP95Ms: number;
-  readonly budgetMs:      number;
-}> {}
+const pIdx = <K extends keyof typeof Gates>(op: K) => Math.ceil(Gates[op].measured * Gates[op].p) - 1
 
-// --- [CONSTANTS] -------------------------------------------------------------
+class GateFault extends Data.TaggedError("GateFault")<{ readonly op: keyof typeof Gates; readonly measured: number; readonly budget: number }> {
+  get delta() { return N.subtract(this.measured, this.budget) }
+}
 
-const budget = { ingest: { p95Ms: 140 }, emit: { p95Ms: 110 } } as const;
-const workload = {
-  items:        80,
-  cadence:      "1 millis",
-  batchSize:    32,
-  within:       "20 millis",
-  warmupRuns:   Arr.makeBy(8, (index) => index + 1),
-  measuredRuns: Arr.makeBy(64, (index) => index + 1),
-} as const;
-const gateP95Ms =    Metric.gauge("perf_gate_p95_ms");
-const gateCycle =    Metric.timerWithBoundaries("perf_gate_cycle_seconds", [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 1, 2, 5]);
-const gateFailures = Metric.frequency("perf_gate_failures_total", { preregisteredWords: ["ingest", "emit"] });
-
-// --- [FUNCTIONS] -------------------------------------------------------------
-
-const runWorkload = (shape: typeof workload) =>
-  Stream.range(1, shape.items).pipe(
-    Stream.schedule(Schedule.spaced(shape.cadence)),
-    Stream.groupedWithin(shape.batchSize, shape.within),
-    Stream.map(Chunk.size),
-    Stream.runFold(0, (sum, size) => sum + size),
-  );
-const runSample = (shape: typeof workload) =>
-  runWorkload(shape).pipe(
-    Effect.timed,
-    Effect.map(([elapsed]) => Duration.toMillis(elapsed)),
-  );
-const gate = (operation: "ingest" | "emit", budgetMs: number) =>
-    Effect.forEach(workload.warmupRuns, () => runSample(workload), { concurrency: 1, discard: true }).pipe(
-    Effect.zipRight(Effect.forEach(workload.measuredRuns, () => runSample(workload), { concurrency: 1 })),
-    Effect.map((samples) => [...samples].sort((a, b) => a - b)),
-    Effect.flatMap((sorted) => Effect.fromNullable(sorted.at(Math.max(0, Math.ceil(sorted.length * 0.95) - 1))).pipe(Effect.orDie)),
-    Effect.tap((p95) => Metric.set(Metric.tagged(gateP95Ms, "operation", operation), p95)),
-    Metric.trackDuration(Metric.tagged(gateCycle, "operation", operation)),
-    Effect.flatMap((p95) =>
-      Match.value(p95 <= budgetMs).pipe(
-        Match.when(true, () => Effect.succeed({ operation, p95 } as const)),
-        Match.orElse(() =>
-          Metric.update(Metric.tagged(gateFailures, "operation", operation), operation).pipe(
-            Effect.zipRight(Effect.fail(new BudgetExceeded({ operation, measuredP95Ms: p95, budgetMs }))),
-          )),
-      )),
-  );
-const ciGate = Effect.all([
-  gate("ingest", budget.ingest.p95Ms),
-  gate("emit",   budget.emit.p95Ms  ),
-], { concurrency: 1 });
+const gate = <K extends keyof typeof Gates>(op: K) => {
+  const cfg = Gates[op]
+  const sample = Stream.range(1, cfg.items).pipe(
+    Stream.schedule(Schedule.spaced("1 millis")),
+    Stream.groupedWithin(cfg.batchSize, cfg.within),
+    Stream.runDrain, Effect.timed, Effect.map(([d]) => Duration.toMillis(d)))
+  return pipe(
+    Effect.replicateEffect(sample, cfg.warmup, { discard: true }),
+    Effect.zipRight(Effect.replicateEffect(sample, cfg.measured)),
+    Effect.map(A.sort(Order.number)),
+    Effect.flatMap((sorted) => A.get(sorted, pIdx(op))),
+    Effect.tap((p) => Metric.set(Metric.tagged(Metric.gauge("gate_p_ms"), "op", op), p)),
+    Effect.filterOrFail((p) => p <= cfg.budgetMs, (p) => new GateFault({ op, measured: p, budget: cfg.budgetMs })),
+    Effect.map((p) => ({ op, p, budget: cfg.budgetMs }) as const))
+}
 ```
 
-**Gate laws:**<br>
-- warmup and measured runs are separate rails and both are versioned with workload,
-- gate metrics are operation-tagged to prevent concurrent overwrite noise,
-- percentile violations fail on a typed error, producing deterministic CI evidence.
+**Gate contracts:**
+- `pIdx` computes percentile index from vocabulary — pure function, not scattered arithmetic.
+- `GateFault` carries both `measured` and `budget` as constructor params. `delta` getter computes from instance fields.
+- Warmup and measured phases via `replicateEffect` — determinism from fixed counts.
+- `Array.get` returns `Option`, composing with `flatMap` — out-of-bounds surfaces as typed `NoSuchElementException`.

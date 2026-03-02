@@ -1,451 +1,317 @@
-# [H1][TYPES]
->**Dictum:** *Type power is achieved by compressing authority, not by multiplying declarations.*
+# Types
 
-<br>
+## Type Extraction Utilities
 
-This reference targets proof-grade type practice: inference firebreaks, protocol drift algebra, nominal rail preservation, and `A/E/R` channel control. Runtime schema is used only at true ingress/egress boundaries; everywhere else, value-driven inference and compile-time law gates own correctness.
+```typescript
+// Extract - Extract types from union
+type AllTypes = 'a' | 'b' | 'c' | 1 | 2 | 3;
+type StringTypes = Extract<AllTypes, string>; // 'a' | 'b' | 'c'
+type NumberTypes = Extract<AllTypes, number>; // 1 | 2 | 3
+// Exclude - Remove types from union
+type WithoutNumbers = Exclude<AllTypes, number>; // 'a' | 'b' | 'c'
+// NonNullable - Remove null and undefined
+type MaybeString = string | null | undefined;
+type DefiniteString = NonNullable<MaybeString>; // string
+// ReturnType - Extract function return type
+function getUser() {
+  return { id: 1, name: 'Ahmad' };
+}
+type User = ReturnType<typeof getUser>; // { id: number; name: string }
+// Parameters - Extract function parameter types
+function createUser(name: string, age: number) {
+  return { name, age };
+}
+type CreateUserParams = Parameters<typeof createUser>; // [string, number]
+// ConstructorParameters - Extract constructor parameters
+class Point {
+  constructor(public x: number, public y: number) {}
+}
+type PointParams = ConstructorParameters<typeof Point>; // [number, number]
+// InstanceType - Extract instance type from constructor
+type PointInstance = InstanceType<typeof Point>; // Point
+```
 
 ---
-## [1][SCHEMA_AUTHORITY_PARSE_POLICY]
->**Dictum:** *Schema authority is valid only when stage order, channel mapping, and recovery policy are one deterministic identity.*
 
-<br>
+## Custom Utilities
 
-- **ALWAYS** keep `Type/Encoded/Context` coupled to one schema identity.
-- **ALWAYS** encode stage order as a compile-time witness, not prose.
-- **NEVER** silently recover parse failures into valid domain values.
-
-```ts
-import { Effect, Match, ParseResult } from "effect";
-import type * as ParseResultTypes from "effect/ParseResult";
-import * as Schema from "effect/Schema";
-
-// --- [CONSTANTS] -------------------------------------------------------------
-
-const parseStages =             ["asymmetry", "invariant", "transform", "policy"] as const;
-const parseStageProof: readonly ["asymmetry", "invariant", "transform", "policy"] = parseStages;
-
-// --- [SCHEMA] ----------------------------------------------------------------
-
-const LocaleCode =    Schema.String.pipe(Schema.pattern(/^[a-z]{2}-[A-Z]{2}$/), Schema.brand("LocaleCode"));
-const ResourcePatch = Schema.transformOrFail(
-  Schema.Struct({
-    display_name:  Schema.NonEmptyTrimmedString,
-    locale:        Schema.String,
-    expires_at_ms: Schema.optional(Schema.NumberFromString),
-  }),
-  Schema.Struct({
-    displayName: Schema.NonEmptyTrimmedString,
-    locale:      LocaleCode,
-    expiresAtMs: Schema.optional(Schema.Number.pipe(Schema.int(), Schema.nonNegative())),
-  }),
+```typescript
+// Nullable - Add null and undefined
+type Nullable<T> = T | null | undefined;
+// ValueOf - Get union of all property values
+type ValueOf<T> = T[keyof T];
+interface Codes {
+  success: 200;
+  notFound: 404;
+  error: 500;
+}
+type StatusCode = ValueOf<Codes>;  // 200 | 404 | 500
+// RequireAtLeastOne - Require at least one property
+type RequireAtLeastOne<T, Keys extends keyof T = keyof T> =
+  Pick<T, Exclude<keyof T, Keys>> &
   {
-    strict: true,
-    decode: ({ display_name, locale, expires_at_ms }, _options, ast) =>
-      Match.value(locale.trim()).pipe(
-        Match.when(
-          (candidate) => /^[a-z]{2}-[A-Z]{2}$/.test(candidate),
-          (candidate) => Schema.decodeUnknown(LocaleCode)(candidate).pipe(
-            Effect.map((decodedLocale) => ({
-              displayName: display_name,
-              locale:      decodedLocale,
-              expiresAtMs: expires_at_ms,
-            })),
-          ),
-        ),
-        Match.orElse(() => Effect.fail(new ParseResult.Type(ast, locale, "locale.invalid"))),
-      ),
-    encode: ({ displayName, locale, expiresAtMs }) =>
-      Effect.succeed({ display_name: displayName, locale, expires_at_ms: expiresAtMs }),
-  },
-);
-
-// --- [FUNCTIONS] -------------------------------------------------------------
-
-type ResourcePatchEncoded = Schema.Schema.Encoded<typeof ResourcePatch>;
-const parseWithPolicy = <const Policy extends {
-  readonly onDecodeError: (
-    error: ParseResultTypes.ParseError,
-    encoded: NoInfer<ResourcePatchEncoded>,
-  ) => ParseResultTypes.ParseError;
-}>(policy: Policy) =>
-  (input: ResourcePatchEncoded) =>
-    Schema.decodeUnknown(ResourcePatch)(input).pipe(
-      Effect.mapError((error) => policy.onDecodeError(error, input)),
-    );
-const strictPolicy = parseWithPolicy({ onDecodeError: (error) => error });
-
-// --- [SAMPLES] ---------------------------------------------------------------
-
-const resourcePatchEncoded = {
-  display_name:  "Portal",
-  locale:        "en-US",
-  expires_at_ms: "4102444800000",
-} as const satisfies Schema.Schema.Encoded<typeof ResourcePatch>;
-const resourcePatchDecoded = {
-  displayName: "Portal",
-  locale:      "en-US" as Schema.Schema.Type<typeof LocaleCode>,
-  expiresAtMs: 4_102_444_800_000,
-} as const satisfies Schema.Schema.Type<typeof ResourcePatch>;
+    [K in Keys]-?: Required<Pick<T, K>> & Partial<Pick<T, Exclude<Keys, K>>>;
+  }[Keys];
+interface Options {
+  id?:    number;
+  name?:  string;
+  email?: string;
+}
+type AtLeastOne = RequireAtLeastOne<Options>;  // Must have at least one of id, name, or email
+// RequireOnlyOne - Require exactly one property
+type RequireOnlyOne<T, Keys extends keyof T = keyof T> =
+  Pick<T, Exclude<keyof T, Keys>> &
+  {
+    [K in Keys]-?:
+      Required<Pick<T, K>> &
+      Partial<Record<Exclude<Keys, K>, undefined>>;
+  }[Keys];
+type OnlyOne = RequireOnlyOne<Options>;  // Must have exactly one of id, name, or email
+// Merge - Deep merge two types
+type Merge<T, U> = Omit<T, keyof U> & U;
+interface Base {
+  id:   number;
+  name: string;
+}
+interface Extension {
+  name:  string; // Override
+  email: string; // Add
+}
+type Combined = Merge<Base, Extension>;  // { id: number; name: string; email: string }
+// ConditionalKeys - Get keys matching condition
+type ConditionalKeys<T, Condition> = {
+  [K in keyof T]: T[K] extends Condition ? K : never;
+}[keyof T];
+type FunctionKeys = ConditionalKeys<typeof Math, Function>;  // 'abs' | 'acos' | 'sin' | ...
 ```
 
 ---
-## [2][NOMINAL_BOUNDARY_TYPES]
->**Dictum:** *Nominal rails are meaningful only when parse creates identity, composition keeps identity, and transport unwraps last.*
 
-<br>
+## Tuple Utilities
 
-- **ALWAYS** parse unknown identifiers into branded values before composition.
-- **ALWAYS** prove adjacent brands are non-interchangeable with negative compile gates.
-- **NEVER** unwrap branded values before the explicit transport edge.
+```typescript
+// First - Get first element type
+type First<T extends any[]> = T extends [infer F, ...any[]] ? F : never;
+type FirstType = First<[string, number, boolean]>; // string
+// Last - Get last element type
+type Last<T extends any[]> = T extends [...any[], infer L] ? L : never;
+type LastType = Last<[string, number, boolean]>; // boolean
+// Tail - Remove first element
+type Tail<T extends any[]> = T extends [any, ...infer Rest] ? Rest : never;
+type TailTypes = Tail<[string, number, boolean]>; // [number, boolean]
+// Prepend - Add element to beginning
+type Prepend<T extends any[], U> = [U, ...T];
+type WithString = Prepend<[number, boolean], string>; // [string, number, boolean]
+// Reverse - Reverse tuple
+type Reverse<T extends any[]> =
+  T extends [infer First, ...infer Rest]
+    ? [...Reverse<Rest>, First]
+    : [];
+type Reversed = Reverse<[1, 2, 3]>; // [3, 2, 1]
+```
 
-```ts
-import * as HttpApiSchema from "@effect/platform/HttpApiSchema";
-import { Brand, Either, Effect, pipe } from "effect";
-import * as Schema from "effect/Schema";
+---
 
-// --- [SCHEMA] ----------------------------------------------------------------
+## String Utilities
 
-const defineId = <const Name extends string>(name: Name) => Schema.UUID.pipe(Schema.brand(`${name}Id` as const));
-const EntityId = defineId("Entity");
-const ScopeId =  defineId("Scope");
-const EntityPathParam = HttpApiSchema.param("entity_id", EntityId);
+```typescript
+// Split - Split string into tuple
+type Split<S extends string, D extends string> =
+  S extends `${infer T}${D}${infer U}`
+    ? [T, ...Split<U, D>]
+    : [S];
+type Parts = Split<'a-b-c', '-'>; // ['a', 'b', 'c']
+// Join - Join tuple into string
+type Join<T extends string[], D extends string> =
+  T extends [infer F extends string, ...infer R extends string[]]
+    ? R extends []
+      ? F
+      : `${F}${D}${Join<R, D>}`
+    : '';
+type Joined = Join<['a', 'b', 'c'], '-'>; // 'a-b-c'
+// Replace - Replace substring
+type Replace<
+  S extends string,
+  From extends string,
+  To extends string
+> = S extends `${infer L}${From}${infer R}`
+  ? `${L}${To}${R}`
+  : S;
+type Replaced = Replace<'hello world', 'world', 'TypeScript'>;  // 'hello TypeScript'
+// TrimLeft - Remove leading whitespace
+type TrimLeft<S extends string> =
+  S extends ` ${infer Rest}` ? TrimLeft<Rest> : S;
+type Trimmed = TrimLeft<'  hello'>; // 'hello'
+```
 
-// --- [CONSTANTS] -------------------------------------------------------------
+---
 
-const entityPathEncoded = "00000000-0000-4000-8000-000000000001" as const satisfies Schema.Schema.Encoded<typeof EntityPathParam>;
-declare const scopeId: Schema.Schema.Type<typeof ScopeId>;
+## Mapped Types
 
-// --- [FUNCTIONS] -------------------------------------------------------------
-
-const toBoundary = {
-  entity: (id: Schema.Schema.Type<typeof EntityId>) => ({ kind: "entity", id } as const),
-  scope:  (id: Schema.Schema.Type<typeof ScopeId>) =>  ({ kind: "scope",  id } as const),
-} as const satisfies {
-  readonly entity: (id: Schema.Schema.Type<typeof EntityId>) => { readonly kind: "entity"; readonly id: Schema.Schema.Type<typeof EntityId> };
-  readonly scope:  (id: Schema.Schema.Type<typeof ScopeId>) =>  { readonly kind: "scope";  readonly id: Schema.Schema.Type<typeof ScopeId>  };
+```typescript
+// Basic mapped type
+type ReadOnly<T> = {
+  readonly [K in keyof T]: T[K];
 };
-const toTransport = {
-  entity: ({ id }: ReturnType<typeof toBoundary.entity>) => ({ kind: "entity", id: Brand.unbranded(id) } as const),
-  scope:  ({ id }: ReturnType<typeof toBoundary.scope>) =>  ({ kind: "scope",  id: Brand.unbranded(id) } as const),
-} as const;
-const acceptsEntity = (_id: Schema.Schema.Type<typeof EntityId>) => Effect.void;
-
-// --- [SAMPLES] ---------------------------------------------------------------
-
-const entityIdentity = pipe(
-  entityPathEncoded,
-  Schema.decodeUnknownEither(EntityId),
-  Either.map(toBoundary.entity),
-  Either.map(toTransport.entity),
-);
-const scopeIdentity = pipe(
-  "00000000-0000-4000-8000-000000000002",
-  Schema.decodeUnknownEither(ScopeId),
-  Either.map(toBoundary.scope),
-  Either.map(toTransport.scope),
-);
-// @ts-expect-error adjacent brands are intentionally non-interchangeable
-const crossBrand = acceptsEntity(scopeId);
+// Optional properties
+type Partial<T> = {
+  [K in keyof T]?: T[K];
+};
+// Required properties
+type Required<T> = {
+  [K in keyof T]-?: T[K]; // Remove optional modifier
+};
+// Key remapping with 'as'
+type Getters<T> = {
+  [K in keyof T as `get${Capitalize<string & K>}`]: () => T[K];
+};
+interface Person {
+  name: string;
+  age:  number;
+}
+type PersonGetters = Getters<Person>;  // { getName: () => string; getAge: () => number; }
+// Filtering keys
+type PickByType<T, U> = {
+  [K in keyof T as T[K] extends U ? K : never]: T[K];
+};
+type StringFields = PickByType<Person, string>; // { name: string }
 ```
 
 ---
-## [3][PROTOCOL_PROJECTION_REGRESSION_GATES]
->**Dictum:** *Protocol surfaces must be projected from constructors once, then guarded by structural drift proofs.*
 
-<br>
+## Recursive Types
 
-- **ALWAYS** derive payload/success/error from protocol constructors.
-- **ALWAYS** assert projection equality and enforce negative drift gates.
-- **NEVER** maintain detached DTO aliases for protocol edges.
+```typescript
+// JSON type
+type JSONValue =
+  | string
+  | number
+  | boolean
+  | null
+  | JSONValue[]
+  | { [key: string]: JSONValue };
+// Deep partial
+type DeepPartial<T> = T extends object ? {
+  [K in keyof T]?: DeepPartial<T[K]>;
+} : T;
+// Deep readonly
+type DeepReadonly<T> = T extends object ? {
+  readonly [K in keyof T]: DeepReadonly<T[K]>;
+} : T;
+// Path type for nested objects
+type PathsToProps<T> = T extends object ? {
+  [K in keyof T]: K extends string
+    ? T[K] extends object
+      ? K | `${K}.${PathsToProps<T[K]>}`
+      : K
+    : never;
+}[keyof T] : never;
+interface User {
+  profile: {
+    name: string;
+    settings: {
+      theme: string;
+    };
+  };
+}
+type UserPaths = PathsToProps<User>;  // 'profile' | 'profile.name' | 'profile.settings' | 'profile.settings.theme'
+```
 
-```ts
-import * as Model from "@effect/sql/Model";
-import * as Rpc from "@effect/rpc/Rpc";
-import { Chunk, DateTime } from "effect";
-import * as Schema from "effect/Schema";
+---
 
-// --- [TYPES] -----------------------------------------------------------------
+# Type-Level Programming
 
-type Equal<A, B> = (<T>() => T extends A ? 1 : 2) extends (<T>() => T extends B ? 1 : 2) ? true : false;
+```typescript
+// Type-level addition (limited)
+type Length<T extends any[]> = T['length'];
+type Concat<A extends any[], B extends any[]> = [...A, ...B];
+// Type-level conditionals
+type If<Condition extends boolean, Then, Else> =
+  Condition extends true ? Then : Else;
+// Type-level equality
+type Equal<X, Y> =
+  (<T>() => T extends X ? 1 : 2) extends
+  (<T>() => T extends Y ? 1 : 2) ? true : false;
+// Assert equal types (for testing)
 type Assert<T extends true> = T;
-
-// --- [CLASSES] ---------------------------------------------------------------
-
-class ResourceRecord extends Model.Class<ResourceRecord>("TypesResourceRecord")({
-  id:       Model.Generated(Schema.UUID),
-  scopeId:  Schema.UUID,
-  amount:   Schema.Number,
-  readings: Schema.Chunk(Schema.Struct({ key: Schema.String, delta: Schema.BigIntFromSelf, at: Schema.DateTimeUtcFromNumber }),),
-}) {}
-
-// --- [SCHEMA] ----------------------------------------------------------------
-
-const ResourceRejected = Schema.Struct({ _tag: Schema.Literal("ResourceRejected"), reason: Schema.String });
-const UpsertResource = Rpc.make("resource.upsert", {
-  payload: ResourceRecord.jsonCreate,
-  success: ResourceRecord.json,
-  error: ResourceRejected,
-});
-
-// --- [LAW_GATES] -------------------------------------------------------------
-
-type PayloadLaw = Assert<Equal<Rpc.Payload<typeof UpsertResource>, Schema.Schema.Type<typeof ResourceRecord.jsonCreate>>>;
-type SuccessLaw = Assert<Equal<Rpc.Success<typeof UpsertResource>, Schema.Schema.Type<typeof ResourceRecord.json>>>;
-type ErrorLaw =   Assert<Equal<Rpc.Error  <typeof UpsertResource>, Schema.Schema.Type<typeof ResourceRejected>>>;
-
-// --- [SAMPLES] ---------------------------------------------------------------
-
-const payloadOk = {
-  scopeId:  "00000000-0000-4000-8000-000000000003",
-  amount:   12,
-  readings: Chunk.of({ key: "cpu", delta: 1n, at: DateTime.unsafeNow() }),
-} as const satisfies Rpc.Payload<typeof UpsertResource>;
-const successOk = {
-  id: "00000000-0000-4000-8000-000000000004",
-  ...payloadOk,
-} as const satisfies Rpc.Success<typeof UpsertResource>;
-const errorOk = {
-  _tag:    "ResourceRejected",
-  reason:  "duplicate",
-} as const satisfies Rpc.Error<typeof UpsertResource>;
-
-// --- [DRIFT_GATES] -----------------------------------------------------------
-
-// @ts-expect-error amount is required by payload projection
-const payloadMissing: Rpc.Payload<typeof UpsertResource> = { scopeId: payloadOk.scopeId, readings: payloadOk.readings };
-// @ts-expect-error extra key is forbidden by payload projection
-const payloadExtra: Rpc.Payload<typeof UpsertResource> = { ...payloadOk, extra: "drift" };
-// @ts-expect-error tag drift must fail against error projection
-const errorTagDrift: Rpc.Error<typeof UpsertResource> = { _tag: "Rejected", reason: "duplicate" };
+type Test = Assert<Equal<1 | 2, 2 | 1>>; // OK
 ```
 
 ---
-## [4][INLINED_HARDENING_NARROWING_INFERENCE_LOCKS]
->**Dictum:** *Inline hardening wins when discriminants, defaults, exactness, and metadata all preserve literal authority under inference pressure.*
 
-<br>
+## Higher-Kinded Types (Simulation)
 
-- **ALWAYS** keep hardening and narrowing inline at definition sites.
-- **ALWAYS** combine `const` generics + `NoInfer` + mapped `satisfies` for anti-widening control.
-- **NEVER** offload inference-critical constraints to detached helper types.
-
-```ts
-import { Effect, Match } from "effect";
-
-// --- [TYPES] -----------------------------------------------------------------
-
-type Command = ReturnType<(typeof command)[keyof typeof command]>;
-
-// --- [CONSTANTS] -------------------------------------------------------------
-
-const routeMetaKey: unique symbol = Symbol("route");
-const command = {
-  append: (id: string, amount: number) => ({ _tag: "Append", id, amount } as const),
-  revoke: (id: string, reason: "manual" | "retention") => ({ _tag: "Revoke", id, reason } as const),
-} as const;
-
-// --- [FUNCTIONS] -------------------------------------------------------------
-
-const handlers = {
-  Append: (input: Extract<Command, { readonly _tag: "Append" }>) => Effect.succeed({ topic: `resource.append.${input.id}` as const }),
-  Revoke: (input: Extract<Command, { readonly _tag: "Revoke" }>) => Effect.succeed({ topic: `resource.revoke.${input.id}` as const }),
-} satisfies {
-  [C in Command as C["_tag"]]: (input: C) => Effect.Effect<{ readonly topic: `resource.${Lowercase<C["_tag"]>}.${string}` }, never, never>;
+```typescript
+// Type-level function simulation
+interface TypeClass<F> {
+  map: <A, B>(f: (a: A) => B, fa: any) => any;
+}
+// Functor pattern
+type Maybe<T> = { type: 'just'; value: T } | { type: 'nothing' };
+const MaybeFunctor: TypeClass<Maybe<any>> = {
+  map: <A, B>(f: (a: A) => B, ma: Maybe<A>): Maybe<B> => {
+    return ma.type === 'just'
+      ? { type: 'just', value: f(ma.value) }
+      : { type: 'nothing' };
+  }
 };
-const dispatch = Match.type<Command>().pipe(
-  Match.tag("Append", handlers.Append),
-  Match.tag("Revoke", handlers.Revoke),
-  Match.exhaustive,
-);
-const defineExact = <Shape>() => <const Value extends Shape>(value: Value & Record<Exclude<keyof Value, keyof Shape>, never>) => value;
-const distributed = <T>(value: T extends unknown ? readonly T[] : never) => value;
-const atomic = <T>(value: [T] extends [unknown] ? readonly T[] : never) => value;
-const selectMode = <const Modes extends readonly ["read" | "write" | "admin", ...("read" | "write" | "admin")[]]>(modes: Modes, preferred: NoInfer<Modes[number]> | undefined) => ({ modes, preferred: preferred ?? modes[0] } as const);
-const getRouteMeta = <const Method extends "GET" | "POST", const Path extends `/${string}`>(metadata: Record<PropertyKey, unknown> | undefined) =>
-  metadata?.[routeMetaKey] as { readonly method: Method; readonly path: Path } | undefined;
-const route = <const Method extends "GET" | "POST", const Path extends `/${string}`>(spec: { readonly method: Method; readonly path: Path }) =>
-  <This, Args extends readonly unknown[], Return>(value: (this: This, ...args: Args) => Return, context: ClassMethodDecoratorContext<This, (this: This, ...args: Args) => Return>) =>
-    context.metadata ? (context.metadata[routeMetaKey] = spec, value) : value;
-
-// --- [SAMPLES] ---------------------------------------------------------------
-
-const basePolicy =        defineExact<{ readonly mode: "read" | "write" | "admin"; readonly retries: number }>()({ mode: "write", retries: 3 });
-const modePolicy =        selectMode(["read", "write", "admin"], basePolicy.mode);
-const distributedSample = distributed<string | number>(["x"]);
-const atomicSample =      atomic<string | number>([1, "x"]);
-const routeDecorator =    route({ method: "GET", path: "/resource/:id" });
-const routeMeta =         getRouteMeta<"GET", "/resource/:id">(undefined);
-```
-
----
-## [5][EFFECT_CHANNEL_ALGEBRA_AND_TYPESTATE_TRANSITIONS]
->**Dictum:** *Channel algebra is complete only when `R` elimination, `E` elimination, and legal transition edges are all proven in one rail.*
-
-<br>
-
-- **ALWAYS** prove `A/E/R` from effect values instead of manually restating rails.
-- **ALWAYS** model capabilities on transition edges (`from -> to`), not state buckets.
-- **NEVER** leave context or error elimination as informal assumptions.
-
-```ts
-import { Context, Data, Effect, Match } from "effect";
-
-// --- [ERRORS] ----------------------------------------------------------------
-
-class ExecuteError extends Data.TaggedError("ExecuteError")<{
-  readonly operation: "read" | "write";
-  readonly reason: "missing" | "conflict";
-}> {}
-
-// --- [SERVICES] --------------------------------------------------------------
-
-const Reader = Context.GenericTag<{ readonly read:  (id: string) => Effect.Effect<{ readonly id: string }, ExecuteError> }>("Reader");
-const Writer = Context.GenericTag<{ readonly write: (id: string) => Effect.Effect<void, ExecuteError> }>("Writer");
-
-// --- [FUNCTIONS] -------------------------------------------------------------
-
-const requireWriterOnly = <A, E>(fx: Effect.Effect<A, E, Context.Tag.Service<typeof Writer>>) => fx;
-const requireNoContext = <A, E>(fx: Effect.Effect<A, E, never>) => fx;
-const requireNoError = <A, R>(fx: Effect.Effect<A, never, R>) => fx;
-const transition = <S extends EdgeState, N extends Next<S>, Owned extends readonly string[]>(from: S, to: N, owned: Owned & (HasAll<Owned, Need<S, N>> extends true ? unknown : never)) => ({ from, to, owned } as const);
-const execute = (id: string) =>
-  Effect.gen(function* () {
-    const reader = yield* Reader;
-    const writer = yield* Writer;
-    const entity = yield* reader.read(id);
-    yield* writer.write(entity.id);
-    return entity.id;
-  });
-
-// --- [TYPES] -----------------------------------------------------------------
-
-type ExecuteA = Effect.Effect.Success<ReturnType<typeof execute>>;
-type ExecuteE = Effect.Effect.Error  <ReturnType<typeof execute>>;
-type ExecuteR = Effect.Effect.Context<ReturnType<typeof execute>>;
-
-type State = keyof typeof transitions | (typeof terminalStates)[number];
-type EdgeState = keyof typeof transitions;
-type Next<S extends EdgeState> = Extract<keyof (typeof transitions)[S], string>;
-type Need<S extends EdgeState, N extends Next<S>> = (typeof transitions)[S][N] extends readonly string[] ? (typeof transitions)[S][N][number] : never;
-type HasAll<Owned extends readonly string[], Needed extends string> = Exclude<Needed, Owned[number]> extends never ? true : false;
-
-// --- [CONSTANTS] -------------------------------------------------------------
-
-const transitions = {
-  Draft:    { Reviewed:  ["write"]                         },
-  Reviewed: { Published: ["approve"], Rejected: ["reject"] },
-} as const satisfies {
-  readonly Draft:    { readonly Reviewed:  readonly string[]                                       };
-  readonly Reviewed: { readonly Published: readonly string[]; readonly Rejected: readonly string[] };
+// Builder pattern with generics
+type Builder<T, K extends keyof T = never> = {
+  with<P extends Exclude<keyof T, K>>(
+    key: P,
+    value: T[P]
+  ): Builder<T, K | P>;
+  build(): K extends keyof T ? T : never;
 };
-const terminalStates = ["Published", "Rejected"] as const;
-
-// --- [SAMPLES] ---------------------------------------------------------------
-
-const withReader = execute("e-1").pipe(
-  Effect.provideService(Reader, {
-    read: (id) => Match.value(id).pipe(Match.when("missing", () => Effect.fail(new ExecuteError({ operation: "read", reason: "missing" }))), Match.orElse(() => Effect.succeed({ id }))),
-  }),
-);
-const withInfra = withReader.pipe(
-  Effect.provideService(Writer, {
-    write: (id) => Match.value(id).pipe(Match.when("blocked", () => Effect.fail(new ExecuteError({ operation: "write", reason: "conflict" }))), Match.orElse(() => Effect.void)),
-  }),
-);
-const recovered = execute("blocked").pipe(
-  Effect.provideService(Reader, {
-    read: (id) => Match.value(id).pipe(Match.when("missing", () => Effect.fail(new ExecuteError({ operation: "read", reason: "missing" }))), Match.orElse(() => Effect.succeed({ id }))),
-  }),
-  Effect.provideService(Writer, {
-    write: (id) => Match.value(id).pipe(Match.when("blocked", () => Effect.fail(new ExecuteError({ operation: "write", reason: "conflict" }))), Match.orElse(() => Effect.void)),
-  }),
-  Effect.catchTag("ExecuteError", () => Effect.succeed("fallback")),
-);
-const writerOnly = requireWriterOnly(withReader);
-const noContext = requireNoContext(withInfra);
-const noError = requireNoError(recovered);
-
-const publish = transition("Reviewed", "Published", ["read", "approve"] as const);
 ```
 
 ---
-## [6][RAIL_PRESERVATION_ACROSS_DATA_STRUCTURES]
->**Dictum:** *Boundary decode, transactional reduction, and watermark progression must preserve one typed error rail across `Chunk`, `Stream`, `STM`, and `TMap`.*
 
-<br>
+## Conditional Types
 
-- **ALWAYS** decode boundary input from encoded shapes, not in-memory conveniences.
-- **ALWAYS** keep mutation transactional until `STM.commit`.
-- **NEVER** leak untyped literals across decode/time/transaction stages.
-
-```ts
-import { Chunk, Clock, Data, DateTime, Effect, Match, Option, STM, Stream, TMap, pipe } from "effect";
-import * as Schema from "effect/Schema";
-
-// --- [ERRORS] ----------------------------------------------------------------
-
-class IngestError extends Data.TaggedError("IngestError")<{ readonly reason: "decode.invalid" | "at.invalid" | "watermark.regression" }> {}
-
-// --- [SCHEMA] ----------------------------------------------------------------
-
-const DeltaWire =      Schema.Struct({ key: Schema.String, delta: Schema.BigInt, atMs: Schema.Number });
-const DeltaBatchWire = Schema.Chunk(DeltaWire);
-
-// --- [FUNCTIONS] -------------------------------------------------------------
-
-const decodeDeltaBatch = (input: unknown) =>
-  Schema.decodeUnknown(DeltaBatchWire)(input).pipe(
-    Effect.mapError(() => new IngestError({ reason: "decode.invalid" })),
-    Effect.flatMap((batch) =>
-      Effect.forEach(batch, ({ key, delta, atMs }) =>
-        Option.match(DateTime.make(atMs), {
-          onNone: () =>   Effect.fail(new IngestError({ reason: "at.invalid" })),
-          onSome: (at) => Effect.succeed({ key, delta, atMs: DateTime.toEpochMillis(at) }),
-        }),
-      ),
-    ),
-  );
-
-const applyDeltaBatchTx = (state: TMap.TMap<string, bigint>, batch: ReadonlyArray<{ readonly key: string; readonly delta: bigint; readonly atMs: number }>) =>
-  pipe(
-    batch,
-    STM.forEach(
-      ({ key, delta }) =>
-        pipe(
-          TMap.get(state, key),
-          STM.map(Option.getOrElse(() => 0n)),
-          STM.flatMap((current) => TMap.set(state, key, current + delta)),
-        ),
-      { discard: true },
-    ),
-    STM.flatMap(() => TMap.toHashMap(state)),
-  );
-
-const ingestDeltaWindows = (state: TMap.TMap<string, bigint>, source: Stream.Stream<unknown>) =>
-  source.pipe(
-    Stream.mapEffect(decodeDeltaBatch),
-    Stream.groupedWithin(64, "500 millis"),
-    Stream.mapEffect((window) =>
-      pipe(
-        window,
-        STM.forEach((batch) => applyDeltaBatchTx(state, batch), { discard: true }),
-        STM.flatMap(() => TMap.toHashMap(state)),
-        STM.commit,
-      ),
-    ),
-  );
-const monotonicWatermark = (previous: number) =>
-  Clock.currentTimeMillis.pipe(
-    Effect.flatMap((now) =>
-      Match.value(now >= previous).pipe(
-        Match.when(true, () => Effect.succeed(now)),
-        Match.orElse(    () => Effect.fail(new IngestError({ reason: "watermark.regression" }))),
-      ),
-    ),
-  );
-
-// --- [SAMPLES] ---------------------------------------------------------------
-
-const deltaBatchEncoded = [{ key: "cpu", delta: "1", atMs: Date.now() }] as const satisfies Schema.Schema.Encoded<typeof DeltaBatchWire>;
+```typescript
+// Basic conditional type
+type IsString<T> = T extends string ? true : false;
+// Distributive conditional types
+type ToArray<T> = T extends any ? T[] : never;
+type StringOrNumberArray = ToArray<string | number>; // string[] | number[]
+// Non-distributive (use tuple)
+type ToArrayNonDist<T> = [T] extends [any] ? T[] : never;
+type BothArray = ToArrayNonDist<string | number>; // (string | number)[]
+// Nested conditionals for type extraction
+type Flatten<T> = T extends Array<infer U>
+  ? U extends Array<infer V>
+    ? Flatten<V>
+    : U
+  : T;
+type Nested = Flatten<string[][][]>; // string
+// Exclude null/undefined
+type NonNullable<T> = T extends null | undefined ? never : T;
 ```
+
+---
+
+## Quick Reference
+
+| Pattern               | Use Case                       |
+| --------------------- | ------------------------------ |
+| `Partial<T>`          | Make all properties optional   |
+| `Required<T>`         | Make all properties required   |
+| `Readonly<T>`         | Make all properties readonly   |
+| `Pick<T, K>`          | Select subset of properties    |
+| `Omit<T, K>`          | Remove subset of properties    |
+| `Record<K, T>`        | Create object type with keys K |
+| `Extract<T, U>`       | Extract types assignable to U  |
+| `Exclude<T, U>`       | Remove types assignable to U   |
+| `NonNullable<T>`      | Remove null and undefined      |
+| `ReturnType<T>`       | Extract function return type   |
+| `Parameters<T>`       | Extract function parameters    |
+| `Awaited<T>`          | Unwrap Promise type            |
+| `T extends U ? X : Y` | Conditional type logic         |
+| `infer R`             | Extract types from patterns    |
+| `K in keyof T`        | Iterate over object keys       |
+| `as NewKey`           | Remap keys in mapped types     |
+| `T extends any`       | Distributive conditionals      |
+| `[T] extends [any]`   | Non-distributive check         |
+| `-?` modifier         | Remove optional                |
+| `readonly` modifier   | Make immutable                 |

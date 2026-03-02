@@ -1,375 +1,309 @@
-# [H1][EFFECTS]
->**Dictum:** *Effect execution is contract algebra: every constructor, topology, and policy choice fixes observable `A/E/R` behavior.*
+## Entry rail composition
 
-<br>
-
-This reference owns runtime decisions that remain after shape and service modeling: entry semantics, topology and loss contracts, `R`-channel supply, and scoped policy rails. Every snippet is pinned to current local typings (`effect@3.19.x`) and keeps branch-free FP+ROP posture. Deep matching, service architecture, and concurrency internals stay in sibling references; this chapter focuses on execution-boundary decisions.
-
----
-## [1][ENTRY_BOUNDARY_AND_CONSTRUCTOR_SEMANTICS]
->**Dictum:** *Boundary constructors define failure semantics first; business flow composes only typed rails.*
-
-<br>
-
-- `Effect.promise` evaluates async code whose rejection/throw path is defect (`die`), not typed `E`.
-- `Effect.tryPromise` keeps async boundary recoverable and mappable into domain failure rails.
-- `Effect.sync` models synchronous side effects; `Effect.suspend` delays graph construction.
-- `Effect.succeed` and `Effect.fail` inject pure values directly into success/error channels.
+`Effect.fn` separates domain logic from resilience policy — the pipeline operator (second argument) applies retry/timeout outside the generator body, ensuring one execution per attempt. `Policy` drives both `tapError` and `retry` from a vocabulary gated via `satisfies` on `IngressError["stage"]`.
 
 ```ts
-import { Data, Effect, Schema as S } from "effect";
+import { Data, Duration, Effect, Schedule, Schema as S } from "effect"
 
-// --- [ERRORS] ----------------------------------------------------------------
+class IngressError extends Data.TaggedError("IngressError")<{
+  readonly stage: "decode" | "quota" | "upstream"; readonly cause: unknown
+}>() {}
 
-class IntakeError extends Data.TaggedError("IntakeError")<{
-  readonly stage:  "decode" | "quota" | "upstream" | "defect";
-  readonly reason: "invalid" | "rejected" | "failed" | "unexpected";
-  readonly cause?: unknown;
-}> {}
+const Policy = {
+  decode:   { status: 400, retryable: false, log: Effect.logWarning },
+  quota:    { status: 429, retryable: true,  log: Effect.logWarning },
+  upstream: { status: 502, retryable: true,  log: Effect.logError   },
+} as const satisfies Record<IngressError["stage"], { status: number; retryable: boolean; log: (...args: ReadonlyArray<unknown>) => Effect.Effect<void> }>
 
-// --- [SCHEMA] ----------------------------------------------------------------
-
-const Intake = S.Struct({
-  tenantId: S.UUID,
-  plan:     S.Literal("free", "pro", "enterprise"),
-  quota:    S.Number.pipe(S.int(), S.nonNegative()),
-});
-
-// --- [FUNCTIONS] -------------------------------------------------------------
-
-const stableHint = Effect.promise(() => Promise.resolve("edge-cache-hit" as const));
-const intakeRail = (input: unknown) =>
-  S.decodeUnknown(Intake)(input).pipe(
-    Effect.mapError((cause) => new IntakeError({ stage: "decode", reason: "invalid", cause })),
-    Effect.filterOrFail(({ quota }) => quota > 0, ({ quota }) => new IntakeError({ stage: "quota", reason: "rejected", cause: quota })),
-    Effect.flatMap((request) =>
-      Effect.tryPromise(() => Promise.resolve({ tenantId: request.tenantId, features: ["audit", "stream"] as const })).pipe(
-        Effect.mapError((cause) => new IntakeError({ stage: "upstream", reason: "failed", cause })),
-        Effect.map((upstream) => ({ request, upstream }) as const),
+const ingest = <A extends { readonly quota: number }, I, R>(
+  schema: S.Schema<A, I, R>,
+  dispatch: (a: A, signal: AbortSignal) => Promise<Response>,
+) => Effect.fn("Ingress.ingest")(
+  (input: unknown): Effect.Effect<Response, IngressError, R> =>
+    S.decodeUnknown(schema)(input).pipe(
+      Effect.mapError((cause) => new IngressError({ stage: "decode", cause })),
+      Effect.filterOrFail(({ quota }) => quota > 0, (a) => new IngressError({ stage: "quota", cause: a.quota })),
+      Effect.flatMap((a) =>
+        Effect.tryPromise({ try: (signal) => dispatch(a, signal), catch: (cause) => new IngressError({ stage: "upstream", cause }) }),
       ),
+      Effect.tapError(({ stage }) => Policy[stage].log("ingress rejected").pipe(Effect.annotateLogs({ stage }))),
     ),
-    Effect.zip(stableHint),
-    Effect.map(([state, cacheHint]) => ({ ...state, cacheHint }) as const),
-  );
+  (effect) => effect.pipe(
+    Effect.retry({ while: ({ stage }) => Policy[stage].retryable, schedule: Schedule.exponential(Duration.millis(100)).pipe(Schedule.jittered, Schedule.intersect(Schedule.recurs(3))) }),
+    Effect.timeoutFail({ duration: Duration.seconds(5), onTimeout: () => new IngressError({ stage: "upstream", cause: "deadline" }) }),
+  ),
+)
 ```
 
-**Laws:**<br>
-- constructor choice sets boundary semantics, not implementation detail,
-- `tryPromise` is the recoverable async ingress rail, `promise` is defect-only ingress,
-- decode and normalization collapse at boundary once; downstream code stays domain-typed.
+**Entry contracts:**
+- `Effect.fn("span")(body, pipeline)` — retry executes only the sealed effect, not the generator. Catches defects in both body and pipeline as `Cause.Sequential`. `fnUntraced` passes original args to pipeline steps; traced variant does not.
+- `S.Schema<A, I, R>` propagates context requirements — `transformOrFail` or service-backed filters widen `R`. `decodeUnknown` accepts `unknown`; `decode` accepts `Schema.Encoded<S>`. `Either`/`Option` decode variants require `R = never`.
+- `tryPromise` object form threads `AbortSignal` for fiber interruption propagation; thunk form runs to completion regardless. `Effect.try` is the synchronous counterpart. `liftPredicate(value, pred, onFalse)` lifts values at entry; `filterOrFail` guards mid-pipeline.
+- Vocabulary fields gated via `satisfies` — adding a stage without matching Policy entry fails at compile time.
+- `Schedule.jittered` prevents thundering herd. `intersect` = tighter (both agree); `union` = looser (either permits). `resetAfter` = circuit-breaker primitive. `whileInput` gates on error value; `tapInput`/`tapOutput` emit within algebra.
 
----
-## [2][TOPOLOGY_MODE_AND_LOSS_CONTRACTS]
->**Dictum:** *Topology chooses dependency shape; aggregation mode chooses information-loss semantics.*
 
-<br>
+## Fan-in topology and retention contracts
 
-- dependency topology: `flatMap` for dependent steps, `all` for independent fan-in, `race` for success-first latency hedging.
-- aggregation mode is contract surface:
-  - fail-fast (`all` default),
-  - branch-preserving (`mode: "either"`),
-  - validation-preserving (`mode: "validate"`),
-  - collection-level retention (`partition`, `validateAll`, `validateFirst`).
-- compare mode on the same graph shape; changing shape and mode together hides loss semantics.
-- choose retention operator only after mode intent is explicit (`either` retains branch success, `validate` retains error position).
+`mode` commits return shape — `"either"` yields `Either<A, E>` per branch (never fails); `"validate"` fails with `{ [K]: Option<E_K> }` (discards successes). Mode selection propagates into all downstream combinators.
+
+`foldOutcomes` parameterizes fold algebra over `(Z, Either<A, E>, index) => Z`. `diagnose` preserves per-key structural identity via `Record.map` — the key-preserving dual to `mergeAll`'s key-collapsing fold.
 
 ```ts
-import * as HttpClient from "@effect/platform/HttpClient";
-import * as HttpClientRequest from "@effect/platform/HttpClientRequest";
-import * as HttpClientResponse from "@effect/platform/HttpClientResponse";
-import { Chunk, Data, Effect, Either, HashMap, Match, Option, Stream } from "effect";
+import { Array as Arr, Data, Effect, Either, Record } from "effect"
 
-// --- [ERRORS] ----------------------------------------------------------------
+class FetchError extends Data.TaggedError("FetchError")<{
+  readonly source: "profile" | "usage" | "entitlements"
+}>() {}
 
-class SnapshotError extends Data.TaggedError("SnapshotError")<{
-  readonly source: "profile" | "usage" | "entitlements";
-  readonly reason: "missing" | "rejected";
-}> {}
-const snapshotReasonPolicy = {
-  missing:  { status: 404, retryable: false },
-  rejected: { status: 503, retryable: true  },
-} as const satisfies Record<SnapshotError["reason"], { readonly status: 404 | 503; readonly retryable: boolean }>;
+const foldOutcomes = <A, E, R, Z>(
+  effects: ReadonlyArray<Effect.Effect<A, E, R>>,
+  zero: Z,
+  f: (z: Z, outcome: Either.Either<A, E>, index: number) => Z,
+): Effect.Effect<Z, never, R> =>
+  Effect.mergeAll(Arr.map(effects, Effect.either), zero, f, { concurrency: "unbounded" })
 
-// --- [FUNCTIONS] -------------------------------------------------------------
+const diagnose = <
+  Fields extends Record<string, Effect.Effect<unknown, { readonly source: string }, any>>,
+>(fields: Fields) =>
+  Effect.all(fields, { mode: "either" }).pipe(
+    Effect.map(Record.map(Either.match({
+      onLeft:  (e) => ({ ok: false, source: e.source } as const),
+      onRight: ()  => ({ ok: true } as const),
+    }))),
+  )
+```
 
-const profile = (tenantId: string) =>
-  HttpClient.HttpClient.pipe(
-    Effect.map((client) => client.pipe(HttpClient.mapRequest(HttpClientRequest.acceptJson))),
-    Effect.flatMap((client) => client.get("https://profile.internal/v1/profile", { urlParams: { tenantId } })),
-    Effect.flatMap((response) =>
-      HttpClientResponse.matchStatus(response, {
-        200: () =>    Effect.succeed({ tenantId, status: "active" as const }),
-        404: () =>    Effect.fail(new SnapshotError({ source: "profile", reason: "missing" })),
-        orElse: () => Effect.fail(new SnapshotError({ source: "profile", reason: "rejected" })),
-      }),
-    ),
-  );
-const usage = (tenantId: string) =>
-  Match.value(tenantId).pipe(
-    Match.when("tenant-overdue", () => Effect.fail(new SnapshotError({ source: "usage", reason: "rejected" }))),
-    Match.orElse((id) => Effect.succeed({ tenantId: id, seatsUsed: 8, apiCalls: 520 } as const)),
-  );
-const entitlements = (tenantId: string) =>
-  Match.value(tenantId).pipe(
-    Match.when("tenant-denied", () => Effect.fail(new SnapshotError({ source: "entitlements", reason: "rejected" }))),
-    Match.orElse((id) => Effect.succeed({ tenantId: id, features: ["audit", "stream"] as const })),
-  );
-const snapshotGraph = (tenantId: string) => ({ profile: profile(tenantId), usage: usage(tenantId), entitlements: entitlements(tenantId) } as const);
-const byMode = (tenantId: string) => ({
-  failFast: Effect.all(snapshotGraph(tenantId)),
-  either:   Effect.all(snapshotGraph(tenantId), { mode: "either" }),
-  validate: Effect.all(snapshotGraph(tenantId), { mode: "validate" }),
-} as const);
-const retentionPolicies = (tenantIds: ReadonlyArray<string>) => ({
-  partition:     Effect.partition(tenantIds,     (tenantId) => byMode(tenantId).failFast, { concurrency: "unbounded" }),
-  validateAll:   Effect.validateAll(tenantIds,   (tenantId) => byMode(tenantId).failFast),
-  validateFirst: Effect.validateFirst(tenantIds, (tenantId) => byMode(tenantId).failFast),
-} as const);
-const summarizeWindows = (tenantIds: ReadonlyArray<string>) =>
-  Stream.fromIterable(tenantIds).pipe(
-    Stream.mapEffect((tenantId) => byMode(tenantId).either),
-    Stream.groupedWithin(64, "750 millis"),
-    Stream.map((window) =>
-      Chunk.reduce(window, HashMap.empty<"ok" | "error", number>(), (acc, outcomes) =>
-        [outcomes.profile, outcomes.usage, outcomes.entitlements].reduce(
-          (state, branch) =>
-            Either.match(branch, {
-              onLeft: () => HashMap.set(state, "error", Option.getOrElse(HashMap.get(state, "error"), () => 0) + 1),
-              onRight: () => HashMap.set(state, "ok", Option.getOrElse(HashMap.get(state, "ok"),      () => 0) + 1),
-            }),
-          acc,
+**Topology contracts:**
+- `Effect.mergeAll` — N-way concurrent fold with positional index. Pre-wrap with `Effect.either` to convert failures to data; without it, first failure short-circuits.
+- `mode: "either"` → `{ [K]: Either<A_K, E_K> }` (never fails). `"validate"` → error channel `{ [K]: Option<E_K> }` (success values absent). Default → `{ [K]: A_K }`, fail-fast. `Effect.all` preserves tuple positional types, struct named types.
+- `partition` → `[rejected, accepted]` with `E = never` (lossless). `validateAll` → `NonEmptyArray<E>` (lossy). `validateFirst` → first success or all errors.
+- Two accumulation patterns: `Record.map` = structural (key-preserving); `mergeAll` = statistical (key-collapsing). `allSuccesses` silently discards failures.
+
+
+## Context derivation and demand narrowing
+
+`mapInputContext` is contravariant: `Context<R2> → Context<R>` widens requirements. `deriveContext` encapsulates `Exclude` arithmetic once. `Layer.function` is the layer-graph dual — pure derivation, no effect.
+
+`serviceOption` → `Effect<Option<A>, never, never>` (zero R). `Context.Reference` (v3.11+) provides default values, vanishing from R when unprovided.
+
+```ts
+import { Context, Effect, Layer, Option, String as Str } from "effect"
+
+class AppTrace     extends Context.Tag("Fx/AppTrace")<AppTrace,         { readonly correlationId: string }>() {}
+class RequestTrace extends Context.Tag("Fx/RequestTrace")<RequestTrace, { readonly traceId:       string }>() {}
+class TenantLens   extends Context.Tag("Fx/TenantLens")<TenantLens,     { readonly tenantId:      string }>() {}
+
+const auditOp = (action: string) =>
+  Effect.all({ trace: RequestTrace, tenant: Effect.serviceOption(TenantLens) }).pipe(
+    Effect.map(({ trace, tenant }) => ({
+      action,
+      traceId:  trace.traceId,
+      tenantId: Option.map(tenant, (t) => t.tenantId),
+    }) as const),
+    Effect.provideServiceEffect(RequestTrace,
+      AppTrace.pipe(
+        Effect.filterOrFail(
+          ({ correlationId }) => Str.isNonEmpty(correlationId),
+          () => ({ _tag: "InvalidTrace" as const }),
         ),
+        Effect.map(({ correlationId }) => ({ traceId: correlationId })),
       ),
     ),
-    Stream.runCollect,
-  );
+  )
+
+const deriveContext = <FId, F, TId, T>(
+  from: Context.Tag<FId, F>,
+  to:   Context.Tag<TId, T>,
+  f:    (a: F) => T,
+) =>
+  <A, E, R>(self: Effect.Effect<A, E, R | TId>): Effect.Effect<A, E, Exclude<R, TId> | FId> =>
+    self.pipe(
+      Effect.mapInputContext((ctx: Context.Context<Exclude<R, TId> | FId>) =>
+        Context.add(ctx, to, f(Context.get(ctx, from))),
+      ),
+    )
+
+const TraceLive = Layer.function(AppTrace, RequestTrace, ({ correlationId }) => ({ traceId: correlationId }))
 ```
 
-**Laws:**<br>
-- topology selection precedes implementation and is part of API meaning,
-- aggregation mode defines retention/loss semantics and therefore return-shape contracts (`validate` preserves error shape, not success retention),
-- tagged error reason policy is one canonical lookup (`reason -> policy`) instead of inline handler literals,
-- bulk rails (`partition`/`validate*`) express product guarantees, not local optimization.
+**Context contracts:**
+- `deriveContext` encapsulates `Exclude<R, TId> | FId`; `Layer.function` is the layer-graph dual. Effect-level for inline pipelines, layer-level for static graphs.
+- `provideServiceEffect` merges provision effect's E and R into consumer. Infallible provision leaves E unchanged — misleading; effectful derivation that can fail belongs here, pure derivation in `mapInputContext`.
+- `serviceOption` → zero R, zero E. `Context.Reference` with `defaultValue` vanishes from R when unprovided. Use `Reference` for config defaults; `serviceOption` for optional capabilities.
+- `Layer.merge` = peer composition (no narrowing). `provide` = narrowing via `Exclude<RIn, ROut_dep>`. `provideMerge` = narrowing + dep output exposed. `Context.omit`/`pick` = value-level `Exclude`/intersection.
+- `Layer.scoped` attaches finalizers to scope; `Layer.effect` has no lifecycle. `Layer.fresh` bypasses memoization; `unwrapEffect` lifts `Effect<Layer>` to `Layer`.
 
----
-## [3][CONTROL_FLOW_INVARIANTS]
->**Dictum:** *Expression-level routing is mandatory; control structures belong to combinators and tagged rails.*
 
-<br>
+## Scoped lifecycle and policy composition
 
-Matching taxonomy and pattern inventory live in `matching.md` and `patterns.md`; this section only pins execution-law posture for effect pipelines.
+Lifetime, timeout, and failure classification compose on a single policy rail. Placing `timeoutFail` outside `Effect.scoped` inverts exit classification — scope closes first with `Exit.Success`, then timeout fires.
 
-```ts
-import { Data, Effect } from "effect";
-
-// --- [ERRORS] ----------------------------------------------------------------
-
-class GateError extends Data.TaggedError("GateError")<{
-  readonly reason: "quota" | "burst";
-  readonly quota:  number;
-  readonly burst:  number;
-}> {}
-
-// --- [FUNCTIONS] -------------------------------------------------------------
-
-const gateAdmission = (quota: number, burst: number) =>
-  Effect.succeed([quota, burst] as const).pipe(
-    Effect.filterOrFail(([currentQuota]) => currentQuota > 0, ([currentQuota, currentBurst]) => new GateError({ reason: "quota", quota: currentQuota, burst: currentBurst })),
-    Effect.filterOrFail(([currentQuota, currentBurst]) => currentBurst <= currentQuota, ([currentQuota, currentBurst]) => new GateError({ reason: "burst", quota: currentQuota, burst: currentBurst })),
-    Effect.map(([currentQuota, currentBurst]) => ({ mode: "admit" as const, quota: currentQuota, burst: currentBurst })),
-  );
-```
-
-**Laws:**<br>
-- route with combinators, not statements,
-- keep failures tagged and local to the rail,
-- match collapse happens at boundary outputs, never mid-pipeline.
-
----
-## [4][R_CHANNEL_PROVISIONING_AND_CONTEXT_LENSING]
->**Dictum:** *`R` is capability demand; provide late, override deterministically, and narrow context explicitly.*
-
-<br>
-
-- `provide` satisfies graph-level requirements.
-- `provideService` and `provideServiceEffect` override capability sources for deterministic runs and tests.
-- `mapInputContext` narrows or remaps ambient context without rewriting core logic.
-- `Context.Tag`/`Context.GenericTag` model boundary contracts; `Effect.Service` owns module construction/default dependencies.
+`withTransport`: non-empty channel tuple unifies single-channel and hedged paths, per-channel scoped lifecycle with four-way exit classification via `ExitLevel` vocabulary, `raceAll` + `disconnect` for hedging, structured telemetry. `resilient` composes six schedule combinators into one circuit-breaker expression.
 
 ```ts
-import { Context, Data, Effect, Option } from "effect";
-
-// --- [ERRORS] ----------------------------------------------------------------
-
-class TenantLifecycleError extends Data.TaggedError("TenantLifecycleError")<{
-  readonly operation: "repo.load" | "repo.save" | "audit.publish";
-  readonly reason:    "missing" | "write" | "rejected";
-  readonly cause?:    unknown;
-}> {}
-
-// --- [SERVICES] --------------------------------------------------------------
-
-const TenantRepo = Context.GenericTag<{
-  readonly load: (tenantId: string) => Effect.Effect<{ readonly tenantId: string; readonly status: "active" | "suspended" }, TenantLifecycleError>;
-  readonly save: (record: { readonly tenantId: string; readonly status: "active" | "suspended" }) => Effect.Effect<{ readonly tenantId: string; readonly status: "active" | "suspended" }, TenantLifecycleError>;
-}>("Fx/TenantRepo");
-const AuditSink =    Context.GenericTag<{readonly publish: (topic: string, payload: unknown) => Effect.Effect<void, TenantLifecycleError>;}>("Fx/AuditSink");
-const AuditTopic =   Context.GenericTag<string>("Fx/AuditTopic");
-const RequestTrace = Context.GenericTag<{ readonly traceId: string }>("Fx/RequestTrace");
-const AppTrace =     Context.GenericTag<{ readonly correlationId: string }>("Fx/AppTrace");
-
-// --- [FUNCTIONS] -------------------------------------------------------------
-
-const suspendTenant = (tenantId: string) =>
-  Effect.gen(function* () {
-    const repo = yield* TenantRepo;
-    const audit = yield* AuditSink;
-    const trace = yield* RequestTrace;
-    const maybeTopic = yield* Effect.serviceOption(AuditTopic);
-    const loaded = yield* repo.load(tenantId);
-    const saved = yield* repo.save({ ...loaded, status: "suspended" });
-    yield* Option.match(maybeTopic, {
-      onNone: () => Effect.void,
-      onSome: (topic) => audit.publish(topic, { tenantId: saved.tenantId, traceId: trace.traceId }),
-    });
-    return saved;
-  });
-const tracedRail = suspendTenant("tenant-1").pipe(
-  Effect.mapInputContext((ctx) => Context.add(ctx, RequestTrace, { traceId: Context.get(ctx, AppTrace).correlationId })),
-);
-const runWithOverrides = tracedRail.pipe(
-  Effect.provideService(AppTrace, { correlationId: "corr-1" }),
-  Effect.provideService(TenantRepo, {
-    load: (tenantId) => Effect.succeed({ tenantId, status: "active" as const }),
-    save: Effect.succeed,
-  }),
-  Effect.provideServiceEffect(AuditSink, Effect.succeed({ publish: () => Effect.void })),
-);
-```
-
-Deep layer and service graph architecture stays owned by `composition.md` and `services.md`; this section keeps only execution-time provisioning law.
-
----
-## [5][SCOPED_POLICY_TIMEOUT_CACHE_AND_HEDGING]
->**Dictum:** *Lifetime, timeout budgets, cache freshness, and cancellation are one policy surface and belong in one rail.*
-
-<br>
-
-**[5.1] Lifetime + timeout + hedging**<br>
-Use-scope exit drives the finalizer callback of `acquireRelease`; it does not report finalizer success/failure. Hedge policy is symmetric here: both branches are disconnected so the winner returns immediately and loser cleanup finishes in background.
-
-```ts
-import { Clock, Data, Duration, Effect, Exit, Scope } from "effect";
-
-// --- [ERRORS] ----------------------------------------------------------------
+import { Array as Arr, Cause, Data, Duration, Effect, Exit, Option, Schedule } from "effect"
 
 class TransportError extends Data.TaggedError("TransportError")<{
-  readonly reason: "closed" | "timeout";
-}> {}
+  readonly reason: "timeout"
+}>() {}
 
-// --- [RESOURCES] -------------------------------------------------------------
+const withTransport = <A, E, R>(
+  channels: readonly [string, ...ReadonlyArray<string>],
+  policy: {
+    readonly timeout: Duration.DurationInput
+    readonly stagger: (index: number) => Duration.DurationInput
+  },
+  send: (ch: { readonly id: string }) => Effect.Effect<A, E, R>,
+): Effect.Effect<A, E | TransportError, R> => {
+  const ExitLevel = {
+    released:    Effect.logDebug,
+    interrupted: Effect.logDebug,
+    defect:      Effect.logError,
+    failure:     Effect.logWarning,
+  } as const satisfies Record<
+    "released" | "interrupted" | "defect" | "failure",
+    (...args: ReadonlyArray<unknown>) => Effect.Effect<void>
+  >
 
-const makeLease = (id: string) =>
-  Effect.acquireRelease(
-    Effect.sync(() => ({ id, open: true } as const)),
-    (_, useExit) =>
-      Exit.match(useExit, {
-        onFailure: () => Effect.logWarning(`transport.scope.failure:${id}`),
-        onSuccess: () => Effect.logDebug(`transport.scope.success:${id}`),
-      }),
-  );
-
-// --- [FUNCTIONS] -------------------------------------------------------------
-
-const sendOn = (channel: "primary" | "replica", payload: string) =>
-  Effect.succeed(payload).pipe(
-    Effect.filterOrFail((body) => body.length > 0, () => new TransportError({ reason: "closed" })),
-    Effect.map((body) => [channel, body] as const),
-  );
-const publishWithBudget = (lease: Effect.Effect<{ readonly id: string; readonly open: boolean }, never, Scope.Scope>, send: Effect.Effect<readonly ["primary" | "replica", string], TransportError>) =>
-  Effect.scoped(
-    lease.pipe(
-      Effect.flatMap((resource) =>
-        send.pipe(Effect.map(([channel, payload]) => ({ resourceId: resource.id, channel, payload }) as const)),
-      ),
-      Effect.timeoutFail({ duration: Duration.seconds(2), onTimeout: () => new TransportError({ reason: "timeout" }) }),
-      Effect.flatMap((record) =>
-        Clock.currentTimeMillis.pipe(Effect.map((finishedAt) => ({ ...record, finishedAt }) as const)),
-      ),
-    ),
-  );
-const hedgedPublish = (payload: string) =>
-  Effect.race(
-    Effect.disconnect(publishWithBudget(makeLease("transport-1"), sendOn("primary", payload))),
-    Effect.disconnect(Effect.sleep("25 millis").pipe(Effect.zipRight(publishWithBudget(makeLease("transport-2"), sendOn("replica", payload))))),
-  );
-```
-
-**[5.2] Cache setup vs getter/invalidate semantics**<br>
-Cache constructors return setup effects. Execute the returned getter to read a value, and execute invalidate explicitly when freshness must be reset.
-
-```ts
-import * as KeyValueStore from "@effect/platform/KeyValueStore";
-import { DateTime, Duration, Effect, Option, Schema as S } from "effect";
-
-// --- [SCHEMAS] ---------------------------------------------------------------
-
-const CachedProfile = S.Struct({
-  value:     S.Struct({ profileRevision: S.Number }),
-  expiresAt: S.Number,
-});
-
-// --- [FUNCTIONS] -------------------------------------------------------------
-
-const cacheRail = Effect.gen(function* () {
-  const store = yield* KeyValueStore.KeyValueStore;
-  const typed = KeyValueStore.prefix(store, "profile:").forSchema(CachedProfile);
-  const [getProfile, invalidateProfile] = yield* Effect.cachedInvalidateWithTTL(
-    DateTime.now.pipe(
-      Effect.map(DateTime.toEpochMillis),
-      Effect.flatMap((now) =>
-        typed.get("tenant-1").pipe(
-          Effect.flatMap((hit) =>
-            Option.match(Option.filter(hit, (entry) => entry.expiresAt > now), {
-              onSome: ({ value }) => Effect.succeed(value),
-              onNone: () =>
-                DateTime.now.pipe(
-                  Effect.map((fresh) => ({ value: { profileRevision: DateTime.toEpochMillis(fresh) }, expiresAt: DateTime.toEpochMillis(DateTime.addDuration("5 minutes")(fresh)) })),
-                  Effect.tap((entry) => typed.set("tenant-1", entry)),
-                  Effect.map((entry) => entry.value),
-                ),
-            }),
+  return Effect.raceAll(
+    Arr.map(channels, (id, i) =>
+      Effect.scoped(
+        Effect.uninterruptibleMask((restore) =>
+          Effect.acquireRelease(
+            Effect.succeed({ id }),
+            (ch, exit) => {
+              const kind = Exit.match(exit, {
+                onSuccess: () => "released" as const,
+                onFailure: (cause) =>
+                  Cause.isInterruptedOnly(cause) ? "interrupted" as const
+                  : Option.isSome(Cause.keepDefects(cause)) ? "defect" as const
+                  : "failure" as const,
+              })
+              return ExitLevel[kind]("transport").pipe(Effect.annotateLogs({ channel: ch.id, exit: kind }))
+            },
+          ).pipe(
+            Effect.flatMap((ch) =>
+              Effect.disconnect(restore(
+                Effect.sleep(policy.stagger(i)).pipe(Effect.andThen(send(ch))),
+              )),
+            ),
+            Effect.timeoutFail({ duration: policy.timeout, onTimeout: () => new TransportError({ reason: "timeout" }) }),
           ),
         ),
       ),
     ),
-    Duration.seconds(45),
-  );
-  const profileFirst = yield* getProfile;
-  yield* invalidateProfile;
-  const profileSecond = yield* getProfile;
-  return { profileFirst, profileSecond } as const;
-});
+  )
+}
+
+const resilient = <E>(isTransient: (cause: Cause.Cause<E>) => boolean) =>
+  Schedule.exponential(Duration.millis(100)).pipe(
+    Schedule.jittered, Schedule.intersect(Schedule.recurs(5)),
+    Schedule.resetAfter(Duration.seconds(30)), Schedule.whileInput(isTransient),
+  )
 ```
 
-**Laws:**<br>
-- scoped resources must encode release behavior in-rail,
-- timeout and hedge are explicit policy values, never incidental wrappers,
-- `cached` yields a getter effect; TTL invalidate variant yields `[getter, invalidate]` and both must be exercised.
+**Lifecycle contracts:**
+- Non-empty tuple `[string, ...string[]]` polymorphic over arity — single-channel or hedged. Per-channel `Effect.scoped`; `raceAll` interrupts losers. `ExitLevel` vocabulary gated via `satisfies`.
+- `acquireUseRelease` seals use phase, preventing fiber-external interruption. `ensuring` = exit-unaware; `onExit` = exit-aware without `Scope`.
+- Four-way exit: `isInterruptedOnly` (pure cancellation), `keepDefects` → `Option` (Some if Die present), typed failure (remaining). `isInterrupted` is weaker (finds any Interrupt). `Cause.match` = exhaustive catamorphism.
+- `disconnect` makes loser interruption non-blocking. `raceAll` returns FIRST error; use `validateFirst` for all errors.
+- `timeoutFail` inside `scoped` = correct. Outside inverts classification: scope closes with `Success`, then timeout fires. `resilient` on caller retries entire constellation; per-channel retry belongs in `send`.
+- `resetAfter` = circuit-breaker: halts after N failures within window, resets after quiescence. `addDelay(f)` enables error-derived delays (`Retry-After`).
 
----
-## [6][EFFECTS_DECISION_MATRIX]
->**Dictum:** *Choose rails by contract, not convenience.*
 
-<br>
+## Cache contract taxonomy
 
-| [INDEX] | [API]                            | [CONTRACT]                | [FAILURE]                   | [BOUNDARY]          |
-| :-----: | :------------------------------- | :------------------------ | :-------------------------- | :------------------ |
-|   [1]   | `Effect.promise`                 | defect-only async ingress | rejection→defect (`die`)    | adapter only        |
-|   [2]   | `Effect.tryPromise`              | recoverable async ingress | rejection → typed `E`       | adapter+domain      |
-|   [3]   | `Effect.all({ mode })`           | fan-in + loss contract    | fail-fast/either/validate   | aggregation surface |
-|   [4]   | `Effect.partition`,`validate*`   | collection retention      | split/all-err/first-succ    | bulk policy         |
-|   [5]   | `Effect.cachedFunction`          | keyed memoization         | per-key effectful dedupe    | lookup policy       |
-|   [6]   | `Effect.cachedInvalidateWithTTL` | freshness + invalidate    | `[getter, invalidate]` pair | cache ownership     |
-|   [7]   | `provide*`,`mapInputContext`     | `R`-channel supply        | deterministic substitution  | execution boundary  |
-|   [8]   | `acquireRelease` + timeout       | scoped lifecycle policy   | release typed in-rail       | ownership plane     |
+`Cache.makeWith` provides bounded LRU with adaptive TTL — `timeToLive` receives `Exit` for stale-while-revalidate via `cache.refresh`. `RequestResolver.makeBatched` coalesces cross-fiber requests in the same tick.
+
+`cachedFunction` is unbounded with custom `Equivalence`. Critical type distinction: `Cache.make` captures R at construction (getter eliminates R); `cachedFunction` retains R per invocation.
+
+```ts
+import { Array as Arr, Cache, Duration, Effect, Equivalence, Exit, Request, RequestResolver } from "effect"
+
+interface FetchUser extends Request.Request<string, Error> {
+  readonly _tag: "FetchUser"
+  readonly id:   number
+}
+const FetchUser = Request.tagged<FetchUser>("FetchUser")
+
+const fetchResolver = RequestResolver.makeBatched(
+  (reqs: ReadonlyArray<FetchUser>) =>
+    Effect.tryPromise({
+      try:   (signal) => fetch("/api/users", { method: "POST", signal,
+        body: JSON.stringify(Arr.map(reqs, (r) => r.id)) }).then((r) => r.json() as Promise<ReadonlyArray<string>>),
+      catch: (cause) => new Error(String(cause)),
+    }).pipe(
+      Effect.andThen((names) => Effect.forEach(reqs, (req, i) => Request.succeed(req, names[i]!))),
+      Effect.catchAll((err)  => Effect.forEach(reqs, (req)    => Request.fail(req, err))),
+    ),
+)
+
+const makeUserCache = Effect.all({
+  bounded: Cache.makeWith({
+    capacity: 256,
+    lookup: (id: number) => Effect.request(FetchUser({ id }), fetchResolver),
+    timeToLive: Exit.match({ onFailure: () => Duration.seconds(10), onSuccess: () => Duration.minutes(5) }),
+  }),
+  keyed: Effect.cachedFunction(
+    (key: { readonly tenant: string; readonly id: number }) =>
+      Effect.request(FetchUser({ id: key.id }), fetchResolver),
+    Equivalence.make((self, that) => self.tenant === that.tenant && self.id === that.id),
+  ),
+})
+```
+
+**Cache contracts:**
+- `makeWith` accepts `timeToLive: (exit) => Duration` — cache successes long, failures short. `refresh(key)` re-computes without invalidation (stale-while-revalidate). `getEither` → left = pre-existing, right = fresh.
+- `Cache.make` captures R at setup; getter eliminates R. `cachedFunction` retains R per-invocation — resolvers can depend on request-scoped context.
+- `Request.tagged` auto-derives `Equal` + `Hash`. `makeBatched` must complete every request — uncompleted hang source fibers. `fromEffectTagged` multiplexes by `_tag`.
+- `Equivalence.make` for compound keys — field-wise comparison avoids delimiter concatenation. `mapInput` projects into simpler domain. Without explicit `Equivalence`, `cachedFunction` uses referential equality.
+- `Layer.scoped` is correct instantiation site — module-level caches grow unboundedly. `ConsumerCache` is read-only view (safe to share).
+
+
+## Contention algebra and admission policy
+
+Queue strategy (`bounded`/`dropping`/`sliding`) and semaphore usage (`withPermits`/`withPermitsIfAvailable`) are the same contention algebra — different resource shapes, identical admit/shed semantics. A single policy vocabulary governs both: `backpressure` blocks producers, `shedding` drops arrivals, `sliding` evicts oldest entries.
+
+```ts
+import { Chunk, Effect, Match, Number, Option, Queue, Ref, type Semaphore } from "effect"
+
+// --- [TYPES] -----------------------------------------------------------------
+type ContentionPolicy = "backpressure" | "shedding" | "sliding"
+
+// --- [CONSTANTS] -------------------------------------------------------------
+const QueueStrategy = {
+  backpressure: Queue.bounded,
+  shedding:     Queue.dropping,
+  sliding:      Queue.sliding,
+} as const satisfies Record<ContentionPolicy, (cap: number) => Effect.Effect<Queue.Queue<unknown>>>
+
+// --- [FUNCTIONS] -------------------------------------------------------------
+const withContention = <A, E, R>(
+  policy: ContentionPolicy, semaphore: Semaphore, permits: number, effect: Effect.Effect<A, E, R>,
+) =>
+  Match.value(policy).pipe(
+    Match.when("backpressure", () => semaphore.withPermits(permits)(effect).pipe(Effect.map(Option.some))),
+    Match.when("shedding",     () => semaphore.withPermitsIfAvailable(permits)(effect)),
+    Match.when("sliding",      () => semaphore.withPermitsIfAvailable(permits)(effect)),
+    Match.exhaustive,
+  )
+
+const runContentionDemo = (policy: ContentionPolicy, capacity: number) =>
+  Effect.gen(function* () {
+    const queue = yield* QueueStrategy[policy](capacity)
+    const sem   = yield* Effect.makeSemaphore(capacity)
+    const shed  = yield* Ref.make(0)
+    yield* Effect.forEach(Chunk.range(1, capacity * 2), (id) =>
+      withContention(policy, sem, 1, Queue.offer(queue, id)).pipe(
+        Effect.tap(Option.match({ onNone: () => Ref.update(shed, Number.increment), onSome: () => Effect.void })),
+      ), { concurrency: "unbounded" })
+    return yield* Effect.all({ queued: Queue.takeAll(queue).pipe(Effect.map(Chunk.size)), shed: Ref.get(shed) })
+  })
+```
+
+**Contention contracts:**
+- `QueueStrategy` map is polymorphic over `ContentionPolicy` — adding a policy literal without a corresponding constructor fails at the `satisfies` gate. `Queue.bounded` suspends producers at capacity; `Queue.dropping` discards new arrivals; `Queue.sliding` evicts oldest entries. All three return `Effect<Queue<A>>`, making the map value-uniform.
+- `withPermits(n)(effect)` blocks until n permits are available — backpressure semantics. `withPermitsIfAvailable(n)(effect)` returns `Option.none` immediately when permits are unavailable — shedding semantics. The `sliding` case uses `withPermitsIfAvailable` because true sliding requires the queue's internal eviction (`Queue.sliding`), not the semaphore — the semaphore only gates admission.
+- `Option.match` on the contention result tracks shed count without branching — `onNone` increments the shed counter, `onSome` is a no-op. The shed counter is the primary observability signal for capacity exhaustion; queue depth alone conflates backpressure with shedding.
+- `Match.exhaustive` enforces that all three policy variants are handled — adding a fourth policy without a corresponding `Match.when` clause fails at compile time. The entire dispatch is data-driven: policy selection propagates through both queue construction and semaphore usage with zero string comparison at runtime.

@@ -102,26 +102,25 @@ public static class TagPolicy {
     // from trace Activity.SetTag (per-span attributes visible to samplers).
     // Provide tags at StartActivity time via ActivityTagsCollection for
     // sampler visibility; gate expensive computation behind IsAllDataRequested.
-    public static void AnnotateSpan(Activity? activity, TagList dimensions) {
-        foreach (KeyValuePair<string, object?> tag in dimensions)
-            activity?.SetTag(tag.Key, tag.Value);
-    }
+    public static void AnnotateSpan(Activity? activity, TagList dimensions) =>
+        Optional(activity).IfSome(a =>
+            toSeq(dimensions).Iter(tag => a.SetTag(tag.Key, tag.Value)));
     // Enriched span start: pass initial tags to StartActivity so head-based
     // samplers can inspect dimensions before recording the full span.
     public static Activity? StartAnnotatedActivity(
-        string operation, ActivityKind kind, TagList dimensions) {
-        ActivityTagsCollection initialTags = new();
-        foreach (KeyValuePair<string, object?> tag in dimensions)
-            initialTags[tag.Key] = tag.Value;
-        return Signals.Source.StartActivity(operation, kind, default, initialTags);
-    }
+        string operation, ActivityKind kind, TagList dimensions) =>
+        Signals.Source.StartActivity(
+            operation, kind, default,
+            toSeq(dimensions).Fold(
+                new ActivityTagsCollection(),
+                (acc, tag) => { acc[tag.Key] = tag.Value; return acc; }));
     // Conditional enrichment: check IsAllDataRequested before computing
     // expensive tag values to avoid overhead on unsampled spans.
     public static void AnnotateSpanWhenRecording(
-        Activity? activity, Func<TagList> computeDimensions) {
-        if (activity is { IsAllDataRequested: true })
-            AnnotateSpan(activity, computeDimensions());
-    }
+        Activity? activity, Func<TagList> computeDimensions) =>
+        Optional(activity)
+            .Filter(static a => a.IsAllDataRequested)
+            .IfSome(a => AnnotateSpan(a, computeDimensions()));
     public static TagList Merge(TagList seed, TagList dimensions) =>
         toSeq(dimensions).Fold(seed,
             static (TagList acc, KeyValuePair<string, object?> next) => {
@@ -341,15 +340,18 @@ public static class TelemetryBootstrap {
                 options.Retry.MaxRetryAttempts = 5;
                 options.Retry.UseJitter = true;
                 options.Retry.OnRetry = static args => {
+                    // Fail-fast: ResilienceContextSetup.Attach() must be called before pipeline execution.
+                    // Missing logger attachment indicates misconfigured resilience pipeline wiring.
+                    ILogger logger = args.Context.Properties.TryGetValue(ResilienceContextSetup.LoggerKey, out ILogger? l)
+                        ? l
+                        : throw new InvalidOperationException(
+                            $"ResilienceContext missing logger. Call {nameof(ResilienceContextSetup)}.{nameof(ResilienceContextSetup.Attach)}() before executing the resilience pipeline.");
                     Error error = args.Outcome.Exception is { } ex
                         ? Error.New(ex)
                         : Error.New(
                             (int)(args.Outcome.Result?.StatusCode ?? 0),
                             args.Outcome.Result?.ReasonPhrase ?? "upstream");
-                    Observe.RetryProjection(
-                        error,
-                        args.Context.Properties.GetValue(ResilienceContextSetup.LoggerKey, default!)!,
-                        "upstream.request", args.AttemptNumber);
+                    Observe.RetryProjection(error, logger, "upstream.request", args.AttemptNumber);
                     return ValueTask.CompletedTask;
                 };
             });

@@ -196,7 +196,9 @@ public static class Serialization {
         string json = JsonSerializer.Serialize(
             value: order, jsonTypeInfo: AppJsonContext.Default.OrderDto);
         return JsonSerializer.Deserialize(
-            json: json, jsonTypeInfo: AppJsonContext.Default.OrderDto)!;
+            json: json, jsonTypeInfo: AppJsonContext.Default.OrderDto)
+            ?? throw new InvalidOperationException(
+                $"Deserialization returned null for {nameof(AppJsonContext)}.Default.{nameof(AppJsonContext.Default.OrderDto)}. JSON: {json}");
     }
 }
 ```
@@ -289,7 +291,7 @@ When a validator is strictly `length + allowed chars`, cache `SearchValues<char>
 namespace Domain.Performance;
 
 public static class PayloadHashValidation {
-    private static readonly SearchValues<char> Hex = SearchValues.Create("0123456789abcdef".AsSpan());
+    private static readonly SearchValues<char> Hex = SearchValues.Create("0123456789abcdef");
     public static bool IsValid(ReadOnlySpan<char> candidate) => candidate.Length == 64 && !candidate.ContainsAnyExcept(Hex);
     public static int FirstInvalidIndex(ReadOnlySpan<char> candidate) => candidate.IndexOfAnyExcept(Hex);
 }
