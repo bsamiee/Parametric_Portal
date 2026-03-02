@@ -139,21 +139,14 @@ public static class DecoratorChain {
     static readonly Seq<Concern> Ordering =
         toSeq(Concern.Items).Strict();
     public static IServiceCollection Assemble(IServiceCollection services) =>
-        // Phase 2: for each StorageRegion, register keyed singleton with region as key;
-        // factory rebuilds decorator chain over the raw store (assumes raw stores
-        // already registered elsewhere with StoreKey(region, IsRaw: true) key)
         toSeq(Enum.GetValues<StorageRegion>())
             .Fold(
-                // Phase 1: apply Concern.Decorate to non-keyed IObjectStore registrations
-                // (Scrutor's Decorate<T> only matches when ServiceKey == null)
                 Ordering.Fold(services,
                     static (IServiceCollection acc, Concern c) =>
                         acc.Decorate<IObjectStore>(c.Decorate)),
                 static (IServiceCollection acc, StorageRegion region) =>
                     acc.AddKeyedSingleton<IObjectStore>(region,
                         (IServiceProvider sp, object? _) =>
-                            // Rebuild decorator chain: fold Concern.Decorate over raw store
-                            // obtained via sp.GetRequiredKeyedService(StoreKey(region, IsRaw: true))
                             Ordering.Fold(
                                 sp.GetRequiredKeyedService<IObjectStore>(new StoreKey(region, IsRaw: true)),
                                 (IObjectStore inner, Concern c) => c.Decorate(inner, sp))));
