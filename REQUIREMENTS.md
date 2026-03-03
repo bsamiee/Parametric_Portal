@@ -17,7 +17,7 @@
 - NEVER create helper/utility files or functions (`helpers.ts`, `*Helper`, `*Util`); colocate logic in domain module
 - NEVER proliferate functions — consolidate into fewer, polymorphic solutions
 - NEVER nest code deeper than 4 levels — extract into named Effect pipelines or flatten with `pipe`/`Effect.filterOrFail`
-- NEVER proliferate schemas/structs/branded types — one canonical schema per entity, derive variants at call site via `pick`/`omit`/`partial`/field modifiers
+- NEVER proliferate schemas/structs/branded types — one canonical polymorphic schema, derive variants at call site via `pick`/`omit`/`partial`/field modifiers
 - NEVER differentiate field/parameter names unnecessarily — same concept uses same name across all objects, parameters, and interfaces
 
 [REQUIRED]:
