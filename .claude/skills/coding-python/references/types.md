@@ -4,6 +4,55 @@ Type authority for Python 3.14+. All snippets assume expression v5.6+ and PEP 69
 
 ---
 
+## Type Features
+
+PEP 695 `type` aliases (lazy-evaluated, no forward-reference quoting), PEP 696 defaults on type parameters, `Literal` vocabularies as compile-time value sets, `TypeIs` (PEP 742) for complement-narrowed predicates, and `@overload` for input-dependent return type narrowing — composed through `Result` rails and `@effect.result` generators to eliminate `if`/`else` dispatch entirely.
+
+```python
+from collections.abc import Callable
+from dataclasses import dataclass
+from math import fma, isfinite
+from typing import Literal, NewType, TypeIs, assert_never, overload
+
+from expression import Ok, Result, curry_flip, effect, pipe
+from expression.collections import Block, block
+
+Kelvin = NewType("Kelvin", float)
+type Unit = Literal["C", "F", "K"]
+type Rejection = tuple[Unit, float]
+type Convert[A, B] = Callable[[float], Result[float, Rejection]]
+
+@dataclass(frozen=True, slots=True)
+class Measurement[U: Unit = "K"]:
+    value: float; unit: U  # type: ignore[assignment]
+
+def is_absolute(m: Measurement) -> TypeIs[Measurement["K"]]:
+    return m.unit == "K" and m.value >= 0
+
+@overload
+def to_kelvin(m: Measurement["C"]) -> Result[Kelvin, Rejection]: ...
+@overload
+def to_kelvin(m: Measurement["F"]) -> Result[Kelvin, Rejection]: ...
+def to_kelvin(m: Measurement) -> Result[Kelvin, Rejection]:
+    match m.unit:
+        case "C": k = m.value + 273.15
+        case "F": k = fma(m.value - 32, 5 / 9, 273.15)
+        case "K": k = m.value
+        case _ as u: assert_never(u)
+    return Ok(Kelvin(k)).filter_with(lambda v: v >= 0 and isfinite(v), lambda _: (m.unit, m.value))
+
+@curry_flip(1)
+def energy(readings: Block[Measurement], ref: Kelvin) -> Result[float, Rejection]:
+    @effect.result[float, Rejection]()
+    def _run():
+        kelvins = yield from pipe(readings, block.map(to_kelvin), block.fold(
+            lambda acc, r: acc.bind(lambda vs: r.map(lambda v: vs + block.of(v))), Ok(block.empty())))
+        return pipe(kelvins, block.fold(lambda a, k: fma(k - ref, k - ref, a), 0.0)) / max(kelvins.length, 1)
+    return _run()
+```
+
+PEP 695 `type` aliases evaluate lazily — `Convert[A, B]` and `Rejection` require no quoting for forward references, replacing legacy `TypeAlias`. PEP 696 default `U: Unit = "K"` on `Measurement` makes absolute scale the default; non-`"K"` construction requires explicit parameterization. `TypeIs` (PEP 742) narrows both branches: `is_absolute` returning `False` provably excludes `Measurement["K"]` in the negative path — `TypeGuard` cannot provide this complement guarantee. `@overload` stubs narrow `to_kelvin`'s return per `Literal` unit at call sites, eliminating runtime `isinstance` for consumers; the implementation uses exhaustive `match/case` with `assert_never` on the `Unit` vocabulary. `fma(m.value - 32, 5/9, 273.15)` fuses Fahrenheit conversion with extended precision; `filter_with` gates non-physical values (negative Kelvin, IEEE specials) into typed `Rejection` tuples. `@curry_flip(1)` defers `ref` to data position; inside `@effect.result`, `block.fold` with sequential `bind` accumulates converted `Kelvin` values, short-circuiting on first rejection — `fma(k - ref, k - ref, a)` then computes mean squared deviation single-pass.
+
 ## Type Family Governance
 
 `Signal[P]` parameterized by sentinel phantom tags eliminates parallel model definitions. `Morph[A, B]` generalizes stage transitions as a composable callable morphism, `Rejection[P]` reuses the failing `Transition` as typed error context.

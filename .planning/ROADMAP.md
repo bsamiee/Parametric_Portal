@@ -114,9 +114,9 @@ Plans:
 **Plans**: TBD
 
 Plans:
-- [ ] 05-01: TBD — Command catalog extraction from bridge + KB seeding pipeline + provider/embed wiring
-- [ ] 05-02: TBD — Generic agent loop in packages/ai + Tool.make orchestration + Chat integration
-- [ ] 05-03: TBD — RAG command discovery + PLAN/EXECUTE/VERIFY/PERSIST/DECIDE state machine + end-to-end wiring
+- [ ] 05-01-PLAN.md — Universal tool factory + RAG toolkit builder + agent loop state machine in packages/ai, C# catalog export, Kargadan boundary adapter, AiRuntime.chatFromJson, protocol catalog envelope
+- [ ] 05-02-PLAN.md — Kargadan agent loop config (createAgentLoop wiring), Chat persistence (exportJson/fromJson replacing placeholder), bridge catalog reception, dispatch extension, harness rewire
+- [ ] 05-03-PLAN.md — System prompt, tool handler layer (read/write bifurcation via bridge dispatch), WebSocketHost catalog send, packages/ai barrel export, end-to-end pipeline closure
 
 ### Phase 6: Scene Representation and Context Management
 **Goal**: The agent maintains awareness of the Rhino document state, manages context window budget to sustain unlimited session length, and uses model-appropriate inference tiers

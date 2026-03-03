@@ -2,6 +2,46 @@
 
 Structural subtyping contracts, capability slicing, variance discipline, and protocol-threaded dependency injection for Python 3.14+. This file governs Protocol surface design — all other reference files assume these capability boundaries and variance rules. All snippets assume expression v5.6+ with `Result`, `Option`, `@effect.result`, `pipe`, `Block`, `Map`, `curry_flip`.
 
+## Protocol for Structural Typing
+
+Protocol defines the lattice join, multiple inheritance the meet (intersection), and `TypeIs` (PEP 742) provides complement-narrowed conformance — negative branch provably excludes `C`, unlike `TypeGuard`. PEP 695 infers variance from method positions, eliminating `covariant=True` ceremony. `structural` reifies conformance as an AOP cross-cut: the decorator lifts untyped inputs into `Result` rails via `filter_with`, invisible to the decorated body.
+
+```python
+from collections.abc import Callable
+from functools import wraps
+from math import fma
+from typing import Concatenate, Protocol, TypeIs, runtime_checkable
+
+from expression import Ok, Result, curry_flip, pipe
+from expression.collections import Block, block
+
+@runtime_checkable
+class Emitter[T](Protocol):
+    def sample(self) -> T: ...
+    def weight(self) -> float: ...
+
+def structural[C, **P, R](cap: type[C]) -> Callable[
+    [Callable[Concatenate[C, P], R]], Callable[Concatenate[object, P], Result[R, tuple[type[C], type]]]]:
+    def narrows(obj: object) -> TypeIs[C]:
+        return isinstance(obj, cap)
+    def dec(fn: Callable[Concatenate[C, P], R]) -> Callable[Concatenate[object, P], Result[R, tuple[type[C], type]]]:
+        @wraps(fn)
+        def go(obj: object, /, *args: P.args, **kwargs: P.kwargs) -> Result[R, tuple[type[C], type]]:
+            return Ok(obj).filter_with(lambda o: narrows(o), lambda o: (cap, type(o))).map(lambda c: fn(c, *args, **kwargs))
+        return go
+    return dec
+
+@structural(Emitter)
+@curry_flip(1)
+def fuse(ref: Emitter[float], readings: Block[Emitter[float]]) -> float:
+    sw, w = pipe(readings, block.fold(
+        lambda acc, s: (fma(s.sample(), s.weight(), acc[0]), acc[1] + s.weight()),
+        (ref.sample() * ref.weight(), ref.weight())))
+    return sw / w
+```
+
+`narrows` is nested because `TypeIs[C]` requires a named function with return annotation — lambdas cannot carry it — and `C` binds from the enclosing PEP 695 scope, precluding module-level placement. `filter_with` threads PEP 742 complement narrowing: `narrows(o)` gates conformance, the `Error` branch carries `(cap, type(o))` as rejection evidence without a dedicated error class. PEP 695 infers `T` covariant in `Emitter[T]` from `sample(self) -> T` (output-only); adding `T` to an input position flips to invariant — a compile-time contract change invisible with manual annotations. Stack composition is right-to-left: `@curry_flip(1)` flips `ref` to data position for pipeability, `@structural(Emitter)` wraps the first positional in conformance verification — the body sees only typed `Emitter[float]` because `.map` threads the narrowed value post-gate. `block.fold` accumulates `(weighted_sum, total_weight)` single-pass; `fma` fuses multiply-add with extended precision — the information-filter where `sw/w` yields the minimum-variance estimate.
+
 ---
 
 ## Protocol Design: Capability Slicing and AOP Authorization
