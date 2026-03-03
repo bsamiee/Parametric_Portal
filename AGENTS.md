@@ -56,7 +56,7 @@ If reviewing, refining, editing, creating, or modifying X file type, use skill Y
   - `ctags -R --exclude=.git --exclude=node_modules --exclude=dist --exclude=build --exclude=.nx .`
 
 ## Language Policy Convergence
-- ALWAYS: follow `CLAUDE.md` + `REQUIREMENTS.md` strict schema-first / Effect-first approach.
+- ALWAYS: follow `CLAUDE.md` + `REQUIREMENTS.md` Effect-first approach.
 - C#: preserve strict analyzer and formatting posture in `.editorconfig` and `Directory.Build.props`.
 - Python: enforce Python 3.14+ baseline via Ruff + ty with explicit configuration.
 
