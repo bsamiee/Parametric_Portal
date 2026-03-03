@@ -5,28 +5,19 @@ Serialization in Python 3.14+ uses a dual-library boundary: Pydantic `TypeAdapte
 ---
 ## Inbound Validation Pipeline
 
-`TypeAdapter(type, *, config=ConfigDict(...))` compiles Pydantic core schema once -- create at module level (expensive construction). `validate_json()` returns typed objects; `validate_python()` for dict/object input; `json_schema()` for OpenAPI generation. `@safe` bridges `ValidationError` into `Result`. `model_validator(mode="before")` receives `cls, data: Any` (preprocessor). `model_validator(mode="after")` receives `self`, returns `Self` (cross-field -- only `after` has typed field access). `model_serializer(mode="wrap")` calls `handler(self)` first then post-processes; `mode="plain"` bypasses defaults. ONE serializer per model max.
+`TypeAdapter(type, *, config=ConfigDict(...))` compiles Pydantic core schema once -- create at module level (expensive construction). `validate_json()` returns typed objects; `validate_python()` for dict/object input; `json_schema()` for OpenAPI generation. Boundary adapter wraps `ValidationError` into `Result` via `try/except`. `model_validator(mode="before")` receives `cls, data: Any` (preprocessor). `model_validator(mode="after")` receives `self`, returns `Self` (cross-field -- only `after` has typed field access). `model_serializer(mode="wrap")` calls `handler(self)` first then post-processes; `mode="plain"` bypasses defaults. ONE serializer per model max.
 
 ```python
 # --- [IMPORTS] ----------------------------------------------------------------
 
-from typing import Annotated, Literal, Self
+from typing import Annotated, assert_never, Literal, Self
 
 import msgspec
 from pydantic import (
-    AliasChoices,
-    AliasPath,
-    BaseModel,
-    ConfigDict,
-    Discriminator,
-    Field,
-    SerializerFunctionWrapHandler,
-    Tag,
-    TypeAdapter,
-    model_serializer,
-    model_validator,
+    AliasChoices, AliasPath, BaseModel, ConfigDict, Discriminator, Field, SerializerFunctionWrapHandler,
+    Tag, TypeAdapter, model_serializer, model_validator,
 )
-from returns.result import Result, safe
+from expression import Error, Ok, Result
 from pinnacle.domain.atoms import Email, Money
 
 # --- [SCHEMA] -----------------------------------------------------------------
@@ -95,9 +86,12 @@ PAYMENT_SCHEMA: dict[str, object] = PaymentAdapter.json_schema()
 
 # --- [FUNCTIONS] --------------------------------------------------------------
 
-@safe
-def validate_payment(raw: bytes) -> Payment:
-    return PaymentAdapter.validate_json(raw)
+def validate_payment(raw: bytes) -> Result[Payment, Exception]:
+    """BOUNDARY ADAPTER -- Pydantic ValidationError into Result."""
+    try:
+        return Ok(PaymentAdapter.validate_json(raw))
+    except Exception as exc:
+        return Error(exc)
 
 class PaymentResponse(msgspec.Struct, frozen=True, gc=False, tag_field="kind"):
     amount: str
@@ -115,6 +109,8 @@ def to_response(payment: Payment) -> PaymentResponse:
             return CardResponse(amount=str(amount), last_four=last_four)
         case BankPayment(amount=amount, iban=iban):
             return BankResponse(amount=str(amount), iban=iban)
+        case _ as unreachable:
+            assert_never(unreachable)
 
 _encoder: msgspec.json.Encoder = msgspec.json.Encoder()
 
@@ -125,7 +121,7 @@ def handle_payment(raw: bytes) -> Result[bytes, Exception]:
     )
 ```
 
-[CRITICAL]: `TypeAdapter` at module level -- never per-request. `model_validator(mode="before")` preprocesses raw data before field validation. `model_validator(mode="after")` has typed field access for cross-field rules. ONE `model_serializer` per model. `@safe` bridges into `Result` railway.
+[CRITICAL]: `TypeAdapter` at module level -- never per-request. `model_validator(mode="before")` preprocesses raw data before field validation. `model_validator(mode="after")` has typed field access for cross-field rules. ONE `model_serializer` per model. Boundary adapter wraps `ValidationError` into `Result` via explicit `try/except`.
 
 ---
 ## Msgspec Structs
@@ -205,14 +201,14 @@ def decode_event(raw: bytes) -> UserCreated | UserDeleted:
 ---
 ## Settings
 
-`pydantic-settings` `BaseSettings` with `SettingsConfigDict` provides layered config: env vars > `.env` file > secrets dir > field defaults. Always `frozen=True`. `@safe` bridges startup validation into `Result`. Settings loaded once at bootstrap, injected as immutable dependency via reader monad.
+`pydantic-settings` `BaseSettings` with `SettingsConfigDict` provides layered config: env vars > `.env` file > secrets dir > field defaults. Always `frozen=True`. Boundary adapter wraps startup validation into `Result`. Settings loaded once at bootstrap, injected as immutable dependency via reader monad.
 
 ```python
 # --- [IMPORTS] ----------------------------------------------------------------
 
+from expression import Error, Ok, Result
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from returns.result import safe
 
 # --- [SCHEMA] -----------------------------------------------------------------
 
@@ -229,9 +225,12 @@ class AppSettings(BaseSettings):
 
 # --- [FUNCTIONS] --------------------------------------------------------------
 
-@safe
-def load_settings() -> AppSettings:
-    return AppSettings()
+def load_settings() -> Result[AppSettings, Exception]:
+    """BOUNDARY ADAPTER -- pydantic-settings ValidationError into Result."""
+    try:
+        return Ok(AppSettings())
+    except Exception as exc:
+        return Error(exc)
 ```
 
 [CRITICAL]: `frozen=True` prevents mutation after startup. Settings loaded once at bootstrap, injected as immutable dependency. Layered precedence: env vars > `.env` file > secrets dir > field defaults.
@@ -259,7 +258,7 @@ def load_settings() -> AppSettings:
 
 | [INDEX] | [PATTERN]                        | [WHEN]                                         | [KEY_TRAIT]                                    |
 | :-----: | -------------------------------- | ---------------------------------------------- | ---------------------------------------------- |
-|   [1]   | `TypeAdapter.validate_json`      | Ingress boundary (HTTP, queue, file)           | Eager module-level init; `@safe` into Result   |
+|   [1]   | `TypeAdapter.validate_json`      | Ingress boundary (HTTP, queue, file)           | Eager module-level init; boundary adapter      |
 |   [2]   | `AliasChoices` / `AliasPath`     | Wire field names differ from domain            | Validation-only aliasing                       |
 |   [3]   | `Discriminator` + `Tag`          | Union dispatch on ingress                      | Callable or field-based discriminator          |
 |   [4]   | `model_validator(mode="before")` | Preprocessing raw data before field validation | Receives `cls, data`; returns normalized data  |

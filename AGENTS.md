@@ -6,9 +6,9 @@ Read `REQUIREMENTS.md`.
 ## REQUIRED STANDARDS
 
 If reviewing, refining, editing, creating, or modifying X file type, use skill Y (required):
-- Typescript: `ts-standards`
-- C#: `csharp-standards`
-- Python: `python-standards`
+- Typescript: `coding-ts`
+- C#: `coding-csharp`
+- Python: `coding-python`
 - Bash/sh: `bash-script-generator`
 
 ## Codex-First Policy (Repo)

@@ -30,7 +30,7 @@ const _sortKeys = (v: unknown): unknown =>
             Object.fromEntries(Object.entries(obj).toSorted(([a], [b]) => a.localeCompare(b)).map(([k, val]) => [k, _sortKeys(val)]))),
         Match.orElse((x) => x),
     );
-const _hash =           (state: unknown) => createHash('sha256').update(JSON.stringify(_sortKeys(state))).digest('hex');
+const _stateHash = (state: unknown) => createHash('sha256').update(JSON.stringify(_sortKeys(state))).digest('hex');
 const _decodeStart =    (json:  unknown) => S.decodeUnknown(StartPayload)(json).pipe(Effect.orElseSucceed(() => ({ userId: null }) as typeof StartPayload.Type));
 const _decodeComplete = (json:  unknown) => S.decodeUnknown(CompletePayload)(json).pipe(Effect.map(Option.some), Effect.orElseSucceed(() => Option.none<typeof CompletePayload.Type>()));
 const _decodeToolCall = (json:  unknown) => S.decodeUnknown(ToolCallPayload)(json).pipe(Effect.orElseSucceed(() => ({}) as typeof ToolCallPayload.Type));
@@ -39,7 +39,7 @@ const _deriveStatus =   (start: JournalEntry, complete: Option.Option<JournalEnt
     complete.pipe(Option.flatMap((e) => e.status), Option.orElse(() => start.status), Option.getOrElse(() => 'running' as const));
 const _mapCheckpoint = (cp: JournalEntry): Effect.Effect<HydrateResult, ParseResult.ParseError> =>
     S.decodeUnknown(CheckpointPayload)(cp.payloadJson).pipe(
-        Effect.map((p) => ({ chatJson: p.chatJson, diverged: Option.exists(cp.stateHash, (hash) => hash !== _hash(p.loopState)), fresh: false as const, sequence: cp.sequence, state: p.loopState })),
+        Effect.map((p) => ({ chatJson: p.chatJson, diverged: Option.exists(cp.stateHash, (hash) => hash !== _stateHash(p.loopState)), fresh: false as const, sequence: cp.sequence, state: p.loopState })),
     );
 const _mapToolCall = (e: JournalEntry) =>
     _decodeToolCall(e.payloadJson).pipe(Effect.map((p) => ({
@@ -71,11 +71,15 @@ class AgentPersistenceService extends Effect.Service<AgentPersistenceService>()(
                 Effect.flatMap((opt): Effect.Effect<HydrateResult, ParseResult.ParseError> => Option.match(opt, { onNone: () => Effect.succeed({ fresh: true as const }), onSome: _mapCheckpoint })),
             ),
         );
-        const findResumable = Effect.fn('database.agentPersistence.findResumable')(() =>
-            Effect.zipWith(repo.find([{ field: 'entryKind', value: 'session_start' }], { asc: false }), repo.find([{ field: 'entryKind', value: 'session_complete' }]), (starts, completions) => {
-                const done = HashSet.fromIterable(completions.map((c) => c.sessionId));
-                return Chunk.findFirst(Chunk.fromIterable(starts), (e) => !HashSet.has(done, e.sessionId) && !Option.exists(e.status, _isTerminal)).pipe(Option.map((e) => e.sessionId));
-            }),
+        const findResumable = Effect.fn('database.agentPersistence.findResumable')((appId: string) =>
+            Effect.zipWith(
+                repo.find([{ field: 'appId', value: appId }, { field: 'entryKind', value: 'session_start' }], { asc: false }),
+                repo.find([{ field: 'appId', value: appId }, { field: 'entryKind', value: 'session_complete' }]),
+                (starts, completions) => {
+                    const done = HashSet.fromIterable(completions.map((c) => c.sessionId));
+                    return Chunk.findFirst(Chunk.fromIterable(starts), (e) => !HashSet.has(done, e.sessionId) && !Option.exists(e.status, _isTerminal)).pipe(Option.map((e) => e.sessionId));
+                },
+            ),
         );
         const list = Effect.fn('database.agentPersistence.list')((filter?: { after?: Date; before?: Date; cursor?: string; limit?: number; status?: readonly string[] }) =>
             Effect.gen(function* () {
@@ -91,9 +95,50 @@ class AgentPersistenceService extends Effect.Service<AgentPersistenceService>()(
                 Effect.flatMap((page) => Effect.map(Effect.forEach(page.items, _mapToolCall), (items) => ({ ...page, items }))),
             ),
         );
+        const startSession = Effect.fn('database.agentPersistence.startSession')((params: {
+            readonly appId: string; readonly correlationId: string; readonly sessionId: string;
+        }) => write([{
+            appId: params.appId, entryKind: 'session_start' as const, operation: Option.none(),
+            payloadJson: { startedAt: new Date(), toolCallCount: 0, userId: null },
+            runId: params.correlationId, sequence: 0, sessionId: params.sessionId,
+            stateHash: Option.none(), status: Option.some('running' as const),
+        }]));
+        const completeSession = Effect.fn('database.agentPersistence.completeSession')((params: {
+            readonly appId: string; readonly correlationId: string; readonly error: string | null;
+            readonly sequence: number; readonly sessionId: string; readonly status: 'completed' | 'failed'; readonly toolCallCount: number;
+        }) => write([{
+            appId: params.appId, entryKind: 'session_complete' as const, operation: Option.none(),
+            payloadJson: { endedAt: new Date(), error: params.error, toolCallCount: params.toolCallCount },
+            runId: params.correlationId, sequence: params.sequence, sessionId: params.sessionId,
+            stateHash: Option.none(), status: Option.some(params.status),
+        }]));
+        const persistCall = Effect.fn('database.agentPersistence.persistCall')((
+            identity: { readonly appId: string; readonly correlationId: string; readonly sessionId: string },
+            loopState: unknown,
+            call: {
+                readonly durationMs: number; readonly error: Option.Option<string>; readonly operation: string;
+                readonly params: Record<string, unknown>; readonly result: Option.Option<unknown>;
+                readonly sequence: number; readonly status: 'ok' | 'error';
+            },
+        ) => write([
+            {
+                appId: identity.appId, entryKind: 'checkpoint' as const, operation: Option.none(),
+                payloadJson: { chatJson: '', loopState }, runId: identity.correlationId,
+                sequence: call.sequence, sessionId: identity.sessionId,
+                stateHash: Option.some(_stateHash(loopState)), status: Option.none(),
+            },
+            {
+                appId: identity.appId, entryKind: 'tool_call' as const,
+                operation: Option.some(call.operation),
+                payloadJson: { durationMs: call.durationMs, params: call.params, result: Option.getOrUndefined(call.result) },
+                runId: identity.correlationId, sequence: call.sequence, sessionId: identity.sessionId,
+                stateHash: Option.none(),
+                status: Option.some(call.status === 'ok' ? 'running' as const : 'failed' as const),
+            },
+        ]));
         const idempotency = (correlationId: string, payload: unknown, sequence: number) =>
-            ({ idempotencyKey: `run:${correlationId.slice(0, 8)}:seq:${String(sequence).padStart(4, '0')}`, payloadHash: _hash(payload) }) as const;
-        return { findResumable, hydrate, idempotency, list, trace, write } as const;
+            ({ idempotencyKey: `run:${correlationId.slice(0, 8)}:seq:${String(sequence).padStart(4, '0')}`, payloadHash: _stateHash(payload) }) as const;
+        return { completeSession, findResumable, hydrate, idempotency, list, persistCall, startSession, trace } as const;
     }),
 }) {}
 

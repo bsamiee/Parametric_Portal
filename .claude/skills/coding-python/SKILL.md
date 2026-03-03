@@ -33,12 +33,12 @@ All code follows six governing principles:
 
 ## Conventions
 
-| Layer                     | Library               | Owns                                                                                                                             |
-| ------------------------- | --------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
-| Domain models + pipelines | expression            | `Option`, `Result`, `@tagged_union`, `Block`, `Map`, `Seq`, `pipe`, `compose`, `@effect.result`, `@effect.async_result`, `curry` |
-| Dependency injection      | Protocol + expression | Protocol-typed parameters, `@effect.result` dependency threading                                                                 |
-| Concurrency               | anyio                 | `TaskGroup`, `CancelScope`, structured concurrency                                                                               |
-| Boundary validation       | Pydantic              | `BaseModel`, `TypeAdapter`, `@field_validator`, ingress/egress                                                                   |
+| Concern              | Library               | Scope                                          |
+| -------------------- | --------------------- | ---------------------------------------------- |
+| Domain + pipelines   | expression            | Result, Option, tagged unions, pipe, @effect   |
+| Dependency injection | Protocol + expression | Structural contracts, @effect.result threading |
+| Concurrency          | anyio                 | TaskGroup, CancelScope, structured spawning    |
+| Boundary validation  | Pydantic              | Frozen models, TypeAdapter, ingress/egress     |
 
 
 ## Contracts
@@ -92,32 +92,30 @@ All code follows six governing principles:
 
 **Foundation** (always):
 
-| Reference                                 | Focus                                    |
-| ----------------------------------------- | ---------------------------------------- |
-| [validation.md](references/validation.md) | Compliance checklist and completion gate |
-| [patterns.md](references/patterns.md)     | Anti-pattern detection heuristics        |
+| Reference                                 | Focus                                                                                |
+| ----------------------------------------- | ------------------------------------------------------------------------------------ |
+| [decorators.md](references/decorators.md) | ParamSpec algebra, ordering, composition, descriptor protocol                        |
+| [transforms.md](references/transforms.md) | Compositional logic: dispatch, folds, polymorphism, monadic composition, AOP algebra |
 
 **Core** (always):
 
-| Reference                                 | Focus                                                                                                      |
-| ----------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
-| [types.md](references/types.md)           | Python typing, NewType, Annotated, generics                                                                |
-| [objects.md](references/objects.md)       | Pydantic models, tagged unions, expression structures                                                      |
-| [effects.md](references/effects.md)       | Result pipelines, @effect builders, ROP                                                                    |
-| [decorators.md](references/decorators.md) | ParamSpec algebra, ordering, composition                                                                   |
-| [errors.md](references/errors.md)         | Error construction, tagged union hierarchies, policy                                                       |
-| [transforms.md](references/transforms.md) | Compositional logic substrate — dispatch, folds, keyed ops, polymorphism, monadic composition, AOP algebra |
-| [surface.md](references/surface.md)       | Public API creation and refinement                                                                         |
+| Reference                                 | Focus                                                                            |
+| ----------------------------------------- | -------------------------------------------------------------------------------- |
+| [types.md](references/types.md)           | Python typing, NewType, Annotated, generics, type-level discipline               |
+| [effects.md](references/effects.md)       | Result/Option pipelines, @effect.result/@effect.async_result builders, ROP       |
+| [errors.md](references/errors.md)         | Error construction, @tagged_union hierarchies, domain error policy               |
+| [protocols.md](references/protocols.md)   | Protocol ports, adapter boundaries, structural DI                                |
+| [numeric.md](references/numeric.md)       | Protocol-driven numerics, Polars lazy frames, Decimal, reductions                |
+| [validation.md](references/validation.md) | Compliance checklist, detection heuristics, completion gate for all `.py` audits |
 
 **Specialized** (load when task matches):
 
-| Reference                                       | Load when                                     |
-| ----------------------------------------------- | --------------------------------------------- |
-| [protocols.md](references/protocols.md)         | Protocol ports, adapter boundaries, reader DI |
-| [concurrency.md](references/concurrency.md)     | TaskGroup, CancelScope, ExceptionGroup        |
-| [observability.md](references/observability.md) | structlog, OpenTelemetry, context propagation |
-| [serialization.md](references/serialization.md) | Pydantic ingress, msgspec egress, TypeAdapter |
-| [performance.md](references/performance.md)     | Memory, CPython internals, profiling          |
+| Reference                                       | Load when                                                   |
+| ----------------------------------------------- | ----------------------------------------------------------- |
+| [concurrency.md](references/concurrency.md)     | TaskGroup, CancelScope, ExceptionGroup, sub-interpreters    |
+| [observability.md](references/observability.md) | structlog, OpenTelemetry, RED metrics, context propagation  |
+| [serialization.md](references/serialization.md) | Pydantic ingress, msgspec egress, TypeAdapter, BaseSettings |
+| [performance.md](references/performance.md)     | Memory layout, CPython internals, profiling, JIT            |
 
 
 ## Validation gate

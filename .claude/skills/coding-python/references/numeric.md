@@ -11,7 +11,7 @@ Python's `typing.SupportsFloat`, `SupportsInt`, `SupportsComplex`, and `Supports
 # --- [IMPORTS] ----------------------------------------------------------------
 from typing import Protocol, Self, TypeVar, runtime_checkable
 from pydantic import BaseModel, ConfigDict
-from returns.result import Failure, Result, Success
+from expression import Error, Ok, Result
 
 # --- [TYPES] ------------------------------------------------------------------
 N = TypeVar("N")
@@ -51,8 +51,8 @@ def total_magnitude[M: Measurable[float]](
     """Reduce measurements via Protocol-typed reducer -- pure, no loops."""
     from functools import reduce
     match items:
-        case (): return Failure("empty measurement sequence")
-        case _: return Success(reduce(
+        case (): return Error("empty measurement sequence")
+        case _: return Ok(reduce(
             reducer.combine, (m.magnitude() for m in items), reducer.identity(),
         ))
 ```
@@ -121,8 +121,8 @@ class VectorTransform(Protocol):
 # --- [FUNCTIONS] --------------------------------------------------------------
 def z_normalize(data: NDArray[np.float64]) -> NDArray[np.float64]:
     """Vectorized z-score normalization -- no loops."""
-    std = np.std(data)
-    return np.where(std > 0.0, (data - np.mean(data)) / std, np.zeros_like(data))
+    mean, std = np.mean(data), np.std(data)
+    return np.where(std > 0.0, (data - mean) / std, np.zeros_like(data))
 
 def clip_to_quantile(
     data: NDArray[np.float64], lower: float = 0.01, upper: float = 0.99,
@@ -180,7 +180,9 @@ class MoneyAmount(BaseModel, frozen=True):
             case _: return raw
 
     def add(self, other: "MoneyAmount") -> "MoneyAmount":
-        return MoneyAmount(value=FINANCIAL_CONTEXT.add(self.value, other.value), currency=self.currency)
+        match self.currency == other.currency:
+            case False: raise ValueError(f"currency mismatch: {self.currency} != {other.currency}")
+            case True: return MoneyAmount(value=FINANCIAL_CONTEXT.add(self.value, other.value), currency=self.currency)
 
     def quantize(self, precision: Decimal) -> "MoneyAmount":
         return MoneyAmount(value=self.value.quantize(precision, context=FINANCIAL_CONTEXT), currency=self.currency)

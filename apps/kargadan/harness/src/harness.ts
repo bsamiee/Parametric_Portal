@@ -49,7 +49,7 @@ const main = Effect.scoped(
         const resumableSessionId = yield* persistence.findResumable(appId);
         const hydrationResult = yield* Option.match(resumableSessionId, {
             onNone: () => Effect.succeed(Option.none()),
-            onSome: (sessionId) => persistence.hydrate({ appId, sessionId }).pipe(Effect.map(Option.some)),
+            onSome: (sessionId) => persistence.hydrate(sessionId).pipe(Effect.map(Option.some)),
         });
         const resume = Option.flatMap(hydrationResult, (result) => result.fresh
             ? Option.none()
@@ -69,7 +69,7 @@ const main = Effect.scoped(
                 }),
         });
         yield* Option.match(resume, {
-            onNone: () => persistence.createSession({ appId, correlationId, sessionId, startedAt: new Date(), status: 'running', toolCallCount: 0 }),
+            onNone: () => persistence.startSession({ appId, correlationId, sessionId }),
             onSome: () => Effect.void,
         });
         const identityBase = { appId, correlationId, sessionId };
@@ -82,13 +82,17 @@ const main = Effect.scoped(
                 return result;
             }),
         );
-        const completionParams = Match.value(outcome.state.status).pipe(
-            Match.when('Completed', () => ({ appId, correlationId, endedAt: new Date(), sessionId, status: 'completed' as const, toolCallCount: outcome.state.sequence })),
-            Match.when('Failed',    () => ({ appId, correlationId, endedAt: new Date(), error: 'Loop terminated with Failed status', sessionId, status: 'failed' as const, toolCallCount: outcome.state.sequence })),
-            Match.when('Planning',  () => ({ appId, correlationId, endedAt: new Date(), error: 'Loop terminated unexpectedly in Planning state', sessionId, status: 'failed' as const, toolCallCount: outcome.state.sequence })),
+        const completionError = Match.value(outcome.state.status).pipe(
+            Match.when('Completed', () => null),
+            Match.when('Failed',    () => 'Loop terminated with Failed status'),
+            Match.when('Planning',  () => 'Loop terminated unexpectedly in Planning state'),
             Match.exhaustive,
         );
-        yield* persistence.completeSession(completionParams);
+        yield* persistence.completeSession({
+            appId, correlationId, error: completionError, sequence: outcome.state.sequence, sessionId,
+            status: outcome.state.status === 'Completed' ? 'completed' as const : 'failed' as const,
+            toolCallCount: outcome.state.sequence,
+        });
         return outcome;
     }).pipe(
         Effect.withSpan('kargadan.harness.main'),

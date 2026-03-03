@@ -41,11 +41,7 @@ class AgentLoop extends Effect.Service<AgentLoop>()('kargadan/AgentLoop', {
             identity: { readonly appId: string; readonly correlationId: string; readonly sessionId: string },
             loopState: unknown,
             call: { readonly durationMs: number; readonly error: Option.Option<string>; readonly operation: string; readonly params: Record<string, unknown>; readonly result: Option.Option<unknown>; readonly sequence: number; readonly status: 'ok' | 'error' },
-        ) => persistence.persist({
-            appId: identity.appId,
-            checkpoint: { chatJson: '', loopState, sceneSummary: Option.none(), sequence: call.sequence, sessionId: identity.sessionId },
-            toolCall: { ...call, correlationId: identity.correlationId, sessionId: identity.sessionId },
-        });
+        ) => persistence.persistCall(identity, loopState, call);
         const persistInboundEvent = (eventEnvelope: Envelope.Event) =>
             Effect.gen(function* () {
                 const start = performance.now();
@@ -161,7 +157,7 @@ class AgentLoop extends Effect.Service<AgentLoop>()('kargadan/AgentLoop', {
                         : ({ includeAttributes: true, scope: 'active' } as const);
                     return {
                         _tag:        'command', ...base, deadlineMs: commandDeadlineMs,
-                        idempotency: isWrite ? persistence.idempotency({ correlationId: base.correlationId, payload, sequence }) : undefined,
+                        idempotency: isWrite ? persistence.idempotency(base.correlationId, payload, sequence) : undefined,
                         objectRefs:  [writeObjectRef], operation, payload, requestId: crypto.randomUUID(),
                         undoScope:   isWrite ? 'kargadan.phase3' : undefined,
                     };
@@ -211,10 +207,7 @@ class AgentLoop extends Effect.Service<AgentLoop>()('kargadan/AgentLoop', {
                 );
                 const fibers = yield* Effect.all([Effect.fork(inboundLoop), Effect.fork(heartbeatLoop)]);
                 const finalState = yield* Effect.iterate(initialState, { body: plan, while: (state) => state.status !== 'Completed' && state.status !== 'Failed' }).pipe(Effect.ensuring(Effect.forEach(fibers, Fiber.interrupt, { discard: true })));
-                const trace = yield* persistence.sessionTrace({
-                    appId:     finalState.identityBase.appId,
-                    sessionId: finalState.identityBase.sessionId,
-                });
+                const trace = yield* persistence.trace(finalState.identityBase.sessionId);
                 return { state: finalState, trace } as const;
             }),
         );

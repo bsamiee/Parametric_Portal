@@ -235,7 +235,7 @@ def route(anomaly: Anomaly, base: Result[float, Anomaly]) -> Result[float, Anoma
 
 def recover(anomaly: Anomaly, strategies: Block[Strategy],
             counts: Map[type, int], threshold: int) -> Result[float, Anomaly | CircuitOpen]:
-    compose = lambda a: pipe(strategies, block.fold(lambda acc, s: acc.or_else_with(s), Error(a)))
+    compose = lambda a: pipe(strategies, block.fold(lambda acc, s: acc.or_else_with(lambda: s(a)), Error(a)))
     return pipe(anomaly, gate(counts, threshold), lambda r: r.bind(lambda a: route(a, compose(a))))
 ```
 
@@ -263,7 +263,7 @@ class Surface:
 
 @dataclass(frozen=True, slots=True)
 class SensorFault:
-    channel: int; code: Literal["drift", "spike", "dropout"]
+    channel: int; code: Literal["drift", "spike", "dropout", "malformed"]; detail: str = ""
 
 class Egress  (msgspec.Struct, frozen=True, gc=False, tag_field="t"): ...
 class Problem (Egress, tag="http"):   uri:  str;  status:  int; title: str
@@ -272,7 +272,8 @@ class Envelope(Egress, tag="worker"): key:  str;  reason:  str
 
 @curry_flip(1)
 def collapse(surface: Surface, fault: SensorFault) -> Problem | Exit | Envelope:
-    rank, label = ("drift", "spike", "dropout").index(fault.code), fault.code.upper()
+    codes = ("drift", "spike", "dropout", "malformed")
+    rank, label = codes.index(fault.code), fault.code.upper()
     match surface.transport:
         case "http": return Problem(f"urn:sensor:{fault.channel}:{fault.code}", 502 + rank, label)
         case "cli": return Exit(70 + rank, label)
@@ -283,7 +284,7 @@ def collapse(surface: Surface, fault: SensorFault) -> Problem | Exit | Envelope:
 def validate[T](adapter: TypeAdapter[T], raw: bytes) -> Result[T, SensorFault]:
     # BOUNDARY ADAPTER — pydantic deserialization boundary
     try: return Ok(adapter.validate_json(raw))
-    except Exception: return Error(SensorFault(channel=0, code="dropout"))
+    except Exception as exc: return Error(SensorFault(channel=-1, code="malformed", detail=str(exc)))
 
 def ingest[T, R](adapter: TypeAdapter[T], surface: Surface,
     transform: Callable[[T], Result[R, SensorFault]],

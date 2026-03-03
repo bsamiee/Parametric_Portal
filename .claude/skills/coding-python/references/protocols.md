@@ -183,13 +183,17 @@ def conform[C](
     obj: object, lattice: Block[tuple[Tier, type[C]]],
     pred: Callable[[C], bool], attest: Attestation,
 ) -> Result[Certified[C], Rejection[C]]:
+    match lattice.head().to_list():
+        case []: raise ValueError("conform requires non-empty lattice; no capability tiers defined")
+        case _: pass
     def narrows(candidate: object, cap: type[C]) -> TypeIs[C]:
         return isinstance(candidate, cap) and pred(candidate)
     gate = lambda tc: Ok(Certified(obj, attest, tc[0])).filter_with(
         lambda _: narrows(obj, tc[1]), lambda _: (tc[1], type(obj), tc[0]))
+    head = lattice.head().value  # safe: non-empty guard above
     return pipe(lattice, block.fold(
         lambda acc, tc: acc.or_else_with(lambda _: gate(tc)),
-        Error(lattice.head().map(lambda h: (h[1], type(obj), h[0])).default_value((object, type(obj), "primary")))))
+        Error((head[1], type(obj), head[0]))))
 ```
 
 `narrows` is nested because `TypeIs[C]` requires a named function with return annotation — lambdas cannot carry `TypeIs` — yet the semantic predicate `pred` closes over `conform`'s scope, making module-level placement impossible without partial application ceremony. `gate` speculatively constructs `Certified(obj, attest, tc[0])` inside `Ok`, then `filter_with` validates through `narrows` — PEP 742 complement narrowing means the negative path provably excludes `C`, a guarantee `TypeGuard` cannot provide. `block.fold` with `or_else_with` implements the conformance lattice as a short-circuiting join: `or_else_with` evaluates `gate(tc)` only when the accumulator holds `Error`, so the first successful tier becomes the supremum and all weaker tiers are skipped. `Rejection[C]` as a tuple alias eliminates a dedicated error dataclass while preserving structured context — the triple `(expected_cap, actual_type, tier)` suffices for both pattern matching and diagnostics.
@@ -222,17 +226,22 @@ async def dispatch[T, E](
     arrows: Block[Task[T, E]], sem: Semaphore,
     budget: float, retries: int, pred: Callable[[E], bool],
 ) -> Result[Block[T], Block[Fault[E]]]:
-    async def _k(fn: Task[T, E], n: int = retries, d: float = 0.1, w: float = 0.0) -> Result[T, Fault[E]]:
-        r: Result[T, E] | None = None
-        with move_on_after(budget - w):
-            async with sem: r = await fn()
-        match r:
-            case None: return Error(Timeout(w, budget))
-            case Ok() as ok: return ok
-            case Error(e) if n <= 0 or not pred(e): return Error(Exhausted(n, e))
-            case _:
-                await anyio.sleep(d)
-                return await _k(fn, n - 1, d * (1 + 5 ** 0.5) / 2, w + d)
+    async def _k(fn: Task[T, E]) -> Result[T, Fault[E]]:
+        n, d, w = retries, 0.1, 0.0
+        phi = (1 + 5 ** 0.5) / 2
+        while True:
+            r: Result[T, E] | None = None
+            with move_on_after(budget - w):
+                async with sem: r = await fn()
+            match r:
+                case None: return Error(Timeout(w, budget))
+                case Ok() as ok: return ok
+                case Error(e) if n <= 0 or not pred(e): return Error(Exhausted(n, e))
+                case _:
+                    await anyio.sleep(d)
+                    w += d
+                    d *= phi
+                    n -= 1
     tx, rx = create_memory_object_stream[Result[T, Fault[E]]](arrows.length)
     async def _emit(f: Task[T, E]) -> None: await tx.send(await _k(f))
     async with create_task_group() as tg: pipe(arrows, block.fold(lambda _, f: tg.start_soon(_emit, f), None))
@@ -248,7 +257,7 @@ The recursive tail call scales delay by $(1 + \sqrt{5})/2$ — irrational spacin
 
 ## Version-Gated Protocol Surfaces
 
-Version negotiation reifies compatibility as a three-stage Kleisli chain: `routes.try_find(v).to_result(...)` verifies version support, `sunsets.try_find(method).map(...)` gates deprecation, and `.bind(adapter_call)` dispatches — the entire version-support-deprecation-dispatch pipeline threads through `Result.bind` with zero conditional branching. `M: StrEnum` makes deprecation keys type-safe: `Method.fecth` is a compile error where `"fecth"` silently misses.
+Version negotiation reifies compatibility as a three-stage Kleisli chain: `routes.try_find(v).to_result(...)` verifies version support, `sunsets.try_find(method).map(...)` gates deprecation, and `.bind(adapter_call)` dispatches — the entire version-support-deprecation-dispatch pipeline threads through `Result.bind` with zero conditional branching. `M: StrEnum` makes deprecation keys type-safe: `Method.fetch` is a compile error where `"fecth"` silently misses.
 
 ```python
 from collections.abc import Callable
@@ -280,11 +289,14 @@ def gate[M: StrEnum, **P, T, E](
     routes: Map[Ver, Callable[P, Result[T, E]]], sunsets: Map[M, tuple[Ver, Ver]], method: M,
 ) -> Callable[[Callable[P, Result[T, E]]], Callable[P, Result[T, E | Skew[M]]]]:
     known = tuple(pipe(routes.to_seq(), seq.map(itemgetter(0))))
+    match known:
+        case (): raise ValueError("gate requires non-empty routes; cannot determine default version")
+        case (default, *_): pass
     def dec(fn: Callable[P, Result[T, E]]) -> Callable[P, Result[T, E | Skew[M]]]:
         @wraps(fn)
         def guarded(*args: P.args, **kw: P.kwargs) -> Result[T, E | Skew[M]]:
             v = pipe(block.of_seq(args), block.try_find(lambda a: isinstance(a, Versioned)),
-                lambda opt: opt.map(lambda a: a.version).default_value(known[0]))
+                lambda opt: opt.map(lambda a: a.version).default_value(default))
             return (routes.try_find(v).to_result(Unsupported(v, known))
                 .bind(lambda adapter: sunsets.try_find(method).map(
                     lambda sr: Ok(adapter).filter_with(lambda _: v < sr[0], lambda _: Sunsetted(method, sr[0], sr[1]))

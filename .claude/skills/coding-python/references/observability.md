@@ -1,6 +1,6 @@
 # Observability
 
-Observability in Python 3.14+ fuses traces, logs, and metrics behind one `@instrument` surface. `structlog` builds event dicts, `logging` transports, and `OpenTelemetry SDK >= 1.39` exports spans/logs through `ReadableLogRecord`. Correlation flows through `ContextVar` and `merge_contextvars`. All snippets target `structlog >= 25.5`, `opentelemetry-sdk >= 1.39`, `match/case` dispatch, and explicit boundary loops only.
+Observability in Python 3.14+ fuses traces, logs, and metrics behind one `@instrument` surface. `structlog` builds event dicts, `logging` transports, and `OpenTelemetry SDK >= 1.39` exports spans/logs through `ReadableLogRecord`. Correlation flows through `ContextVar` and `merge_contextvars`. All snippets target `structlog >= 25.5`, `opentelemetry-sdk >= 1.39`, expression v5.6+ with `Result`, `Ok`, `Error`, `match/case` dispatch, and explicit boundary loops only.
 
 ---
 ## Signal Pipeline
@@ -21,7 +21,7 @@ from typing import cast
 import structlog
 from opentelemetry import trace
 from opentelemetry.trace import StatusCode
-from returns.result import Failure, Result, Success
+from expression import Error, Ok, Result
 from structlog.contextvars import merge_contextvars
 from structlog.processors import (
     CallsiteParameter, CallsiteParameterAdder, TimeStamper, add_log_level,
@@ -37,10 +37,10 @@ def _record_outcome[R](
     span: trace.Span, log: BoundLogger, name: str, result: Result[R, Exception],
 ) -> None:
     match result:
-        case Success(_):
+        case Ok(_):
             span.set_status(StatusCode.OK)
             log.info("op_success", operation=name)
-        case Failure(error):
+        case Error(error):
             span.record_exception(error)
             span.set_status(StatusCode.ERROR, str(error))
             log.error("op_failure", operation=name, error_type=type(error).__name__)
@@ -60,7 +60,6 @@ def instrument[**P, R](
             _record_outcome(span, log, operation, result)
             return result
     return wrapper
-# instrument_async: identical structure with async/await + ainfo/aerror log methods
 
 def _inject_trace_identifiers(
     _logger: object, _method_name: str, event_dict: dict[str, object],
@@ -177,10 +176,10 @@ Propagation paths:
 import logging
 
 from opentelemetry import trace
-from opentelemetry._logs import set_logger_provider  # noqa: PLC2701
 from opentelemetry.instrumentation.logging import LoggingInstrumentor
-from opentelemetry.sdk._logs import LoggerProvider, LoggingHandler  # noqa: PLC2701
-from opentelemetry.sdk._logs.export import BatchLogRecordProcessor, InMemoryLogRecordExporter  # noqa: PLC2701
+from opentelemetry.logs import set_logger_provider
+from opentelemetry.sdk.logs import LoggerProvider, LoggingHandler
+from opentelemetry.sdk.logs.export import BatchLogRecordProcessor, InMemoryLogRecordExporter
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor, ConsoleSpanExporter
@@ -218,7 +217,7 @@ def bootstrap_telemetry(
 ---
 ## Metrics Projection
 
-`@instrument` projects counters and histograms from `Success`/`Failure` via `opentelemetry.metrics`. Rate is a monotonic counter per call. Error is a monotonic counter per `Failure`. Duration is a histogram recording elapsed seconds. All share the `operation` dimension for dashboard correlation.
+`@instrument` projects counters and histograms from `Ok`/`Error` via `opentelemetry.metrics`. Rate is a monotonic counter per call. Error is a monotonic counter per `Error` outcome. Duration is a histogram recording elapsed seconds. All share the `operation` dimension for dashboard correlation.
 
 ```python
 """RED metrics projection from Result outcomes via @instrument."""
@@ -231,7 +230,7 @@ from functools import wraps
 
 from opentelemetry import metrics, trace
 from opentelemetry.trace import StatusCode
-from returns.result import Failure, Result, Success
+from expression import Error, Ok, Result
 
 # --- [CONSTANTS] --------------------------------------------------------------
 
@@ -257,10 +256,10 @@ def _record_outcome_with_metrics[R](
     _request_counter.add(1, {"operation": name, "outcome": "total"})
     _duration_histogram.record(elapsed, {"operation": name})
     match result:
-        case Success(_):
+        case Ok(_):
             span.set_status(StatusCode.OK)
             _request_counter.add(1, {"operation": name, "outcome": "success"})
-        case Failure(error):
+        case Error(error):
             span.record_exception(error)
             span.set_status(StatusCode.ERROR, str(error))
             _error_counter.add(1, {"operation": name, "error_type": type(error).__name__})
@@ -282,8 +281,6 @@ def instrument_with_metrics[**P, R](
     return wrapper
 ```
 
-**expression.Result alternative** -- `expression.Ok`/`expression.Error` match identically in `_record_outcome_with_metrics`; substitute `case Ok(_):`/`case Err(error):` for `case Success(_):`/`case Failure(error):`. Bridge at the observability boundary via `from expression import Result as ExprResult, Ok, Error as Err`.
-
 RED instruments: **Rate** `service.requests.total` (counter, `operation` + `outcome`), **Error** `service.errors.total` (counter, `operation` + `error_type`), **Duration** `service.request.duration` (histogram, `operation`). Dimension stability is critical -- `operation` keys must match across all three for dashboard joins.
 
 ---
@@ -294,13 +291,14 @@ RED instruments: **Rate** `service.requests.total` (counter, `operation` + `outc
 - [NEVER] Scatter `get_current_span()` through business logic -- inject via `@instrument`.
 - [NEVER] Initialize telemetry providers at import time.
 - [ALWAYS] Export logs with `ReadableLogRecord` (OTel >= 1.39).
-- [ALWAYS] Implement `on_emit()` for custom log processors.
+- [ALWAYS] Implement structlog `Processor` via `__call__(logger, method_name, event_dict) -> EventDict`.
+- [ALWAYS] Implement OTel `LogRecordProcessor` via `on_emit()`, `shutdown()`, `force_flush()` lifecycle methods.
 - [ALWAYS] Keep `merge_contextvars` first, `wrap_for_formatter` terminal in processor chain.
 - [ALWAYS] Clear, bind, and scope context vars per request lifecycle.
 - [ALWAYS] Project RED metrics from `Result` outcomes -- never from exception handlers.
 - [ALWAYS] Use stable `operation` dimension keys across all metric instruments.
+- [ALWAYS] Use `expression.Result` (`Ok`/`Error`) for all outcome projection -- canonical library.
 - [PREFER] `msgspec.json.encode` as JSON serializer backend for structlog.
-- [PREFER] `expression.Result` match in domain-model-heavy modules.
 
 ---
 ## Quick Reference
@@ -314,5 +312,5 @@ RED instruments: **Rate** `service.requests.total` (counter, `operation` + `outc
 |   [5]   | `ReadableLogRecord`        | Modern OTel log export shape              | Required for OTel >= 1.39              |
 |   [6]   | `bootstrap_telemetry`      | One-shot startup wiring                   | Resource -> Providers -> Global        |
 |   [7]   | RED metrics projection     | Rate/Error/Duration from Result outcomes  | Counter + Counter + Histogram          |
-|   [8]   | `expression.Result` bridge | RED projection for domain-model modules   | Same match/case, `Ok`/`Error` variants |
+|   [8]   | `expression.Result` dispatch | RED projection via `Ok`/`Error` match     | Canonical Result library               |
 |   [9]   | Scoped context binding     | Per-request bind/unbind lifecycle         | `clear` -> `bind` -> clear             |

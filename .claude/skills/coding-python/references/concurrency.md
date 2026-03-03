@@ -1,6 +1,6 @@
 # Concurrency
 
-Concurrency in Python 3.14+ is boundary architecture. `anyio.create_task_group()` is the spawn primitive, `CancelScope` owns deadlines and shielding, `CapacityLimiter` + `MemoryObjectStream` enforce backpressure, and `ContextVar[tuple]` replaces mutable globals under free-threading. All snippets target `anyio >= 4.12`, `match/case` dispatch, and explicit boundary loops only.
+Concurrency in Python 3.14+ is boundary architecture. `anyio.create_task_group()` is the spawn primitive, `CancelScope` owns deadlines and shielding, `CapacityLimiter` + `MemoryObjectStream` enforce backpressure, and `ContextVar[tuple]` replaces mutable globals under free-threading. All snippets target `anyio >= 4.12`, expression v5.6+ with `Result`, `Ok`, `Error`, `Option`, `@effect.async_result`, `pipe`, `Block`, `match/case` dispatch, and explicit boundary loops only.
 
 ---
 ## Structured Concurrency Algebra
@@ -8,80 +8,58 @@ Concurrency in Python 3.14+ is boundary architecture. `anyio.create_task_group()
 Seven primitives compose one bounded pipeline: `TaskGroup` owns lifecycle, `CancelScope(deadline)` enforces timeout, `CancelScope(shield=True)` protects critical sections, `CapacityLimiter` caps concurrency, `MemoryObjectStream[T]` carries typed backpressure, and `checkpoint()` yields cooperatively.
 
 ```python
-"""Bounded pipeline: deadline + backpressure + shielded ack + checkpoints."""
-
-# --- [IMPORTS] ----------------------------------------------------------------
-
 from collections.abc import Awaitable, Callable, Coroutine
+from dataclasses import dataclass
 
 import anyio
 from anyio import CancelScope, CapacityLimiter, create_task_group, get_cancelled_exc_class
-from anyio.abc import ObjectSendStream
+from anyio.abc import ObjectReceiveStream, ObjectSendStream
 from anyio.lowlevel import checkpoint
-from returns.future import future_safe
-from returns.result import Failure, Result, Success
+from expression import Error, Ok, Option, Result, pipe
+from expression.collections import Block, block
 
-# --- [CODE] -------------------------------------------------------------------
+@dataclass(frozen=True, slots=True)
+class Timeout: index: int; budget: float
 
 async def bounded_pipeline[T, U](
-    items: tuple[T, ...],
-    process: Callable[[T], Coroutine[object, object, U]],
-    acknowledge: Callable[[U], Awaitable[None]],
-    concurrency: int = 10,
-    timeout: float = 30.0,
-) -> tuple[Result[U, Exception], ...]:
-    limiter: CapacityLimiter = CapacityLimiter(concurrency)
-    send_result, recv_result = anyio.create_memory_object_stream[
-        tuple[int, Result[U, Exception]]
-    ](max_buffer_size=len(items))
-
-    @future_safe
-    async def safe_process(item: T) -> U:
-        return await process(item)
-    async def _worker(
-        index: int, item: T,
-        sender: ObjectSendStream[tuple[int, Result[U, Exception]]],
-    ) -> None:
+    items: Block[T], process: Callable[[T], Coroutine[None, None, U]],
+    acknowledge: Callable[[U], Awaitable[None]], concurrency: int = 10, budget: float = 30.0,
+) -> Block[Result[U, Timeout | Exception]]:
+    limiter = CapacityLimiter(concurrency)
+    tx, rx = anyio.create_memory_object_stream[tuple[int, Result[U, Timeout | Exception]]](items.length)
+    async def _worker(idx: int, item: T, sender: ObjectSendStream[tuple[int, Result[U, Timeout | Exception]]]) -> None:
+        r: Result[U, Exception] | None = None
         async with limiter:
-            with CancelScope(deadline=anyio.current_time() + timeout) as scope:
-                result: Result[U, Exception] = await safe_process(item)
+            with anyio.move_on_after(budget):
+                # BOUNDARY ADAPTER — async process may raise; typed cancellation via sentinel
+                try: r = Ok(await process(item))
+                except Exception as exc: r = Error(exc)  # noqa: BLE001
                 await checkpoint()
-            match scope:
-                case CancelScope(cancelled_caught=True):
-                    await sender.send((index, Failure(TimeoutError(f"item {index}"))))
-                    return
-                case _:
-                    pass
-            # [BOUNDARY]: try/except required -- anyio cancellation protocol
-            match result:
-                case Success(value):
-                    try:
-                        with CancelScope(shield=True):
-                            await acknowledge(value)
-                    except get_cancelled_exc_class():
-                        raise
-                case _:
-                    pass
-            await sender.send((index, result))
-    # Side-effect boundary: task spawning is inherently imperative IO
-    async with create_task_group() as task_group:
-        for index, item in enumerate(items):
-            task_group.start_soon(_worker, index, item, send_result)
-    await send_result.aclose()
-    collected: list[tuple[int, Result[U, Exception]]] = []
-    async for result_item in recv_result:
-        collected.append(result_item)
-    return tuple(r for _, r in sorted(collected))
+        match r:
+            case None: await sender.send((idx, Error(Timeout(idx, budget)))); return
+            case Ok(value):
+                # BOUNDARY ADAPTER — anyio cancellation protocol requires try/except
+                try:
+                    with CancelScope(shield=True): await acknowledge(value)
+                except get_cancelled_exc_class(): await sender.send((idx, r)); raise
+                except Exception as exc: await sender.send((idx, Error(exc))); return  # noqa: BLE001
+            case _: pass
+        await sender.send((idx, r))
+    async with create_task_group() as tg:
+        pipe(items.indexed(), block.fold(lambda _, iv: tg.start_soon(_worker, iv[0], iv[1], tx), None))
+    await tx.aclose()
+    collected = block.of_seq(rx.receive_nowait() for _ in range(items.length))
+    return pipe(collected, block.sort_with(lambda a, b: a[0] - b[0]), block.map(lambda iv: iv[1]))
 ```
+
+`move_on_after` scopes both process execution and checkpoint — cancellation sentinel `r: ... | None = None` absorbs scope expiration into `match`, converting to typed `Timeout(idx, budget)` with full index provenance. `block.fold` drives task registration as a void fold over `items.indexed()`, producing index/item pairs without `enumerate`. `block.sort_with` on the collected `(index, result)` tuples restores deterministic ordering; `block.map` projects to the result channel. `CancelScope(shield=True)` protects acknowledgment from parent cancellation — the `try/except get_cancelled_exc_class(): raise` re-throw is the sole permitted domain-adjacent exception handling.
 
 **Pipeline stage composition** chains stages via `MemoryObjectStream` pairs with explicit `max_buffer_size`.
 
 ```python
 async def pipeline_stage[TIn, TOut](
-    receive: ObjectReceiveStream[TIn],
-    send: ObjectSendStream[TOut],
-    transform: Callable[[TIn], Awaitable[TOut]],
-    limiter: CapacityLimiter,
+    receive: ObjectReceiveStream[TIn], send: ObjectSendStream[TOut],
+    transform: Callable[[TIn], Awaitable[TOut]], limiter: CapacityLimiter,
 ) -> None:
     async with send:
         async for item in receive:
@@ -90,13 +68,13 @@ async def pipeline_stage[TIn, TOut](
                 await checkpoint()
 ```
 
-Timeout semantics: `deadline` (absolute), `shield=True` (defer parent cancel), `move_on_after` (soft -- inspect `cancelled_caught`), `fail_after` (hard -- raises `TimeoutError`).
+Timeout semantics: `deadline` (absolute), `shield=True` (defer parent cancel), `move_on_after` (soft — inspect `cancelled_caught`), `fail_after` (hard — raises `TimeoutError`).
 Checkpoint variants: `checkpoint()` (yield + cancel check), `checkpoint_if_cancelled()` (cheaper in hot paths), `cancel_shielded_checkpoint()` (yield inside shielded scopes).
 
 [CRITICAL]:
-- [NEVER] Use bare `asyncio.create_task()` or `asyncio.gather()` -- violates structured cancellation.
+- [NEVER] Use bare `asyncio.create_task()` or `asyncio.gather()` — violates structured cancellation.
 - [ALWAYS] Route results through `MemoryObjectStream`, not shared mutable collections.
-- [ALWAYS] Set `max_buffer_size` explicitly -- default 0 is rendezvous.
+- [ALWAYS] Set `max_buffer_size` explicitly — default 0 is rendezvous.
 - [ALWAYS] Close send streams via `async with send:` to signal completion downstream.
 - [ALWAYS] Wrap commit/ack in `CancelScope(shield=True)` and re-raise cancellation.
 
@@ -162,23 +140,17 @@ Free-threading rules:
 ```python
 """InterpreterPoolExecutor: bytes wire contract for CPU-parallel work."""
 
-# --- [IMPORTS] ----------------------------------------------------------------
-
 from concurrent.futures import InterpreterPoolExecutor
 
 import msgspec
+from expression import Error, Ok, Result
 from pydantic import BaseModel, TypeAdapter
-from returns.result import safe
-
-# --- [CLASSES] ----------------------------------------------------------------
 
 class IngressPayload(BaseModel, frozen=True):
     account_id: str
     amount_cents: int
 
 _adapter: TypeAdapter[IngressPayload] = TypeAdapter(IngressPayload)
-
-# --- [FUNCTIONS] --------------------------------------------------------------
 
 def _decode_on_worker(payload: bytes) -> bytes:
     raw: object = msgspec.json.decode(payload)
@@ -187,19 +159,20 @@ def _decode_on_worker(payload: bytes) -> bytes:
         {"account_id": validated.account_id, "cents": validated.amount_cents},
     )
 
-@safe
-def decode_batch_isolated(
-    payloads: tuple[bytes, ...], max_workers: int = 4,
-) -> tuple[bytes, ...]:
-    with InterpreterPoolExecutor(max_workers=max_workers) as pool:
-        return tuple(pool.map(_decode_on_worker, payloads))
+def decode_batch_isolated(payloads: tuple[bytes, ...], max_workers: int = 4) -> Result[tuple[bytes, ...], Exception]:
+    # BOUNDARY ADAPTER — InterpreterPoolExecutor may raise NotShareableError
+    try:
+        with InterpreterPoolExecutor(max_workers=max_workers) as pool:
+            return Ok(tuple(pool.map(_decode_on_worker, payloads)))
+    except Exception as exc:  # noqa: BLE001
+        return Error(exc)
 ```
 
 Interpreter boundary rules:
 - Input/output must be `bytes` (or primitive-safe values) across boundaries.
 - Recreate validators per interpreter; `TypeAdapter` internals are not shareable.
 - Prefer `msgspec.json` wire encoding.
-- `@safe` wrapping captures `NotShareableError` in the Result error channel.
+- Manual `try/except` at boundary with `# BOUNDARY ADAPTER` marker wraps into `Result`.
 
 ---
 ## Exception Groups
@@ -209,13 +182,11 @@ When multiple tasks fail concurrently inside a `TaskGroup`, anyio raises an `Exc
 ```python
 """except* structured handling at TaskGroup boundaries."""
 
-# --- [IMPORTS] ----------------------------------------------------------------
-
 import anyio
 from anyio import create_task_group
-from returns.result import Failure, Result, Success
-
-# --- [CODE] -------------------------------------------------------------------
+from collections.abc import Callable, Coroutine
+from expression import Error, Ok, Result
+from expression.collections import Block
 
 class RetryableError(Exception):
     def __init__(self, operation: str) -> None:
@@ -225,33 +196,31 @@ class RetryableError(Exception):
 class FatalError(Exception):
     """Non-recoverable failure; propagate immediately."""
 
-async def resilient_batch[T](
-    items: tuple[T, ...],
-) -> tuple[Result[T, Exception], ...]:
-    results: list[Result[T, Exception]] = []
+type Processor[T] = Callable[[T], Coroutine[None, None, None]]
 
+async def resilient_batch[T](items: Block[T], process: Processor[T]) -> Block[Result[T, Exception]]:
+    tx, rx = anyio.create_memory_object_stream[Result[T, Exception]](items.length)
     async def _attempt(item: T) -> None:
-        results.append(Success(item))
-        await anyio.sleep(0)
-    # [BOUNDARY]: except* required -- TaskGroup surfaces concurrent failures
+        await process(item)  # may raise RetryableError or FatalError
+        await tx.send(Ok(item))
+    # BOUNDARY ADAPTER — except* required; TaskGroup surfaces concurrent failures
     # as ExceptionGroup; no Result-based alternative for multi-task failure
     try:
-        async with create_task_group() as task_group:
-            for item in items:
-                task_group.start_soon(_attempt, item)
+        async with create_task_group() as tg:
+            items.iterate(lambda item: tg.start_soon(_attempt, item))
     except* RetryableError as group:
-        for exc in group.exceptions:
-            results.append(Failure(exc))
+        Block(group.exceptions).iterate(lambda exc: tx.send_nowait(Error(exc)))
     except* FatalError:
         raise
-    return tuple(results)
+    await tx.aclose()
+    return Block(rx.receive_nowait() for _ in range(items.length))
 ```
 
 Exception group rules:
 - `except*` clauses are subtractive: each matched subset removed, unmatched propagate.
 - Use typed exception hierarchies for exhaustive `except*` clause coverage.
 - `ExceptionGroup` from `TaskGroup` is the ONLY context for `except*` in domain-adjacent code.
-- For finer-grained isolation, `expression.MailboxProcessor` processes messages sequentially -- converting concurrent failures to ordered Result values.
+- For finer-grained isolation, `expression.MailboxProcessor` processes messages sequentially — converting concurrent failures to ordered `Result` values.
 
 ---
 ## Rules
@@ -263,13 +232,13 @@ Exception group rules:
 - [ALWAYS] Add cooperative checkpoints in hot async loops.
 - [ALWAYS] Handle TaskGroup multi-failure via `except*` at group boundaries.
 - [ALWAYS] Use `bytes` as the interpreter-crossing wire contract.
-- [ALWAYS] Wrap `InterpreterPoolExecutor` calls with `@safe`.
+- [ALWAYS] Wrap `InterpreterPoolExecutor` calls with `# BOUNDARY ADAPTER` try/except into `Result`.
 - [NEVER] Use mutable globals under free-threading -- `ContextVar[tuple]` snapshots instead.
 - [NEVER] Use bare `asyncio.create_task()` or `asyncio.gather()`.
 - [PREFER] `threading.Lock` only for genuinely shared mutable resources.
 - [PREFER] `expression.CancellationToken` for cooperative cross-thread cancellation.
 
-Rule note: `try/except get_cancelled_exc_class(): raise` is the only permitted domain-adjacent `try/except`; cancellation is a foreign exception protocol.
+Rule note: `try/except get_cancelled_exc_class(): raise` is the only permitted domain-adjacent `try/except`; cancellation is a foreign exception protocol. `# BOUNDARY ADAPTER` marks all other `try/except` at interpreter and process boundaries.
 
 ---
 ## Quick Reference
@@ -282,7 +251,7 @@ Rule note: `try/except get_cancelled_exc_class(): raise` is the only permitted d
 |   [4]   | `CancelScope(shield=True)`   | Protect commit/ack under parent cancel      | Defer cancel until scope exit            |
 |   [5]   | Checkpoint discipline        | Fairness for CPU-heavy async loops          | `checkpoint_if_cancelled()` in hot paths |
 |   [6]   | ContextVar snapshots         | Free-threaded safety for scoped state       | Immutable tuple replacement              |
-|   [7]   | Interpreter isolation        | CPU-parallel with `bytes` wire contract     | `InterpreterPoolExecutor` + `@safe`      |
+|   [7]   | Interpreter isolation        | CPU-parallel with `bytes` wire contract     | `InterpreterPoolExecutor` + boundary adapter |
 |   [8]   | `except*` groups             | TaskGroup multi-failure structured handling | Subtractive clause matching              |
 |   [9]   | `MailboxProcessor`           | Actor-based sequential message processing   | Ordered Result from concurrent input     |
 |  [10]   | `CancellationToken`          | Cooperative cross-thread cancellation       | `is_cancellation_requested` check        |

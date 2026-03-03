@@ -188,6 +188,9 @@ class Axis(StrEnum):
     T = auto(); X = auto(); Y = auto()
 
 def contract(u: Map[Axis, float], v: Map[Axis, float], metric: Metric = (-1.0, 1.0, 1.0)) -> Result[float, Block[Axis]]:
+    match len(Axis) == len(metric):
+        case False: raise ValueError(f"metric length {len(metric)} != Axis count {len(Axis)}")
+        case True: pass
     resolved, gaps = pipe(
         Block(zip(Axis, metric)),
         block.fold(

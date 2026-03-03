@@ -186,9 +186,9 @@ def memoize_ok[**P, T, E, K: Hashable](extract: Callable[..., K]) -> Callable[[H
     def decorator(fn: Hom[P, T, E]) -> Hom[P, T, E]:
         @wraps(fn)
         def wrapper(*args: P.args, **kwargs: P.kwargs) -> Result[T, E]:
-            key = extract(*args, **kwargs)
-            return _store.get().try_find(key).map(Ok).default_with(
-                lambda: fn(*args, **kwargs).map(lambda v: (_store.set(_store.get().add(key, v)), v)[1])
+            key, cache = extract(*args, **kwargs), _store.get()
+            return cache.try_find(key).map(Ok).default_with(
+                lambda: fn(*args, **kwargs).map(lambda v: (_store.set(cache.add(key, v)), v)[1])
             )
         return wrapper
     return decorator
@@ -249,7 +249,7 @@ def bounded_retry[**P, T, E](max_n: int, base: float, retryable: Callable[[E], b
             for i in range(max_n):
                 match await fn(*args, **kwargs):
                     case Ok() as ok: return ok
-                    case Error(e) if retryable(e): err, delay, waited = e, delay * 1.618, waited + delay; await anyio.sleep(delay)
+                    case Error(e) if retryable(e): err, delay, waited = e, delay * 1.618, waited + delay * 1.618; await anyio.sleep(delay)
                     case Error(e): return Error(Exhausted(i + 1, e, waited))
             return Error(Exhausted(max_n, err, waited))
         return wrapper

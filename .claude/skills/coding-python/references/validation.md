@@ -15,12 +15,12 @@ Checklist for auditing `.py` modules against python-standards contracts. Items b
 ---
 ## Effect Integrity
 
-- [ ] `Result[T, E]` sync, `FutureResult[T, E]` async, `Maybe[T]` absence -- correct container per channel
-- [ ] `@safe`/`@future_safe` at foreign boundaries only -- domain returns `Result` explicitly
+- [ ] `Result[T, E]` sync, `@effect.async_result` async, `Option[T]` absence -- correct container per channel
+- [ ] Boundary adapters (`try/except`) at foreign boundaries only -- domain returns `Result` explicitly
 - [ ] Zero `try`/`except` and zero `.unwrap()`/`.value_or()` in `domain/` or `ops/`
-- [ ] `flow()` + `bind`/`map_`/`lash` as primary composition -- not method chaining for 3+ stages
-- [ ] Result library consistency: ONE library's `Result`/`Option` per module (no `expression.Ok` + `returns.Success`)
-- [ ] No mid-pipeline library mixing: `expression.pipe` and `returns.flow` never in same file
+- [ ] `pipe()` + `result.map`/`result.bind`/`.or_else_with` as primary composition -- not method chaining for 3+ stages
+- [ ] Result library consistency: `expression` exclusively per module (no `returns` imports)
+- [ ] No mid-pipeline library mixing: `expression.pipe` only -- `returns.flow` absent from codebase
 
 ---
 ## Control Flow
@@ -68,8 +68,8 @@ Checklist for auditing `.py` modules against python-standards contracts. Items b
 
 | [INDEX] | [CAUSE]                  | [GREP_ID] | [RG_PATTERN]                                          | [FIX]                                      |
 | :-----: | ------------------------ | :-------: | ----------------------------------------------------- | ------------------------------------------ |
-|   [1]   | Optional masking failure |   `G1`    | `"is None:" -g "*.py"`                                | `Maybe[T]` + `.to_result()`                |
-|   [2]   | Exception control flow   |   `G2`    | `"^\s*except " -g "*.py"`                             | `@safe` at edge, `Result` in domain        |
+|   [1]   | Optional masking failure |   `G1`    | `"is None:" -g "*.py"`                                | `Option[T]` + `.to_result()`               |
+|   [2]   | Exception control flow   |   `G2`    | `"^\s*except " -g "*.py"`                             | Boundary adapter at edge, `Result` in domain |
 |   [3]   | Imperative iteration     |   `G3`    | `"^\s*for " -g "*.py"`                                | Comprehension or `map`                     |
 |   [4]   | Nominal dispatch         |   `G4`    | `"isinstance\\(" -g "*.py"`                           | Structural `match`/`case`                  |
 |   [5]   | ABC-based interface      |   `G5`    | `"class.*ABC\|from abc import" -g "*.py"`             | `Protocol` structural typing               |
@@ -77,7 +77,7 @@ Checklist for auditing `.py` modules against python-standards contracts. Items b
 |   [7]   | Mutable domain model     |   `G7`    | `"class.*BaseModel" -g "*.py"`                        | Set `frozen=True`                          |
 |   [8]   | Bare collection          |   `G8`    | `"-> list\\[\|-> dict\\[" -g "*.py"`                  | Frozen model or `TypeAdapter`              |
 |   [9]   | Unstructured concurrency |   `G9`    | `"asyncio\\.create_task\|asyncio\\.gather" -g "*.py"` | `TaskGroup` + `start_soon`                 |
-|  [10]   | Unstructured logging     |   `G10`   | `"logging\\.info\\(f\\\"\|logger\\.info\\(f\\\""...`  | Key-value structured logs                  |
+|  [10]   | Unstructured logging     |   `G10`   | `"logging\\.info\\(f\|logger\\.info\\(f" -g "*.py"`   | Key-value structured logs                  |
 |  [11]   | Global mutable state     |   `G11`   | `"^[A-Z_]*: dict\|= \\[\\]\|= \\{\\}" -g "*.py"`      | `ContextVar[tuple]` snapshots              |
 |  [12]   | Bare primitive I/O       |   `G12`   | `"def .*: str\\) -> str:" -g "*.py"`                  | Typed atoms + `Result[T, E]`               |
 |  [13]   | Import-time IO           |   `G13`   | `"^db = \|^conn = \|^client = " -g "*.py"`            | Defer to `boot()`                          |
@@ -85,7 +85,7 @@ Checklist for auditing `.py` modules against python-standards contracts. Items b
 |  [15]   | `hasattr`/`getattr`      |   `G15`   | `"hasattr\\(\|getattr\\(" -g "*.py"`                  | `case object(attr=value)`                  |
 |  [16]   | Imperative accumulation  |   `G16`   | `"^\s*total\s*[+=]\|^\s*count\s*[+=]" -g "*.py"`      | `reduce` or `Seq.fold`                     |
 |  [17]   | Premature optimization   |   `G17`   | `"# TODO.*optim\|# PERF" -g "*.py"`                   | Profile with `cProfile`/`tracemalloc`      |
-|  [18]   | Mixed Result libraries   |   `G18`   | `"from expression.*Result\|from returns.*Result"...`  | ONE library per module; bridge at boundary |
+|  [18]   | Stale `returns` imports  |   `G18`   | `"from returns" -g "*.py"`                             | Replace with `expression` equivalents      |
 
 All patterns use `rg -n`. Combine G2+G14 for full control-flow audit; G4+G15 for dispatch audit.
 
@@ -95,7 +95,7 @@ All patterns use `rg -n`. Combine G2+G14 for full control-flow audit; G4+G15 for
 | [INDEX] | [CHECKLIST_AREA]      | [WHAT_IT_VALIDATES]                                                            |
 | :-----: | --------------------- | ------------------------------------------------------------------------------ |
 |   [1]   | TYPE_INTEGRITY        | Atoms, frozen models, unions, immutable collections                            |
-|   [2]   | EFFECT_INTEGRITY      | Result/Maybe/FutureResult, flow, library consistency                           |
+|   [2]   | EFFECT_INTEGRITY      | Result/Option/@effect.async_result, pipe, library consistency                  |
 |   [3]   | CONTROL_FLOW          | match/case exhaustive, zero imperative branching                               |
 |   [4]   | DECORATOR_INTEGRITY   | ParamSpec, ordering, single-concern                                            |
 |   [5]   | CONCURRENCY_INTEGRITY | TaskGroup, CancelScope, CapacityLimiter, ContextVar                            |
@@ -103,5 +103,3 @@ All patterns use `rg -n`. Combine G2+G14 for full control-flow audit; G4+G15 for
 |   [7]   | ALGORITHM_INTEGRITY   | Folds, scans, generators, @trampoline, Decimal                                 |
 |   [8]   | PERFORMANCE_INTEGRITY | __slots__, singletons, backpressure, profiling-first                           |
 |   [9]   | DETECTION_HEURISTICS  | Grep-based violation surface scan (G1-G18)                                     |
-|  [10]   | SERIALIZATION         | TypeAdapter at module level, Pydantic ingress, msgspec egress, Settings frozen |
-|  [11]   | OBSERVABILITY         | Fused @instrument, processor chain, RED metrics, context propagation           |
