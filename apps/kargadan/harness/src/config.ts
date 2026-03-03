@@ -1,18 +1,13 @@
-import { Config, Data, Duration, Effect, Match, Option, Schema as S } from 'effect';
+import { Config, Data, Duration, Effect, Option, Schema as S } from 'effect';
 import { DEFAULT_LOOP_OPERATIONS, ObjectTypeTag, Operation } from './protocol/schemas';
 
 // --- [ERRORS] ----------------------------------------------------------------
 
 class HarnessConfigError extends Data.TaggedError('HarnessConfigError')<{
-    readonly reason: 'invalid_protocol_version';
-    readonly input:  string;
+    readonly input: string;
 }> {
-    override get message() {return `HarnessConfig/${this.reason}: '${this.input}'`;}
+    override get message() {return `HarnessConfig/invalid_protocol_version: '${this.input}'`;}
 }
-
-// --- [FUNCTIONS] -------------------------------------------------------------
-
-const _splitCsv = (value: string) => value.split(',').map((entry) => entry.trim()).filter(Boolean);
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
@@ -24,11 +19,9 @@ const HarnessConfig = {
     commandManifestNamespace:  Config.string('KARGADAN_COMMAND_MANIFEST_NAMESPACE').pipe(Config.withDefault('kargadan')),
     commandManifestScopeId:    Config.string('KARGADAN_COMMAND_MANIFEST_SCOPE_ID').pipe(
         Config.withDefault(''),
-        Effect.flatMap((value) =>
-            Match.value(value.trim()).pipe(
-                Match.when('', () => Effect.succeed(Option.none())),
-                Match.orElse((scopeId) => S.decodeUnknown(S.UUID)(scopeId).pipe(Effect.map(Option.some))),
-            ),
+        Config.map((v) => v.trim()),
+        Effect.flatMap((v) =>
+            v === '' ? Effect.succeed(Option.none()) : S.decodeUnknown(S.UUID)(v).pipe(Effect.map(Option.some)),
         ),
     ),
     commandManifestVersion:  Config.string('KARGADAN_COMMAND_MANIFEST_VERSION').pipe(Config.withDefault('')),
@@ -40,26 +33,24 @@ const HarnessConfig = {
     pgMaxConnections:        Config.integer('KARGADAN_PG_MAX_CONNECTIONS').pipe(Config.withDefault(5)),
     protocolVersion:         Config.string('KARGADAN_PROTOCOL_VERSION').pipe(
         Config.withDefault('1.0'),
-        Effect.flatMap((value) =>
-            Match.value(value.trim().split('.')).pipe(
-                Match.when(
-                    (parts): parts is [string, string] => parts.length === 2 && parts.every((part) => /^\d+$/.test(part)),
-                    ([major, minor]) => Effect.succeed({ major: Number.parseInt(major, 10), minor: Number.parseInt(minor, 10) }),
-                ),
-                Match.orElse(() => Effect.fail(new HarnessConfigError({ input: value, reason: 'invalid_protocol_version' }))),
-            ),
+        Effect.map((v) => v.trim().split('.')),
+        Effect.filterOrFail(
+            (parts): parts is [string, string] => parts.length === 2 && parts.every((p) => /^\d+$/.test(p)),
+            (parts) => new HarnessConfigError({ input: parts.join('.') }),
         ),
+        Effect.map(([major, minor]) => ({ major: Number.parseInt(major, 10), minor: Number.parseInt(minor, 10) })),
+        Effect.orDie,
     ),
     reconnectBackoffBaseMs:  Config.integer('KARGADAN_RECONNECT_BACKOFF_BASE_MS').pipe(Config.withDefault(500)),
     reconnectBackoffMaxMs:   Config.integer('KARGADAN_RECONNECT_BACKOFF_MAX_MS').pipe(Config.withDefault(30_000)),
     reconnectMaxAttempts:    Config.integer('KARGADAN_RECONNECT_MAX_ATTEMPTS').pipe(Config.withDefault(50)),
     resolveCapabilities: Effect.all({
-        optional: Config.string('KARGADAN_CAP_OPTIONAL').pipe(Config.withDefault('view.capture'), Config.map(_splitCsv)),
-        required: Config.string('KARGADAN_CAP_REQUIRED').pipe(Config.withDefault('read.scene.summary,write.object.create'), Config.map(_splitCsv)),
+        optional: Config.string('KARGADAN_CAP_OPTIONAL').pipe(Config.withDefault('view.capture'), Config.map((v) => v.split(',').map((e) => e.trim()).filter(Boolean))),
+        required: Config.string('KARGADAN_CAP_REQUIRED').pipe(Config.withDefault('read.scene.summary,write.object.create'), Config.map((v) => v.split(',').map((e) => e.trim()).filter(Boolean))),
     }),
     resolveLoopOperations: Config.string('KARGADAN_LOOP_OPERATIONS').pipe(
         Config.withDefault(DEFAULT_LOOP_OPERATIONS.join(',')),
-        Config.map(_splitCsv),
+        Config.map((v) => v.split(',').map((e) => e.trim()).filter(Boolean)),
         Effect.flatMap(S.decodeUnknown(S.Array(Operation))),
     ),
     resolveWriteObjectRef: Effect.all({
