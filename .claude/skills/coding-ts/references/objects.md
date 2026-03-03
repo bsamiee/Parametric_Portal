@@ -43,7 +43,7 @@ const TransportRoute = Target.pipe(
 
 const TransportDecoded = S.typeSchema(TransportRoute)
 const TransportEncoded = S.encodedSchema(TransportRoute)
-const TransportBound =   S.encodedBoundSchema(TransportRoute)
+const TransportBound   = S.encodedBoundSchema(TransportRoute)
 ```
 
 **Authority contracts:**

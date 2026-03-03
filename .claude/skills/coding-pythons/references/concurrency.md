@@ -1,15 +1,9 @@
-# [H1][CONCURRENCY]
->**Dictum:** *Structured concurrency is algebraic: bounded spawning, explicit cancellation, typed backpressure, and immutable shared state.*
-
-<br>
+# Concurrency
 
 Concurrency in Python 3.14+ is boundary architecture. `anyio.create_task_group()` is the spawn primitive, `CancelScope` owns deadlines and shielding, `CapacityLimiter` + `MemoryObjectStream` enforce backpressure, and `ContextVar[tuple]` replaces mutable globals under free-threading. All snippets target `anyio >= 4.12`, `match/case` dispatch, and explicit boundary loops only.
 
 ---
-## [1][STRUCTURED_CONCURRENCY_ALGEBRA]
->**Dictum:** *TaskGroup, CancelScope, CapacityLimiter, MemoryObjectStream, and checkpoint compose as one algebra; no primitive stands alone.*
-
-<br>
+## Structured Concurrency Algebra
 
 Seven primitives compose one bounded pipeline: `TaskGroup` owns lifecycle, `CancelScope(deadline)` enforces timeout, `CancelScope(shield=True)` protects critical sections, `CapacityLimiter` caps concurrency, `MemoryObjectStream[T]` carries typed backpressure, and `checkpoint()` yields cooperatively.
 
@@ -96,8 +90,8 @@ async def pipeline_stage[TIn, TOut](
                 await checkpoint()
 ```
 
-Timeout semantics: `deadline` (absolute), `shield=True` (defer parent cancel), `move_on_after` (soft -- inspect `cancelled_caught`), `fail_after` (hard -- raises `TimeoutError`).<br>
-Checkpoint variants: `checkpoint()` (yield + cancel check), `checkpoint_if_cancelled()` (cheaper in hot paths; see `performance.md` [4]), `cancel_shielded_checkpoint()` (yield inside shielded scopes).
+Timeout semantics: `deadline` (absolute), `shield=True` (defer parent cancel), `move_on_after` (soft -- inspect `cancelled_caught`), `fail_after` (hard -- raises `TimeoutError`).
+Checkpoint variants: `checkpoint()` (yield + cancel check), `checkpoint_if_cancelled()` (cheaper in hot paths), `cancel_shielded_checkpoint()` (yield inside shielded scopes).
 
 [CRITICAL]:
 - [NEVER] Use bare `asyncio.create_task()` or `asyncio.gather()` -- violates structured cancellation.
@@ -107,10 +101,7 @@ Checkpoint variants: `checkpoint()` (yield + cancel check), `checkpoint_if_cance
 - [ALWAYS] Wrap commit/ack in `CancelScope(shield=True)` and re-raise cancellation.
 
 ---
-## [2][FREE_THREADING]
->**Dictum:** *Free-threading demands immutable shared state; ContextVar snapshots replace mutable globals.*
-
-<br>
+## Free Threading
 
 Under `python3.14t` (GIL disabled via PEP 779), decorator closures capturing mutable state become data races. `ContextVar[tuple[...]]` provides scoped immutable snapshots, `threading.Lock` guards genuinely shared mutable resources, and frozen models are inherently thread-safe.
 
@@ -160,14 +151,11 @@ class WorkItem(BaseModel, frozen=True):
 Free-threading rules:
 - `ContextVar[tuple]` snapshots for append-style state -- no locking needed.
 - `threading.Lock` only for genuinely shared mutable resources.
-- Frozen Pydantic models are inherently safe. See `types.md` [3].
+- Frozen Pydantic models are inherently safe.
 - `expression.CancellationToken` for cooperative cross-thread cancellation: `token.cancel()` signals, workers check `token.is_cancellation_requested` at yield points.
 
 ---
-## [3][INTERPRETER_ISOLATION]
->**Dictum:** *Subinterpreters demand bytes wire contracts; rich objects cannot cross the boundary.*
-
-<br>
+## Interpreter Isolation
 
 `InterpreterPoolExecutor` provides process-level isolation without fork overhead -- values crossing must be `bytes`, `int`, `float`, `bool`, or `None`.
 
@@ -210,14 +198,11 @@ def decode_batch_isolated(
 Interpreter boundary rules:
 - Input/output must be `bytes` (or primitive-safe values) across boundaries.
 - Recreate validators per interpreter; `TypeAdapter` internals are not shareable.
-- Prefer `msgspec.json` wire encoding. See `serialization.md` [2].
+- Prefer `msgspec.json` wire encoding.
 - `@safe` wrapping captures `NotShareableError` in the Result error channel.
 
 ---
-## [4][EXCEPTION_GROUPS]
->**Dictum:** *`except*` is the structured handler for TaskGroup multi-failure; pattern-match grouped exceptions for selective recovery.*
-
-<br>
+## Exception Groups
 
 When multiple tasks fail concurrently inside a `TaskGroup`, anyio raises an `ExceptionGroup`. `except*` (PEP 654) provides structured handling -- each clause matches a subset, unmatched exceptions propagate automatically.
 
@@ -266,13 +251,10 @@ Exception group rules:
 - `except*` clauses are subtractive: each matched subset removed, unmatched propagate.
 - Use typed exception hierarchies for exhaustive `except*` clause coverage.
 - `ExceptionGroup` from `TaskGroup` is the ONLY context for `except*` in domain-adjacent code.
-- For finer-grained isolation, `expression.MailboxProcessor` processes messages sequentially -- converting concurrent failures to ordered Result values. See `effects.md` [5] for expression patterns.
+- For finer-grained isolation, `expression.MailboxProcessor` processes messages sequentially -- converting concurrent failures to ordered Result values.
 
 ---
-## [5][RULES]
->**Dictum:** *Concurrency correctness is structural, not aspirational.*
-
-<br>
+## Rules
 
 - [ALWAYS] Spawn via `anyio.create_task_group()` only.
 - [ALWAYS] Set explicit `CancelScope` deadlines for bounded execution.
@@ -290,10 +272,7 @@ Exception group rules:
 Rule note: `try/except get_cancelled_exc_class(): raise` is the only permitted domain-adjacent `try/except`; cancellation is a foreign exception protocol.
 
 ---
-## [6][QUICK_REFERENCE]
->**Dictum:** *One table maps pattern to context.*
-
-<br>
+## Quick Reference
 
 | [INDEX] | [PATTERN]                    | [WHEN]                                      | [KEY_TRAIT]                              |
 | :-----: | ---------------------------- | ------------------------------------------- | ---------------------------------------- |

@@ -1,15 +1,9 @@
-# [H1][VALIDATION]
->**Dictum:** *Operational criteria verify Python 3.14+ standards compliance.*
-
-<br>
+# Validation
 
 Checklist for auditing `.py` modules against python-standards contracts. Items below are not fully enforced by ty or ruff and require human/agent judgment.
 
 ---
-## [1][TYPE_INTEGRITY]
->**Dictum:** *Types make illegal states unrepresentable.*
-
-<br>
+## Type Integrity
 
 - [ ] One canonical schema per entity -- no duplicate model definitions across files
 - [ ] Typed atoms (`NewType`/`Annotated`) -- raw `str`/`int` absent from public signatures
@@ -19,10 +13,7 @@ Checklist for auditing `.py` modules against python-standards contracts. Items b
 - [ ] Immutable collections: `tuple`/`frozenset`/`Mapping`/`Block[T]` over mutable equivalents
 
 ---
-## [2][EFFECT_INTEGRITY]
->**Dictum:** *Effects encode failure as types; extraction happens once at the boundary.*
-
-<br>
+## Effect Integrity
 
 - [ ] `Result[T, E]` sync, `FutureResult[T, E]` async, `Maybe[T]` absence -- correct container per channel
 - [ ] `@safe`/`@future_safe` at foreign boundaries only -- domain returns `Result` explicitly
@@ -32,20 +23,14 @@ Checklist for auditing `.py` modules against python-standards contracts. Items b
 - [ ] No mid-pipeline library mixing: `expression.pipe` and `returns.flow` never in same file
 
 ---
-## [3][CONTROL_FLOW]
->**Dictum:** *Dispatch is structural and exhaustive; iteration is declarative.*
-
-<br>
+## Control Flow
 
 - [ ] Zero `if`/`else`/`elif` -- `match`/`case` exhaustive dispatch with `case _:` defensive arm
 - [ ] Zero `for`/`while` in domain transforms -- boundary loops only with side-effect comments
 - [ ] Guard clauses via `case x if predicate:` -- not bare `if` statements
 
 ---
-## [4][DECORATOR_INTEGRITY]
->**Dictum:** *Decorators preserve signatures and compose cleanly.*
-
-<br>
+## Decorator Integrity
 
 - [ ] `ParamSpec` + `Concatenate` + `@wraps` on every decorator
 - [ ] Canonical ordering: trace > authorize > validate > cache > retry > operation
@@ -53,48 +38,33 @@ Checklist for auditing `.py` modules against python-standards contracts. Items b
 - [ ] Class-based decorators implement descriptor protocol (`__set_name__` + `__get__`)
 
 ---
-## [5][CONCURRENCY_INTEGRITY]
->**Dictum:** *Concurrency is bounded, structured, and cooperative.*
-
-<br>
+## Concurrency Integrity
 
 - [ ] `anyio.create_task_group()` sole spawn -- no bare `asyncio.create_task`
 - [ ] `checkpoint()` in tight async loops; `CapacityLimiter` for backpressure
 - [ ] `ContextVar` for request-scoped state; `CancelScope` with explicit deadlines
 
 ---
-## [6][SURFACE_QUALITY]
->**Dictum:** *Surface area reflects domain boundaries, not implementation artifacts.*
-
-<br>
+## Surface Quality
 
 - [ ] No helper spam, class proliferation, DTO soup, framework coupling, or import-time IO
 
 ---
-## [7][ALGORITHM_INTEGRITY]
->**Dictum:** *Accumulators are folds, not loops.*
-
-<br>
+## Algorithm Integrity
 
 - [ ] `reduce` replaces accumulator loops; `accumulate` for scans; generators for lazy transforms
 - [ ] `@trampoline` for unbounded recursion depth -- stack safety mandatory
 - [ ] `Decimal` + `ROUND_HALF_EVEN` for financial arithmetic -- zero `float` in monetary paths
 
 ---
-## [8][PERFORMANCE_INTEGRITY]
->**Dictum:** *Measure before optimizing; allocation discipline is structural.*
-
-<br>
+## Performance Integrity
 
 - [ ] `__slots__` on non-Pydantic domain classes; module-level singletons for Encoder/Decoder/TypeAdapter
 - [ ] `CapacityLimiter` sized to downstream; `checkpoint_if_cancelled()` in hot loops
 - [ ] Profiling evidence before optimization -- no premature tuning
 
 ---
-## [9][DETECTION_HEURISTICS]
->**Dictum:** *Grep patterns surface violations faster than reading every line.*
-
-<br>
+## Detection Heuristics
 
 | [INDEX] | [CAUSE]                  | [GREP_ID] | [RG_PATTERN]                                          | [FIX]                                      |
 | :-----: | ------------------------ | :-------: | ----------------------------------------------------- | ------------------------------------------ |
@@ -120,21 +90,18 @@ Checklist for auditing `.py` modules against python-standards contracts. Items b
 All patterns use `rg -n`. Combine G2+G14 for full control-flow audit; G4+G15 for dispatch audit.
 
 ---
-## [10][QUICK_REFERENCE]
->**Dictum:** *One table maps checklist to reference.*
+## Quick Reference
 
-<br>
-
-| [INDEX] | [CHECKLIST_AREA]      | [WHAT_IT_VALIDATES]                                                            | [REFERENCE]                |
-| :-----: | --------------------- | ------------------------------------------------------------------------------ | -------------------------- |
-|   [1]   | TYPE_INTEGRITY        | Atoms, frozen models, unions, immutable collections                            | `types.md` [1]-[5]         |
-|   [2]   | EFFECT_INTEGRITY      | Result/Maybe/FutureResult, flow, library consistency                           | `effects.md` [1]-[5]       |
-|   [3]   | CONTROL_FLOW          | match/case exhaustive, zero imperative branching                               | `patterns.md` [1]          |
-|   [4]   | DECORATOR_INTEGRITY   | ParamSpec, ordering, single-concern                                            | `decorators.md` [1]-[2]    |
-|   [5]   | CONCURRENCY_INTEGRITY | TaskGroup, CancelScope, CapacityLimiter, ContextVar                            | `concurrency.md` [1]-[4]   |
-|   [6]   | SURFACE_QUALITY       | No helpers, framework coupling, import-time IO                                 | `protocols.md` [1], [3]    |
-|   [7]   | ALGORITHM_INTEGRITY   | Folds, scans, generators, @trampoline, Decimal                                 | `algorithms.md` [1]-[5]    |
-|   [8]   | PERFORMANCE_INTEGRITY | __slots__, singletons, backpressure, profiling-first                           | `performance.md` [1]-[5]   |
-|   [9]   | DETECTION_HEURISTICS  | Grep-based violation surface scan (G1-G18)                                     | Section [9] in this file   |
-|  [10]   | SERIALIZATION         | TypeAdapter at module level, Pydantic ingress, msgspec egress, Settings frozen | `serialization.md` [1]-[3] |
-|  [11]   | OBSERVABILITY         | Fused @instrument, processor chain, RED metrics, context propagation           | `observability.md` [1]-[4] |
+| [INDEX] | [CHECKLIST_AREA]      | [WHAT_IT_VALIDATES]                                                            |
+| :-----: | --------------------- | ------------------------------------------------------------------------------ |
+|   [1]   | TYPE_INTEGRITY        | Atoms, frozen models, unions, immutable collections                            |
+|   [2]   | EFFECT_INTEGRITY      | Result/Maybe/FutureResult, flow, library consistency                           |
+|   [3]   | CONTROL_FLOW          | match/case exhaustive, zero imperative branching                               |
+|   [4]   | DECORATOR_INTEGRITY   | ParamSpec, ordering, single-concern                                            |
+|   [5]   | CONCURRENCY_INTEGRITY | TaskGroup, CancelScope, CapacityLimiter, ContextVar                            |
+|   [6]   | SURFACE_QUALITY       | No helpers, framework coupling, import-time IO                                 |
+|   [7]   | ALGORITHM_INTEGRITY   | Folds, scans, generators, @trampoline, Decimal                                 |
+|   [8]   | PERFORMANCE_INTEGRITY | __slots__, singletons, backpressure, profiling-first                           |
+|   [9]   | DETECTION_HEURISTICS  | Grep-based violation surface scan (G1-G18)                                     |
+|  [10]   | SERIALIZATION         | TypeAdapter at module level, Pydantic ingress, msgspec egress, Settings frozen |
+|  [11]   | OBSERVABILITY         | Fused @instrument, processor chain, RED metrics, context propagation           |

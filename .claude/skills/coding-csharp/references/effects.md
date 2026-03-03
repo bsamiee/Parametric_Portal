@@ -1,374 +1,212 @@
-# [H1][EFFECTS]
->**Dictum:** *Effects are typed; failures are values; pipelines replace procedures.*
+# Effects
 
-<br>
-
-Effect types in LanguageExt v5 make the codomain honest: `Fin<T>` for sync failures, `Validation<Error,T>` for parallel accumulation, `Eff<RT,T>` for environmental DI pipelines via `ReaderT<RT, IO, A>`, and `IO<A>` for boundary side effects. All snippets assume `using static LanguageExt.Prelude;` -- Prelude functions (`Some`, `None`, `unit`, `pure`, `guard`, `liftIO`, `Ref`, `Atom`, `ms`, `sec`) are unqualified throughout. Switch *expressions* (pattern matching) are permitted; imperative `switch` *statements* are forbidden.
+Effect type system for C# 14 / .NET 10. LanguageExt v5 stratifies effects across four types: `Fin<T>` for synchronous failure, `Validation<Error,T>` for applicative accumulation, `Eff<RT,T>` for environmental DI pipelines via `ReaderT<RT, IO, A>`, and `IO<A>` for boundary-level effect description. All snippets assume `using static LanguageExt.Prelude;` and `using LanguageExt;`.
 
 ---
-## [1][FIN]
->**Dictum:** *Fin is the honest codomain for synchronous fallible operations.*
 
-<br>
+## Sync Pipelines and Applicative Bridging
 
-`Fin<T>` is isomorphic to `Either<Error,T>`. Construct via `Fin.Succ(value)` / `Fin.Fail<T>(error)` (static class). Chain via `Bind`/`Map`. Convert to `Validation` via `.ToValidation()` or to `Eff` via `.ToEff()`. Reserve `Match` for boundaries only.
+Stratify validation into monadic refinement per field and applicative accumulation across fields. `Fin<T>` short-circuits guard chains within `Refine`; `.ToValidation()` lifts each result into the applicative functor where tuple `.Apply()` runs all fields independently, combining failures through `Error`'s Monoid. `[Union]` on the error DU generates `Switch<TResult>` with one required `Func` per variant, propagating `TScalar` through generated dispatch for compile-time totality.
 
 ```csharp
 namespace Domain.Effects;
 
-public static class TotalParsing {
-    public static Fin<decimal> SafeDivide(decimal numerator, decimal denominator) =>
-        denominator switch {
-            0m => Fin.Fail<decimal>(Error.New(message: "Division by zero")),
-            _ => Fin.Succ(numerator / denominator)
-        };
+[Union]
+public partial record FieldFault<TScalar>(string Message, int Code, Option<Error> Inner = default)
+    : Expected(Message, Code, Inner) where TScalar : INumber<TScalar> {
+    public partial record BelowFloor(string Field, TScalar Actual, TScalar Floor)
+        : FieldFault<TScalar>($"{Field}: {Actual} < {Floor}", 4001);
+    public partial record AboveCeiling(string Field, TScalar Actual, TScalar Ceiling)
+        : FieldFault<TScalar>($"{Field}: {Actual} > {Ceiling}", 4002);
+    public partial record NonFinite(string Field, TScalar Actual)
+        : FieldFault<TScalar>($"{Field}: non-finite {Actual}", 4003);
+}
+
+public static class SyncPipeline {
+    public static Fin<T> Refine<T, TScalar>(TScalar raw, TScalar floor, TScalar ceiling, string field)
+        where T : DomainType<T, TScalar>
+        where TScalar : INumber<TScalar> =>
+        from _ in guard(TScalar.IsFinite(raw), new FieldFault<TScalar>.NonFinite(Field: field, Actual: raw))
+        from __ in guard(raw >= floor, new FieldFault<TScalar>.BelowFloor(Field: field, Actual: raw, Floor: floor))
+        from ___ in guard(raw <= ceiling, new FieldFault<TScalar>.AboveCeiling(Field: field, Actual: raw, Ceiling: ceiling))
+        from t in T.From(raw)
+        select t;
+    public static Validation<Error, (TA First, TB Second, TC Third)> Consolidate<TA, TB, TC, TScalar>(
+        (TScalar Raw, TScalar Floor, TScalar Ceiling, string Field) a,
+        (TScalar Raw, TScalar Floor, TScalar Ceiling, string Field) b,
+        (TScalar Raw, TScalar Floor, TScalar Ceiling, string Field) c)
+        where TA : DomainType<TA, TScalar>
+        where TB : DomainType<TB, TScalar>
+        where TC : DomainType<TC, TScalar>
+        where TScalar : INumber<TScalar> =>
+        (Refine<TA, TScalar>(a.Raw, a.Floor, a.Ceiling, a.Field).ToValidation(),
+         Refine<TB, TScalar>(b.Raw, b.Floor, b.Ceiling, b.Field).ToValidation(),
+         Refine<TC, TScalar>(c.Raw, c.Floor, c.Ceiling, c.Field).ToValidation()
+        ).Apply(static (TA x, TB y, TC z) => (First: x, Second: y, Third: z));
 }
 ```
 
-[CRITICAL]: `Fin<T>` replaces every `try`/`catch` pattern. Switch expressions on the discriminant replace imperative branching. `Match` is a boundary tool -- prefer `Bind`/`Map` in pipelines:
-
-```csharp
-Fin<decimal> result = TotalParsing.SafeDivide(numerator: 100m, denominator: 3m);
-string output = result.Match(
-    Succ: (decimal value) => value.ToString(),
-    Fail: (Error error) => error.Message);
-```
-
-See `types.md` [3] for `Fin` factories in smart constructors.
+- `guard` calls desugar to `Bind` chains — first failure makes subsequent guards and `T.From(raw)` structurally unreachable. `TScalar.IsFinite(raw)` resolves via static abstract dispatch: vacuous for integrals, rejects `NaN`/`Infinity` for floats.
+- `.ToValidation()` lifts each `Fin` into the applicative functor; tuple `.Apply()` runs all `Refine` pipelines independently, accumulating failures through `Error.Combine`. `Consolidate` is necessarily per-arity — tuple `.Apply()` requires heterogeneous type parameters, so a `Seq`-based alternative collapses to homogeneous `Validation<Error, Seq<T>>`, losing distinct domain types.
+- `[Union]` generates `Switch<TResult>` with one required `Func` per variant — adding a fourth variant breaks all call sites at compile time. `TScalar` propagates through generated dispatch without re-constraining; `Expected` base carries `Code` for machine-routable error dispatch at serialization boundaries.
 
 ---
-## [2][EFF_PIPELINE]
->**Dictum:** *Eff pipelines orchestrate DI environmentally; zero procedural branches.*
 
-<br>
+## Environmental Pipelines and Scoped Execution
 
-`Eff<RT,T>` wraps `ReaderT<RT, IO, A>` -- a reader-transformer over `IO`. The runtime `RT` is a plain record providing dependencies via properties. Access services via `Eff<RT, T>.Asks(rt => rt.Property)` or LINQ `from svc in asks<RT, T>(rt => rt.Property)`. No `Has<RT, Trait>` interfaces -- v5 uses direct property access on the runtime record.
-
-```csharp
-namespace Domain.Effects;
-
-using NodaTime;
-
-// --- [CONTRACTS] -------------------------------------------------------------
-
-public interface IGatewayProvider<RT> {
-    Eff<RT, string> TransmitPayload(TransactionState.Pending pendingState);
-}
-public interface IOrderService<RT> {
-    Eff<RT, OrderRequest> ValidateOrder(OrderRequest request);
-    Eff<RT, OrderRequest> EnrichWithPricing(OrderRequest order);
-    Eff<RT, OrderRequest> PersistOrder(OrderRequest order);
-    Eff<RT, Unit> NotifyCustomer(OrderRequest order);
-}
-public sealed record AppRuntime(
-    IGatewayProvider<AppRuntime> Gateway,
-    IClock Clock,
-    IOrderService<AppRuntime> OrderService);
-
-// --- [PIPELINE] --------------------------------------------------------------
-
-public static class OrchestrationPipeline {
-    public static Eff<AppRuntime, TransactionState> ExecuteWorkflow(
-        InitializationRequest request) =>
-        TransactionValidator.ValidateRequest(request: request)
-            .ToFin()
-            .MapFail((Error error) =>
-                Error.New(message: "Validation fault", inner: error))
-            .ToEff()
-            .Bind(f: (TransactionState.Pending pending) =>
-                Eff<AppRuntime, IGatewayProvider<AppRuntime>>.Asks(static (AppRuntime rt) => rt.Gateway)
-                    .Bind(f: (IGatewayProvider<AppRuntime> gw) => gw.TransmitPayload(pendingState: pending))
-                    .Map(f: (string token) =>
-                        (TransactionState)new TransactionState.Authorized(
-                            Id: pending.Id, AuthorizationToken: token)))
-            .MapFail(f: (Error err) => Error.New(message: "Workflow terminal failure.", inner: err));
-}
-```
-
-[IMPORTANT]: Runtime `RT` is a plain `sealed record` -- no interface indirection. `Eff<RT, T>.Asks` lifts a property accessor into the effect. `MapFail` annotates errors without losing the original cause. See `types.md` [4] for the `TransactionState` DU used here.
-
-**LINQ Comprehension with guard** -- `from...in...select` syntax provides multi-step Eff composition; `guard` short-circuits with a typed error when the condition is false:
-
-```csharp
-public static Eff<AppRuntime, OrderConfirmation> ProcessOrder(
-    OrderRequest request) =>
-    // guard : (bool, Error) -> Guard<Error, Unit>
-    // guardnot : (bool, Error) -> Guard<Error, Unit>
-    // Guard<Error, Unit> integrates with Eff/IO LINQ via SelectMany extensions.
-    from _         in guard(request.Items.Count > 0, Error.New(message: "Order must have items"))
-    from __        in guardnot(request.IsExpired, Error.New(message: "Order has expired"))
-    from svc       in Eff<AppRuntime, IOrderService>.Asks(static (AppRuntime rt) => rt.OrderService)
-    from validated in svc.ValidateOrder(request: request)
-    from enriched  in svc.EnrichWithPricing(order: validated)
-    from persisted in svc.PersistOrder(order: enriched)
-    from ___       in svc.NotifyCustomer(order: persisted)
-    select new OrderConfirmation(OrderId: persisted.Id);
-```
-
-**Boundary Execution** -- collapse `Eff` at HTTP boundaries via double-`Run` + `Match`. The first `.Run(runtime)` resolves the `ReaderT` environment yielding `IO<A>`; the second `.Run()` executes the `IO` effect yielding `Fin<A>`:
-
-```csharp
-Fin<OrderConfirmation> result = ProcessOrder(request: request).Run(runtime).Run();
-return result.Match(
-    Succ: (OrderConfirmation confirmation) => Ok(value: confirmation),
-    Fail: (Error error) => Problem(detail: error.Message));
-```
-
----
-## [3][ERROR_RECOVERY]
->**Dictum:** *Errors recover declaratively; catch composes with choice.*
-
-<br>
-
-`@catch` enables pattern-matched error recovery in pipelines. The `|` operator (Alternative/Choice trait) provides declarative fallback chains. Both compose without `Match`:
-
-```csharp
-namespace Domain.Effects;
-
-// --- [ERRORS] ----------------------------------------------------------------
-
-public static class Errors {
-    public static readonly Error TimedOut = Error.New(message: "Request timed out");
-    public static readonly Error NotFound = Error.New(message: "Resource not found");
-}
-
-// --- [ERROR_HIERARCHY] -------------------------------------------------------
-
-// Domain error hierarchy via Expected (recoverable) / Exceptional (system) subtypes:
-public sealed record NotFoundError(string Resource, string Key)
-    : Expected(message: $"{Resource} '{Key}' not found", code: 404);
-public sealed record ConflictError(string Resource, string Key)
-    : Expected(message: $"{Resource} '{Key}' conflict", code: 409);
-
-// --- [CATCH] -----------------------------------------------------------------
-
-// @catch overloads (CatchM<Error, M, A> factory via Prelude):
-// 1. | @catch((Error err) => recover(err))            -- catch-all with factory
-// 2. | @catch(Errors.TimedOut, (Error err) => f(err)) -- equality + factory
-// 3. | @catch((Error err) => err.Code == 504, eff)    -- predicate + eager
-// 4. | @catch(Errors.NotFound, defaultEff)             -- equality + eager
-
-Eff<AppRuntime, HttpResponse> resilientCall = CallApi(request: request)
-    | @catch((Error err) => err == Errors.TimedOut, RetryWithFallback(request: request))
-    | @catch((Error err) => err == Errors.NotFound,
-        Eff<AppRuntime, HttpResponse>.Pure(new HttpResponse(Status: 404)));
-
-// Typed recovery via Expected subtype predicate:
-Eff<AppRuntime, Resource> typedRecovery = LoadResource(key: key)
-    | @catch((Error err) => err is NotFoundError, handleNotFoundEff)
-    | @catch((Error err) => err is ConflictError, handleConflictEff);
-
-// --- [ALTERNATIVE] -----------------------------------------------------------
-
-// | Alternative -- try first, fall through to next on failure
-Eff<AppRuntime, Config> loadConfig =
-    LoadFromFile(path: "config.json")
-    | LoadFromEnvironment()
-    | Pure(Config.Default);
-// Works across Fin, Option, Either, Eff, IO
-Option<User> user = FindByEmail(email: email) | FindByUsername(username: username) | None;
-```
-
-[IMPORTANT]: `@catch` takes a predicate `Func<Error, bool>` for selective recovery paired with the fallback `Eff`. The `|` operator is the Alternative/Choice combinator -- it tries the left operand and falls back to the right on failure. Compose both for layered resilience without procedural branching.
-
----
-## [4][VALIDATION]
->**Dictum:** *Validation collects all errors; short-circuit is not acceptable for user-facing boundaries.*
-
-<br>
-
-`Validation<Error,T>` is applicative: independent checks run in parallel and accumulate all failures. `Error` implements `Monoid` in v5, so `Validation<Error,T>` is valid -- errors combine via `Error.Combine`. Tuple `.Apply()` syntax combines validated fields. `.ToValidation()` converts `Fin` to the applicative context.
+`Eff<RT,T>` — `ReaderT<RT, IO, A>` over a `sealed record` runtime — defers service resolution to the reader environment, making LINQ pipeline composition structurally independent of DI wiring topology. Collapsing the pipeline peels three layers at a single boundary site: the reader resolves environment, `IO` executes effects, `Fin` captures failure without exceptions.
 
 ```csharp
 namespace Domain.Effects;
 
 using NodaTime;
 
-public static class TransactionValidator {
-    public static Eff<AppRuntime, Validation<Error, TransactionState.Pending>> ValidateRequest(
-        InitializationRequest request) =>
-        Eff<AppRuntime, IClock>.Asks(static (AppRuntime rt) => rt.Clock)
-            .Map(clock => (
-                DomainIdentity.Create(candidate: request.CandidateId).ToValidation(),
-                TransactionAmount.Create(candidate: request.CandidateAmount).ToValidation()
-            ).Apply(
-                f: (DomainIdentity id, TransactionAmount amount) =>
-                    new TransactionState.Pending(
-                        Id: id,
-                        Amount: amount,
-                        InitiatedAt: clock.GetCurrentInstant())));
+public interface IEnricher<RT> {
+    Eff<RT, T> Enrich<T>(T raw) where T : notnull;
+}
+public interface IDispatcher<RT> {
+    Eff<RT, T> Dispatch<T>(T enriched) where T : notnull;
+}
+
+public sealed record PipelineRuntime(
+    IEnricher<PipelineRuntime> Enricher,
+    IDispatcher<PipelineRuntime> Dispatcher,
+    IClock Clock);
+
+public static class Pipeline {
+    public static Eff<PipelineRuntime, (T Dispatched, Instant Timestamp)> Orchestrate<T>(
+        T payload, Func<T, bool> invariant) where T : notnull =>
+        from enricher in Eff<PipelineRuntime, IEnricher<PipelineRuntime>>.Asks(static (PipelineRuntime rt) => rt.Enricher)
+        from dispatcher in Eff<PipelineRuntime, IDispatcher<PipelineRuntime>>.Asks(static (PipelineRuntime rt) => rt.Dispatcher)
+        from clock in Eff<PipelineRuntime, IClock>.Asks(static (PipelineRuntime rt) => rt.Clock)
+        from _ in guard(invariant(payload), Error.New(message: "Invariant violation"))
+        from enriched in enricher.Enrich(raw: payload)
+        from __ in guardnot(enriched.Equals(payload),
+            Error.New(message: "Enrichment idempotency fault"))
+        from dispatched in dispatcher.Dispatch(enriched: enriched)
+        let timestamp = clock.GetCurrentInstant()
+        select (Dispatched: dispatched, Timestamp: timestamp);
+    public static Fin<T> Collapse<T>(
+        Eff<PipelineRuntime, T> pipeline, PipelineRuntime runtime) =>
+        pipeline.Run(runtime).Run();
 }
 ```
 
-[CRITICAL]: Each `.ToValidation()` call lifts `Fin<T>` into the applicative. `.Apply()` on the tuple runs all validations independently. Zero short-circuit means the user sees every error at once. See `types.md` [1] for `DomainIdentity.Create` and `TransactionAmount.Create`. `IClock` is resolved from `AppRuntime` via `Eff.Asks` -- never passed as a direct parameter; no `DateTimeOffset.UtcNow` in domain code.
+- `Eff<RT,T>.Asks(static rt => rt.Property)` lifts a runtime field into the reader monad — `static` proves zero closure, confining the DI surface to the runtime record. Scrutor decorates concrete `IDispatcher<PipelineRuntime>` at the composition root, transparent to the pipeline's interface-only view.
+- `Collapse` is intentionally minimal — `.Run(runtime)` resolves the reader yielding `IO<A>`, `.Run()` executes the `IO` yielding `Fin<A>`. `guard`/`guardnot` short-circuit via `Fin.Fail`, propagating through every remaining `SelectMany` binding without explicit error plumbing.
+- `let timestamp` desugars to `Select` (functor map), not `SelectMany` (monadic bind) — zero effect allocation for pure-value bindings within the same comprehension that sequences effectful `from` bindings via monadic `Bind`.
 
 ---
-## [5][IO_FREE_MONAD]
->**Dictum:** *IO separates description from execution; interpretation happens at the boundary.*
 
-<br>
+## Recovery Algebra and Resilience Injection
 
-`IO<A>` is a free-monad DSL -- constructing it describes effects without executing them. `IO.lift()` wraps synchronous lambdas; `IO.liftAsync()` wraps async. `Run()` / `RunAsync()` interpret the description at the boundary. No four-variant decomposition in v5 -- `IO<A>` is an opaque effect description interpreted by the runtime.
+Decorator injection via Scrutor interposes `@catch` selective recovery and `Schedule` algebraic retry between caller and capability interface — resilience is a composition-root concern, not a pipeline concern. Each method declares its own recovery topology: `Acquire` degrades through an alternate retry cadence into a typed sentinel, `List` collapses expected failures to `Seq.Empty`; both share the same `static readonly` schedule algebra without per-instance allocation.
+
+```csharp
+namespace Infra.Resilience;
+
+public interface IResourceProvider<RT> {
+    Eff<RT, Resource> Acquire(ResourceKey key);
+    Eff<RT, Seq<Resource>> List(ResourceFilter filter);
+}
+
+public sealed class ResilientResourceProvider<RT>(
+    IResourceProvider<RT> inner) : IResourceProvider<RT>
+{
+    private static readonly Schedule RetryPolicy =
+        (Schedule.exponential(baseDelay: 200 * ms)
+            | Schedule.jitter(factor: 0.15)
+            | Schedule.recurs(times: 5))
+        & Schedule.upto(duration: 60 * sec);
+    public Eff<RT, Resource> Acquire(ResourceKey key) =>
+        inner.Acquire(key: key)
+            .Retry(schedule: RetryPolicy)
+        | @catch(static (Error err) => err.Code == 503,
+            inner.Acquire(key: key)
+                .Retry(schedule: Schedule.spaced(spacing: 5 * sec)
+                    | Schedule.recurs(times: 2)))
+        | Eff<RT, Resource>.Pure(Resource.Unavailable(key: key));
+    public Eff<RT, Seq<Resource>> List(ResourceFilter filter) =>
+        inner.List(filter: filter)
+            .Retry(schedule: RetryPolicy)
+        | @catch(static (Error err) => err.IsExpected,
+            Eff<RT, Seq<Resource>>.Pure(Seq<Resource>.Empty))
+        | Eff<RT, Seq<Resource>>.Pure(Seq<Resource>.Empty);
+}
+```
+
+- `|` (union) on `Schedule` applies transformers — `jitter`, `recurs` — to the base `exponential`; `&` (intersect) bounds the composite against an independent `upto` constraint, enforcing retry-count AND wall-clock limits simultaneously. The policy is a `static readonly` first-class value: zero per-instance allocation, algebraically composable without builder APIs.
+- `@catch` fires only after `.Retry` exhaustion, discriminating on the terminal `Error` via a `static` predicate; `Acquire` selects `err.Code == 503` for a degraded retry cadence then falls through `|` Alternative to a typed `Unavailable` sentinel, while `List` collapses any expected error to `Seq.Empty` — polymorphic recovery per method over a shared schedule algebra.
+- `services.Decorate<IResourceProvider<RT>, ResilientResourceProvider<RT>>()` replaces the registration transparently at the composition root — primary constructor parameter `inner` is the Scrutor-resolved decorated instance (non-static capture, structurally required); all `Schedule` fields and `@catch` lambdas remain `static`, confining allocation to the policy constants.
+
+---
+
+## Transactional State and Effect Description
+
+`Atom<T>` provides lock-free single-value CAS with validator-enforced invariants on every swap; `Ref<T>` + `atomic` blocks compose reads and writes across multiple refs as a single STM transaction with automatic retry on conflict. Both bridge into `IO<A>` effect descriptions that separate construction from execution, and `StateT<S, IO, A>` stacks state threading over IO as a single describable computation collapsed at the boundary.
 
 ```csharp
 namespace Domain.Effects;
 
-public static class ConsoleIO {
-    public static IO<Option<string>> ReadLine => IO.lift(static () =>
-        Console.ReadLine() is { } line ? Some(line) : Option<string>.None);
-    public static IO<Unit> WriteLine(string message) =>
-        IO.lift(() => { Console.WriteLine(message); return unit; });
-    public static IO<Unit> Program =>
-        from _ in WriteLine(message: "Enter name:")
-        from maybeName in ReadLine
-        from __ in maybeName.Match(
-            Some: name => WriteLine(message: $"Hello, {name}"),
-            None: () => WriteLine(message: "No input received"))
-        select unit;
+using NodaTime;
+
+[ValueObject<string>(SkipFactoryMethods = true)]
+public readonly partial struct AccountId : DomainType<AccountId, string> {
+    public static Fin<AccountId> From(string repr) =>
+        from _ in guard(!string.IsNullOrWhiteSpace(repr), Error.New(message: "blank account id"))
+        select new AccountId(repr);
+    public string To() => _value;
 }
-// Boundary: Program.Run() or await Program.RunAsync()
-```
 
-[IMPORTANT]: `IO<A>` is a free monad -- constructing it performs no effects. `Run` / `RunAsync` collapses the description into execution. Use `IO` at system boundaries; use `Eff<RT,T>` for pipelines requiring DI.
+public readonly record struct Ledger(decimal Assets, decimal Liabilities, Instant Settled);
 
----
-## [6][MONAD_TRANSFORMERS]
->**Dictum:** *Transformers compose effect stacks; each layer adds one concern.*
-
-<br>
-
-`OptionT<M,A>` threads optionality through any monad. `EitherT<L,M,A>` threads error handling. `StateT<S,M,A>` threads state. Compose by nesting: `StateT<GameState, IO, Unit>` gives stateful IO.
-
-```csharp
-namespace Domain.Effects;
-
-public static class GameLoop {
-    public static StateT<GameState, IO, Unit> Step =>
-        from state in StateT<GameState, IO>.get
-        from _ in liftIO(ConsoleIO.WriteLine(message: $"Score: {state.Score}"))
-        from maybeInput in liftIO(ConsoleIO.ReadLine)
-        from __ in maybeInput.Match(
-            Some: input => StateT<GameState, IO>.modify(
-                (GameState s) => s with { Score = s.Score + input.Length }),
-            None: () => StateT<GameState, IO>.Pure(unit))
-        select unit;
-}
-public readonly record struct GameState(int Score);
-```
-
----
-## [7][STM_CONCURRENCY]
->**Dictum:** *Atoms are lock-free; Refs are transactional; atomic blocks compose.*
-
-<br>
-
-`Atom<T>` provides lock-free atomic state with optional validators that reject invalid transitions. `Ref<T>` participates in STM transactions. `atomic()` blocks compose multi-ref operations that commit or rollback atomically. `Swap` applies pure transitions.
-
-```csharp
-namespace Domain.Effects;
-
-public static class AccountTransfers {
-    // --- [ATOM] --------------------------------------------------------------
-    // static readonly -- single shared instance; expression-bodied would create new Atom per access
-    public static readonly Atom<HashMap<string, decimal>> Balances = Atom(
-        HashMap(("alice", 1000m), ("bob", 500m)),
-        (HashMap<string, decimal> state) => state.ForAll(
-            (string _, decimal value) => value >= 0m));
-    // --- [REFS] --------------------------------------------------------------
-    public static readonly Ref<Account> AccountA = Ref(new Account(Balance: 1000m));
-    public static readonly Ref<Account> AccountB = Ref(new Account(Balance: 500m));
-    // --- [OPERATIONS] --------------------------------------------------------
-    public static Unit Transfer(decimal amount) =>
+public static class AtomicLedger {
+    public static readonly Atom<HashMap<AccountId, Ledger>> Accounts = Atom(
+        HashMap<AccountId, Ledger>(),
+        static (HashMap<AccountId, Ledger> s) => s.ForAll(
+            static (AccountId _, Ledger l) => l.Assets >= 0m && l.Liabilities >= 0m));
+    public static Unit Rebalance(
+        Ref<Ledger> source, Ref<Ledger> target, decimal amount, Instant now) =>
         atomic(() => {
-            AccountA.Swap((Account a) => a with { Balance = a.Balance - amount });
-            AccountB.Swap((Account b) => b with { Balance = b.Balance + amount });
+            source.Swap((Ledger s) => s with { Assets = s.Assets - amount, Settled = now });
+            target.Swap((Ledger t) => t with { Assets = t.Assets + amount, Settled = now });
         });
-}
-public readonly record struct Account(decimal Balance);
-```
-
-[IMPORTANT]: `Atom` for single-value concurrent state -- the optional validator function rejects `Swap` calls that would produce invalid state. `Ref` + `atomic` for multi-ref transactional consistency. STM also provides `snapshot()` (snapshot isolation) and `serial()` (serializable isolation) as alternatives to `atomic()`. `Swap` takes a pure `A -> A` function -- no mutation, no locks. Use `static readonly` fields (not expression-bodied properties) to ensure a single shared instance.
-
----
-## [8][SCHEDULE]
->**Dictum:** *Retry policies are algebraic; compose via `|` union and `&` intersect operators.*
-
-<br>
-
-`Schedule` combinators build retry/repeat policies from algebraic primitives. The `|` operator composes (union -- take both). The `&` operator intersects (take shorter). `.Retry()` applies a schedule to any `Eff`. Note: `jitter`, `recurs`, and `maxDelay` return `ScheduleTransformer` (not `Schedule`) -- the `|` operator applies transformers to the base schedule via implicit composition.
-
-```csharp
-namespace Domain.Effects;
-
-public static class ResiliencePolicy {
-    // --- [SCHEDULES] ---------------------------------------------------------
-    // exponential backoff + jitter + cap at 5 retries + max 30s delay
-    // Schedule | ScheduleTransformer applies transformation to base schedule
-    public static Schedule RetryPolicy =>
-        Schedule.exponential(baseDelay: 100 * ms)
-        | Schedule.jitter(factor: 0.1)
-        | Schedule.recurs(times: 5)
-        | Schedule.maxDelay(delay: 30 * sec);
-    public static Schedule FixedPolicy =>
-        Schedule.spaced(spacing: 1 * sec) | Schedule.recurs(times: 3);
-    public static Schedule LinearPolicy =>
-        Schedule.linear(seed: 100 * ms, factor: 2.0);
-    // & intersection: bounded by BOTH time AND count
-    public static Schedule BoundedPolicy =>
-        Schedule.exponential(baseDelay: 200 * ms) & Schedule.upto(duration: 60 * sec);
-    // --- [EFFECTS] -----------------------------------------------------------
-    public static Eff<AppRuntime, HttpResponse> ResilientCall(
-        HttpRequest request) =>
-        CallExternalApi(request: request).Retry(schedule: RetryPolicy);
+    public static IO<Unit> SettlementWorkflow(
+        Ref<Ledger> source, Ref<Ledger> target, decimal amount, IClock clock) =>
+        from now in IO.lift(() => clock.GetCurrentInstant())
+        from _   in IO.lift(() => Rebalance(source: source, target: target, amount: amount, now: now))
+        from __  in IO.lift(() => Accounts.Swap((HashMap<AccountId, Ledger> a) => a.Map(
+            (AccountId _, Ledger l) => l with { Settled = now })))
+        select unit;
+    public static StateT<Ledger, IO, decimal> NetPosition(IClock clock) =>
+        from state in StateT<Ledger, IO>.get
+        from now   in liftIO(IO.lift(() => clock.GetCurrentInstant()))
+        from _     in StateT<Ledger, IO>.modify((Ledger l) => l with { Settled = now })
+        select state.Assets - state.Liabilities;
 }
 ```
 
----
-## [9][RULES]
->**Dictum:** *Rules compress into constraints.*
-
-<br>
-
-- [ALWAYS] `Fin<T>` for synchronous failures -- `Bind`/`Map` chain, `Match` at boundary.
-- [ALWAYS] `Validation<Error,T>` for parallel field validation -- applicative `.Apply()` tuple.
-- [ALWAYS] `Eff<RT,T>` for effectful pipelines -- `ReaderT<RT, IO, A>` environmental DI via runtime record.
-- [ALWAYS] Keep DI registration in composition roots; use constrained Scrutor scans/decorators so `Eff` modules remain wiring-agnostic.
-- [ALWAYS] `IO<A>` for boundary side effects -- `Run`/`RunAsync` interpretation.
-- [ALWAYS] `@catch` with predicate for selective error recovery -- no `Match` mid-pipeline.
-- [ALWAYS] `|` Alternative for fallback chains -- declarative try-then-fallback composition.
-- [ALWAYS] `static readonly` for `Atom`/`Ref` shared state -- expression-bodied properties create new instances.
-- [NEVER] `try`/`catch`/`throw` in domain code -- effects are typed.
-- [NEVER] Early `Match` in mid-pipeline -- prefer `Map`/`Bind`/`BiMap`.
-- [NEVER] v4 `Has<RT, Trait>` / `default(RT)` pattern -- use v5 `Eff<RT, T>.Asks` with runtime record.
-- [NEVER] `await` inside methods returning `Eff<RT,T>` -- CSP0711 catches mixed paradigms where `async`/`await` appears in an Eff-returning method body. Bridge async operations via `.ToEff()` on `Fin<T>` results, or `liftIO(IO.liftAsync(...))` for raw `Task` boundaries. The Eff pipeline owns scheduling; injecting `await` breaks the monadic composition and loses error-channel typing.
-- [IMPORTANT] Encode cancellation boundaries explicitly via `Eff` -- delimit uninterruptible regions rather than scattering `CancellationToken` checks. See `concurrency.md` [1] for `WithTimeout` via `Bracket`; `concurrency.md` [3] for async stream cancellation patterns.
-
-```csharp
-// [ANTI-PATTERN] CSP0711 -- await inside Eff-returning method mixes paradigms
-// public static Eff<RT, string> Fetch<RT>(HttpClient client, string url) {
-//     string result = await client.GetStringAsync(url);  // async/await in Eff body
-//     return Eff<RT, string>.Pure(result);
-// }
-
-// [CORRECT] -- lift async boundary via IO.liftAsync, compose in Eff
-public static Eff<RT, string> Fetch<RT>(HttpClient client, string url) =>
-    liftIO(IO.liftAsync(
-        async () => await client.GetStringAsync(url).ConfigureAwait(false)))
-    .ToEff<RT, string>();
-```
+- `Atom` validator fires on every `Swap` — rejection preserves the previous value, making invariant violations structurally impossible. `static readonly` field (not expression-bodied property) ensures a single shared instance; an expression-bodied property silently constructs a new `Atom` per access, breaking shared-state semantics.
+- `atomic()` composes reads and writes across multiple `Ref<T>` instances as a single transaction — if any ref was modified externally between snapshot and commit, the entire block retries with fresh values.
+- `IO.lift(() => ...)` wraps a synchronous lambda as an effect description — constructing the pipeline performs no work until `.Run()` collapses it. `StateT<Ledger, IO, decimal>` describes a stateful computation as a first-class value, collapsed via `.Run(initialState).Run()` which resolves `StateT` yielding `IO<(S, A)>`, then executes the `IO` yielding `Fin<(S, A)>`.
 
 ---
-## [10][QUICK_REFERENCE]
 
-| [INDEX] | [PATTERN]             | [WHEN]                              | [KEY_TRAIT]                             |
-| :-----: | :-------------------- | :---------------------------------- | --------------------------------------- |
-|   [1]   | `Fin<T>`              | Synchronous fallible operation      | `Bind`/`Map`/`Match` + switch expr      |
-|   [2]   | `Eff<RT,T>`           | Effectful pipeline with DI          | `ReaderT` + `Asks` + LINQ comprehension |
-|   [3]   | `@catch`              | Selective error recovery            | Predicate catch + `\|` compose          |
-|   [4]   | `\| Alternative`      | Declarative fallback chain          | Choice trait on Fin/Eff/Option          |
-|   [5]   | `Validation<Error,T>` | Parallel multi-field validation     | Applicative `.Apply()` tuple            |
-|   [6]   | `IO<A>`               | Boundary side effect description    | Free-monad DSL + `Run`                  |
-|   [7]   | `OptionT<M,A>`        | Optionality threaded through monad  | Transformer stacking                    |
-|   [8]   | `Atom<T>`             | Lock-free concurrent single value   | `Swap` + optional validator             |
-|   [9]   | `Ref<T>` + `atomic`   | Multi-ref transactional consistency | STM commit/rollback                     |
-|  [10]   | `Schedule`            | Algebraic retry/repeat policy       | `\|` union + `&` intersect + `Retry`    |
+## Rules
+
+- [ALWAYS] `Fin<T>` for synchronous failures — monadic `Bind`/`Map`, `Match` at boundary only.
+- [ALWAYS] `Validation<Error,T>` for parallel accumulation — `.Apply()` on tuple, `.ToValidation()` bridges `Fin`.
+- [ALWAYS] `Eff<RT,T>` for environmental pipelines — `sealed record` runtime, `Asks(static rt => ...)` reader-lift.
+- [ALWAYS] `IO<A>` for boundary effect description — `Run`/`RunAsync` collapses description to execution.
+- [ALWAYS] `@catch` with `static` predicate for selective recovery — fires after retry exhaustion, `|` Alternative for fallback.
+- [ALWAYS] `Schedule` algebra — `|` applies transformers, `&` intersects bounds, `.Retry(schedule)` applies to `Eff`.
+- [ALWAYS] `static readonly` for shared `Atom`/`Ref` state — expression-bodied properties create new instances.
+- [ALWAYS] `Ref<T>` + `atomic()` for multi-ref STM — pure `Swap`, automatic retry on conflict.
+- [ALWAYS] Resilience as Scrutor decorator — pipeline owns effect composition, composition root owns wiring.
+- [ALWAYS] Boundary collapse `Eff → IO → Fin` at single site — `.Run(runtime).Run()`.
+- [NEVER] `try`/`catch`/`throw` in domain code — effects are typed.
+- [NEVER] `await` inside `Eff<RT,T>` — bridge via `liftIO(IO.liftAsync(...))`.
+- [NEVER] v4 `Has<RT, Trait>` / `default(RT)` — v5 uses `Eff<RT, T>.Asks` with runtime record.
+- [NEVER] Early `Match` mid-pipeline — `Map`/`Bind`/`BiMap`; `Match` at boundaries.
+- [OVERLAP: composition.md] Scrutor decorator wiring at composition root — effects.md owns resilience pipeline definition, composition.md owns decorator registration topology.
+- [OVERLAP: transforms.md] Kleisli composition via `ComposeK`/`FoldArrows` operates over effect types — transforms.md owns arrow algebra, effects.md owns effect type stratification.

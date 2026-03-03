@@ -14,7 +14,6 @@ dependencies = [
     "pydantic",
     "pydantic-settings",
     "expression",
-    "returns",
     "stamina",
     "structlog",
     "typing-extensions",
@@ -54,7 +53,7 @@ python_version = "3.14"
 cache_dir =      ".cache/mypy"
 strict =         true
 pretty =         true
-plugins = ["returns.contrib.mypy.returns_plugin", "pydantic.mypy"] # Keep returns plugin first in chain as recommended by returns docs.
+plugins = ["pydantic.mypy"]
 exclude = [
     "^\\.cache/",
     "^\\.git/",

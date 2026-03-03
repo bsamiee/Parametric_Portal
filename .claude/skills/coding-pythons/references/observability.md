@@ -1,15 +1,9 @@
-# [H1][OBSERVABILITY]
->**Dictum:** *Signals are one algebra: span, log, and metric execute as a fused tap over typed outcomes.*
-
-<br>
+# Observability
 
 Observability in Python 3.14+ fuses traces, logs, and metrics behind one `@instrument` surface. `structlog` builds event dicts, `logging` transports, and `OpenTelemetry SDK >= 1.39` exports spans/logs through `ReadableLogRecord`. Correlation flows through `ContextVar` and `merge_contextvars`. All snippets target `structlog >= 25.5`, `opentelemetry-sdk >= 1.39`, `match/case` dispatch, and explicit boundary loops only.
 
 ---
-## [1][SIGNAL_PIPELINE]
->**Dictum:** *One decorator owns span + log + metric projection; the processor chain is a pure transformation pipeline.*
-
-<br>
+## Signal Pipeline
 
 `@instrument` creates a span, emits structured start/success/failure events, and projects `Result` outcomes into telemetry. The structlog chain is pure transformation: `merge_contextvars` -> `CallsiteParameterAdder` -> `add_log_level` -> `TimeStamper` -> `inject_trace_identifiers` -> stdlib bridge.
 
@@ -71,7 +65,7 @@ def instrument[**P, R](
 def _inject_trace_identifiers(
     _logger: object, _method_name: str, event_dict: dict[str, object],
 ) -> dict[str, object]:
-    """Inject OTel trace/span IDs + correlation ID. See CONTEXT_THREADING [2]."""
+    """Inject OTel trace/span IDs + correlation ID."""
     ctx: trace.SpanContext = trace.get_current_span().get_span_context()
     return {
         **event_dict, "correlation_id": _correlation_id.get(),
@@ -119,10 +113,7 @@ def configure_structlog() -> None:
 - [ALWAYS] Place `merge_contextvars` first in the processor chain.
 
 ---
-## [2][CONTEXT_THREADING]
->**Dictum:** *ContextVar is the sole mechanism for threading correlation through async boundaries.*
-
-<br>
+## Context Threading
 
 A custom processor reads `trace_id` (32-char hex) and `span_id` (16-char hex) from the active OTel span context. `bind_contextvars()` sets context-local pairs that `merge_contextvars` injects into every log event. Each `anyio` task inherits a snapshot of the parent context automatically.
 
@@ -170,14 +161,11 @@ Propagation paths:
 - Request entry: `clear_contextvars()` -> `bind_contextvars(...)` -> clear on exit.
 - Child task: `ContextVar` snapshot inheritance via AnyIO task groups.
 - Scoped sub-op: `bound_contextvars(...)` with automatic unbind on exit.
-- Cross-thread: per-thread `ContextVar` isolation. See `concurrency.md` [2].
+- Cross-thread: per-thread `ContextVar` isolation.
 - Span correlation: `trace.get_current_span()` via OTel context propagation.
 
 ---
-## [3][BOOTSTRAP]
->**Dictum:** *Telemetry initialization is an imperative shell concern; SDK wiring executes once at startup.*
-
-<br>
+## Bootstrap
 
 `bootstrap_telemetry()` configures: (1) `Resource` identity, (2) `TracerProvider` + `BatchSpanProcessor`, (3) `LoggerProvider` + `BatchLogRecordProcessor` (OTel >= 1.39 -- `LogData` removed), (4) structlog chain. Init order: Resource -> Exporters -> Processors -> Providers -> Global. Called once at startup -- never at import time.
 
@@ -228,10 +216,7 @@ def bootstrap_telemetry(
 - [ALWAYS] All global registrations (`set_tracer_provider`, `set_meter_provider`, `set_logger_provider`) are write-once.
 
 ---
-## [4][METRICS_PROJECTION]
->**Dictum:** *RED metrics (Rate/Error/Duration) are projections from Result outcomes, not parallel instrumentation branches.*
-
-<br>
+## Metrics Projection
 
 `@instrument` projects counters and histograms from `Success`/`Failure` via `opentelemetry.metrics`. Rate is a monotonic counter per call. Error is a monotonic counter per `Failure`. Duration is a histogram recording elapsed seconds. All share the `operation` dimension for dashboard correlation.
 
@@ -297,17 +282,12 @@ def instrument_with_metrics[**P, R](
     return wrapper
 ```
 
-**expression.Result alternative** -- `expression.Ok`/`expression.Error` match identically in `_record_outcome_with_metrics`; substitute `case Ok(_):`/`case Err(error):` for `case Success(_):`/`case Failure(error):`. Bridge at the observability boundary via `from expression import Result as ExprResult, Ok, Error as Err`. See `SKILL.md` [8] for library split.
+**expression.Result alternative** -- `expression.Ok`/`expression.Error` match identically in `_record_outcome_with_metrics`; substitute `case Ok(_):`/`case Err(error):` for `case Success(_):`/`case Failure(error):`. Bridge at the observability boundary via `from expression import Result as ExprResult, Ok, Error as Err`.
 
 RED instruments: **Rate** `service.requests.total` (counter, `operation` + `outcome`), **Error** `service.errors.total` (counter, `operation` + `error_type`), **Duration** `service.request.duration` (histogram, `operation`). Dimension stability is critical -- `operation` keys must match across all three for dashboard joins.
 
-Cross-references: `effects.md` [3] for Result error algebra, `decorators.md` [1] for ParamSpec signatures.
-
 ---
-## [5][RULES]
->**Dictum:** *Observability quality is consistency under composition pressure.*
-
-<br>
+## Rules
 
 - [NEVER] Split logs, traces, and metrics across separate decorators -- fuse in one surface.
 - [NEVER] Use deprecated `AsyncBoundLogger`; use async methods on `BoundLogger`.
@@ -320,13 +300,10 @@ Cross-references: `effects.md` [3] for Result error algebra, `decorators.md` [1]
 - [ALWAYS] Project RED metrics from `Result` outcomes -- never from exception handlers.
 - [ALWAYS] Use stable `operation` dimension keys across all metric instruments.
 - [PREFER] `msgspec.json.encode` as JSON serializer backend for structlog.
-- [PREFER] `expression.Result` match in domain-model-heavy modules. See `SKILL.md` [8].
+- [PREFER] `expression.Result` match in domain-model-heavy modules.
 
 ---
-## [6][QUICK_REFERENCE]
->**Dictum:** *One table maps pattern to context.*
-
-<br>
+## Quick Reference
 
 | [INDEX] | [PATTERN]                  | [WHEN]                                    | [KEY_TRAIT]                            |
 | :-----: | -------------------------- | ----------------------------------------- | -------------------------------------- |

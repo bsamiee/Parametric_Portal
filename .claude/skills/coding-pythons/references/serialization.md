@@ -1,15 +1,9 @@
-# [H1][SERIALIZATION]
->**Dictum:** *Pydantic validates ingress; msgspec encodes egress; domain code touches neither raw bytes nor untyped dicts.*
+# Serialization
 
-<br>
-
-Serialization in Python 3.14+ uses a dual-library boundary: Pydantic `TypeAdapter` validates ingress with `model_validator`/`model_serializer` hooks, msgspec `Struct(frozen=True, gc=False)` serializes egress. Domain models never handle raw wire formats. All snippets assume `pydantic >= 2.12`, `msgspec >= 0.20`, `pydantic-settings >= 2.12`, with `match/case` dispatch only. See types.md [1] for atom-level `__get_pydantic_core_schema__` patterns.
+Serialization in Python 3.14+ uses a dual-library boundary: Pydantic `TypeAdapter` validates ingress with `model_validator`/`model_serializer` hooks, msgspec `Struct(frozen=True, gc=False)` serializes egress. Domain models never handle raw wire formats. All snippets assume `pydantic >= 2.12`, `msgspec >= 0.20`, `pydantic-settings >= 2.12`, with `match/case` dispatch only.
 
 ---
-## [1][INBOUND_VALIDATION_PIPELINE]
->**Dictum:** *Validate once at ingress via eager TypeAdapter; extend via model_validator/model_serializer hooks; dispatch variants via structural match/case.*
-
-<br>
+## Inbound Validation Pipeline
 
 `TypeAdapter(type, *, config=ConfigDict(...))` compiles Pydantic core schema once -- create at module level (expensive construction). `validate_json()` returns typed objects; `validate_python()` for dict/object input; `json_schema()` for OpenAPI generation. `@safe` bridges `ValidationError` into `Result`. `model_validator(mode="before")` receives `cls, data: Any` (preprocessor). `model_validator(mode="after")` receives `self`, returns `Self` (cross-field -- only `after` has typed field access). `model_serializer(mode="wrap")` calls `handler(self)` first then post-processes; `mode="plain"` bypasses defaults. ONE serializer per model max.
 
@@ -131,15 +125,12 @@ def handle_payment(raw: bytes) -> Result[bytes, Exception]:
     )
 ```
 
-[CRITICAL]: `TypeAdapter` at module level -- never per-request. `model_validator(mode="before")` preprocesses raw data before field validation. `model_validator(mode="after")` has typed field access for cross-field rules. ONE `model_serializer` per model. `@safe` bridges into `Result` railway. See types.md [1] for `__get_pydantic_core_schema__` + `__get_pydantic_json_schema__` atom-level patterns.
+[CRITICAL]: `TypeAdapter` at module level -- never per-request. `model_validator(mode="before")` preprocesses raw data before field validation. `model_validator(mode="after")` has typed field access for cross-field rules. ONE `model_serializer` per model. `@safe` bridges into `Result` railway.
 
 ---
-## [2][MSGSPEC_STRUCTS]
->**Dictum:** *Egress structs are frozen, GC-exempt, and tag-discriminated.*
+## Msgspec Structs
 
-<br>
-
-`msgspec.Struct(frozen=True, gc=False)` produces zero-allocation C-backed objects excluded from garbage collection. `tag`/`tag_field` for discriminated unions. `msgspec.structs.replace()` for functional updates (NOTE: `__post_init__` NOT called by `replace`). Custom type handling via `enc_hook`/`dec_hook` passed to `Encoder`/`Decoder` or via `Annotated[T, Meta(enc_hook=...)]`. `msgspec.json.schema(type)` outputs JSON Schema 2020-12; `schema_components` for multi-type OpenAPI specs. See performance.md [3] for throughput benchmarks.
+`msgspec.Struct(frozen=True, gc=False)` produces zero-allocation C-backed objects excluded from garbage collection. `tag`/`tag_field` for discriminated unions. `msgspec.structs.replace()` for functional updates (NOTE: `__post_init__` NOT called by `replace`). Custom type handling via `enc_hook`/`dec_hook` passed to `Encoder`/`Decoder` or via `Annotated[T, Meta(enc_hook=...)]`. `msgspec.json.schema(type)` outputs JSON Schema 2020-12; `schema_components` for multi-type OpenAPI specs.
 
 ```python
 # --- [IMPORTS] ----------------------------------------------------------------
@@ -212,12 +203,9 @@ def decode_event(raw: bytes) -> UserCreated | UserDeleted:
 [CRITICAL]: `frozen=True` ensures immutability. `gc=False` excludes from garbage collection -- use for short-lived wire objects without circular references. `structs.replace()` for functional updates; `__post_init__` is NOT called. Encoder/decoder are module-level singletons.
 
 ---
-## [3][SETTINGS]
->**Dictum:** *Configuration is validated at startup; secrets never leak into domain.*
+## Settings
 
-<br>
-
-`pydantic-settings` `BaseSettings` with `SettingsConfigDict` provides layered config: env vars > `.env` file > secrets dir > field defaults. Always `frozen=True`. `@safe` bridges startup validation into `Result`. Settings loaded once at bootstrap, injected as immutable dependency via reader monad. See protocols.md [2] for typed DI composition.
+`pydantic-settings` `BaseSettings` with `SettingsConfigDict` provides layered config: env vars > `.env` file > secrets dir > field defaults. Always `frozen=True`. `@safe` bridges startup validation into `Result`. Settings loaded once at bootstrap, injected as immutable dependency via reader monad.
 
 ```python
 # --- [IMPORTS] ----------------------------------------------------------------
@@ -249,10 +237,7 @@ def load_settings() -> AppSettings:
 [CRITICAL]: `frozen=True` prevents mutation after startup. Settings loaded once at bootstrap, injected as immutable dependency. Layered precedence: env vars > `.env` file > secrets dir > field defaults.
 
 ---
-## [4][RULES]
->**Dictum:** *Rules compress into constraints.*
-
-<br>
+## Rules
 
 - [ALWAYS] Pydantic `TypeAdapter` for inbound validation -- `validate_python`/`validate_json` at boundaries.
 - [ALWAYS] `TypeAdapter` initialized eagerly at module level -- never per-request.
@@ -270,10 +255,7 @@ def load_settings() -> AppSettings:
 - [NEVER] `model_validator(mode="before")` for cross-field rules -- only `after` has typed field access.
 
 ---
-## [5][QUICK_REFERENCE]
->**Dictum:** *Patterns indexed by shape and intent.*
-
-<br>
+## Quick Reference
 
 | [INDEX] | [PATTERN]                        | [WHEN]                                         | [KEY_TRAIT]                                    |
 | :-----: | -------------------------------- | ---------------------------------------------- | ---------------------------------------------- |

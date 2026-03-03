@@ -1,15 +1,9 @@
-# [H1][PERFORMANCE]
->**Dictum:** *Measure before optimizing; optimize allocation before algorithm; optimize algorithm before concurrency.*
-
-<br>
+# Performance
 
 Performance in Python 3.14+ is structural: `__slots__` on all classes, `msgspec.Struct(gc=False)` for GC-exempt wire objects, `tuple` over `list`, frozen collections with structural sharing, free-threading via PEP 779, and copy-and-patch JIT via PEP 744. All snippets target `msgspec >= 0.20`, `anyio >= 4.12`, `expression >= 5.6`, and CPython 3.14+ free-threading build.
 
 ---
-## [1][MEMORY_AND_ALLOCATION]
->**Dictum:** *Allocation-free is normal-form; immutable structures prevent an entire class of GC pressure.*
-
-<br>
+## Memory and Allocation
 
 `__slots__` eliminates per-instance `__dict__` overhead (~56 bytes per object on 64-bit). `tuple` over `list` and `frozenset` over `set` prevent accidental mutation and reduce GC tracking. `expression.collections.Block[T]` provides frozen list semantics with structural sharing for O(log32 N) append/update -- suitable as Pydantic model fields via built-in `__get_pydantic_core_schema__`.
 
@@ -56,18 +50,15 @@ _DICT_BASELINE: Final[int] = sys.getsizeof({"name": "test", "values": (), "total
 
 Allocation hierarchy (prefer top):
 - `tuple[T, ...]` / `frozenset[T]` -- zero-overhead immutable; no GC tracking for simple content.
-- `expression.Block[T]` -- structural sharing; Pydantic-compatible; 30+ combinators. See types.md [3].
+- `expression.Block[T]` -- structural sharing; Pydantic-compatible; 30+ combinators.
 - `expression.Map[K, V]` -- HAMT-backed frozen dict; O(log32 N) operations.
-- `msgspec.Struct(gc=False)` -- C-backed, GC-exempt wire objects. See serialization.md [2].
+- `msgspec.Struct(gc=False)` -- C-backed, GC-exempt wire objects.
 - `list[T]` / `dict[K, V]` -- mutable; boundary-only when framework requires.
 
 [CRITICAL]: `__slots__` on all non-Pydantic, non-dataclass domain classes. Pydantic `BaseModel` manages its own `__dict__` -- adding `__slots__` conflicts.
 
 ---
-## [2][CPYTHON_INTERNALS]
->**Dictum:** *Understand the runtime to avoid fighting it; free-threading and JIT change the performance calculus.*
-
-<br>
+## CPython Internals
 
 CPython 3.14 ships two runtime-altering features: **free-threading** (PEP 779 -- GIL disabled per-interpreter) and **copy-and-patch JIT** (PEP 744 -- template-based compilation of hot bytecode). Both change which optimizations matter.
 
@@ -91,23 +82,20 @@ _JIT_AVAILABLE: Final[bool] = hasattr(sys, "_jit") and sys._jit.is_enabled()  # 
 ```
 
 Free-threading implications:
-- `ContextVar[tuple]` snapshots replace mutable globals -- immutable replacement is lock-free. See concurrency.md [2].
+- `ContextVar[tuple]` snapshots replace mutable globals -- immutable replacement is lock-free.
 - `threading.Lock` only for genuinely shared mutable state (registries, connection pools).
 - Frozen Pydantic models and `tuple` fields are inherently thread-safe -- no synchronization needed.
-- `InterpreterPoolExecutor` for CPU-parallel work with `bytes` wire contracts. See concurrency.md [2].
+- `InterpreterPoolExecutor` for CPU-parallel work with `bytes` wire contracts.
 
 JIT implications:
 - Hot loops over simple bytecode operations benefit most -- the JIT traces and compiles frequently executed paths.
 - Tight generator expressions and comprehensions are JIT-friendly; deeply nested function calls with complex dispatch are not.
 - Profile before assuming JIT handles a hot path -- `sys._jit.is_enabled()` confirms the build has JIT support.
 
-[IMPORTANT]: Free-threading does NOT eliminate the need for `CapacityLimiter` backpressure in async pipelines -- it enables true parallelism for CPU-bound threads, but async concurrency still requires structured bounds. See concurrency.md [1].
+[IMPORTANT]: Free-threading does NOT eliminate the need for `CapacityLimiter` backpressure in async pipelines -- it enables true parallelism for CPU-bound threads, but async concurrency still requires structured bounds.
 
 ---
-## [3][SERIALIZATION_THROUGHPUT]
->**Dictum:** *msgspec is 5-10x stdlib json; module-level singletons amortize schema compilation.*
-
-<br>
+## Serialization Throughput
 
 `msgspec.json` outperforms `json` by 5-10x for encode/decode via C-backed codegen. `orjson` provides similar throughput with different trade-offs (no schema validation, returns `bytes` natively). `Struct(gc=False, frozen=True)` produces zero-GC immutable wire objects. Module-level `Encoder`/`Decoder` singletons amortize schema compilation cost across requests.
 
@@ -164,13 +152,10 @@ Throughput hierarchy:
 - `Pydantic TypeAdapter.validate_json` -- Rust-backed validation; slower than msgspec but richer validation.
 - `json.dumps/loads` -- stdlib fallback; 5-10x slower than msgspec.
 
-[CRITICAL]: `Encoder`/`Decoder` at module level -- never per-request. `TypeAdapter` at module level -- construction compiles Pydantic core schema. See serialization.md [2] for full msgspec struct patterns.
+[CRITICAL]: `Encoder`/`Decoder` at module level -- never per-request. `TypeAdapter` at module level -- construction compiles Pydantic core schema.
 
 ---
-## [4][ASYNC_PERFORMANCE]
->**Dictum:** *Backpressure prevents runaway memory; checkpoint placement determines latency fairness.*
-
-<br>
+## Async Performance
 
 Async performance is bounded concurrency performance. `CapacityLimiter` prevents fan-out from exhausting memory, `MemoryObjectStream` buffer sizing controls backpressure, and checkpoint variant selection determines latency distribution across tasks.
 
@@ -222,13 +207,10 @@ Checkpoint selection:
 
 uvloop note: `anyio` auto-selects uvloop when installed (`pip install uvloop`). 2-4x throughput improvement for high-connection-count workloads. No code changes required -- `anyio` detects at import time.
 
-[IMPORTANT]: Size `CapacityLimiter` to downstream capacity (database pool size, external API rate limit), not to upstream request volume. See concurrency.md [1] for full structured concurrency algebra.
+[IMPORTANT]: Size `CapacityLimiter` to downstream capacity (database pool size, external API rate limit), not to upstream request volume.
 
 ---
-## [5][PROFILING_AND_MEASUREMENT]
->**Dictum:** *Profile first; optimize what the profiler identifies, not what intuition suggests.*
-
-<br>
+## Profiling and Measurement
 
 | [INDEX] | [TOOL]          | [USE_WHEN]                           | [KEY_TRAIT]                                  |
 | :-----: | --------------- | ------------------------------------ | -------------------------------------------- |
@@ -269,17 +251,14 @@ def measure_allocations[T](
 Profiling workflow:
 1. **Identify** -- `cProfile` or `py-spy` to find the hot function.
 2. **Measure** -- `tracemalloc` snapshot diff to quantify allocations in the hot path.
-3. **Optimize** -- apply allocation hierarchy from [1], serialization patterns from [3], or async patterns from [4].
+3. **Optimize** -- apply allocation hierarchy, serialization patterns, or async patterns.
 4. **Verify** -- re-profile to confirm improvement; compare before/after snapshots.
-5. **Monitor** -- `py-spy` in production for regression detection. See observability.md [4] for RED metrics projection.
+5. **Monitor** -- `py-spy` in production for regression detection.
 
 [CRITICAL]: [NEVER] optimize without profiling evidence. `scalene` for line-level granularity when `cProfile` is too coarse. `memray` for heap analysis when `tracemalloc` overhead is acceptable.
 
 ---
-## [6][RULES]
->**Dictum:** *Rules compress into constraints.*
-
-<br>
+## Rules
 
 - [ALWAYS] `__slots__` on all non-Pydantic, non-dataclass domain classes.
 - [ALWAYS] `tuple` over `list`, `frozenset` over `set` for immutable data in domain models.
@@ -290,15 +269,12 @@ Profiling workflow:
 - [NEVER] Unbounded `MemoryObjectStream` buffer in production.
 
 ---
-## [7][QUICK_REFERENCE]
->**Dictum:** *One table maps pattern to context.*
-
-<br>
+## Quick Reference
 
 | [INDEX] | [PATTERN]                 | [WHEN]                                | [KEY_TRAIT]                            |
 | :-----: | ------------------------- | ------------------------------------- | -------------------------------------- |
 |   [1]   | `__slots__`               | All non-Pydantic domain classes       | ~56 bytes saved per instance           |
-|   [2]   | `Block[T]` / `Map[K,V]`   | Frozen collections in Pydantic models | Structural sharing, O(log32 N)         |
+|   [2]   | `Block[T]` / `Map[K,V]`  | Frozen collections in Pydantic models | Structural sharing, O(log32 N)         |
 |   [3]   | `Struct(gc=False)`        | Wire objects, short-lived egress      | Zero GC tracking, C-backed             |
 |   [4]   | Free-threading (PEP 779)  | CPU-parallel without GIL              | `sys._is_gil_enabled()`, frozen models |
 |   [5]   | Copy-and-patch JIT        | Hot bytecode trace compilation        | `sys._jit.is_enabled()`, auto-optimize |

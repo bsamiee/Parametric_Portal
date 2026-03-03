@@ -1,15 +1,9 @@
-# [H1][NUMERIC]
->**Dictum:** *Numeric computation flows through typed pipelines -- Protocols define algebraic contracts, polars expresses lazy transformations, numpy vectorizes without loops, Decimal encodes precision, memoryview avoids copies.*
+# Numeric
 
-<br>
-
-Protocol-driven numeric abstractions for Python 3.14+. Numeric tower via structural subtyping replaces inheritance hierarchies. Polars lazy frames compose via `.pipe()` chains. Numpy operations replace iteration with vectorized expressions. Decimal contexts enforce financial precision. Cross-references: protocols.md [1][4], types.md [2][3], effects.md [1], performance.md [1].
+Protocol-driven numeric abstractions for Python 3.14+. Numeric tower via structural subtyping replaces inheritance hierarchies. Polars lazy frames compose via `.pipe()` chains. Numpy operations replace iteration with vectorized expressions. Decimal contexts enforce financial precision.
 
 ---
-## [1][PROTOCOL_NUMERIC_ALGEBRA]
->**Dictum:** *The numeric tower is structural -- Protocols define algebraic capabilities, implementations satisfy without inheritance.*
-
-<br>
+## Protocol Numeric Algebra
 
 Python's `typing.SupportsFloat`, `SupportsInt`, `SupportsComplex`, and `SupportsAbs` define structural numeric contracts. Compose these into domain-specific algebraic Protocols. Implementations satisfy structurally -- frozen Pydantic models carry validated numeric payloads through pipelines. Use `TypeVar` with Protocol bounds for generic numeric functions.
 
@@ -64,10 +58,7 @@ def total_magnitude[M: Measurable[float]](
 ```
 
 ---
-## [2][POLARS_LAZY_PATTERNS]
->**Dictum:** *Polars LazyFrames compose declaratively -- `.pipe()` chains express transformations, `.collect()` materializes once at the boundary.*
-
-<br>
+## Polars Lazy Patterns
 
 Polars lazy evaluation defers computation until `.collect()`. Compose transformations as standalone functions accepting and returning `LazyFrame`. Chain via `.pipe()` for linear flows. Type-safe column access via `pl.col()` expressions. Predicate pushdown and projection pruning happen automatically in the query planner.
 
@@ -112,10 +103,7 @@ def aggregate_by(group_col: str, agg_col: str) -> FrameTransform:
 ```
 
 ---
-## [3][NUMPY_TYPED_VECTORIZATION]
->**Dictum:** *Numpy replaces loops with vectorized expressions -- type stubs enforce array dtype contracts at static analysis time.*
-
-<br>
+## Numpy Typed Vectorization
 
 `numpy.typing.NDArray[np.float64]` provides typed array annotations verified by mypy/pyright via numpy's bundled stubs. Vectorized operations express element-wise computation without iteration. Boolean masking replaces conditional filtering. `np.where` replaces ternary dispatch over arrays.
 
@@ -155,10 +143,7 @@ def compose_transforms(*transforms: VectorTransform) -> VectorTransform:
 ```
 
 ---
-## [4][DECIMAL_PRECISION]
->**Dictum:** *Financial arithmetic demands Decimal -- frozen models carry precision context, validators reject float contamination at boundaries.*
-
-<br>
+## Decimal Precision
 
 `decimal.Decimal` with explicit `Context` prevents silent precision loss. Pydantic frozen models encode monetary values with `Field(decimal_places=N)` constraints. Decode `str -> Decimal` at boundaries -- never construct `Decimal` from `float`. Use `match/case` for rounding mode dispatch.
 
@@ -205,10 +190,7 @@ class MoneyAmount(BaseModel, frozen=True):
 ```
 
 ---
-## [5][ZERO_COPY_MEMORYVIEW]
->**Dictum:** *Buffer protocol enables zero-copy slicing -- memoryview exposes typed views over contiguous memory without allocation.*
-
-<br>
+## Zero-Copy Memoryview
 
 `memoryview` wraps objects supporting the buffer protocol (`bytes`, `bytearray`, `array.array`, numpy arrays). Slicing a `memoryview` produces a new view -- no data copy. Use `struct.unpack_from` for typed extraction from binary buffers. Cast between formats via `.cast()`.
 
@@ -253,10 +235,7 @@ def extract_payload(buffer: memoryview, header: PacketHeader) -> memoryview:
 ```
 
 ---
-## [6][RULES]
->**Dictum:** *Rules compress into constraints.*
-
-<br>
+## Rules
 
 - [ALWAYS] Define numeric contracts as `Protocol` -- structural satisfaction, no `abc.ABC`.
 - [ALWAYS] Use `NDArray[np.float64]` (or specific dtype) -- never bare `np.ndarray`.
@@ -275,10 +254,7 @@ def extract_payload(buffer: memoryview, header: PacketHeader) -> memoryview:
 - [NEVER] Copy buffer data when `memoryview` slicing suffices -- unnecessary allocation.
 
 ---
-## [7][QUICK_REFERENCE]
->**Dictum:** *Patterns indexed by shape and intent.*
-
-<br>
+## Quick Reference
 
 | [INDEX] | [PATTERN]                        | [WHEN]                                         | [KEY_TRAIT]                                   |
 | :-----: | -------------------------------- | ---------------------------------------------- | --------------------------------------------- |
