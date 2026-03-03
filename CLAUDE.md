@@ -122,7 +122,7 @@ If reviewing, refining, editing, creating, or modifying X file type, use skill Y
 - [NEVER] Function proliferation → consolidate into fewer, polymorphic solutions.
 - [NEVER] Comments describing "what" → reserve for "why".
 - [NEVER] Nesting deeper than 4 levels → extract into named Effect pipelines or flatten with `pipe`/`Effect.filterOrFail`.
-- [NEVER] Schema/struct/branded type proliferation → one canonical schema per entity, derive variants at call site via `pick`/`omit`/`partial`/field modifiers.
+- [NEVER] Schema/struct/branded type proliferation → one canonical polymorphic schema, derive variants at call site via `pick`/`omit`/`partial`/field modifiers.
 - [NEVER] Inconsistent field/parameter naming → same concept uses same name everywhere; no unnecessary differentiation across objects.
 
 [CONDITIONAL]:
