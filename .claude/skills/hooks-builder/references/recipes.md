@@ -103,7 +103,7 @@ if __name__ == "__main__": sys.exit(main())
 from typing import Final
 import json, sys, subprocess, os
 from pathlib import Path
-B: Final = {"files": ("REQUIREMENTS.md", "CLAUDE.md"), "tag": "context"}
+B: Final = {"files": ("CLAUDE.md",), "tag": "context"}
 git = lambda cmd: subprocess.run(["git", *cmd], capture_output=True, text=True, timeout=5).stdout.strip()
 exists = lambda p: (Path(os.environ.get("CLAUDE_PROJECT_DIR", ".")) / p).exists()
 def main() -> int:

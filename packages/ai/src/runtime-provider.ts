@@ -3,7 +3,7 @@ import { DatabaseService } from '@parametric-portal/database/repos';
 import { Context } from '@parametric-portal/server/context';
 import { MetricsService } from '@parametric-portal/server/observe/metrics';
 import { CacheService } from '@parametric-portal/server/platform/cache';
-import { Data, Duration, Effect, Layer, Match, Option, PrimaryKey, Ref, Schema as S, Stream } from 'effect';
+import { Data, Duration, Effect, FiberRef, Layer, Match, Option, PrimaryKey, Ref, Schema as S, Stream } from 'effect';
 import { identity } from 'effect/Function';
 import { AiRegistry } from './registry.ts';
 
@@ -26,7 +26,10 @@ class AiError extends Data.TaggedError('AiError')<{
 // --- [CONSTANTS] -------------------------------------------------------------
 
 const _EMPTY_BUDGET: { readonly dailyTokens: number; readonly rateCount: number } = { dailyTokens: 0, rateCount: 0 };
-type _Budget = typeof _EMPTY_BUDGET;
+const _BudgetCacheKey = {
+    daily: (tenantId: string) => `ai:budget:daily:${tenantId}`,
+    rate:  (tenantId: string) => `ai:rate:${tenantId}`,
+} as const;
 
 // --- [SCHEMA] ----------------------------------------------------------------
 
@@ -40,7 +43,25 @@ class SettingsKey extends S.TaggedRequest<SettingsKey>()('SettingsKey', {
 
 class AiRuntimeProvider extends Effect.Service<AiRuntimeProvider>()('ai/RuntimeProvider', {
     effect: Effect.gen(function* () {
-        const budgets = yield* Ref.make(new Map<string, _Budget>());
+        const budgets = yield* Ref.make(new Map<string, typeof _EMPTY_BUDGET>());
+        const withOverride = (settings: AiRegistry.Settings, override: Option.Option<AiRegistry.SessionOverride>) =>
+            Option.match(override, {
+                onNone: () => settings,
+                onSome: (o) => AiRegistry.applySessionOverride(settings, o),
+            });
+        const resolveAppSettings = (tenantId: string) =>
+            Effect.serviceOption(DatabaseService).pipe(
+                Effect.flatMap(Option.match({
+                    onNone: () => AiRegistry.decodeAppSettings({}),
+                    onSome: (database) =>
+                        database.apps.one([{ field: 'id', value: tenantId }]).pipe(
+                            Effect.flatMap(Option.match({
+                                onNone: () => AiRegistry.decodeAppSettings({}),
+                                onSome: (app) => AiRegistry.decodeAppSettings(app.settings ?? {}),
+                            })),
+                        ),
+                })),
+            );
         return {
             annotate:            (_: AiTelemetry.GenAITelemetryAttributeOptions) => Effect.void,
             observeEmbedding:    (_labels: Record<string, string>, _count: number) => Effect.void,
@@ -50,11 +71,15 @@ class AiRuntimeProvider extends Effect.Service<AiRuntimeProvider>()('ai/RuntimeP
             observeRequest:      (_op: string, _labels: Record<string, string>) => Effect.void,
             observeTokens:       (_labels: Record<string, string>, _usage: Response.Usage) => Effect.void,
             readBudget:          (tenantId: string) => Ref.get(budgets).pipe(Effect.map((m) => m.get(tenantId) ?? _EMPTY_BUDGET)),
-            resolveSettings:     (_tenantId: string) => AiRegistry.decodeAppSettings({}),
-            resolveTenantId:     Effect.succeed('system'),
+            resolveSettings:     (tenantId: string) =>
+                Effect.all([resolveAppSettings(tenantId), FiberRef.get(AiRegistry.SessionOverrideRef)]).pipe(
+                    Effect.map(([settings, override]) => withOverride(settings, override)),
+                    Effect.mapError(AiError.from('ai.provider.settings')),
+                ),
+            resolveTenantId:     Context.Request.currentTenantId.pipe(Effect.catchAll(() => Effect.succeed('system'))),
             trackEffect:         <A, E, R>(_op: string, _labels: Record<string, string>, e: Effect.Effect<A, E, R>) => e,
             trackStream:         <A, E, R>(_op: string, _labels: Record<string, string>, s: Stream.Stream<A, E, R>) => s,
-            writeBudget:         (tenantId: string, budget: _Budget) => Ref.update(budgets, (m) => new Map(m).set(tenantId, budget)),
+            writeBudget:         (tenantId: string, budget: typeof _EMPTY_BUDGET) => Ref.update(budgets, (m) => new Map(m).set(tenantId, budget)),
         };
     }),
 }) {
@@ -84,13 +109,16 @@ class AiRuntimeProvider extends Effect.Service<AiRuntimeProvider>()('ai/RuntimeP
                 return Effect.forEach(valid, ([kind, tokens]) => MetricsService.inc(metrics.ai.tokens, MetricsService.label({ ...labels, kind }), tokens), { discard: true });
             },
             readBudget: (tenantId) =>
-                Effect.all([cache.kv.get(`ai:budget:daily:${tenantId}`, S.Number), cache.kv.get(`ai:rate:${tenantId}`, S.Number)]).pipe(
+                Effect.all([cache.kv.get(_BudgetCacheKey.daily(tenantId), S.Number), cache.kv.get(_BudgetCacheKey.rate(tenantId), S.Number)]).pipe(
                     Effect.map(([d, r]) => ({ dailyTokens: Option.getOrElse(d, () => _EMPTY_BUDGET.dailyTokens), rateCount: Option.getOrElse(r, () => _EMPTY_BUDGET.rateCount) })),
                     Effect.catchAll(() => Effect.succeed(_EMPTY_BUDGET)),
                 ),
             resolveSettings: (tenantId) =>
-                settingsCache.get(new SettingsKey({ tenantId })).pipe(
-                    Effect.catchAll((error) => Effect.logWarning('ai.provider.settings.resolve_error', { error, tenantId }).pipe(Effect.andThen(AiRegistry.decodeAppSettings({})))),
+                Effect.all([settingsCache.get(new SettingsKey({ tenantId })), FiberRef.get(AiRegistry.SessionOverrideRef)]).pipe(
+                    Effect.map(([settings, override]) => Option.match(override, {
+                        onNone: () => settings,
+                        onSome: (o) => AiRegistry.applySessionOverride(settings, o),
+                    })),
                 ),
             resolveTenantId: Context.Request.currentTenantId.pipe(Effect.catchAll(() => Effect.succeed('system'))),
             trackEffect: (operation, labels, effect) =>
@@ -102,7 +130,7 @@ class AiRuntimeProvider extends Effect.Service<AiRuntimeProvider>()('ai/RuntimeP
                     Stream.withSpan(operation, { kind: 'client' }),
                 ),
             writeBudget: (tenantId, budget) =>
-                Effect.all([cache.kv.set(`ai:budget:daily:${tenantId}`, budget.dailyTokens, Duration.hours(24)), cache.kv.set(`ai:rate:${tenantId}`, budget.rateCount, Duration.minutes(1))], { discard: true }).pipe(
+                Effect.all([cache.kv.set(_BudgetCacheKey.daily(tenantId), budget.dailyTokens, Duration.hours(24)), cache.kv.set(_BudgetCacheKey.rate(tenantId), budget.rateCount, Duration.minutes(1))], { discard: true }).pipe(
                     Effect.catchAll((error) => Effect.logWarning('ai.budget.write.cache_error', { error, tenantId })),
                 ),
         }));

@@ -3,6 +3,7 @@ using System.Text.Json;
 using LanguageExt;
 using LanguageExt.Common;
 using ParametricPortal.Kargadan.Plugin.src.contracts;
+using ParametricPortal.Kargadan.Plugin.src.execution;
 using static LanguageExt.Prelude;
 namespace ParametricPortal.Kargadan.Plugin.src.protocol;
 
@@ -12,8 +13,10 @@ internal static class CommandRouter {
     private static class JsonFields {
         internal const string Tag = "_tag";
         internal const string Operation = "operation";
+        internal const string CommandId = "commandId";
         internal const string DeadlineMs = "deadlineMs";
         internal const string Payload = "payload";
+        internal const string Args = "args";
         internal const string Idempotency = "idempotency";
         internal const string IdempotencyKey = "idempotencyKey";
         internal const string PayloadHash = "payloadHash";
@@ -70,6 +73,7 @@ internal static class CommandRouter {
         from deadlineMs in DecodeDeadlineMs(
             envelope: envelope,
             operation: operation)
+        from payload in DecodePayload(envelope: envelope)
         from objectRefs in DecodeObjectRefs(envelope: envelope)
         from idempotency in DecodeIdempotency(envelope: envelope)
         from undoScope in DecodeUndoScope(envelope: envelope)
@@ -80,21 +84,44 @@ internal static class CommandRouter {
             ObjectRefs: objectRefs,
             Idempotency: idempotency,
             UndoScope: undoScope,
-            Payload: DecodePayload(envelope: envelope),
+            Payload: payload,
             TelemetryContext: telemetryContext,
             DeadlineMs: deadlineMs);
     private static Fin<CommandOperation> DecodeOperation(JsonElement envelope) =>
-        from operationKey in RequireStringProperty(
-            parent: envelope,
-            propertyName: JsonFields.Operation,
-            errorMessage: "Command operation field must be a string and is required.")
+        from operationKey in DecodeOperationKey(envelope: envelope)
         from operation in DomainBridge.ParseSmartEnum<CommandOperation, string>(
             candidate: operationKey)
             .BiMap(
                 Succ: static (CommandOperation operation) => operation,
                 Fail: (Error _) => Error.New(
                     message: $"Unsupported operation '{operationKey}' on command envelope."))
-        select operation;
+        from supportedOperation in CommandExecutor.Supports(operation) switch {
+            true => FinSucc(operation),
+            _ => FinFail<CommandOperation>(Error.New(message: $"Operation '{operationKey}' is not enabled in the current command route table.")),
+        }
+        select supportedOperation;
+    private static Fin<string> DecodeOperationKey(JsonElement envelope) {
+        Option<string> commandId = ReadOptionalString(
+            parent: envelope,
+            propertyName: JsonFields.CommandId);
+        Option<string> legacyOperation = ReadOptionalString(
+            parent: envelope,
+            propertyName: JsonFields.Operation);
+        return commandId.Match(
+            Some: commandValue =>
+                legacyOperation.Match(
+                    Some: legacyValue =>
+                        string.Equals(commandValue, legacyValue, StringComparison.Ordinal)
+                            ? FinSucc(commandValue)
+                            : FinFail<string>(Error.New(
+                                message: $"Envelope command identity mismatch: '{JsonFields.CommandId}'='{commandValue}' and '{JsonFields.Operation}'='{legacyValue}'.")),
+                    None: () => FinSucc(commandValue)),
+            None: () =>
+                legacyOperation.Match(
+                    Some: FinSucc,
+                    None: () => FinFail<string>(Error.New(
+                        message: $"Command envelope must include '{JsonFields.CommandId}' (preferred) or '{JsonFields.Operation}'."))));
+    }
     private static Fin<int> DecodeDeadlineMs(
         JsonElement envelope,
         CommandOperation operation) =>
@@ -104,10 +131,29 @@ internal static class CommandRouter {
                 FinSucc(Math.Max(MinimumDeadlineMs, parsedDeadlineMs)),
             true => FinFail<int>(Error.New(message: "deadlineMs must be an integer when provided.")),
         };
-    private static JsonElement DecodePayload(JsonElement envelope) =>
-        envelope.TryGetProperty(JsonFields.Payload, out JsonElement payloadElement) switch {
-            true => payloadElement,
-            false => EmptyJsonElement,
+    private static Fin<JsonElement> DecodePayload(JsonElement envelope) {
+        bool hasArgs = envelope.TryGetProperty(JsonFields.Args, out JsonElement argsElement);
+        bool hasPayload = envelope.TryGetProperty(JsonFields.Payload, out JsonElement payloadElement);
+        return (hasArgs, hasPayload) switch {
+            (true, true) when !JsonElement.DeepEquals(argsElement, payloadElement) =>
+                FinFail<JsonElement>(Error.New(
+                    message: $"Envelope contains both '{JsonFields.Args}' and '{JsonFields.Payload}' with different values.")),
+            (true, _) => EnsurePayloadObject(
+                payload: argsElement,
+                source: JsonFields.Args),
+            (false, true) => EnsurePayloadObject(
+                payload: payloadElement,
+                source: JsonFields.Payload),
+            _ => FinSucc(EmptyJsonElement),
+        };
+    }
+    private static Fin<JsonElement> EnsurePayloadObject(
+        JsonElement payload,
+        string source) =>
+        payload.ValueKind switch {
+            JsonValueKind.Object => FinSucc(payload),
+            _ => FinFail<JsonElement>(Error.New(
+                message: $"Envelope '{source}' must be an object when provided.")),
         };
     private static Fin<TelemetryContext> DecodeTelemetryContext(JsonElement envelope) =>
         from telemetryContextElement in RequireObjectProperty(
@@ -237,59 +283,13 @@ internal static class CommandRouter {
             true when propertyElement.TryGetInt32(out int propertyValue) => FinSucc(propertyValue),
             _ => FinFail<int>(Error.New(message: errorMessage)),
         };
-}
-internal static class FailureMapping {
-    private readonly record struct FailureTemplate(
-        ErrorCode Code,
-        string Fallback);
-    internal static FailureReason FromCode(ErrorCode code, string message) =>
-        BuildFailure(
-            code: code,
-            message: message,
-            fallback: code.Key);
-    internal static FailureReason FromException(Exception exception) {
-        FailureTemplate template = SelectTemplate(exception: exception);
-        return BuildFailure(
-            code: template.Code,
-            message: exception.Message,
-            fallback: template.Fallback);
-    }
-    internal static Error ToError(FailureReason reason) =>
-        Error.New(message: $"{reason.Code.Key}:{reason.FailureClass.Key}:{reason.Message}");
-    private static FailureTemplate SelectTemplate(Exception exception) =>
-        exception switch {
-            JsonException => new FailureTemplate(
-                Code: ErrorCode.PayloadMalformed,
-                Fallback: "Invalid JSON envelope."),
-            TimeoutException => new FailureTemplate(
-                Code: ErrorCode.TransientIo,
-                Fallback: "Operation timed out."),
-            FormatException => new FailureTemplate(
-                Code: ErrorCode.PayloadMalformed,
-                Fallback: "Invalid formatted payload value."),
-            ArgumentException => new FailureTemplate(
-                Code: ErrorCode.PayloadMalformed,
-                Fallback: "Invalid argument in protocol envelope."),
-            InvalidOperationException => new FailureTemplate(
-                Code: ErrorCode.PayloadMalformed,
-                Fallback: "Invalid protocol operation."),
-            _ => new FailureTemplate(
-                Code: ErrorCode.UnexpectedRuntime,
-                Fallback: "Unhandled transport/runtime exception."),
+    private static Option<string> ReadOptionalString(
+        JsonElement parent,
+        string propertyName) =>
+        parent.TryGetProperty(propertyName, out JsonElement propertyElement) switch {
+            true when propertyElement.ValueKind == JsonValueKind.String =>
+                Optional((propertyElement.GetString() ?? string.Empty).Trim())
+                    .Filter(static value => value.Length > 0),
+            _ => None,
         };
-    private static FailureReason BuildFailure(
-        ErrorCode code,
-        string message,
-        string fallback) =>
-        new(
-            Code: code,
-            Message: Normalize(message: message, fallback: fallback));
-    private static string Normalize(string message, string fallback) =>
-        Optional(message)
-            .Map(static m => m.Trim())
-            .Bind(static trimmed => trimmed.Length switch {
-                0 => None,
-                _ => Some(trimmed),
-            })
-            .IfNone(fallback);
 }

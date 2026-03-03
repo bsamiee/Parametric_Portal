@@ -10,7 +10,7 @@ Requirements for initial release. Each maps to roadmap phases.
 ### Transport
 
 - [x] **TRAN-01**: Plugin opens a WebSocket/TCP listener on localhost inside Rhino on a configurable port, accepting connections from the CLI harness
-- [ ] **TRAN-02**: Plugin targets net9.0 single-target for Rhino 9 only — no Rhino 8, no multi-target build (currently deviates: plugin inherits net10.0; decision/update required)
+- [x] **TRAN-02**: Plugin targets net9.0 single-target for Rhino 9 only — no Rhino 8, no multi-target build
 - [x] **TRAN-03**: Plugin marshals all incoming WebSocket commands to Rhino's UI thread via `RhinoApp.InvokeOnUiThread` before executing any RhinoDoc operation
 - [x] **TRAN-04**: Harness detects plugin disconnection (Rhino quit/crash) and reconnects automatically when the plugin becomes available again
 - [x] **TRAN-05**: Session state survives plugin disconnection — harness restores context from PostgreSQL checkpoint on reconnection without losing conversation history
@@ -27,31 +27,31 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### Agent
 
-- [ ] **AGNT-01**: packages/ai provides a generic agent loop service (tool-calling orchestration, planning, conversation management) consumable by any app — not Kargadan-specific
-- [ ] **AGNT-02**: Tools are defined via @effect/ai `Tool.make` with schema-driven parameters, typed success/failure, and descriptive annotations — composed into `Toolkit` collections
-- [ ] **AGNT-03**: Agent translates natural language user input into appropriate Rhino commands or RhinoCommon API calls via LLM inference
-- [ ] **AGNT-04**: C# bridge plugin exports the real Rhino command catalog as structured JSON on connection; harness decodes via CommandManifest, seeds via KBSeeder with a real embed function, and agent discovers relevant commands via pgvector cosine similarity over the populated knowledge base
-- [ ] **AGNT-05**: Agent uses @effect/ai `Chat` for multi-turn conversation with Ref-based history accumulation
+- [x] **AGNT-01**: packages/ai provides a generic agent loop service (tool-calling orchestration, planning, conversation management) consumable by any app — not Kargadan-specific
+- [x] **AGNT-02**: Tools are defined via @effect/ai `Tool.make` with schema-driven parameters, typed success/failure, and descriptive annotations — composed into `Toolkit` collections
+- [x] **AGNT-03**: Agent translates natural language user input into appropriate Rhino commands or RhinoCommon API calls via LLM inference
+- [x] **AGNT-04**: C# bridge plugin exports the real Rhino command catalog as structured JSON on connection; harness decodes the catalog schema, seeds via `AiService.seedKnowledge` with a real embed function, and agent discovers relevant commands via pgvector cosine similarity over the populated knowledge base
+- [x] **AGNT-05**: Agent uses @effect/ai `Chat` for multi-turn conversation with Ref-based history accumulation
 - [ ] **AGNT-06**: Architect/Editor model split — strong reasoning model (configurable) plans the operation strategy, faster model executes the command sequence
 - [ ] **AGNT-07**: Anthropic Tool Search Tool integration for on-demand tool discovery from large catalogs without upfront context loading
 - [ ] **AGNT-08**: Durable multi-step workflows via @effect/workflow — Activity (execute-once), withCompensation (rollback on failure), DurableDeferred (human approval gates)
-- [ ] **AGNT-09**: Read tools are stateless and high-frequency (no undo overhead); write tools are validated, undo-wrapped, and carry idempotency tokens — bifurcated by design
-- [ ] **AGNT-10**: Agent loop follows PLAN/EXECUTE/VERIFY/PERSIST/DECIDE state machine with typed transitions for retry, correction, compensation, and fatal escalation
+- [x] **AGNT-09**: Read tools are stateless and high-frequency (no undo overhead); write tools are validated, undo-wrapped, and carry idempotency tokens — bifurcated by design
+- [x] **AGNT-10**: Agent loop follows PLAN/EXECUTE/VERIFY/PERSIST/DECIDE state machine with typed transitions for retry, correction, compensation, and fatal escalation
 
 ### Provider
 
-- [ ] **PROV-01**: User can select AI provider (Anthropic, OpenAI, Google) and model at session start — no hardcoded default provider
-- [ ] **PROV-02**: Provider selection and model configuration stored in user/project settings and resolved at runtime via packages/ai AiRegistry
-- [ ] **PROV-03**: packages/ai provider abstraction is universal — adding a new provider requires only a new Layer implementation, not changes to the agent loop or tool definitions
-- [ ] **PROV-04**: Fallback chain across providers — if primary provider fails, agent automatically retries on configured fallback providers
+- [x] **PROV-01**: User can select AI provider (Anthropic, OpenAI, Google) and model at session start — no hardcoded default provider
+- [x] **PROV-02**: Provider selection and model configuration stored in user/project settings and resolved at runtime via packages/ai AiRegistry
+- [x] **PROV-03**: packages/ai provider abstraction is universal — adding a new provider requires only a new Layer implementation, not changes to the agent loop or tool definitions
+- [x] **PROV-04**: Fallback chain across providers — if primary provider fails, agent automatically retries on configured fallback providers
 
 ### Persistence
 
-- [x] **PERS-01**: Conversation history, run events, snapshots, and tool call results persist to PostgreSQL — replacing the in-memory PersistenceTrace
+- [x] **PERS-01**: Conversation history, run events, snapshots, and tool call results persist to PostgreSQL — replacing legacy in-memory traces
 - [x] **PERS-02**: Session resumption restores from the last PostgreSQL checkpoint — rebuilds loop state, Chat history, and active context without data loss
 - [x] **PERS-03**: Every tool call is logged with parameters, result, duration, and failure status for audit and replay
 - [x] **PERS-04**: Past agent sessions are queryable and replayable from the audit trail
-- [x] **PERS-05**: Rhino command knowledge base infrastructure — CommandManifest decode schema and KBSeeder write pipeline (search_documents + search_embeddings via injected embed function) ready for real command catalog ingestion
+- [x] **PERS-05**: Rhino command knowledge base infrastructure — catalog decode schema and `AiService.seedKnowledge` write pipeline (`search_chunks` + embeddings via injected embed function) ready for real command catalog ingestion
 
 ### Scene
 
@@ -129,7 +129,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | Requirement | Phase | Status |
 |-------------|-------|--------|
 | TRAN-01 | Phase 1 | Complete |
-| TRAN-02 | Phase 1 | Open (current implementation inherits net10.0; requirement/doc decision pending) |
+| TRAN-02 | Phase 1 | Complete |
 | TRAN-03 | Phase 1 | Complete |
 | TRAN-04 | Phase 1 | Complete |
 | TRAN-05 | Phase 1 | Complete |
@@ -140,20 +140,20 @@ Which phases cover which requirements. Updated during roadmap creation.
 | EXEC-04 | Phase 2 | Complete |
 | EXEC-05 | Phase 2 | Complete |
 | EXEC-06 | Phase 7 | Pending |
-| AGNT-01 | Phase 5 | Pending |
-| AGNT-02 | Phase 5 | Pending |
-| AGNT-03 | Phase 5 | Pending |
-| AGNT-04 | Phase 5 | Pending |
-| AGNT-05 | Phase 5 | Pending |
+| AGNT-01 | Phase 5 | Complete |
+| AGNT-02 | Phase 5 | Complete |
+| AGNT-03 | Phase 5 | Complete |
+| AGNT-04 | Phase 5 | Complete |
+| AGNT-05 | Phase 5 | Complete |
 | AGNT-06 | Phase 6 | Pending |
 | AGNT-07 | Phase 6 | Pending |
 | AGNT-08 | Phase 7 | Pending |
-| AGNT-09 | Phase 5 | Pending |
-| AGNT-10 | Phase 5 | Pending |
-| PROV-01 | Phase 5 | Pending |
-| PROV-02 | Phase 5 | Pending |
-| PROV-03 | Phase 5 | Pending |
-| PROV-04 | Phase 5 | Pending |
+| AGNT-09 | Phase 5 | Complete |
+| AGNT-10 | Phase 5 | Complete |
+| PROV-01 | Phase 5 | Complete |
+| PROV-02 | Phase 5 | Complete |
+| PROV-03 | Phase 5 | Complete |
+| PROV-04 | Phase 5 | Complete |
 | PERS-01 | Phase 4 | Complete |
 | PERS-02 | Phase 4 | Complete |
 | PERS-03 | Phase 4 | Complete |
@@ -187,4 +187,4 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 ---
 *Requirements defined: 2026-02-22*
-*Last updated: 2026-02-23 after Phase 4 refactoring (PERS-05 alias removal, AGNT-04 extraction pipeline)*
+*Last updated: 2026-03-03 after Phase 5 implementation drift reconciliation*

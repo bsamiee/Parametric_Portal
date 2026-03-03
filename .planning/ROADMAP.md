@@ -14,7 +14,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 
 - [x] **Phase 1: Plugin Transport Foundation** - WebSocket bridge between CLI harness and Rhino plugin on localhost with reconnection and heartbeat (completed 2026-02-22)
 - [x] **Phase 2: RhinoDoc Execution and Events** - Command execution, direct API access, event subscriptions, and undo integration inside Rhino (completed 2026-02-23)
-- [ ] **Phase 3: Schema Redesign and Topology** - Delete legacy schemas, extract universal concepts to packages/, isolate app-specific protocol in apps/kargadan
+- [x] **Phase 3: Schema Redesign and Topology** - Delete legacy schemas, extract universal concepts to packages/, isolate app-specific protocol in apps/kargadan (completed 2026-02-23)
 - [x] **Phase 4: Session Persistence and Knowledge Base** - PostgreSQL-backed session store replacing in-memory trace, plus Rhino command knowledge base for RAG (completed 2026-02-23)
 - [ ] **Phase 5: Agent Core and Provider Abstraction** - Generic agent loop in packages/ai with tool orchestration, RAG discovery, multi-provider support, and fallback chains
 - [ ] **Phase 6: Scene Representation and Context Management** - Layered scene summary, context compaction, Architect/Editor model split, and Tool Search Tool integration
@@ -81,42 +81,43 @@ Plans:
 **Depends on**: Phase 2, Phase 3
 **Requirements**: PERS-01, PERS-02, PERS-03, PERS-04, PERS-05
 **Success Criteria** (what must be TRUE):
-  1. Conversation history, run events, snapshots, and tool call results are stored in PostgreSQL — the in-memory PersistenceTrace is no longer used
+  1. Conversation history, run events, snapshots, and tool call results are stored in PostgreSQL — the legacy in-memory trace is no longer used
   2. After a harness restart, the agent resumes from the last checkpoint with full Chat history and loop state intact
   3. Every tool call is logged with parameters, result, duration, and failure status — queryable after the fact
   4. Past agent sessions can be listed and their full execution trace replayed from the audit trail
-  5. The Rhino command knowledge base infrastructure is ready — CommandManifest decode schema and KBSeeder write pipeline (search_documents + search_embeddings) accept real command catalog data from the bridge and seed pgvector for RAG queries
+  5. The Rhino command knowledge base infrastructure is ready — catalog decode boundary and `AiService.seedKnowledge` pipeline (`search_chunks` + embeddings) accept real command catalog data from the bridge and seed pgvector for RAG queries
 **Plans**: 2 plans
 
 Plans:
 - [x] 04-01-PLAN.md -- Model.Class definitions, PostgreSQL migration, PersistenceService with atomic checkpoint+tool-call writes, session listing/replay, migrator layer, harness rewire
-- [x] 04-02-PLAN.md -- CommandManifest decode boundary schema, KBSeeder write pipeline (search_documents + search_embeddings via injected embed function)
+- [x] 04-02-PLAN.md -- Catalog decode boundary schema + `AiService.seedKnowledge` pipeline (`search_chunks` embeddings via runtime provider)
 
 ### Phase 5: Agent Core and Provider Abstraction
 **Goal**: The agent accepts natural language input, discovers relevant Rhino commands via RAG over a real command catalog extracted from the bridge, generates and executes tool calls, and works across multiple AI providers
 **Depends on**: Phase 4
 **Requirements**: AGNT-01, AGNT-02, AGNT-03, AGNT-04, AGNT-05, AGNT-09, AGNT-10, PROV-01, PROV-02, PROV-03, PROV-04
 
-**Architecture context — what Phase 4 built and what Phase 5 must wire:**
-- Phase 4 delivered `CommandManifest` (decode schema) and `KBSeeder` (write pipeline into search_documents + search_embeddings). These are infrastructure — pipes without a data source.
-- Phase 5 must provide the data source: the C# bridge plugin exports the real Rhino command catalog as JSON on connection. The harness decodes it via `CommandManifest.decode()`, seeds via `KBSeeder.seed(manifest, embed)`, and the agent queries the populated pgvector tables for RAG discovery.
-- Phase 5 must also wire the embed function: `AiRuntime.embed` (or provider-specific implementation) is the concrete `EmbedFn` passed to `KBSeeder.seed()`.
-- Phase 5 must wire `Chat.exportJson`/`Chat.fromJson` into `PersistenceService` — the `chatJson` field is currently an empty string placeholder.
+**Architecture context — current integration snapshot (2026-03-03):**
+- Phase 4 delivered catalog decode boundaries and `AiService.seedKnowledge` writes into `search_chunks` with embedding support.
+- Phase 5 now sources catalog data from the plugin handshake ack payload (`catalog`) first; env manifest remains fallback/dev override.
+- Harness decodes and merges catalog metadata, then seeds via `AiService.seedKnowledge(catalog)` using runtime embedding support.
+- Chat persistence now uses `Chat.exportJson`/`Chat.fromJson` through checkpoint `chatJson` roundtrip.
+- Provider fallback chain is wired in `packages/ai` runtime; tenant-default/session-override selection is now wired through harness session-start configuration (`KARGADAN_AI_LANGUAGE_PROVIDER` / `KARGADAN_AI_LANGUAGE_MODEL` / optional fallback).
 
 **Success Criteria** (what must be TRUE):
-  1. The C# bridge plugin exports its command catalog as structured JSON on connection — the harness decodes it, seeds the knowledge base via `KBSeeder`, and pgvector embeddings are generated via a real embedding provider
+  1. The C# bridge plugin exports its command catalog as structured JSON on connection — the harness decodes it, seeds the knowledge base via `AiService.seedKnowledge`, and pgvector embeddings are generated via a real embedding provider
   2. A user types a natural language instruction (e.g., "create a 10x10 box") and geometry appears in Rhino — end-to-end through LLM inference, RAG command discovery, and tool execution via the bridge
   3. The agent discovers relevant commands from the knowledge base via pgvector cosine similarity without hardcoded command enums — commands it has never seen in conversation are findable
   4. Tools are schema-driven via `Tool.make` with typed success/failure; read tools are stateless (no undo overhead); write tools are undo-wrapped and validated
   5. The agent loop follows PLAN/EXECUTE/VERIFY/PERSIST/DECIDE transitions with retry on transient failure and correction on verification failure
   6. Chat history is serialized to PostgreSQL via `Chat.exportJson`/`Chat.fromJson` — the Phase 4 `chatJson` placeholder is replaced with real data
   7. The user can select AI provider and model at session start; if the primary provider fails, the agent retries on configured fallback providers
-**Plans**: TBD
+**Execution tracks**: 3 (integrated in working tree; closeout validation pending)
 
-Plans:
-- [ ] 05-01-PLAN.md — Universal tool factory + RAG toolkit builder + agent loop state machine in packages/ai, C# catalog export, Kargadan boundary adapter, AiRuntime.chatFromJson, protocol catalog envelope
-- [ ] 05-02-PLAN.md — Kargadan agent loop config (createAgentLoop wiring), Chat persistence (exportJson/fromJson replacing placeholder), bridge catalog reception, dispatch extension, harness rewire
-- [ ] 05-03-PLAN.md — System prompt, tool handler layer (read/write bifurcation via bridge dispatch), WebSocketHost catalog send, packages/ai barrel export, end-to-end pipeline closure
+Tracks:
+- [x] Protocol/catalog boundary and harness ingestion (handshake catalog + command envelope compatibility + ack/result sequencing)
+- [x] Generic agent core in `packages/ai` (state-machine rails, high-order toolkit, chat serialize/deserialize, provider override resolution)
+- [x] Harness loop rewire + persistence closure + Phase 5 validation + `.planning` reconciliation
 
 ### Phase 6: Scene Representation and Context Management
 **Goal**: The agent maintains awareness of the Rhino document state, manages context window budget to sustain unlimited session length, and uses model-appropriate inference tiers
@@ -180,7 +181,7 @@ Note: Phases 6, 7, and 8 all depend on Phase 5 but not on each other. They can b
 | 2. RhinoDoc Execution and Events | 2/2 | Complete | 2026-02-23 |
 | 3. Schema Redesign and Topology | 2/2 | Complete | 2026-02-23 |
 | 4. Session Persistence and Knowledge Base | 2/2 | Complete    | 2026-02-23 |
-| 5. Agent Core and Provider Abstraction | 0/3 | Not started | - |
+| 5. Agent Core and Provider Abstraction | 3/3 | Validation pending (manual Rhino smoke) | - |
 | 6. Scene Representation and Context Management | 0/2 | Not started | - |
 | 7. Verification, Workflows, and Grasshopper | 0/3 | Not started | - |
 | 8. CLI Interface | 0/2 | Not started | - |

@@ -18,7 +18,7 @@ const ToolCallPayload = S.Struct({ durationMs: S.optional(S.Number), params: S.o
 
 // --- [TYPES] -----------------------------------------------------------------
 
-type JournalEntry = S.Schema.Type<typeof AgentJournal>;
+type JournalEntry  = S.Schema.Type<typeof AgentJournal>;
 type HydrateResult = { readonly fresh: true } | { chatJson: string; diverged: boolean; fresh: false; sequence: number; state: unknown };
 
 // --- [FUNCTIONS] -------------------------------------------------------------
@@ -31,33 +31,6 @@ const _sortKeys = (v: unknown): unknown =>
         Match.orElse((x) => x),
     );
 const _stateHash = (state: unknown) => createHash('sha256').update(JSON.stringify(_sortKeys(state))).digest('hex');
-const _decodeStart =    (json:  unknown) => S.decodeUnknown(StartPayload)(json).pipe(Effect.orElseSucceed(() => ({ userId: null }) as typeof StartPayload.Type));
-const _decodeComplete = (json:  unknown) => S.decodeUnknown(CompletePayload)(json).pipe(Effect.map(Option.some), Effect.orElseSucceed(() => Option.none<typeof CompletePayload.Type>()));
-const _decodeToolCall = (json:  unknown) => S.decodeUnknown(ToolCallPayload)(json).pipe(Effect.orElseSucceed(() => ({}) as typeof ToolCallPayload.Type));
-const _isTerminal =     (s: string) => s === 'completed' || s === 'failed';
-const _deriveStatus =   (start: JournalEntry, complete: Option.Option<JournalEntry>): 'running' | 'completed' | 'failed' | 'interrupted' =>
-    complete.pipe(Option.flatMap((e) => e.status), Option.orElse(() => start.status), Option.getOrElse(() => 'running' as const));
-const _mapCheckpoint = (cp: JournalEntry): Effect.Effect<HydrateResult, ParseResult.ParseError> =>
-    S.decodeUnknown(CheckpointPayload)(cp.payloadJson).pipe(
-        Effect.map((p) => ({ chatJson: p.chatJson, diverged: Option.exists(cp.stateHash, (hash) => hash !== _stateHash(p.loopState)), fresh: false as const, sequence: cp.sequence, state: p.loopState })),
-    );
-const _mapToolCall = (e: JournalEntry) =>
-    _decodeToolCall(e.payloadJson).pipe(Effect.map((p) => ({
-        appId:     e.appId, correlationId: e.runId, createdAt: e.createdAt, durationMs: p.durationMs ?? 0,
-        operation: Option.getOrElse(e.operation, () => 'unknown'), params: p.params ?? {}, result: Option.fromNullable(p.result),
-        sequence:  e.sequence, sessionId: e.sessionId, success: !Option.exists(e.status, (s) => s === 'failed'),
-    })));
-const _mapStart = (cMap: HashMap.HashMap<string, JournalEntry>) => (s: JournalEntry) => {
-    const complete = HashMap.get(cMap, s.sessionId);
-    return Effect.zipWith(_decodeStart(s.payloadJson), Option.match(complete, { onNone: () => Effect.succeed(Option.none<typeof CompletePayload.Type>()), onSome: (c) => _decodeComplete(c.payloadJson) }), (sp, cpOpt) => {
-        const cp = Option.getOrUndefined(cpOpt);
-        return {
-            appId: s.appId, correlationId: s.runId, endedAt: Option.fromNullable(cp?.endedAt).pipe(Option.map((v) => v instanceof Date ? v : new Date(v))),
-            error: Option.fromNullable(cp?.error), id: s.sessionId, metadata: sp.metadata ?? {}, startedAt: sp.startedAt ?? s.createdAt, status: _deriveStatus(s, complete),
-            toolCallCount: cp?.toolCallCount ?? sp.toolCallCount ?? 0, updatedAt: complete.pipe(Option.map((e) => e.createdAt), Option.getOrElse(() => s.createdAt)), userId: Option.fromNullable(sp.userId),
-        };
-    });
-};
 
 // --- [SERVICES] --------------------------------------------------------------
 
@@ -66,9 +39,79 @@ class AgentPersistenceService extends Effect.Service<AgentPersistenceService>()(
     effect: Effect.gen(function* () {
         const { agentJournal: repo } = yield* DatabaseService;
         const write = Effect.fn('database.agentPersistence.write')((entries: readonly S.Schema.Type<typeof AgentJournal.insert>[]) => repo.put([...entries]));
+        const decodeStart = (json: unknown) =>
+            S.decodeUnknown(StartPayload)(json).pipe(Effect.orElseSucceed(() => ({ userId: null }) as typeof StartPayload.Type));
+        const decodeComplete = (json: unknown) =>
+            S.decodeUnknown(CompletePayload)(json).pipe(Effect.map(Option.some), Effect.orElseSucceed(() => Option.none<typeof CompletePayload.Type>()));
+        const decodeToolCall = (json: unknown) =>
+            S.decodeUnknown(ToolCallPayload)(json).pipe(Effect.orElseSucceed(() => ({}) as typeof ToolCallPayload.Type));
+        const deriveStatus = (start: JournalEntry, complete: Option.Option<JournalEntry>): 'running' | 'completed' | 'failed' | 'interrupted' =>
+            complete.pipe(
+                Option.flatMap((entry) => entry.status),
+                Option.orElse(() => start.status),
+                Option.match({
+                    onNone: () => 'running' as const,
+                    onSome: (status) => status === 'ok' || status === 'error' ? 'running' as const : status,
+                }),
+            );
+        const mapToolCall = (entry: JournalEntry) =>
+            decodeToolCall(entry.payloadJson).pipe(Effect.map((payload) => ({
+                appId:         entry.appId,
+                correlationId: entry.runId,
+                createdAt:     entry.createdAt,
+                durationMs:    payload.durationMs ?? 0,
+                operation:     Option.getOrElse(entry.operation, () => 'unknown'),
+                params:        payload.params ?? {},
+                result:        Option.fromNullable(payload.result),
+                sequence:      entry.sequence,
+                sessionId:     entry.sessionId,
+                success:       Option.exists(entry.status, (status) => status === 'ok'),
+            })));
+        const mapStart = (completionBySession: HashMap.HashMap<string, JournalEntry>) => (start: JournalEntry) => {
+            const complete = HashMap.get(completionBySession, start.sessionId);
+            return Effect.zipWith(
+                decodeStart(start.payloadJson),
+                Option.match(complete, { onNone: () => Effect.succeed(Option.none<typeof CompletePayload.Type>()), onSome: (entry) => decodeComplete(entry.payloadJson) }),
+                (startPayload, completePayloadOption) => {
+                    const completePayload = Option.getOrUndefined(completePayloadOption);
+                    return {
+                        appId:         start.appId,
+                        correlationId: start.runId,
+                        endedAt:       Option.fromNullable(completePayload?.endedAt).pipe(Option.map((value) => value instanceof Date ? value : new Date(value))),
+                        error:         Option.fromNullable(completePayload?.error),
+                        id:            start.sessionId,
+                        metadata:      startPayload.metadata ?? {},
+                        startedAt:     startPayload.startedAt ?? start.createdAt,
+                        status:        deriveStatus(start, complete),
+                        toolCallCount: completePayload?.toolCallCount ?? startPayload.toolCallCount ?? 0,
+                        updatedAt:     complete.pipe(Option.map((entry) => entry.createdAt), Option.getOrElse(() => start.createdAt)),
+                        userId:        Option.fromNullable(startPayload.userId),
+                    };
+                },
+            );
+        };
         const hydrate = Effect.fn('database.agentPersistence.hydrate')((sessionId: string) =>
-            repo.by('bySessionKind', { entryKind: 'checkpoint', sessionId }).pipe(
-                Effect.flatMap((opt): Effect.Effect<HydrateResult, ParseResult.ParseError> => Option.match(opt, { onNone: () => Effect.succeed({ fresh: true as const }), onSome: _mapCheckpoint })),
+            repo.latestCheckpoint(sessionId).pipe(
+                Effect.flatMap((entry): Effect.Effect<HydrateResult, ParseResult.ParseError> =>
+                    Option.match(entry, {
+                        onNone: () => Effect.succeed({ fresh: true as const }),
+                        onSome: (checkpoint) =>
+                            S.decodeUnknown(CheckpointPayload)(checkpoint.payloadJson).pipe(
+                                Effect.map((payload) => ({
+                                    chatJson: payload.chatJson,
+                                    diverged: Option.exists(checkpoint.stateHash, (hash) => hash !== _stateHash(payload.loopState)),
+                                    fresh:    false as const,
+                                    sequence: checkpoint.sequence,
+                                    state:    payload.loopState,
+                                })),
+                            ),
+                    }),
+                ),
+                Effect.catchAll((error) =>
+                    Effect.logWarning('database.agentPersistence.hydrate.decode_failed', { error: String(error), sessionId }).pipe(
+                        Effect.as({ fresh: true as const }),
+                    ),
+                ),
             ),
         );
         const findResumable = Effect.fn('database.agentPersistence.findResumable')((appId: string) =>
@@ -77,7 +120,10 @@ class AgentPersistenceService extends Effect.Service<AgentPersistenceService>()(
                 repo.find([{ field: 'appId', value: appId }, { field: 'entryKind', value: 'session_complete' }]),
                 (starts, completions) => {
                     const done = HashSet.fromIterable(completions.map((c) => c.sessionId));
-                    return Chunk.findFirst(Chunk.fromIterable(starts), (e) => !HashSet.has(done, e.sessionId) && !Option.exists(e.status, _isTerminal)).pipe(Option.map((e) => e.sessionId));
+                    return Chunk.findFirst(
+                        Chunk.fromIterable(starts),
+                        (entry) => !HashSet.has(done, entry.sessionId) && !Option.exists(entry.status, (status) => status === 'completed' || status === 'failed'),
+                    ).pipe(Option.map((entry) => entry.sessionId));
                 },
             ),
         );
@@ -86,54 +132,57 @@ class AgentPersistenceService extends Effect.Service<AgentPersistenceService>()(
                 const { cursor, hasNext, hasPrev, items: starts, total } = yield* repo.page([{ field: 'entryKind', value: 'session_start' }, ...repo.preds({ after: filter?.after, before: filter?.before })], { asc: false, cursor: filter?.cursor, limit: filter?.limit });
                 const sessionIds = starts.map((s) => s.sessionId);
                 const completions = sessionIds.length ? yield* repo.find([{ field: 'entryKind', value: 'session_complete' }, { field: 'sessionId', op: 'in', values: sessionIds }]) : [];
-                const items = yield* Effect.forEach(starts, _mapStart(HashMap.fromIterable(completions.map((c) => [c.sessionId, c] as const))));
-                return { cursor, hasNext, hasPrev, items: items.filter((i) => !filter?.status?.length || filter.status.includes(i.status)), total };
+                const items = yield* Effect.forEach(starts, mapStart(HashMap.fromIterable(completions.map((entry) => [entry.sessionId, entry] as const))));
+                const filteredItems = items.filter((item) => !filter?.status?.length || filter.status.includes(item.status));
+                return { cursor, hasNext, hasPrev, items: filteredItems, total: filter?.status?.length ? filteredItems.length : total };
             }),
         );
         const trace = Effect.fn('database.agentPersistence.trace')((sessionId: string, options?: { cursor?: string; limit?: number }) =>
             repo.page([['sessionId', sessionId], { field: 'entryKind', value: 'tool_call' }], { cursor: options?.cursor, limit: options?.limit }).pipe(
-                Effect.flatMap((page) => Effect.map(Effect.forEach(page.items, _mapToolCall), (items) => ({ ...page, items }))),
+                Effect.map((page) => ({ ...page, items: page.items.toSorted((left, right) => left.sequence - right.sequence) })),
+                Effect.flatMap((page) => Effect.map(Effect.forEach(page.items, mapToolCall), (items) => ({ ...page, items }))),
             ),
         );
         const startSession = Effect.fn('database.agentPersistence.startSession')((params: {
             readonly appId: string; readonly correlationId: string; readonly sessionId: string;
         }) => write([{
-            appId: params.appId, entryKind: 'session_start' as const, operation: Option.none(),
+            appId:       params.appId, entryKind: 'session_start' as const, operation: Option.none(),
             payloadJson: { startedAt: new Date(), toolCallCount: 0, userId: null },
-            runId: params.correlationId, sequence: 0, sessionId: params.sessionId,
-            stateHash: Option.none(), status: Option.some('running' as const),
+            runId:       params.correlationId, sequence: 0, sessionId: params.sessionId,
+            stateHash:   Option.none(), status: Option.some('running' as const),
         }]));
         const completeSession = Effect.fn('database.agentPersistence.completeSession')((params: {
             readonly appId: string; readonly correlationId: string; readonly error: string | null;
-            readonly sequence: number; readonly sessionId: string; readonly status: 'completed' | 'failed'; readonly toolCallCount: number;
+            readonly sequence: number; readonly sessionId: string; readonly status: 'completed' | 'failed' | 'interrupted'; readonly toolCallCount: number;
         }) => write([{
-            appId: params.appId, entryKind: 'session_complete' as const, operation: Option.none(),
+            appId:       params.appId, entryKind: 'session_complete' as const, operation: Option.none(),
             payloadJson: { endedAt: new Date(), error: params.error, toolCallCount: params.toolCallCount },
-            runId: params.correlationId, sequence: params.sequence, sessionId: params.sessionId,
-            stateHash: Option.none(), status: Option.some(params.status),
+            runId:       params.correlationId, sequence: params.sequence, sessionId: params.sessionId,
+            stateHash:   Option.none(), status: Option.some(params.status),
         }]));
         const persistCall = Effect.fn('database.agentPersistence.persistCall')((
             identity: { readonly appId: string; readonly correlationId: string; readonly sessionId: string },
             loopState: unknown,
             call: {
+                readonly chatJson:   string;
                 readonly durationMs: number; readonly error: Option.Option<string>; readonly operation: string;
-                readonly params: Record<string, unknown>; readonly result: Option.Option<unknown>;
-                readonly sequence: number; readonly status: 'ok' | 'error';
+                readonly params:     Record<string, unknown>; readonly result: Option.Option<unknown>;
+                readonly sequence:   number; readonly status: 'ok' | 'error';
             },
         ) => write([
             {
-                appId: identity.appId, entryKind: 'checkpoint' as const, operation: Option.none(),
-                payloadJson: { chatJson: '', loopState }, runId: identity.correlationId,
-                sequence: call.sequence, sessionId: identity.sessionId,
-                stateHash: Option.some(_stateHash(loopState)), status: Option.none(),
+                appId:       identity.appId, entryKind: 'checkpoint' as const, operation: Option.none(),
+                payloadJson: { chatJson: call.chatJson, loopState }, runId: identity.correlationId,
+                sequence:    call.sequence, sessionId: identity.sessionId,
+                stateHash:   Option.some(_stateHash(loopState)), status: Option.none(),
             },
             {
-                appId: identity.appId, entryKind: 'tool_call' as const,
-                operation: Option.some(call.operation),
+                appId:       identity.appId, entryKind: 'tool_call' as const,
+                operation:   Option.some(call.operation),
                 payloadJson: { durationMs: call.durationMs, params: call.params, result: Option.getOrUndefined(call.result) },
-                runId: identity.correlationId, sequence: call.sequence, sessionId: identity.sessionId,
-                stateHash: Option.none(),
-                status: Option.some(call.status === 'ok' ? 'running' as const : 'failed' as const),
+                runId:       identity.correlationId, sequence: call.sequence, sessionId: identity.sessionId,
+                stateHash:   Option.none(),
+                status:      Option.some(call.status),
             },
         ]));
         const idempotency = (correlationId: string, payload: unknown, sequence: number) =>

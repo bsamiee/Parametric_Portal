@@ -28,16 +28,16 @@ Every handler inside the WebSocket receiver (`SessionHost`, command router, even
 
 ---
 
-### Pitfall 2: net10.0 TFM Targeting Rhino 9 WIP
+### Pitfall 2: TFM Drift Against Rhino Runtime
 
 **What goes wrong:**
-The current plugin `csproj` targets `net10.0`. Rhino 9 WIP runs `.NET 9` (`NetCoreVersion=v9`). A `net10.0` binary will either fail to load at all or produce a cryptic `TypeLoadException` at runtime. Rhino 8 runs `.NET 7/8`. Both are broken by the current target.
+Any drift away from Rhino's runtime target causes load failures (`TypeLoadException` / `BadImageFormatException`). Rhino 9 WIP runs `.NET 9` (`NetCoreVersion=v9`), so plugin TFM must stay aligned.
 
 **Why it happens:**
-The monorepo's `Directory.Build.props` defaults pushed toward `net10.0` to track bleeding-edge C#. The Rhino constraint was documented but not yet applied. It is easy to overlook the Rhino runtime pinning when everything else in the monorepo targets the latest framework.
+Monorepo defaults can drift independently from Rhino runtime constraints. Historical net10 drift demonstrated this risk.
 
 **How to avoid:**
-Change `<TargetFramework>net10.0</TargetFramework>` to `<TargetFrameworks>net8.0;net9.0</TargetFrameworks>` immediately — this is already a known required fix in `PROJECT.md`. Add a CI check that validates the plugin DLL loads against a Rhino 9 WIP headless runner to catch TFM regression.
+Keep plugin target at `<TargetFramework>net9.0</TargetFramework>` for the current project policy. Add a CI check that validates plugin load against Rhino 9 WIP to catch regressions.
 
 **Warning signs:**
 - Plugin fails to appear in `PlugIn Manager` after installation
@@ -191,20 +191,20 @@ Enrich every command catalog entry with task-oriented natural language aliases a
 ### Pitfall 10: WebSocket Reconnection Without Session State Re-Sync
 
 **What goes wrong:**
-When the WebSocket connection drops (Rhino crash, macOS sleep/wake, network hiccup) and the harness reconnects, the `SessionSupervisor` phase resets to `idle` but the `AgentLoop` `LoopState` may be mid-execution (between EXECUTE and VERIFY). The reconnected session starts a new handshake, receives a new `sessionId`, and continues iterating the loop — but the C# plugin's `SessionHost` has no memory of the previous in-flight command. The result is a duplicate execution or a ghost command in the undo stack.
+When the WebSocket connection drops (Rhino crash, macOS sleep/wake, network hiccup) and the harness reconnects, the `ReconnectionSupervisor` can recover transport while `AgentLoop` `LoopState` is still mid-execution (between EXECUTE and VERIFY). The reconnected session starts a new handshake, receives a new `sessionId`, and continues iterating the loop — but the C# plugin's `SessionHost` has no memory of the previous in-flight command. The result is a duplicate execution or a ghost command in the undo stack.
 
 **Why it happens:**
 The current `KargadanSocketClientLive` layer wraps a stateless socket. Reconnection creates a fresh `KargadanSocketClient` with an empty pending map and a new session. The agent loop's `Effect.iterate` drives state forward independently. Without explicit re-sync, the loop state and the plugin session state diverge.
 
 **How to avoid:**
-On reconnect, the harness must re-run the handshake and then check whether any command was in-flight (pending `Deferred` in the socket map at disconnect time). If a command was in-flight, issue a status query to the plugin to determine if it executed before the drop. Only then continue the loop. The PostgreSQL-backed session persistence (planned) solves this structurally — session resumption from checkpoint is the correct fix. Until that is implemented, treat any mid-execution disconnect as a `retryable` transport error and re-execute from the last persisted sequence number.
+On reconnect, the harness must re-run the handshake and then check whether any command was in-flight (pending `Deferred` in the socket map at disconnect time). If a command was in-flight, issue a status query to the plugin to determine if it executed before the drop. Only then continue the loop. PostgreSQL-backed session persistence is now implemented and provides checkpoint-based resumption; remaining work is explicit in-flight command re-sync semantics to avoid duplicate execution after transport drops.
 
 **Warning signs:**
 - Duplicate geometry appearing in the document after reconnect
 - Undo stack containing commands that appear twice
 - Session IDs in loop trace events diverging from plugin session IDs in event payloads
 
-**Phase to address:** Session resumption implementation — wire PostgreSQL checkpoint restore before enabling long-running sessions.
+**Phase to address:** Reconnect recovery hardening — PostgreSQL checkpoint restore is implemented; remaining work is explicit in-flight command re-sync semantics.
 
 ---
 
@@ -232,7 +232,7 @@ Define a canonical protocol specification document (JSON Schema or OpenRPC) that
 
 | Shortcut | Immediate Benefit | Long-term Cost | When Acceptable |
 |----------|-------------------|----------------|-----------------|
-| In-memory `PersistenceTrace` instead of PostgreSQL persistence | No DB dependency during early testing | Session state lost on harness crash; no resumption possible | MVP only — must migrate before any session > 30 min |
+| Reintroducing in-memory trace instead of PostgreSQL persistence | No DB dependency during early testing | Session state lost on harness crash; no resumption possible | MVP only — must migrate before any session > 30 min |
 | Single TFM (`net9.0`) without `net8.0` multi-target | Simpler build | No Rhino 8 compatibility; blocks broader adoption | Acceptable for Rhino 9 WIP development phase |
 | Hardcoded operations list in `HarnessConfig` | No LLM orchestration needed for testing loop | Cannot express user intent; loop is a fixture not an agent | Scaffolding only — must replace before any real agent run |
 | Always-loaded tool definitions (no Tool Search) | No search latency on tool calls | Context bloat at ≥50 tools; selection accuracy degrades | Acceptable for ≤20 tools; mandatory threshold for full command catalog |
@@ -303,7 +303,7 @@ Define a canonical protocol specification document (JSON Schema or OpenRPC) that
 | Pitfall | Recovery Cost | Recovery Steps |
 |---------|---------------|----------------|
 | InvokeOnUiThread missing on one write path | MEDIUM | Audit all RhinoDoc call sites in plugin; add InvokeOnUiThread wrapper; test on macOS Apple Silicon specifically |
-| net10.0 TFM blocking plugin load | LOW | Change TFM to `net8.0;net9.0` in csproj; rebuild; reinstall `.rhp` in Rhino Plugin Manager |
+| TFM drift blocking plugin load | LOW | Restore plugin TFM to `net9.0`; rebuild; reinstall `.rhp` in Rhino Plugin Manager |
 | Context window exhaustion mid-session | MEDIUM | Add tokenizer check before each PLAN step; truncate or summarize history to budget; restart session from PostgreSQL checkpoint once persistence is implemented |
 | Tool Search Tool accuracy below threshold | MEDIUM | Add alias fields to all catalog entries; rerun embedding generation; retune search confidence threshold |
 | Undo stack corruption | HIGH | Requires RhinoDoc reload from last `.3dm` save; all AI-issued operations since last save are lost; prevention is the only viable strategy |
@@ -316,7 +316,7 @@ Define a canonical protocol specification document (JSON Schema or OpenRPC) that
 | Pitfall | Prevention Phase | Verification |
 |---------|------------------|--------------|
 | Missing InvokeOnUiThread (Pitfall 1) | Plugin transport layer | macOS Apple Silicon smoke test: 100 rapid write commands, zero crashes |
-| net10.0 TFM (Pitfall 2) | Plugin build infrastructure | Plugin loads and all commands resolve in Rhino 9 WIP |
+| TFM drift (Pitfall 2) | Plugin build infrastructure | Plugin loads and all commands resolve in Rhino 9 WIP |
 | Context window exhaustion (Pitfall 3) | Context compaction implementation | 40-turn fixture session never exceeds token budget |
 | Tool definition bloat (Pitfall 4) | packages/ai agent toolkit design | Tool selection accuracy ≥92% on standard task set with full tool surface loaded |
 | Tool Search 60% accuracy (Pitfall 5) | Knowledge base seeding with aliases | 50-query evaluation set achieves ≥85% recall before production use |
@@ -324,7 +324,7 @@ Define a canonical protocol specification document (JSON Schema or OpenRPC) that
 | macOS event ordering (Pitfall 7) | RhinoDoc event subscription | Document identity resolution test: open 5 files in sequence, all correlate correctly |
 | Correction loop without fingerprinting (Pitfall 8) | Agent loop LLM integration | Same-error repeated test: loop escalates to `fatal` after 2 identical errors |
 | Generic embeddings for CAD (Pitfall 9) | Knowledge base seeding | 50-query precision/recall evaluation with alias-enriched entries |
-| Reconnect without re-sync (Pitfall 10) | Session resumption (PostgreSQL) | Mid-EXECUTE disconnect test: no duplicate geometry after reconnect |
+| Reconnect without re-sync (Pitfall 10) | Reconnect recovery hardening (post-checkpoint resumption) | Mid-EXECUTE disconnect test: no duplicate geometry after reconnect |
 | Schema boundary drift (Pitfall 11) | Protocol contract stabilization | CI gate: JSON Schema validation of both C# and TS schemas against canonical spec |
 
 ---

@@ -1,4 +1,6 @@
-import { Config, Data, Duration, Effect, Option, Schema as S } from 'effect';
+import { AiRegistry } from '@parametric-portal/ai/registry';
+import { Config, Data, Duration, Effect, Match, Option, Schema as S } from 'effect';
+import { Client } from '@parametric-portal/database/client';
 import { DEFAULT_LOOP_OPERATIONS, ObjectTypeTag, Operation } from './protocol/schemas';
 
 // --- [ERRORS] ----------------------------------------------------------------
@@ -12,6 +14,8 @@ class HarnessConfigError extends Data.TaggedError('HarnessConfigError')<{
 // --- [CONSTANTS] -------------------------------------------------------------
 
 const HarnessConfig = {
+    agentIntent:               Config.string('KARGADAN_AGENT_INTENT').pipe(Config.withDefault('Summarize the active scene and apply the requested change.')),
+    appId:                     Config.string('KARGADAN_APP_ID').pipe(Config.withDefault(Client.tenant.Id.system), Effect.flatMap(S.decodeUnknown(S.UUID))),
     checkpointDatabaseUrl:     Config.redacted('KARGADAN_CHECKPOINT_DATABASE_URL'),
     commandDeadlineMs:         Config.integer('KARGADAN_COMMAND_DEADLINE_MS').pipe(Config.withDefault(5_000)),
     commandManifestEntityType: Config.string('KARGADAN_COMMAND_MANIFEST_ENTITY_TYPE').pipe(Config.withDefault('command')),
@@ -52,6 +56,38 @@ const HarnessConfig = {
         Config.withDefault(DEFAULT_LOOP_OPERATIONS.join(',')),
         Config.map((v) => v.split(',').map((e) => e.trim()).filter(Boolean)),
         Effect.flatMap(S.decodeUnknown(S.Array(Operation))),
+    ),
+    resolveSessionOverride: Effect.all({
+        fallback: Config.string('KARGADAN_AI_LANGUAGE_FALLBACK').pipe(
+            Config.withDefault(''),
+            Config.map((value) => value.split(',').map((entry) => entry.trim()).filter(Boolean)),
+        ),
+        model: Config.string('KARGADAN_AI_LANGUAGE_MODEL').pipe(
+            Config.withDefault(''),
+            Config.map((value) => value.trim()),
+        ),
+        provider: Config.string('KARGADAN_AI_LANGUAGE_PROVIDER').pipe(
+            Config.withDefault(''),
+            Config.map((value) => value.trim()),
+        ),
+    }).pipe(
+        Effect.flatMap((selection) =>
+            Match.value(selection).pipe(
+                Match.when(
+                    (value) => value.model === '' && value.provider === '',
+                    () => Effect.succeed(Option.none<AiRegistry.SessionOverride>()),
+                ),
+                Match.orElse((value) =>
+                    AiRegistry.decodeSessionOverride({
+                        language: {
+                            fallback: value.fallback,
+                            model:    value.model,
+                            provider: value.provider,
+                        },
+                    }).pipe(Effect.map(Option.some)),
+                ),
+            ),
+        ),
     ),
     resolveWriteObjectRef: Effect.all({
         objectId:       Config.string('KARGADAN_WRITE_OBJECT_ID').pipe(Config.withDefault('00000000-0000-0000-0000-000000000100')),

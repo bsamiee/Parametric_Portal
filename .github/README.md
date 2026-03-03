@@ -8,7 +8,7 @@
 | :-----: | -------------------------- | -------------------------------------------------------------------------------------- |
 |   [1]   | `labels.yml`               | 39 labels across 7 categories (type, agentic, status, phase, priority, agent, special) |
 |   [2]   | `dependabot.yml`           | Security-only patches (version updates delegated to Renovate)                          |
-|   [3]   | `copilot-instructions.md`  | AI assistant guidelines enforcing REQUIREMENTS.md standards                            |
+|   [3]   | `copilot-instructions.md`  | AI assistant guidelines enforcing CLAUDE.md standards                                  |
 |   [4]   | `PULL_REQUEST_TEMPLATE.md` | PR template with Summary, Related Issues, Changes sections                             |
 
 <br>
@@ -24,7 +24,7 @@
 |   [5]   | sonarcloud.yml         | CI      | PR/Push + dispatch  | SonarCloud analysis with PR decoration + job summary       |
 |   [6]   | dashboard.yml          | Passive | 6h schedule         | Repository metrics dashboard                               |
 |   [7]   | claude.yml             | Agent   | @claude mention     | Interactive Claude Code with 4 specialist agents           |
-|   [8]   | claude-code-review.yml | Agent   | PR opened/sync      | Automated PR review against REQUIREMENTS.md                |
+|   [8]   | claude-code-review.yml | Agent   | PR opened/sync      | Automated PR review against CLAUDE.md standards            |
 |   [9]   | gemini-dispatch.yml    | Agent   | @gemini-cli mention | Routes to review or invoke workflows                       |
 |  [10]   | gemini-review.yml      | Agent   | workflow_call       | Gemini CLI PR review with MCP GitHub                       |
 |  [11]   | gemini-invoke.yml      | Agent   | workflow_call       | General Gemini CLI invocation                              |

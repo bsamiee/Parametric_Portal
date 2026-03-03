@@ -62,6 +62,5 @@ jobs:
           prompt: |
             [LOAD_STANDARDS]
             1. Read CLAUDE.md.
-            2. Read REQUIREMENTS.md.
-            3. Read .claude/skills/style-standards/SKILL.md.
-            4. Load appropriate skill per language `csharp-standards`, `ts-standards`, `python-standards`, `bash-script-generator`, etc as needed.
+            2. Read .claude/skills/style-standards/SKILL.md.
+            3. Load appropriate skill per language `csharp-standards`, `ts-standards`, `python-standards`, `bash-script-generator`, etc as needed.

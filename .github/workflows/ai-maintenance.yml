@@ -114,13 +114,12 @@ jobs:
 
                       **code-quality-report**:
                       - Run nx run-many -t typecheck and nx run-many -t check
-                      - Analyze code for REQUIREMENTS.md violations
+                      - Analyze code for CLAUDE.md and .claude/rules/ violations
                       - Check for if/else, var/let, any usage
                       - Generate quality metrics report
 
                       **documentation-sync**:
-                      - Verify REQUIREMENTS.md matches implementation
-                      - Check CLAUDE.md accuracy
+                      - Verify CLAUDE.md and .claude/rules/ match implementation
                       - Flag outdated examples
 
                       Report findings as GitHub issue or PR comment as appropriate.

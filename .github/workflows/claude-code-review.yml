@@ -65,10 +65,9 @@ jobs:
 
             [PHASE_1] Load Standards
             1. Read CLAUDE.md — agent behavior, philosophy, constraints
-            2. Read REQUIREMENTS.md — technical specification, code standards
-            3. Read .claude/skills/style-standards/SKILL.md — formatting rules
-            4. Read .claude/skills/typescript-effect/SKILL.md — TypeScript patterns
-            5. Read .claude/skills/parallel-dispatch/SKILL.md - parallel dispatching rules
+            2. Read .claude/skills/style-standards/SKILL.md — formatting rules
+            3. Read .claude/skills/typescript-effect/SKILL.md — TypeScript patterns
+            4. Read .claude/skills/parallel-dispatch/SKILL.md - parallel dispatching rules
 
             [PHASE_2] Get Changes
             1. gh pr diff ${{ github.event.pull_request.number || github.event.inputs.pr_number }} --name-only

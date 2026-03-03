@@ -31,9 +31,8 @@ class CommandDispatch extends Effect.Service<CommandDispatch>()('kargadan/Comman
     effect: Effect.gen(function* () {
         const socket = yield* KargadanSocketClient;
         const [capabilities, protocolVersion] = yield* Effect.all([HarnessConfig.resolveCapabilities, HarnessConfig.protocolVersion]);
+        const catalogRef = yield* Ref.make<ReadonlyArray<Envelope.CatalogEntry>>([]);
         const phaseRef = yield* Ref.make<'connecting' | 'active' | 'closed'>('connecting');
-        const _protocolError = (expected: string) => (actual: Envelope.PendingReply) =>
-            Effect.fail(new CommandDispatchError({ details: { expected, received: actual._tag }, reason: 'protocol' }));
         const _request = Effect.fn('CommandDispatch.request')((envelope: Envelope.Outbound) =>
             socket.request(envelope).pipe(
                 Effect.catchTag('SocketClientError', (error) => Ref.set(phaseRef, 'closed').pipe(
@@ -46,17 +45,38 @@ class CommandDispatch extends Effect.Service<CommandDispatch>()('kargadan/Comman
             ({ token, ...identity }: Envelope.Identity & { readonly token: string }) =>
                 _request({ _tag: 'handshake.init', ...identity, auth: { token, tokenExpiresAt: new Date(Date.now() + Duration.toMillis(Duration.minutes(15))) }, capabilities, protocolVersion }).pipe(
                     Effect.flatMap((response) => Match.value(response).pipe(
-                        Match.tag('handshake.ack', (ack) => Ref.set(phaseRef, 'active').pipe(Effect.andThen(Effect.log('kargadan.session.authenticated')), Effect.as(ack))),
+                        Match.tag('handshake.ack', (ack) => Effect.all([
+                            Ref.set(phaseRef, 'active'),
+                            Ref.set(catalogRef, ack.catalog),
+                            Effect.log('kargadan.session.authenticated'),
+                        ], { discard: true }).pipe(Effect.as(ack))),
                         Match.tag('handshake.reject', (r) => Effect.fail(new CommandDispatchError({ details: { code: r.code, message: r.message }, failureClass: r.failureClass, reason: 'rejected' }))),
-                        Match.orElse(_protocolError('handshake.ack|handshake.reject'))))));
+                        Match.orElse((reply) => Effect.fail(new CommandDispatchError({ details: { expected: 'handshake.ack|handshake.reject', received: reply._tag }, reason: 'protocol' }))),
+                    )),
+                ),
+        );
         const execute = Effect.fn('CommandDispatch.execute')((command: Envelope.Command) =>
-            _request(command).pipe(Effect.flatMap((response) => Match.value(response).pipe(
-                Match.tag('result', Effect.succeed), Match.orElse(_protocolError('result'))))));
+            _request(command).pipe(
+                Effect.flatMap((response) => Match.value(response).pipe(
+                    Match.tag('result', Effect.succeed),
+                    Match.orElse((reply) => Effect.fail(new CommandDispatchError({
+                        details: { expected: 'result', received: reply._tag },
+                        reason: 'protocol',
+                    }))),
+                )),
+            ));
         const heartbeat = Effect.fn('CommandDispatch.heartbeat')((base: Envelope.IdentityBase) =>
             _request({ _tag: 'heartbeat', ...base, mode: 'ping', requestId: crypto.randomUUID() }).pipe(
                 Effect.flatMap((response) => Match.value(response).pipe(
-                    Match.when({ _tag: 'heartbeat', mode: 'pong' }, Effect.succeed), Match.orElse(_protocolError('heartbeat.pong'))))));
-        return { execute, handshake, heartbeat, phase: Ref.get(phaseRef), start: socket.start, takeEvent: socket.takeEvent } as const;
+                    Match.when({ _tag: 'heartbeat', mode: 'pong' as const }, Effect.succeed),
+                    Match.orElse((reply) => Effect.fail(new CommandDispatchError({
+                        details: { expected: 'heartbeat.pong', received: reply._tag },
+                        reason: 'protocol',
+                    }))),
+                )),
+            ));
+        const receiveCatalog = Effect.fn('CommandDispatch.receiveCatalog')(() => Ref.get(catalogRef));
+        return { execute, handshake, heartbeat, phase: Ref.get(phaseRef), receiveCatalog, start: socket.start, takeEvent: socket.takeEvent } as const;
     }),
 }) {}
 

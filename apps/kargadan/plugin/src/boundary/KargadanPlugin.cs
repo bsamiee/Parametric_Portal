@@ -12,6 +12,7 @@ using ParametricPortal.Kargadan.Plugin.src.observation;
 using ParametricPortal.Kargadan.Plugin.src.protocol;
 using ParametricPortal.Kargadan.Plugin.src.transport;
 using Rhino;
+using Rhino.DocObjects;
 using Rhino.PlugIns;
 using static LanguageExt.Prelude;
 using Duration = NodaTime.Duration;
@@ -19,12 +20,8 @@ namespace ParametricPortal.Kargadan.Plugin.src.boundary;
 
 [BoundaryAdapter]
 public sealed class KargadanPlugin : PlugIn {
-    private static class JsonFields {
-        internal const string CommandAckTag = "command.ack";
-        internal const string DeadlineMs = "deadlineMs";
-        internal const string Identity = "identity";
-        internal const string RequestId = "requestId";
-    }
+    private readonly record struct DecodedCommand(BoundaryState State, CommandEnvelope Envelope);
+    private const string CommandAckTag = "command.ack";
     private readonly record struct BoundaryState(
         SessionEventPublisher SessionEvents,
         SessionHost SessionHost,
@@ -53,13 +50,16 @@ public sealed class KargadanPlugin : PlugIn {
                 heartbeatTimeout: HandshakeHeartbeatTimeout,
                 now: now);
             HandshakeEnvelope negotiated = global::ParametricPortal.Kargadan.Plugin.src.transport.SessionHost.Negotiate(
-                init: init,
-                supportedMajor: 1,
-                supportedMinor: 0,
-                server: new ServerInfo(
-                    RhinoVersion: VersionString.Create(RhinoApp.Version.ToString()),
-                    PluginRevision: VersionString.Create(Version.ToString())),
-                now: now);
+                new NegotiationContext(
+                    Init: init,
+                    SupportedMajor: 1,
+                    SupportedMinor: 0,
+                    Server: new ServerInfo(
+                        RhinoVersion: VersionString.Create(RhinoApp.Version.ToString()),
+                        PluginRevision: VersionString.Create(Version.ToString())),
+                    SupportedCapabilities: CommandExecutor.SupportedCapabilities,
+                    Catalog: CommandExecutor.CommandCatalog,
+                    Now: now));
             return opened.Bind((_) =>
                 negotiated switch {
                     HandshakeEnvelope.Init => FinFail<HandshakeEnvelope>(
@@ -69,17 +69,6 @@ public sealed class KargadanPlugin : PlugIn {
                     _ => FinFail<HandshakeEnvelope>(Error.New(message: "Unexpected handshake envelope variant.")),
                 });
         });
-    private Fin<CommandResultEnvelope> HandleCommand(
-        JsonElement envelope,
-        EnvelopeIdentity sessionIdentity,
-        Func<CommandEnvelope, Fin<CommandResultEnvelope>> onCommand) =>
-        ReadState().Bind((BoundaryState state) =>
-            CommandRouter.Decode(
-                envelope: envelope,
-                sessionIdentity: sessionIdentity)
-            .Bind(onCommand)
-            .Bind((CommandResultEnvelope result) =>
-                state.SessionEvents.PublishLifecycleEvent(result: result).Map((_) => result)));
     private Fin<HeartbeatEnvelope> HandleHeartbeat(HeartbeatEnvelope heartbeat) =>
         ReadState().Bind((BoundaryState state) => {
             Instant now = Instant.FromDateTimeOffset(_timeProvider.GetUtcNow());
@@ -111,17 +100,7 @@ public sealed class KargadanPlugin : PlugIn {
         expiresOnUtc: "2026-08-22T00:00:00Z")]
     private static Task<Fin<T>> RunOnUiThreadAsync<T>(Func<Fin<T>> operation) {
         TaskCompletionSource<Fin<T>> tcs = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        RhinoApp.InvokeOnUiThread(new Action(() => {
-            Task<Fin<T>> operationTask = new(operation);
-            operationTask.RunSynchronously();
-            _ = operationTask.Status switch {
-                TaskStatus.RanToCompletion => tcs.TrySetResult(operationTask.Result),
-                TaskStatus.Faulted when operationTask.Exception is not null =>
-                    tcs.TrySetException(operationTask.Exception.InnerExceptions),
-                TaskStatus.Canceled => tcs.TrySetCanceled(CancellationToken.None),
-                _ => tcs.TrySetCanceled(CancellationToken.None),
-            };
-        }));
+        RhinoApp.InvokeOnUiThread(new Action(() => tcs.TrySetResult(operation())));
         return tcs.Task;
     }
     private async Task<Fin<JsonElement>> DispatchHandshakeAsync(
@@ -144,102 +123,123 @@ public sealed class KargadanPlugin : PlugIn {
         JsonElement message,
         Func<JsonElement, Task> sendAckAsync,
         CancellationToken cancellationToken) {
-        JsonElement ackPayload = ExtractAckPayload(message: message);
-        await sendAckAsync(ackPayload).ConfigureAwait(false);
-        int deadlineMs = ExtractDeadlineMs(message: message);
-        using CancellationTokenSource timeoutCts =
-            CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeoutCts.CancelAfter(millisecondsDelay: deadlineMs);
-        Fin<JsonElement> result = await RunOnUiThreadAsync(() =>
+        Fin<DecodedCommand> decoded = await RunOnUiThreadAsync(() =>
             ReadState().Bind((BoundaryState state) => {
                 Instant now = Instant.FromDateTimeOffset(_timeProvider.GetUtcNow());
                 return state.SessionHost.Timeout(now).Bind((SessionSnapshot snapshot) =>
                     snapshot.Phase switch {
-                        SessionPhase.Active => HandleCommand(
+                        SessionPhase.Active => CommandRouter.Decode(
                                 envelope: message,
-                                sessionIdentity: snapshot.Identity,
-                                onCommand: (CommandEnvelope envelope) => ExecuteCommand(
-                                    state: state,
-                                    envelope: envelope))
-                            .Map((CommandResultEnvelope resultEnvelope) =>
-                                JsonSerializer.SerializeToElement(value: resultEnvelope, options: JsonOptions)),
-                        SessionPhase.Connected => FinFail<JsonElement>(
+                                sessionIdentity: snapshot.Identity)
+                            .Map((CommandEnvelope envelope) => new DecodedCommand(
+                                State: state,
+                                Envelope: envelope)),
+                        SessionPhase.Connected => FinFail<DecodedCommand>(
                             Error.New(message: "Session is not active; handshake is not fully negotiated.")),
-                        SessionPhase.Terminal terminal => FinFail<JsonElement>(
+                        SessionPhase.Terminal terminal => FinFail<DecodedCommand>(
                             Error.New(message: $"Session is not active; current state is '{terminal.StateTag.Key}'.")),
-                        _ => FinFail<JsonElement>(
+                        _ => FinFail<DecodedCommand>(
                             Error.New(message: "Session is not active.")),
                     });
             })
-        ).WaitAsync(timeoutCts.Token).ConfigureAwait(false);
-        return result;
+        ).WaitAsync(cancellationToken).ConfigureAwait(false);
+        async Task<Fin<JsonElement>> ExecuteDecodedAsync(DecodedCommand command) {
+            await sendAckAsync(BuildCommandAckPayload(envelope: command.Envelope)).ConfigureAwait(false);
+            using CancellationTokenSource timeoutCts =
+                CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeoutCts.CancelAfter(millisecondsDelay: command.Envelope.DeadlineMs);
+            return await RunOnUiThreadAsync(() =>
+                ExecuteCommand(
+                    state: command.State,
+                    envelope: command.Envelope)
+                .Map((CommandResultEnvelope resultEnvelope) =>
+                    JsonSerializer.SerializeToElement(value: resultEnvelope, options: JsonOptions))
+            ).WaitAsync(timeoutCts.Token).ConfigureAwait(false);
+        }
+        return await (decoded.IsFail
+            ? Task.FromResult(FinFail<JsonElement>(Error.New(message: "Command envelope decode failed.")))
+            : ExecuteDecodedAsync(decoded.IfFail(default(DecodedCommand)))).ConfigureAwait(false);
     }
+    private static JsonElement BuildCommandAckPayload(CommandEnvelope envelope) =>
+        JsonSerializer.SerializeToElement(new CommandAckEnvelope(
+            Tag: CommandAckTag,
+            RequestId: (Guid)envelope.Identity.RequestId));
+    private static FailureReason ResolveFailureReason(Error error) =>
+        FailureMapping.FromError(error);
     private Fin<CommandResultEnvelope> ExecuteCommand(
         BoundaryState state,
-        CommandEnvelope envelope) {
-        RhinoDoc? doc = RhinoDoc.ActiveDoc;
-        return doc switch {
-            null => FinFail<CommandResultEnvelope>(
-                Error.New(message: "No active Rhino document.")),
-            _ => BuildCommandResult(
-                envelope: envelope,
-                executionResult: CommandExecutor.Execute(
-                    doc: doc,
-                    envelope: envelope,
-                    onUndoRedo: state.SessionEvents.EmitUndoEnvelope)),
-        };
-    }
-    private static JsonElement ExtractAckPayload(JsonElement message) {
-        string requestId = message.TryGetProperty(JsonFields.Identity, out JsonElement identity)
-            && identity.TryGetProperty(JsonFields.RequestId, out JsonElement reqId)
-            && reqId.ValueKind == JsonValueKind.String
-                ? reqId.GetString() ?? string.Empty
-                : string.Empty;
-        return JsonSerializer.SerializeToElement(new {
-            _tag = JsonFields.CommandAckTag,
-            requestId,
-        });
-    }
-    private static int ExtractDeadlineMs(JsonElement message) =>
-        message.TryGetProperty(JsonFields.DeadlineMs, out JsonElement deadlineElement)
-            && deadlineElement.TryGetInt32(out int deadline)
-            && deadline > 0
-                ? deadline
-                : 30_000;
-    private Fin<CommandResultEnvelope> BuildCommandResult(
+        CommandEnvelope envelope) =>
+        Optional(RhinoDoc.ActiveDoc)
+            .ToFin(Error.New(message: "No active Rhino document."))
+            .Bind((RhinoDoc doc) =>
+                state.SessionHost.RegisterIdempotency(envelope).Bind((Option<RequestId> duplicateRequestId) =>
+                    duplicateRequestId.Match(
+                        Some: (RequestId originalRequestId) =>
+                            BuildResult(
+                                envelope: envelope,
+                                durationMs: 0,
+                                build: (ExecutionMetadata metadata) => new CommandResultEnvelope.Success(
+                                    Identity: envelope.Identity,
+                                    Dedupe: new DedupeMetadata(
+                                        Decision: DedupeDecision.Duplicate,
+                                        OriginalRequestId: originalRequestId),
+                                    Result: JsonSerializer.SerializeToElement(new { duplicate = true }),
+                                    Execution: metadata,
+                                    TelemetryContext: envelope.TelemetryContext))
+                            .Bind((CommandResultEnvelope result) =>
+                                state.SessionEvents.PublishLifecycleEvent(result: result).Map((_) => result)),
+                        None: () => {
+                            long startedAtTimestamp = _timeProvider.GetTimestamp();
+                            Fin<JsonElement> executionResult = CommandExecutor.Execute(
+                                doc: doc,
+                                envelope: envelope,
+                                onUndoRedo: state.SessionEvents.EmitUndoEnvelope);
+                            return BuildResult(
+                                envelope: envelope,
+                                durationMs: DurationMilliseconds(startedAtTimestamp),
+                                build: (ExecutionMetadata metadata) =>
+                                    executionResult.Match(
+                                        Succ: (JsonElement payload) => (CommandResultEnvelope)new CommandResultEnvelope.Success(
+                                            Identity: envelope.Identity,
+                                            Dedupe: new DedupeMetadata(
+                                                Decision: DedupeDecision.Executed,
+                                                OriginalRequestId: envelope.Identity.RequestId),
+                                            Result: payload,
+                                            Execution: metadata,
+                                            TelemetryContext: envelope.TelemetryContext),
+                                        Fail: (Error error) => new CommandResultEnvelope.Failure(
+                                            Identity: envelope.Identity,
+                                            Dedupe: new DedupeMetadata(
+                                                Decision: DedupeDecision.Rejected,
+                                                OriginalRequestId: envelope.Identity.RequestId),
+                                            Result: JsonSerializer.SerializeToElement(new { error = error.Message }),
+                                            Execution: metadata,
+                                            Error: new CommandErrorEnvelope(
+                                                Reason: ResolveFailureReason(error),
+                                                Details: None),
+                                            TelemetryContext: envelope.TelemetryContext)))
+                                .Bind((CommandResultEnvelope result) =>
+                                    state.SessionEvents.PublishLifecycleEvent(result: result).Map((_) => result));
+                        })));
+    private Fin<CommandResultEnvelope> BuildResult(
         CommandEnvelope envelope,
-        Fin<JsonElement> executionResult) =>
+        int durationMs,
+        Func<ExecutionMetadata, CommandResultEnvelope> build) =>
         ExecutionMetadata.Create(
-            durationMs: 0,
+            durationMs: durationMs,
             pluginRevision: VersionString.Create(Version.ToString()),
-            sourceRevision: 0)
+            sourceRevision: CurrentSourceRevision())
         .Match(
-            Succ: (ExecutionMetadata metadata) =>
-                executionResult.Match(
-                    Succ: (JsonElement payload) => FinSucc((CommandResultEnvelope)new CommandResultEnvelope.Success(
-                        Identity: envelope.Identity,
-                        Dedupe: new DedupeMetadata(
-                            Decision: DedupeDecision.Executed,
-                            OriginalRequestId: envelope.Identity.RequestId),
-                        Result: payload,
-                        Execution: metadata,
-                        TelemetryContext: envelope.TelemetryContext)),
-                    Fail: (Error error) => FinSucc((CommandResultEnvelope)new CommandResultEnvelope.Failure(
-                        Identity: envelope.Identity,
-                        Dedupe: new DedupeMetadata(
-                            Decision: DedupeDecision.Executed,
-                            OriginalRequestId: envelope.Identity.RequestId),
-                        Result: JsonSerializer.SerializeToElement(new { error = error.Message }),
-                        Execution: metadata,
-                        Error: new CommandErrorEnvelope(
-                            Reason: new FailureReason(
-                                Code: ErrorCode.UnexpectedRuntime,
-                                Message: error.Message),
-                            Details: None),
-                        TelemetryContext: envelope.TelemetryContext))),
+            Succ: (ExecutionMetadata metadata) => FinSucc(build(metadata)),
             Fail: static (Seq<Error> errors) =>
                 FinFail<CommandResultEnvelope>(errors.HeadOrNone().IfNone(
                     Error.New(message: "Execution metadata is invalid."))));
+    private int DurationMilliseconds(long startedAtTimestamp) =>
+        Math.Max(
+            0,
+            (int)Math.Round(_timeProvider.GetElapsedTime(startedAtTimestamp).TotalMilliseconds));
+    private static int CurrentSourceRevision() =>
+        (int)Math.Min((long)RhinoObject.NextRuntimeSerialNumber, int.MaxValue);
     private Fin<JsonElement> SerializeHeartbeat(JsonElement message) {
         HeartbeatEnvelope? heartbeat = JsonSerializer.Deserialize<HeartbeatEnvelope>(
             element: message,
@@ -253,6 +253,11 @@ public sealed class KargadanPlugin : PlugIn {
     }
     private Fin<BoundaryState> ReadState() =>
         _state.Value.ToFin(Error.New(message: "Plugin boundary state is unavailable before plugin load."));
+    [BoundaryImperativeExemption(
+        ruleId: "CSP0001",
+        reason: BoundaryImperativeReason.ProtocolRequired,
+        ticket: "TRAN-03",
+        expiresOnUtc: "2026-08-22T00:00:00Z")]
     protected override LoadReturnCode OnLoad(ref string errorMessage) {
         _ = _instance.Swap((_) => Some(this));
         _ = _state.Swap((previousState) => {
@@ -285,6 +290,11 @@ public sealed class KargadanPlugin : PlugIn {
         });
         return LoadReturnCode.Success;
     }
+    [BoundaryImperativeExemption(
+        ruleId: "CSP0001",
+        reason: BoundaryImperativeReason.ProtocolRequired,
+        ticket: "TRAN-03",
+        expiresOnUtc: "2026-08-22T00:00:00Z")]
     protected override void OnShutdown() {
         Instant now = Instant.FromDateTimeOffset(_timeProvider.GetUtcNow());
         _ = ReadState().Bind((BoundaryState state) => {

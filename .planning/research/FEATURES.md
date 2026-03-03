@@ -4,6 +4,8 @@
 **Researched:** 2026-02-22
 **Confidence:** MEDIUM-HIGH — ecosystem for AI coding agents is HIGH; Rhino-specific AI agent patterns are MEDIUM (limited production deployments; RhinoMCP is the primary reference and it is experimental)
 
+**Status note (2026-03-03):** This document remains a research/prioritization artifact. Implementation truth is tracked in `.planning/ROADMAP.md` and `.planning/STATE.md`.
+
 ---
 
 ## Feature Landscape
@@ -39,7 +41,7 @@ Features that set the product apart. Not required, but valued.
 | RAG-backed dynamic command discovery | Current state of all Rhino AI tools: hardcoded command lists or naive prompt injection. Kargadan uses pgvector embedding + Anthropic Tool Search Tool to surface only the relevant commands for the current task. As Rhino adds commands, the catalog grows without code changes. | HIGH | Requires: (1) seeding Rhino command knowledge base with descriptions, parameters, examples; (2) nightly embedding cron (already exists in `packages/ai`); (3) Tool Search Tool integration via `advanced-tool-use-2025-11-20` beta. |
 | Bifurcated read/write tool surface | Read tools (stateless, high-frequency, no undo overhead) vs write tools (validated, undo-wrapped, idempotent). Most CAD agents treat all tools the same — this causes undo stack pollution and unnecessary latency on reads. | MEDIUM | Read tools: get-layer-tree, get-object-attributes, get-bounding-box, get-curve-properties. Write tools: create-object, move-object, modify-attributes, delete-object — each validated and undo-wrapped. Schema-driven `Tool.make` from `@effect/ai`. |
 | Layered context representation | Standard CAD AI tools dump the full scene state into the prompt, exhausting context immediately on complex documents. Kargadan's three-layer approach (compact summary always present, detail on-demand) preserves context budget for reasoning. | MEDIUM | Layer 0: object count by type, active layer name, document units. Layer 1: all object names and GUIDs with bounding boxes. Layer 2: full attribute data for specific objects (named explicitly). Layer 3: geometry data (only on explicit request). |
-| Grasshopper 1 procedural automation | No production CLI agent integrates with Grasshopper's programmatic C# SDK. RhinoMCP has Python-based GH support but it is experimental and unreliable. Kargadan targets the stable GH1 C# SDK — enabling parametric design automation driven by NL intent. | HIGH | GH1 has stable `GrasshopperDocument`, `IGH_Component`, `GH_Canvas` APIs. Commands routed via the existing C# plugin. Defer to post-v1 unless early users explicitly request it. Blocked by: plugin WebSocket server completion. |
+| Grasshopper 1 procedural automation | No production CLI agent integrates with Grasshopper's programmatic C# SDK. RhinoMCP has Python-based GH support but it is experimental and unreliable. Kargadan targets the stable GH1 C# SDK — enabling parametric design automation driven by NL intent. | HIGH | GH1 has stable `GrasshopperDocument`, `IGH_Component`, `GH_Canvas` APIs. Commands route via the existing C# plugin transport (already complete). Current gate is Phase 7 workflow/verification stabilization, so this remains post-v1 unless users force earlier prioritization. |
 | Full audit trail and replay | Production AI tools that modify documents need a complete audit log. `@effect/workflow` activity log + PostgreSQL run events give a durable, queryable record of every agent action. Can replay a session to reproduce or debug. | MEDIUM | Already architected in the existing infra. Session run events + tool call audit log are part of the active scope. Differentiating because RhinoMCP has zero persistence. |
 | Context compaction with configurable thresholds | Tokenizer-gated rolling summarization with 75% trigger / 40% target thresholds means long design sessions stay within context budget without surprising truncation. Claude Code implements this; no Rhino-specific tool does. | MEDIUM | Use `@effect/ai` `Tokenizer` for measurement. Implement rolling summarization using the same model that drives the session. Preserve: architectural decisions, unresolved errors, current active objects. Discard: verbose tool outputs already verified. |
 
@@ -51,7 +53,7 @@ Features that seem good but create problems.
 
 | Feature | Why Requested | Why Problematic | Alternative |
 |--------------|---------------|-----------------|-------------|
-| Vision-based verification (screenshot analysis) | "Let the AI see the viewport to verify results" — visually intuitive and compelling. | `ViewCapture.CaptureToBitmap` has confirmed Metal-specific capture timing issues on macOS (documented in PROJECT.md Out of Scope). Unreliable timing means false positives on verify — the agent thinks it succeeded when the viewport had not finished rendering. Deferred explicitly. | Verify via `RhinoDoc` event data: object exists, has expected GUID, bounding box is within tolerance. Deterministic, not screenshot-dependent. |
+| Vision-based verification as the primary verifier in v1 | "Let the AI see the viewport to verify results" — visually intuitive and compelling. | `ViewCapture.CaptureToBitmap` has known Metal-specific capture timing risk on macOS. Using vision as the primary or only verifier in v1 introduces false positives when the viewport has not fully rendered. | Deterministic verification (`RhinoDoc` state, object identity, bbox tolerance) is mandatory baseline; viewport vision stays a Phase 7 gated augmentation path. |
 | MCP as primary execution mechanism | MCP is the "standard" and Claude Desktop / Cursor use it. Seems natural to use for Kargadan too. | MCP adds protocol overhead (initialize/negotiate/operate round-trips) on every command execution. For an interactive agent loop executing dozens of commands in a session, this overhead accumulates. The native typed tool call path via `@effect/ai` is the reliability substrate. | Keep MCP in `packages/ai` for interoperability with Claude Desktop/Cursor. Kargadan's core execution path uses native typed tool calls. Users who want MCP can use the MCP layer. |
 | Real-time parametric dragging | "Control geometry handles in real time via NL prompts." Sounds like a compelling demo. | 200ms debounce latency in the event system is incompatible with real-time feedback. WebSocket round-trip + LLM inference latency makes this feel broken. Users would get stuck waiting for inference on every drag tick. | Deterministic Grasshopper or Rhino parameter sliders for real-time feedback. The agent sets parameters; the user adjusts with Rhino native UI. Defer real-time loop to future transport optimization. |
 | Multi-document simultaneous sessions | Power users manage multiple Rhino documents and want the agent to work across all of them. | macOS `ActiveDocumentChanged` fires before some open/new events — event ordering differs from Windows. Cross-document state management requires careful event sequencing research specific to macOS that adds significant risk to v1. | Single active document per session for v1. Document switching is user-driven: close one session, open another. Add multi-document after macOS event ordering is fully characterized. |
@@ -93,7 +95,7 @@ Features that seem good but create problems.
     └──required by──> [Architect/Editor Model Split]
 
 [Grasshopper 1 C# SDK Integration]
-    └──blocked by──> [Plugin WebSocket Server Completion]
+    └──blocked by──> [Phase 7 workflow + verification stabilization]
 
 [Layered Scene Representation]
     └──enhances──> [RAG-Backed Command Discovery] (reduces tokens available for retrieval if scene is verbose)
@@ -110,7 +112,7 @@ Features that seem good but create problems.
 
 - **WebSocket Plugin Transport requires Plugin WebSocket Server**: The `SessionHost.cs` TCP/WebSocket listener inside the Rhino plugin must exist before any command execution can happen. This is the single most critical path item.
 - **PostgreSQL Session Persistence requires packages/ai generic loop**: The persistent session must be tied to the generic agent loop, not the app-specific harness. Redesigning kargadan schemas must happen before persistence is wired up.
-- **Rhino Command Knowledge Base Seeding requires manual curation work**: Embedding cron and pgvector search exist in `packages/ai`. The blocking item is the data: catalog Rhino commands with descriptions, parameters, valid argument formats, and examples. This is domain knowledge work, not engineering.
+- **Rhino Command Knowledge Base quality still requires curation work**: Handshake-catalog ingestion + seeding path is implemented, but alias/description quality still determines retrieval quality in production.
 - **Architect/Editor Model Split requires Tool.make definitions to be stable**: Cannot wire two model tiers until the tool surface is finalized. Tool schema changes break both models simultaneously.
 - **Durable Workflow Execution requires Undo Integration to be correct first**: If undo records are malformed or missing, the compensation path in `@effect/workflow` cannot roll back reliably. Undo correctness gates durability.
 
@@ -129,7 +131,7 @@ Minimum viable product — what is needed to validate the concept.
 - [ ] Tool call visibility in terminal output — builds trust
 - [ ] Undo integration (one undo record per agent action) — without this Rhino power users will not adopt
 - [ ] Layer 0 scene representation (~500 tokens, always present) — agent must know what is in the document
-- [ ] Session persistence via PostgreSQL (replace in-memory PersistenceTrace) — validated in active scope
+- [ ] Session persistence via PostgreSQL (replace legacy in-memory traces) — validated in active scope
 - [ ] Basic RAG-backed command discovery (pgvector, seeded knowledge base) — enables command-agnostic NL input
 - [ ] Error messages with recovery suggestions — minimum bar for usability
 

@@ -97,7 +97,7 @@ public sealed record SceneObjectRef {
                         Error.New(message: "SourceRevision must be non-negative."))));
 }
 
-// --- [STRUCTS] ---------------------------------------------------------------
+// --- [STRUCTS_EXTENDED] ------------------------------------------------------
 
 [StructLayout(LayoutKind.Auto)]
 public readonly record struct IdempotencyToken(IdempotencyKey Key, PayloadHash PayloadHash);
@@ -118,16 +118,43 @@ public readonly record struct ExecutionMetadata {
         (Require.NonNegative(value: durationMs, field: "DurationMs"),
          Success<Error, VersionString>(pluginRevision),
          Require.NonNegative(value: sourceRevision, field: "SourceRevision"))
-            .Apply(static (int dur, VersionString rev, int srcRev) =>
+            .Apply(static (int durationMs, VersionString pluginRevision, int sourceRevision) =>
                 new ExecutionMetadata(
-                    durationMs: dur,
-                    pluginRevision: rev,
-                    sourceRevision: srcRev));
+                    durationMs: durationMs,
+                    pluginRevision: pluginRevision,
+                    sourceRevision: sourceRevision));
 }
 
-// --- [RECORDS] ---------------------------------------------------------------
+// --- [RECORDS_EXTENDED] ------------------------------------------------------
 
 public sealed record DedupeMetadata(DedupeDecision Decision, RequestId OriginalRequestId);
+
+// --- [COMMAND_CATALOG] -------------------------------------------------------
+
+public sealed record CommandCatalogExample(
+    string Input,
+    string Description);
+public sealed record CommandCatalogParameter(
+    string Name,
+    string Type,
+    bool Required,
+    string Description);
+public sealed record CommandDispatchMetadata(CommandDispatchMode Mode);
+public sealed record CommandEnvelopeRequirements(
+    bool RequiresTelemetryContext,
+    bool RequiresObjectRefs,
+    int MinimumObjectRefCount);
+public sealed record CommandCatalogEntry(
+    string Id,
+    string Name,
+    string Description,
+    string Category,
+    bool IsDestructive,
+    Seq<string> Aliases,
+    CommandDispatchMetadata Dispatch,
+    CommandEnvelopeRequirements Requirements,
+    Seq<CommandCatalogParameter> Params,
+    Seq<CommandCatalogExample> Examples);
 
 // --- [EXECUTION_MODELS] ------------------------------------------------------
 
@@ -141,16 +168,24 @@ public readonly record struct ScriptResult {
         CommandResult = commandResult;
         ObjectsCreatedCount = objectsCreatedCount;
     }
-    public static Fin<ScriptResult> Create(string commandName, int commandResult, int objectsCreatedCount) =>
-        (string.IsNullOrWhiteSpace(commandName), commandResult is < 0 or > 6, objectsCreatedCount < 0) switch {
-            (true, _, _) => FinFail<ScriptResult>(Error.New(message: "CommandName must not be empty.")),
-            (_, true, _) => FinFail<ScriptResult>(Error.New(message: "CommandResult must be in 0-6 range.")),
-            (_, _, true) => FinFail<ScriptResult>(Error.New(message: "ObjectsCreatedCount must be non-negative.")),
-            _ => FinSucc(new ScriptResult(
-                commandName: commandName,
-                commandResult: commandResult,
-                objectsCreatedCount: objectsCreatedCount))
-        };
+    public static Validation<Error, ScriptResult> Create(string commandName, int commandResult, int objectsCreatedCount) =>
+        (string.IsNullOrWhiteSpace(commandName) switch {
+            true => Fail<Error, string>(Error.New(message: "CommandName must not be empty.")),
+            false => Success<Error, string>(commandName),
+        },
+         (commandResult is < 0 or > 6) switch {
+             true => Fail<Error, int>(Error.New(message: "CommandResult must be in 0-6 range.")),
+             false => Success<Error, int>(commandResult),
+         },
+         (objectsCreatedCount < 0) switch {
+             true => Fail<Error, int>(Error.New(message: "ObjectsCreatedCount must be non-negative.")),
+             false => Success<Error, int>(objectsCreatedCount),
+         })
+            .Apply(static (string validName, int validResult, int validCount) =>
+                new ScriptResult(
+                    commandName: validName,
+                    commandResult: validResult,
+                    objectsCreatedCount: validCount));
 }
 [StructLayout(LayoutKind.Auto)]
 public readonly record struct RawDocEvent(

@@ -69,7 +69,7 @@ from typing import Final
 WRAPPER: Final = "context"
 def build_response(content: str) -> dict[str, object]:
     return {"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": f"<{WRAPPER}>\n{content}\n</{WRAPPER}>"}}
-print(json.dumps(build_response("Project uses Effect. Follow REQUIREMENTS.md.")))
+print(json.dumps(build_response("Project uses Effect. Follow CLAUDE.md.")))
 ```
 
 ### [2.3][ENV_FILE_PERSISTENCE]

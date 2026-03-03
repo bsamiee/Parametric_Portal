@@ -68,27 +68,31 @@ public sealed partial class CommandOperation {
     public static readonly CommandOperation ObjectCreate = new("write.object.create");
     public static readonly CommandOperation ObjectUpdate = new("write.object.update");
     public static readonly CommandOperation ObjectDelete = new("write.object.delete");
-    public static readonly CommandOperation LayerUpdate = new("write.layer.update");
-    public static readonly CommandOperation ViewportUpdate = new("write.viewport.update");
-    public static readonly CommandOperation AnnotationUpdate = new("write.annotation.update");
     public static readonly CommandOperation ScriptRun = new("script.run");
-    private (CommandExecutionMode ExecutionMode, CommandCategory Category) Metadata =>
+    public CommandExecutionMode ExecutionMode =>
         Map(
-            sceneSummary: (CommandExecutionMode.DirectApi, CommandCategory.Read),
-            objectMetadata: (CommandExecutionMode.DirectApi, CommandCategory.Read),
-            objectGeometry: (CommandExecutionMode.DirectApi, CommandCategory.Read),
-            layerState: (CommandExecutionMode.DirectApi, CommandCategory.Read),
-            viewState: (CommandExecutionMode.DirectApi, CommandCategory.Read),
-            toleranceUnits: (CommandExecutionMode.DirectApi, CommandCategory.Read),
-            objectCreate: (CommandExecutionMode.DirectApi, CommandCategory.Write),
-            objectUpdate: (CommandExecutionMode.DirectApi, CommandCategory.Write),
-            objectDelete: (CommandExecutionMode.DirectApi, CommandCategory.Write),
-            layerUpdate: (CommandExecutionMode.DirectApi, CommandCategory.Write),
-            viewportUpdate: (CommandExecutionMode.DirectApi, CommandCategory.Write),
-            annotationUpdate: (CommandExecutionMode.DirectApi, CommandCategory.Write),
-            scriptRun: (CommandExecutionMode.Script, CommandCategory.Geometric));
-    public CommandExecutionMode ExecutionMode => Metadata.ExecutionMode;
-    public CommandCategory Category => Metadata.Category;
+            sceneSummary: CommandExecutionMode.DirectApi,
+            objectMetadata: CommandExecutionMode.DirectApi,
+            objectGeometry: CommandExecutionMode.DirectApi,
+            layerState: CommandExecutionMode.DirectApi,
+            viewState: CommandExecutionMode.DirectApi,
+            toleranceUnits: CommandExecutionMode.DirectApi,
+            objectCreate: CommandExecutionMode.DirectApi,
+            objectUpdate: CommandExecutionMode.DirectApi,
+            objectDelete: CommandExecutionMode.DirectApi,
+            scriptRun: CommandExecutionMode.Script);
+    public CommandCategory Category =>
+        Map(
+            sceneSummary: CommandCategory.Read,
+            objectMetadata: CommandCategory.Read,
+            objectGeometry: CommandCategory.Read,
+            layerState: CommandCategory.Read,
+            viewState: CommandCategory.Read,
+            toleranceUnits: CommandCategory.Read,
+            objectCreate: CommandCategory.Write,
+            objectUpdate: CommandCategory.Write,
+            objectDelete: CommandCategory.Write,
+            scriptRun: CommandCategory.Geometric);
     public static bool SupportsCapability(string capability) =>
         TryGet((capability ?? string.Empty).Trim(), out CommandOperation? _);
 }
@@ -130,6 +134,11 @@ public sealed partial class EventType {
 public sealed partial class CommandExecutionMode {
     public static readonly CommandExecutionMode DirectApi = new("direct_api");
     public static readonly CommandExecutionMode Script = new("script");
+}
+[SmartEnum<string>]
+public sealed partial class CommandDispatchMode {
+    public static readonly CommandDispatchMode Direct = new("direct");
+    public static readonly CommandDispatchMode Script = new("script");
 }
 [SmartEnum<string>]
 public sealed partial class CommandCategory {

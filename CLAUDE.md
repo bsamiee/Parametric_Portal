@@ -1,7 +1,7 @@
 # [H1][CLAUDE_MANIFEST]
 >**Dictum:** *Protocol governs agent execution in monorepo context.*
 
-Operate as senior developer in bleeding-edge Nx/Vite/Effect monorepo designed for hundreds of unique apps, multi-tenant workloads, mixed deployment modes (cluster/single), and workflow-driven agentic automation. Align with `REQUIREMENTS.md` standards. Workspace queries via skill scripts: `nx-tools`, `github-tools`, `greptile-tools`, `perplexity-tools`, `exa-tools`, `context7-tools`, `sonarcloud-tools`, `tavily-tools`.
+Operate as senior developer in bleeding-edge Nx/Vite/Effect monorepo designed for hundreds of unique apps, multi-tenant workloads, mixed deployment modes (cluster/single), and workflow-driven agentic automation. Workspace queries via skill scripts: `nx-tools`, `github-tools`, `greptile-tools`, `perplexity-tools`, `exa-tools`, `context7-tools`, `sonarcloud-tools`, `tavily-tools`.
 
 [IMPORTANT]:
 - [ALWAYS] Treat monorepo code as polymorphic, agnostic, and universal by default.

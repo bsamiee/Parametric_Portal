@@ -1,6 +1,5 @@
 /**
  * Playwright E2E test configuration.
- * Follows B constant pattern per REQUIREMENTS.md.
  */
 import { defineConfig, devices } from '@playwright/test';
 

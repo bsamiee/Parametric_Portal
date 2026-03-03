@@ -7,7 +7,7 @@ import { Clock, Effect, Option, Record as R, Schema as S } from 'effect';
 import { repo, routine, Update, type RepoPredicate } from './factory.ts';
 import { Page } from './page.ts';
 import {
-    AgentJournal, ApiKey, App, AppSettingsDefaults, AppSettingsSchema, Asset, AuditLog, type AuditOperationSchema,
+    AgentJournal, ApiKey, App, AppSettingsDefaults, AppSettingsSchema, Asset, AuditLog,
     Job, JobDlq, KvStore, MfaSecret, Notification, OauthAccount, Permission, Session, User, WebauthnCredential,
 } from './models.ts';
 import { SearchRepo } from './search.ts';
@@ -87,8 +87,8 @@ const makeAssetRepo = Effect.gen(function* () {
 const makeAuditRepo = Effect.gen(function* () {
     const repository = yield* repo(AuditLog, 'audit_logs', { scoped: 'appId' });
     return { ...repository,
-        bySubject: (type: string, id: string, limit: number, cursor?: string | undefined, { after, before, operation }: { after?: Date | undefined; before?: Date | undefined; operation?: S.Schema.Type<typeof AuditOperationSchema> | undefined } = {}) => repository.page([{ field: 'targetType', value: type }, { field: 'targetId', value: id }, ...repository.preds({ after, before, operation })], { cursor, limit }),
-        byUser: (userId: string, limit: number, cursor?: string | undefined, { after, before, operation }: { after?: Date | undefined; before?: Date | undefined; operation?: S.Schema.Type<typeof AuditOperationSchema> | undefined } = {}) => repository.page(repository.preds({ after, before, operation, userId }), { cursor, limit }),
+        bySubject: (type: string, id: string, limit: number, cursor?: string | undefined, { after, before, operation }: { after?: Date | undefined; before?: Date | undefined; operation?: S.Schema.Type<typeof AuditLog.fields.operation> | undefined } = {}) => repository.page([{ field: 'targetType', value: type }, { field: 'targetId', value: id }, ...repository.preds({ after, before, operation })], { cursor, limit }),
+        byUser: (userId: string, limit: number, cursor?: string | undefined, { after, before, operation }: { after?: Date | undefined; before?: Date | undefined; operation?: S.Schema.Type<typeof AuditLog.fields.operation> | undefined } = {}) => repository.page(repository.preds({ after, before, operation, userId }), { cursor, limit }),
         log: repository.insert,
     };
 });
@@ -211,10 +211,18 @@ class DatabaseService extends Effect.Service<DatabaseService>()('database/Databa
             makeJobRepo, makeJobDlqRepo, makeNotificationRepo,
             makeKvStoreRepo, makeSystemRepo,
         ]);
-        const agentJournal = yield* repo(AgentJournal, 'agent_journal', {
+        const agentJournalRepository = yield* repo(AgentJournal, 'agent_journal', {
             resolve: { byRunId: { field: 'runId', many: true }, bySession: { field: 'sessionId', many: true }, bySessionKind: ['sessionId', 'entryKind'] },
             scoped: 'appId',
         });
+        const agentJournal = {
+            ...agentJournalRepository,
+            latestCheckpoint: (sessionId: string) =>
+                agentJournalRepository.page(
+                    [{ field: 'entryKind', value: 'checkpoint' }, { field: 'sessionId', value: sessionId }],
+                    { asc: false, limit: 1 },
+                ).pipe(Effect.map((page) => Option.fromNullable(page.items[0]))),
+        };
         return {
             agentJournal,
             apiKeys, apps, assets, audit, jobDlq, jobs, kvStore, mfaSecrets, notifications, oauthAccounts, observability: system, permissions, search: searchRepo, sessions,

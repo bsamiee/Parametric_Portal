@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { Toolkit, Tool } from '@effect/ai';
 import { DatabaseService } from '@parametric-portal/database/repos';
 import { SearchRepo } from '@parametric-portal/database/search';
 import { Context } from '@parametric-portal/server/context';
@@ -12,7 +13,7 @@ import { AiError, AiRuntimeProvider } from './runtime-provider.ts';
 
 // --- [SCHEMA] ----------------------------------------------------------------
 
-const _ManifestEntry = S.Struct({
+const ManifestEntrySchema = S.Struct({
     aliases:         S.optionalWith(S.Array(S.NonEmptyTrimmedString), { default: () => [] }),
     category:        S.optional(S.NonEmptyTrimmedString),
     description:     S.NonEmptyString,
@@ -28,7 +29,7 @@ const _ManifestEntry = S.Struct({
         type:        S.NonEmptyTrimmedString,
     })),
 });
-const _ManifestSchema = S.parseJson(S.Array(_ManifestEntry));
+const _ManifestSchema = S.parseJson(S.Array(ManifestEntrySchema));
 
 // --- [SERVICES] --------------------------------------------------------------
 
@@ -70,7 +71,7 @@ class AiService extends Effect.Service<AiService>()('ai/Service', {
         );
         const seedKnowledge = Effect.fn('AiService.seedKnowledge')((input: {
             readonly entityType: string;
-            readonly manifest:   ReadonlyArray<typeof _ManifestEntry.Type> | string;
+            readonly manifest:   ReadonlyArray<typeof ManifestEntrySchema.Type> | string;
             readonly namespace?: string | undefined;
             readonly scopeId?:   string | null | undefined;
         }) => Effect.gen(function* () {
@@ -97,7 +98,7 @@ class AiService extends Effect.Service<AiService>()('ai/Service', {
             const docs = yield* Effect.forEach(entries, (e, i) =>
                 database.search.upsertDocument({
                     contentText: e.description, displayText: e.name, entityId: A.unsafeGet(entityIds, i), entityType: input.entityType,
-                    metadata: { aliases: e.aliases, category: e.category, examples: e.examples, isDestructive: e.isDestructive, params: e.params },
+                    metadata: { aliases: e.aliases, category: e.category, examples: e.examples, id: e.id, isDestructive: e.isDestructive, params: e.params },
                     scopeId,
                 }),
                 { concurrency: 10 },
@@ -111,13 +112,13 @@ class AiService extends Effect.Service<AiService>()('ai/Service', {
             return { upserted: entries.length } as const;
         }));
         const searchQuery = Effect.fn('AiService.searchQuery')(
-            (options: {
-                readonly entityTypes?:     readonly string[] | undefined;
-                readonly includeFacets?:   boolean | undefined;
-                readonly includeGlobal?:   boolean | undefined;
-                readonly includeSnippets?: boolean | undefined;
-                readonly term: string;
-            }, pagination?: { readonly cursor?: string | undefined; readonly limit?: number | undefined }) =>
+                (options: {
+                    readonly entityTypes?:     readonly string[] | undefined;
+                    readonly includeFacets?:   boolean | undefined;
+                    readonly includeGlobal?:   boolean | undefined;
+                    readonly includeSnippets?: boolean | undefined;
+                    readonly term: string;
+                }, pagination?: { readonly cursor?: string | undefined; readonly limit?: number | undefined }) =>
                 Effect.gen(function* () {
                     const { ctx, scopeId, subjectId } = yield* _resolveSearchContext();
                     const settings = yield* model.settings();
@@ -180,7 +181,89 @@ class AiService extends Effect.Service<AiService>()('ai/Service', {
                 return result;
             }).pipe(Telemetry.span('search.suggest', { 'search.prefix': options.prefix })),
         );
-        return { model, searchQuery, searchRefresh, searchRefreshEmbeddings, searchSuggest, seedKnowledge } as const;
+        const buildAgentToolkit = Effect.fn('AiService.buildAgentToolkit')(
+            <
+                CatalogSuccess,
+                CatalogEncoded extends Record<string, unknown>,
+                CommandSuccess,
+                CommandEncoded extends Record<string, unknown>,
+                ContextSuccess,
+                ContextEncoded extends Record<string, unknown>,
+            >(input: {
+                readonly catalogSearch: (term: string) => Effect.Effect<CatalogSuccess, never, never>;
+                readonly commandExecute: (payload: { readonly commandId: string; readonly args: Record<string, unknown> }) => Effect.Effect<CommandSuccess, never, never>;
+                readonly readContext: (query: string) => Effect.Effect<ContextSuccess, never, never>;
+                readonly schemas: {
+                    readonly catalogSearch: S.Schema<CatalogSuccess, CatalogEncoded, never>;
+                    readonly commandExecute: S.Schema<CommandSuccess, CommandEncoded, never>;
+                    readonly readContext: S.Schema<ContextSuccess, ContextEncoded, never>;
+                };
+            }) =>
+            Effect.sync(() => {
+                const toolkit = Toolkit.make(
+                    Tool.make('catalog.search', {
+                        description: 'Searches command catalog entries by semantic query.',
+                        parameters:  { term: S.NonEmptyTrimmedString },
+                        success:     input.schemas.catalogSearch,
+                    }),
+                    Tool.make('command.execute', {
+                        description: 'Executes a plugin command using catalog commandId plus structured args.',
+                        parameters:  { args: S.Record({ key: S.String, value: S.Unknown }), commandId: S.NonEmptyTrimmedString },
+                        success:     input.schemas.commandExecute,
+                    }),
+                    Tool.make('context.read', {
+                        description: 'Reads scoped context artifacts required by the current step.',
+                        parameters:  { query: S.NonEmptyTrimmedString },
+                        success:     input.schemas.readContext,
+                    }),
+                );
+                return {
+                    layer: toolkit.toLayer({
+                        'catalog.search': ({ term }) => input.catalogSearch(term),
+                        'command.execute': ({ args, commandId }) => input.commandExecute({ args, commandId }),
+                        'context.read': ({ query }) => input.readContext(query),
+                    }),
+                    toolkit,
+                } as const;
+            }),
+        );
+        const runAgentCore = Effect.fn('AiService.runAgentCore')(<
+            State,
+            Plan,
+            Execution,
+            Verification,
+            PlanError,
+            ExecuteError,
+            VerifyError,
+            DecideError,
+            PersistError,
+            PlanContext,
+            ExecuteContext,
+            VerifyContext,
+            DecideContext,
+            PersistContext,
+        >(input: {
+            readonly decide: (state: State, plan: Plan, execution: Execution, verification: Verification) => Effect.Effect<State, DecideError, DecideContext>;
+            readonly execute: (state: State, plan: Plan) => Effect.Effect<Execution, ExecuteError, ExecuteContext>;
+            readonly initialState: State;
+            readonly isTerminal: (state: State) => boolean;
+            readonly persist: (state: State, plan: Plan, execution: Execution, verification: Verification, decision: State) => Effect.Effect<void, PersistError, PersistContext>;
+            readonly plan: (state: State) => Effect.Effect<Plan, PlanError, PlanContext>;
+            readonly verify: (state: State, plan: Plan, execution: Execution) => Effect.Effect<Verification, VerifyError, VerifyContext>;
+        }) =>
+            Effect.iterate(input.initialState, {
+                body: (state) => Effect.gen(function* () {
+                    const planResult = yield* input.plan(state);
+                    const executionResult = yield* input.execute(state, planResult);
+                    const verificationResult = yield* input.verify(state, planResult, executionResult);
+                    const decisionResult = yield* input.decide(state, planResult, executionResult, verificationResult);
+                    yield* input.persist(state, planResult, executionResult, verificationResult, decisionResult);
+                    return decisionResult;
+                }),
+                while: (state) => !input.isTerminal(state),
+            }),
+        );
+        return { buildAgentToolkit, model, runAgentCore, searchQuery, searchRefresh, searchRefreshEmbeddings, searchSuggest, seedKnowledge } as const;
     }),
 }) {
     static readonly EmbeddingCron = ClusterService.Schedule.cron({
@@ -194,10 +277,10 @@ class AiService extends Effect.Service<AiService>()('ai/Service', {
         name: 'refresh-embeddings',
     });
     static readonly KnowledgeDefault = Layer.mergeAll(AiService.Default, AiRuntime.Default, AiRuntimeProvider.Default        );
-    static readonly KnowledgeLive =    Layer.mergeAll(AiService.KnowledgeDefault, DatabaseService.Default, SearchRepo.Default);
-    static readonly Live =             Layer.mergeAll(AiService.Default, AiRuntime.Live                                      );
+    static readonly KnowledgeLive =    Layer.mergeAll(AiService.Default, AiRuntime.Live, DatabaseService.Default, SearchRepo.Default);
+    static readonly Live =             Layer.mergeAll(AiService.Default, AiRuntime.Live                                                    );
 }
 
 // --- [EXPORT] ----------------------------------------------------------------
 
-export { AiService };
+export { AiService, ManifestEntrySchema };

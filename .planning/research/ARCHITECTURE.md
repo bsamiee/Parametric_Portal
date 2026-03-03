@@ -6,7 +6,7 @@
 
 ---
 
-## Standard Architecture
+## Standard Architecture (Target-State / Phase 6+)
 
 ### System Overview
 
@@ -15,12 +15,12 @@
 │  CLI LAYER (apps/kargadan/harness — TypeScript, Node.js process)     │
 │                                                                      │
 │  ┌─────────────┐  ┌──────────────┐  ┌─────────────────────────────┐  │
-│  │  CLI Shell  │  │  AgentLoop   │  │  packages/ai AiAgentService │  │
-│  │ (Ink/stdio) │  │ PLAN→EXECUTE │  │  LanguageModel + Toolkit    │  │
-│  │  streaming  │  │ →VERIFY→     │  │  Chat (Ref history)         │  │
-│  │  progress   │  │ PERSIST→     │  │  Tokenizer (context budget) │  │
-│  └──────┬──────┘  │ DECIDE       │  │  Tool Search Tool proxy     │  │
-│         │         └──────┬───────┘  └─────────────────────────────┘  │
+│  │  CLI Shell  │  │  AgentLoop   │  │   packages/ai AiService     │  │
+│  │ (@effect/cli│  │ PLAN→EXECUTE │  │  LanguageModel + Toolkit    │  │
+│  │  /stdio)    │  │ →VERIFY→     │  │  Chat (Ref history)         │  │
+│  │  streaming  │  │ PERSIST→     │  │  Tokenizer (context budget) │  │
+│  │  progress   │  │ DECIDE       │  │  Tool Search Tool proxy     │  │
+│  └──────┬──────┘  └──────┬───────┘  └─────────────────────────────┘  │
 │         │                │                                           │
 │  ┌──────┴──────────────────────────────────────────────────────┐     │
 │  │                   packages/ai AiRuntime                     │     │
@@ -36,14 +36,14 @@
 │  └──────────────────────────────────────────────────────────────┘    │
 │                                                                      │
 │  ┌──────────────────┐  ┌─────────────────────────────────────────┐   │
-│  │ SessionSupervisor│  │  PostgreSQL Session Store               │   │
-│  │ Ref state machine│  │  RunEvent / RunSnapshot / RetrievalArti │   │
-│  │ idle→connected→  │  │  fact (replaces PersistenceTrace)       │   │
-│  │ authed→active→   │  └─────────────────────────────────────────┘   │
-│  │ terminal         │                                                │
+│  │ ReconnectionSup. │  │  PostgreSQL Session Store               │   │
+│  │ socket/session   │  │  checkpoints + journal + chatJson       │   │
+│  │ recovery rails   │  │  (legacy trace replaced)                │   │
+│  │ pending-map sync │  └─────────────────────────────────────────┘   │
+│  │ + timeout policy │                                                │
 │  └──────────────────┘                                                │
 ├──────────────────────────────────────────────────────────────────────┤
-│             WebSocket Bridge  (ws://127.0.0.1:9181)                  │
+│             WebSocket Bridge (ws://127.0.0.1:<port from ~/.kargadan/port>) │
 │  Full-duplex JSON; Deferred-correlated request/response; event queue │
 ├──────────────────────────────────────────────────────────────────────┤
 │  PLUGIN LAYER (apps/kargadan/plugin — C# net9.0, Rhino process)      │
@@ -87,21 +87,21 @@
 
 ---
 
-## Component Boundaries
+## Component Boundaries (Target-State / Phase 6+)
 
 | Component                                          | Responsibility                                                                                                                                         | Communicates With                                                     |
 | -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------- |
-| **CLI Shell**                                      | Terminal UI (Ink or raw stdio), streaming progress, plan-before-execute mode, session start/resume                                                     | AgentLoop                                                             |
-| **AgentLoop** (`apps/kargadan/harness`)            | PLAN→EXECUTE→VERIFY→PERSIST→DECIDE state machine; retry/correction/compensation; heartbeat fiber; event ingestion fiber                                | packages/ai AiAgentService, CommandDispatch, PostgreSQL session store |
-| **AiAgentService** (`packages/ai`)                 | Generic agent orchestration: tool-calling loop, conversation management with `Chat` module, Architect/Editor model dispatch, context compaction gating | AiRuntime, AiToolkit, Tokenizer                                       |
+| **CLI Shell**                                      | Terminal UI (`@effect/cli` policy), streaming progress, plan-before-execute mode, session start/resume                                                  | AgentLoop                                                             |
+| **AgentLoop** (`apps/kargadan/harness`)            | PLAN→EXECUTE→VERIFY→PERSIST→DECIDE state machine; retry/correction/compensation; heartbeat fiber; event ingestion fiber                                | packages/ai `AiService.runAgentCore`, CommandDispatch, PostgreSQL session store |
+| **AiService** (`packages/ai`)                      | Generic agent orchestration: tool-calling loop, conversation management with `Chat` module, provider/model resolution, context compaction gating        | AiRuntime, toolkit builders, Tokenizer                                |
 | **AiRuntime** (`packages/ai`)                      | Existing service: multi-provider LLM inference, embedding, budget/rate enforcement, OTEL telemetry                                                     | AiRegistry, AiRuntimeProvider, packages/database                      |
-| **AiToolkit** (`packages/ai`)                      | Tool.make schema-driven definitions; read/write bifurcation; Tool Search Tool integration; `defer_loading: true` for the full Rhino catalog            | AiRuntime (LanguageModel), pgvector knowledge base                    |
-| **CommandDispatch** (`apps/kargadan/harness`)      | Typed WebSocket protocol: handshake, execute, heartbeat, event streaming; correlates Deferred by requestId                                             | KargadanSocketClient, SessionSupervisor                               |
+| **AiToolkit** (`packages/ai`)                      | Tool.make schema-driven definitions; read/write bifurcation; current runtime uses high-order `catalog.search` + `command.execute` + `context.read`      | AiRuntime (LanguageModel), pgvector knowledge base                    |
+| **CommandDispatch** (`apps/kargadan/harness`)      | Typed WebSocket protocol: handshake, execute, heartbeat, event streaming; correlates Deferred by requestId                                             | KargadanSocketClient, ReconnectionSupervisor                          |
 | **KargadanSocketClient** (`apps/kargadan/harness`) | Effect Platform WebSocket with pending-map Deferred correlation, inbound event Queue                                                                   | WebSocket bridge                                                      |
-| **SessionSupervisor** (`apps/kargadan/harness`)    | Ref-backed session lifecycle state machine (idle→connected→authenticated→active→terminal)                                                              | CommandDispatch                                                       |
-| **PostgreSQL Session Store**                       | Durable RunEvent log, RunSnapshot checkpoints, ConversationHistory, tool call audit; replaces in-memory PersistenceTrace                               | packages/database repo factory                                        |
-| **pgvector Knowledge Base**                        | Rhino command catalog with embeddings for RAG-backed discovery; queried by AiToolkit for Tool Search                                                   | packages/database, AiRuntime (embed)                                  |
-| **WebSocket Bridge**                               | localhost:9181 full-duplex JSON; request/response correlation by identity.requestId; push event channel                                                | KargadanSocketClient ↔ Plugin WebSocket Server                        |
+| **ReconnectionSupervisor** (`apps/kargadan/harness`) | Reconnect/session timeout supervision + pending request coordination across socket resets                                                              | KargadanSocketClient, harness runtime                                 |
+| **PostgreSQL Session Store**                       | Durable checkpoints (`chatJson`), tool-call/session journal, deterministic latest-sequence hydrate; replaces legacy in-memory traces                   | packages/database repo factory                                        |
+| **pgvector Knowledge Base**                        | Rhino command catalog with embeddings for RAG-backed discovery; seeded at handshake and queried during PLAN for command selection                       | packages/database, AiRuntime (embed)                                  |
+| **WebSocket Bridge**                               | localhost ephemeral port via port-file discovery (`~/.kargadan/port`); request/response correlation by identity.requestId; push event channel        | KargadanSocketClient ↔ Plugin WebSocket Server                        |
 | **Plugin WebSocket Server** (C#)                   | Accepts connections; dispatches to SessionHost/CommandRouter; marshals via background thread; pushes EventPublisher drain                              | Plugin boundary layer                                                 |
 | **CommandRouter** (C#)                             | Decodes JsonElement → `Fin<CommandEnvelope>`; validates all fields via Fin combinators                                                                 | KargadanPlugin.HandleCommand                                          |
 | **SessionHost** (C#)                               | Lock-gated session state machine (Connected→Active→Terminal); heartbeat timeout enforcement                                                            | KargadanPlugin                                                        |
@@ -115,10 +115,12 @@
 
 ### Primary: User Intent → CAD Execution
 
+> Note: This section describes target-state runtime flow. Phase 5 now uses NL planning over handshake-catalog + pgvector search; remaining closeout is manual Rhino smoke sign-off.
+
 ```
 [User types intent in CLI]
     ↓
-[CLI Shell] — streams to → [AiAgentService.run()]
+[CLI Shell] — streams to → [AiService.runAgentCore() rails]
     ↓
 [Chat.append(user message)] — appended to Ref history
     ↓
@@ -183,9 +185,9 @@
 [Replay RunEvents in sequence order] → reconstruct LoopState
     ↓
 [Each transition]
-PersistenceTrace.appendTransition → PostgreSQL INSERT RunEvent
+AgentPersistenceService.persistCall → PostgreSQL checkpoint/tool-call/session journal write
     ↓
-PersistenceTrace.snapshot → PostgreSQL UPSERT RunSnapshot (SHA-256 hash)
+AgentPersistenceService.getLatestCheckpoint → deterministic highest-sequence hydrate
     ↓
 [Session end / crash] → next start resumes from last RunSnapshot
 ```
@@ -193,7 +195,7 @@ PersistenceTrace.snapshot → PostgreSQL UPSERT RunSnapshot (SHA-256 hash)
 ### RAG Tool Discovery Flow
 
 ```
-[AiAgentService] — on tool call with "rhino.command.*" prefix
+[AiService/SearchService] — on tool call with "rhino.command.*" prefix
     ↓
 [Tool Search Tool (BM25)] — natural language query to pgvector catalog
     ↓ returns tool_reference blocks (3-5 best matches)
@@ -201,9 +203,9 @@ PersistenceTrace.snapshot → PostgreSQL UPSERT RunSnapshot (SHA-256 hash)
     ↓
 [LanguageModel receives expanded tool, selects parameters]
     ↓
-[CommandEnvelope.operation = discovered command string]
+[CommandEnvelope.commandId + args = discovered command invocation]
     ↓ over WebSocket
-[Plugin: RhinoApp.RunScript(command, true)]
+[Plugin: CommandExecutor route (direct API or RhinoApp.RunScript)]
 ```
 
 ---
@@ -214,56 +216,50 @@ PersistenceTrace.snapshot → PostgreSQL UPSERT RunSnapshot (SHA-256 hash)
 apps/kargadan/
 ├── harness/src/
 │   ├── cli/
-│   │   └── shell.ts             # Ink or readline-based terminal UI, streaming display
+│   │   └── shell.ts             # @effect/cli-driven terminal surface, streaming display
 │   ├── runtime/
-│   │   ├── agent-loop.ts        # EXISTING: PLAN/EXECUTE/VERIFY/PERSIST/DECIDE — wire to AiAgentService
-│   │   ├── loop-stages.ts       # EXISTING: pure stage functions — extend for LLM planning
-│   │   └── persistence-trace.ts # MIGRATE: swap Ref store → PostgreSQL via packages/database
+│   │   └── agent-loop.ts        # EXISTING: PLAN/EXECUTE/VERIFY/PERSIST/DECIDE — wired to generic ai.runAgentCore
 │   ├── protocol/
 │   │   ├── dispatch.ts          # EXISTING: CommandDispatch service
-│   │   └── supervisor.ts        # EXISTING: SessionSupervisor state machine
-│   ├── socket.ts                # EXISTING: KargadanSocketClient
+│   │   └── schemas.ts           # EXISTING: protocol boundary schemas (handshake/catalog/command envelopes)
+│   ├── socket.ts                # EXISTING: KargadanSocketClient with ack/result sequencing guard
 │   ├── config.ts                # EXISTING: HarnessConfig — add LLM model config
 │   └── harness.ts               # EXISTING: entry point
 │
-└── plugin/src/
-    ├── boundary/
-    │   ├── KargadanPlugin.cs    # EXISTING: entry point — ADD WebSocket server start
-    │   └── EventPublisher.cs   # EXISTING: atomic drain
-    ├── contracts/
-    │   ├── ProtocolEnvelopes.cs # EXISTING: typed envelopes
-    │   ├── ProtocolValueObjects.cs # EXISTING: 14 VOs
-    │   └── ProtocolEnums.cs    # EXISTING: 9 smart enums
-    ├── transport/
-    │   ├── SessionHost.cs       # EXISTING: session state machine
-    │   ├── WebSocketServer.cs   # TO BUILD: TcpListener + WebSocket upgrade + background thread
-    │   └── Handshake.cs         # EXISTING: version negotiation
-    └── protocol/
-        ├── Router.cs            # EXISTING: CommandRouter.Decode
-        ├── RhinoExecutor.cs     # TO BUILD: InvokeOnUiThread + RunScript + RhinoCommon ops
-        ├── EventMonitor.cs      # TO BUILD: RhinoDoc event subscriptions + 200ms debounce
-        └── FailureMapping.cs    # EXISTING
+	└── plugin/src/
+	    ├── boundary/
+	    │   ├── KargadanPlugin.cs    # EXISTING: entry point with host + handshake/catalog wiring
+	    │   └── EventPublisher.cs   # EXISTING: atomic drain
+	    ├── contracts/
+	    │   ├── ProtocolEnvelopes.cs # EXISTING: typed envelopes
+	    │   ├── ProtocolValueObjects.cs # EXISTING: 14 VOs
+	    │   └── ProtocolEnums.cs    # EXISTING: 9 smart enums
+	    ├── execution/
+	    │   └── CommandExecutor.cs   # EXISTING: route metadata + command catalog projection + dispatch
+	    ├── observation/
+	    │   └── ObservationPipeline.cs # EXISTING: RhinoDoc event subscriptions + 200ms debounce
+	    ├── transport/
+	    │   ├── SessionHost.cs       # EXISTING: session state machine + capability negotiation
+	    │   ├── WebSocketHost.cs     # EXISTING: TcpListener + WebSocket upgrade + background host
+	    │   └── WebSocketPortFile.cs # EXISTING: port discovery contract
+	    └── protocol/
+	        └── Router.cs            # EXISTING: CommandRouter.Decode (`commandId` + legacy compatibility)
 
 packages/ai/src/
-├── runtime.ts                   # EXISTING: AiRuntime (generateText, embed, chat)
-├── registry.ts                  # EXISTING: AiRegistry (provider layers)
-├── runtime-provider.ts          # EXISTING: AiRuntimeProvider
-├── search.ts                    # EXISTING: SearchService + EmbeddingCron
-├── errors.ts                    # EXISTING: AiError
-├── mcp.ts                       # EXISTING: McpServer interop
-├── agent.ts                     # TO BUILD: AiAgentService (tool-calling loop, Architect/Editor split)
-├── toolkit.ts                   # TO BUILD: AiToolkit (read + write bifurcation, Tool Search proxy)
-├── compaction.ts                # TO BUILD: TokenizerGatedCompaction (75% trigger, 40% target)
-└── knowledge-base.ts            # TO BUILD: Rhino command catalog seed + pgvector queries
+├── runtime.ts                   # EXISTING: AiRuntime (generateText, embed, chat, serialize/deserialize)
+├── registry.ts                  # EXISTING: AiRegistry (provider layers + session override decode/apply)
+├── runtime-provider.ts          # EXISTING: AiRuntimeProvider (tenant settings + override resolution)
+├── service.ts                   # EXISTING: AiService (search, seed, generic agent-core rails/toolkit)
+└── mcp.ts                       # EXISTING: McpServer interop
 ```
 
 ---
 
 ## Architectural Patterns
 
-### Pattern 1: Two-Layer Loop (AgentLoop delegates to AiAgentService)
+### Pattern 1: Two-Layer Loop (AgentLoop delegates to AiService rails)
 
-**What:** `AgentLoop` (harness) handles the execution protocol state machine (PLAN/EXECUTE/VERIFY/PERSIST/DECIDE). `AiAgentService` (packages/ai) handles the LLM conversation cycle (model inference, tool dispatch, history management). They compose: AgentLoop calls `AiAgentService.run(userIntent, tools)` to get the next CommandEnvelope; AiAgentService's result feeds EXECUTE.
+**What:** `AgentLoop` (harness) handles the execution protocol state machine (PLAN/EXECUTE/VERIFY/PERSIST/DECIDE). `AiService.runAgentCore` (packages/ai) handles reusable stage orchestration. They compose: AgentLoop provides stage handlers (`plan/execute/verify/persist/decide`) and the generic runner drives iteration.
 
 **When to use:** Always. Separation keeps the generic AI agent loop in packages/ai (reusable) and the Kargadan-specific execution protocol in apps/kargadan (bounded).
 
@@ -271,30 +267,31 @@ packages/ai/src/
 
 **Example:**
 ```typescript
-// packages/ai/src/agent.ts
-class AiAgentService extends Effect.Service<AiAgentService>()('ai/Agent', {
-    scoped: Effect.gen(function* () {
-        const [runtime, toolkit] = yield* Effect.all([AiRuntime, AiToolkit]);
-        const run = Effect.fn('AiAgentService.run')(
-            (input: { intent: string; history: Chat.History }) =>
-                Effect.gen(function* () {
-                    yield* Tokenizer.check(input.history);  // compaction gate
-                    const response = yield* LanguageModel.generateText({
-                        prompt: input.intent,
-                        tools: toolkit.architect,   // Architect model tools
-                    });
-                    // dispatch tool calls → resolve via Toolkit.toLayer
-                    return response;  // CommandEnvelope or final answer
-                })
-        );
-        return { run } as const;
-    }),
-}) {}
+// packages/ai/src/service.ts
+const runAgentCore = Effect.fn('AiService.runAgentCore')(<State, Plan, Execution, Verification>(input: {
+    readonly plan: (state: State) => Effect.Effect<Plan>;
+    readonly execute: (state: State, plan: Plan) => Effect.Effect<Execution>;
+    readonly verify: (state: State, plan: Plan, execution: Execution) => Effect.Effect<Verification>;
+    readonly persist: (state: State, plan: Plan, execution: Execution, verification: Verification) => Effect.Effect<void>;
+    readonly decide: (state: State, plan: Plan, execution: Execution, verification: Verification) => Effect.Effect<State>;
+    readonly isTerminal: (state: State) => boolean;
+    readonly initialState: State;
+}) =>
+    Effect.iterate(input.initialState, {
+        body: (state) => Effect.gen(function* () {
+            const planResult = yield* input.plan(state);
+            const executionResult = yield* input.execute(state, planResult);
+            const verificationResult = yield* input.verify(state, planResult, executionResult);
+            yield* input.persist(state, planResult, executionResult, verificationResult);
+            return yield* input.decide(state, planResult, executionResult, verificationResult);
+        }),
+        while: (state) => !input.isTerminal(state),
+    }));
 ```
 
 ### Pattern 2: Bifurcated Tool Surface (Read vs Write)
 
-**What:** Read tools are stateless, high-frequency, no undo scope, no idempotency key. Write tools are validated, undo-wrapped, idempotency-keyed, and execute via the full PLAN→PERSIST loop. The distinction is encoded in the `CommandOperation` smart enum prefix (`read.*` vs `write.*`) which already gates the undo logic in `loop-stages.ts`.
+**What:** Read tools are stateless, high-frequency, no undo scope, no idempotency key. Write tools are validated, undo-wrapped, idempotency-keyed, and execute via the full PLAN→PERSIST loop. The distinction is encoded in `CommandOperation` category/operation prefixes (`read.*` vs `write.*`) and direct-vs-script dispatch metadata.
 
 **When to use:** Every tool definition. The bifurcation is the primary reliability mechanism.
 
@@ -302,16 +299,11 @@ class AiAgentService extends Effect.Service<AiAgentService>()('ai/Agent', {
 
 **Example:**
 ```typescript
-// packages/ai/src/toolkit.ts
-const readTools = Toolkit.make(
-    Tool.make('rhino/read.scene.summary', { ... }),      // no undoScope
-    Tool.make('rhino/read.object.metadata', { ... }),
-    Tool.make('rhino/read.layer.table', { ... }),
-);
-const writeTools = Toolkit.make(
-    Tool.make('rhino/write.object.create', { ... }),     // carries undoScope
-    Tool.make('rhino/write.layer.update', { ... }),
-    // ... all marked defer_loading: true for Tool Search
+// packages/ai/src/service.ts
+const toolkit = Toolkit.make(
+    Tool.make('catalog.search', { parameters: { term: S.NonEmptyTrimmedString }, success: S.Unknown }),
+    Tool.make('command.execute', { parameters: { commandId: S.NonEmptyTrimmedString, args: S.Unknown }, success: S.Unknown }),
+    Tool.make('context.read', { parameters: { query: S.NonEmptyTrimmedString }, success: S.Unknown }),
 );
 ```
 
@@ -339,7 +331,7 @@ const writeTools = Toolkit.make(
 
 **When to use:** Write sequences with 3+ dependent steps, or any operation requiring human-in-the-loop approval before execution.
 
-**Trade-offs:** @effect/workflow is alpha. Until stable, the existing PLAN→EXECUTE retry/compensation pattern in `loop-stages.ts` handles simpler cases.
+**Trade-offs:** @effect/workflow is alpha. Until stable, the existing PLAN→EXECUTE retry/compensation pattern in `agent-loop.ts` handles simpler cases.
 
 **Example:**
 ```typescript
@@ -363,7 +355,7 @@ const buildingFloorPlateWorkflow = Workflow.make(
 
 **What:** Strong reasoning model (claude-opus-4-6 / claude-sonnet-4-5) plans the operation sequence and validates design intent. Faster model (claude-haiku-4-x or claude-sonnet-4-5) executes precise parameter generation for each command invocation. Mirrors aider's 85% SWE-bench result from the two-model pattern.
 
-**When to use:** All agent sessions. The split is wired into `AiAgentService` via two `AiRegistry` layers with different model configs.
+**When to use:** All agent sessions. The split is wired through `AiService`/`AiRuntime` with provider/model selection from `AiRegistry`.
 
 **Trade-offs:** Two model API calls per planning cycle. Benefit: cost reduction on execution calls; stronger reasoning reserved for planning.
 
@@ -380,7 +372,7 @@ const buildingFloorPlateWorkflow = Workflow.make(
     ↓
 [LoopState] — mutable only within Effect.iterate; no shared mutable state
     ↓
-[PersistenceTrace → PostgreSQL] — every transition appended; snapshots after PERSIST
+[AgentPersistenceService → PostgreSQL] — checkpoints/journal persisted after PERSIST
 ```
 
 ---
@@ -411,13 +403,13 @@ const buildingFloorPlateWorkflow = Workflow.make(
 
 **Do this instead:** Gate every `LanguageModel.generateText` call with `Tokenizer.estimate`. Trigger compaction at 75% via observation masking (remove tool results) + summarization of old turns. Store Layer 0 scene summary as a persistent note that survives compaction.
 
-### Anti-Pattern 4: In-Memory PersistenceTrace for Production
+### Anti-Pattern 4: Reintroducing In-Memory Trace for Production
 
-**What people do:** Keep the existing `Ref`-backed `PersistenceTrace` as the persistence layer.
+**What people do:** Keep or reintroduce `Ref`-backed in-memory tracing as the persistence layer.
 
 **Why it's wrong:** Process crash loses all session state. No session resumption across restarts. Architectural regression from the "Persistent agent sessions" requirement.
 
-**Do this instead:** Replace `PersistenceTrace` with PostgreSQL-backed run events + snapshots via `packages/database` repo factory. The existing schema (RunEvent, RunSnapshot, RetrievalArtifact) maps directly to database tables. Keep `PersistenceTrace` interface, swap implementation layer.
+**Do this instead:** Keep persistence in `AgentPersistenceService` + PostgreSQL-backed checkpoints/journal (`chatJson` + sequence-ordered hydrate). Do not add parallel in-memory persistence implementations.
 
 ### Anti-Pattern 5: Conflating Universal and App-Specific Schemas
 
@@ -439,79 +431,41 @@ const buildingFloorPlateWorkflow = Workflow.make(
 | OpenAI API      | `@effect/ai-openai` `OpenAiEmbeddingModel`                         | text-embedding-3-small for Rhino command catalog; existing `AiRuntime.embed()`                    |
 | PostgreSQL 18.2 | `packages/database` polymorphic repo factory                       | RunEvent, RunSnapshot, ConversationHistory, command knowledge base                                |
 | pgvector        | `packages/database` search + `packages/ai` SearchService           | Existing `SearchService.query()` + `refreshEmbeddings()` covers knowledge base queries            |
-| Rhino 9 WIP     | C# plugin over `ws://localhost:9181`                               | net9.0 target required; `[CommandStyle(ScriptRunner)]` on plugin commands                         |
+| Rhino 9 WIP     | C# plugin over localhost WebSocket (ephemeral port via port file)  | net9.0 target required; `[CommandStyle(ScriptRunner)]` on plugin commands                         |
 
 ### Internal Boundaries
 
 | Boundary                        | Communication                                  | Notes                                                                                |
 | ------------------------------- | ---------------------------------------------- | ------------------------------------------------------------------------------------ |
-| harness ↔ packages/ai           | Effect service composition via `Layer.provide` | AiAgentService in packages/ai; harness provides dependencies via Layer               |
+| harness ↔ packages/ai           | Effect service composition via `Layer.provide` | AiService/AiRuntime in packages/ai; harness provides dependencies via Layer          |
 | harness ↔ plugin                | WebSocket JSON, Deferred-correlated            | Typed protocol; all messages schema-validated at decode boundary                     |
 | packages/ai ↔ packages/database | Direct Effect service dependency               | AiRuntime → DatabaseService for budget, SearchService for embeddings                 |
-| AgentLoop ↔ AiAgentService      | Effect.gen call passing `LoopState`            | AiAgentService is stateless w.r.t. loop; LoopState carries conversation context refs |
+| AgentLoop ↔ AiService           | Effect.gen call passing `LoopState`            | AiService rails are loop-agnostic; LoopState carries Kargadan protocol context       |
 | Plugin ↔ RhinoCommon            | Direct C# API calls inside InvokeOnUiThread    | No async allowed inside InvokeOnUiThread; use synchronous RhinoCommon APIs only      |
 
 ---
 
 ## Build Order (Dependency Implications)
 
-The following order minimizes blocked work and validates each layer before the next depends on it:
+Canonical build order is maintained in `.planning/ROADMAP.md`. Current phase state:
 
 ```
-Phase 1: Transport (unblocks everything)
-    1a. Plugin WebSocket Server (C#) — TcpListener + WebSocket upgrade + background thread
-    1b. Plugin .NET target correction (net10.0 → net9.0 multi-target)
-    → Validates: WebSocket bridge, handshake, heartbeat, basic command round-trip
+Phase 1-4: Complete
+    Transport + execution + schema topology + persistence foundations are implemented.
 
-Phase 2: Execution (unblocks LLM integration)
-    2a. RhinoDoc Command Executor (C#) — RunScript + InvokeOnUiThread + undo records
-    2b. RhinoDoc Event Subscriptions + EventMonitor (C#) — 200ms debounce + push
-    → Validates: actual Rhino state changes respond to commands; events flow back
+Phase 5: In progress
+    Handshake catalog transfer, harness ingestion/seeding, generic agent-core rails,
+    chat checkpoint roundtrip, and provider override/fallback runtime paths are wired.
 
-Phase 3: Persistence (unblocks session durability)
-    3a. PostgreSQL session store schemas (RunEvent, RunSnapshot, ConversationHistory tables)
-    3b. PersistenceTrace → PostgreSQL swap in harness
-    3c. Session resumption from last snapshot
-    → Validates: restart-safe sessions; audit trail
-
-Phase 4: AI Agent Core (unblocks tool calling)
-    4a. packages/ai AiToolkit (Tool.make read + write definitions)
-    4b. packages/ai AiAgentService skeleton (Chat loop, Architect model, tool dispatch)
-    4c. Rhino command knowledge base seeding (pgvector catalog)
-    4d. Custom tool search proxy using AiRuntime.embed() + pgvector → tool_reference blocks
-    → Validates: LLM can discover and invoke Rhino commands dynamically
-
-Phase 5: Context Management (unblocks long sessions)
-    5a. Tokenizer-gated compaction (75% trigger, observation masking + summarization)
-    5b. Layer 0 scene summary (always-present compact Rhino state)
-    5c. Architect/Editor model split
-    → Validates: multi-operation sessions don't degrade
-
-Phase 6: CLI Interface
-    6a. Terminal shell with streaming progress (Ink or readline)
-    6b. Plan-before-execute mode (DurableDeferred approval gate)
-    6c. Tool call visibility in terminal
-    → Validates: usable end-to-end developer experience
-
-Phase 7: Durability (workflow transactions)
-    7a. @effect/workflow integration for multi-step write sequences
-    7b. Activity compensation for partial failure rollback
-    → Validates: complex multi-object operations can recover atomically
-
-Phase 8: Refactoring
-    8a. Delete and redesign kargadan-schemas.ts (separate universal vs app-specific)
-    8b. Refactor apps/kargadan to consume packages/ai for all LLM interaction
-    → Completes: monorepo topology compliance
+Phase 6/7/8: Pending
+    Phase 6 (scene/context), Phase 7 (verification/workflow durability), and
+    Phase 8 (CLI surface via @effect/cli policy) remain gated on Phase 5 close.
 ```
 
 **Critical dependencies:**
-- Phases 1→2→3 are strictly sequential (transport required before execution, execution before persistence)
-- Phase 4 requires Phase 1 (needs a working bridge to validate tool execution)
-- Phase 4a/4b/4c can parallelize within the phase
-- Phase 5 requires Phase 4 (needs tool calls to measure context consumption)
-- Phase 6 can start in parallel with Phases 4-5 (CLI shell is independent of AI internals)
-- Phase 7 depends on Phase 4 (workflow wraps tool calls)
-- Phase 8 can start any time but should not block earlier phases
+- Phases 1→4 are sequential and complete foundations (transport, execution, schema topology, persistence).
+- Phase 5 depends on Phase 4 and is the current integration gate.
+- Phases 6, 7, and 8 all depend on Phase 5 completion and are otherwise independent.
 
 ---
 
@@ -522,9 +476,9 @@ Phase 8: Refactoring
 - Anthropic advanced tool use announcement: [anthropic.com/engineering/advanced-tool-use](https://www.anthropic.com/engineering/advanced-tool-use)
 - Context compaction strategy: [code.claude.com/docs/en/how-claude-code-works](https://code.claude.com/docs/en/how-claude-code-works)
 - Rhino two-process architecture validation: `apps/kargadan/Rhino-Research1.md`, `apps/kargadan/Rhino-Research2.md` (existing validated research in codebase)
-- Existing harness codebase: `apps/kargadan/harness/src/` (agent-loop.ts, loop-stages.ts, socket.ts, protocol/dispatch.ts, protocol/supervisor.ts)
-- Existing plugin codebase: `apps/kargadan/plugin/src/` (KargadanPlugin.cs, SessionHost.cs, CommandRouter.cs, EventPublisher.cs)
-- Existing packages/ai: `packages/ai/src/` (runtime.ts, registry.ts, search.ts)
+- Existing harness codebase: `apps/kargadan/harness/src/` (agent-loop.ts, socket.ts, protocol/dispatch.ts, protocol/schemas.ts, harness.ts)
+- Existing plugin codebase: `apps/kargadan/plugin/src/` (KargadanPlugin.cs, SessionHost.cs, Router.cs, EventPublisher.cs)
+- Existing packages/ai: `packages/ai/src/` (service.ts, runtime.ts, registry.ts, runtime-provider.ts, mcp.ts)
 - @effect/workflow alpha status: [effect.website/blog/this-week-in-effect/2026/01/02](https://effect.website/blog/this-week-in-effect/2026/01/02/)
 - Observation masking vs LLM summarization: NeurIPS DL4Code 2025 finding (cited in Rhino-Research2.md)
 - Architect/Editor model split (85% SWE-bench): aider pattern, cited in Rhino-Research2.md

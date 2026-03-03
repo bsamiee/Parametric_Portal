@@ -105,18 +105,8 @@ internal sealed class ObservationPipeline : IDisposable {
         _debounceTimer.Dispose();
         return unit;
     }
-    [BoundaryImperativeExemption(
-        ruleId: "CSP0001",
-        reason: BoundaryImperativeReason.ProtocolRequired,
-        ticket: "EXEC-03",
-        expiresOnUtc: "2026-08-22")]
     private void Subscribe() =>
         RhinoSubscriptions.Iter(subscription => subscription.Attach(this));
-    [BoundaryImperativeExemption(
-        ruleId: "CSP0001",
-        reason: BoundaryImperativeReason.ProtocolRequired,
-        ticket: "EXEC-03",
-        expiresOnUtc: "2026-08-22")]
     private void Unsubscribe() =>
         RhinoSubscriptions.Iter(subscription => subscription.Detach(this));
     private static bool IsUndoRedoActive() =>
@@ -230,11 +220,6 @@ internal sealed class ObservationPipeline : IDisposable {
             now);
         return unit;
     }
-    [BoundaryImperativeExemption(
-        ruleId: "CSP0001",
-        reason: BoundaryImperativeReason.ProtocolRequired,
-        ticket: "EXEC-03",
-        expiresOnUtc: "2026-08-22")]
     private void OnUndoRedo(object? sender, UndoRedoEventArgs e) =>
         _ = (e.IsEndUndo, e.IsEndRedo) switch {
             (true, _) => EmitUndoRedoMarker(marker: "undo"),

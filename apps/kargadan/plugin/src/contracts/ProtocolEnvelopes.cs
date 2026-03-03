@@ -1,4 +1,6 @@
+using System;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using LanguageExt;
 using LanguageExt.Common;
 using NodaTime;
@@ -9,6 +11,9 @@ namespace ParametricPortal.Kargadan.Plugin.src.contracts;
 // --- [ENVELOPES] -------------------------------------------------------------
 
 public sealed record CommandErrorEnvelope(FailureReason Reason, Option<JsonElement> Details);
+public sealed record CommandAckEnvelope(
+    [property: JsonPropertyName("_tag")] string Tag,
+    Guid RequestId);
 
 public sealed record CommandEnvelope(
     EnvelopeIdentity Identity,
@@ -48,6 +53,7 @@ public abstract partial record HandshakeEnvelope {
         EnvelopeIdentity Identity,
         Seq<string> AcceptedCapabilities,
         ServerInfo Server,
+        Seq<CommandCatalogEntry> Catalog,
         TelemetryContext TelemetryContext) : HandshakeEnvelope;
     public sealed record Reject(
         EnvelopeIdentity Identity,

@@ -1,7 +1,6 @@
 # Parametric Portal Agent Guide
 
 Read `CLAUDE.md`.
-Read `REQUIREMENTS.md`.
 
 ## REQUIRED STANDARDS
 
@@ -11,38 +10,7 @@ If reviewing, refining, editing, creating, or modifying X file type, use skill Y
 - Python: `coding-python`
 - Bash/sh: `bash-script-generator`
 
-## Codex-First Policy (Repo)
-- Codex is the primary execution agent for this repository.
-- Codex behavior is governed by user config in `~/.codex/config.toml` and this repo file.
-- Claude-style lifecycle hooks are not required for Codex quality enforcement.
-
-## Definition Of Done
-1. Run affected checks while iterating.
-2. Run language-specific validation for touched surfaces.
-3. Run the full available root-script validation set before completion.
-4. Run command-specific checks needed for the current change set.
-
 ## Deterministic Command Matrix
-
-### Affected iteration gate
-- `pnpm ts:check`
-- `pnpm cs:check:affected`
-- `pnpm py:check`
-
-### TypeScript / React
-- `pnpm ts:check`
-
-### C#
-- `pnpm cs:check`
-- Preferred targeted variant during iteration: `pnpm cs:check:affected`
-
-### Python
-- `pnpm py:check`
-
-### Full completion gate
-- `pnpm ts:check`
-- `pnpm cs:check`
-- `pnpm py:check`
 
 ## Navigation And Context Discipline
 - Use `fd` for discovery, then `rg` for exact references.
@@ -56,7 +24,7 @@ If reviewing, refining, editing, creating, or modifying X file type, use skill Y
   - `ctags -R --exclude=.git --exclude=node_modules --exclude=dist --exclude=build --exclude=.nx .`
 
 ## Language Policy Convergence
-- ALWAYS: follow `CLAUDE.md` + `REQUIREMENTS.md` Effect-first approach.
+- ALWAYS: follow `CLAUDE.md` Effect-first approach.
 - C#: preserve strict analyzer and formatting posture in `.editorconfig` and `Directory.Build.props`.
 - Python: enforce Python 3.14+ baseline via Ruff + ty with explicit configuration.
 

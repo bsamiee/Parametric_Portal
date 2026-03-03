@@ -34,6 +34,42 @@ const FeatureFlagsSchema = S.Struct({
     enableRealtime:        S.optionalWith(S.Int.pipe(S.between(0, 100)), { default: () => 100 }),
     enableWebhooks:        S.optionalWith(S.Int.pipe(S.between(0, 100)), { default: () => 0   }),
 });
+const AiProviderSchema = S.Literal('anthropic', 'gemini', 'openai');
+const AiSettingsSchema = (() => {
+    const embedding = S.Struct({
+        cacheCapacity:   S.optionalWith(S.Int, { default: () => 1000 }),
+        cacheTtlMinutes: S.optionalWith(S.Int, { default: () => 30   }),
+        dimensions:      S.optionalWith(S.Int, { default: () => 1536 }),
+        maxBatchSize:    S.optionalWith(S.Int, { default: () => 256  }),
+        mode:            S.optionalWith(S.Literal('batched', 'data-loader'), { default: () => 'batched' as const }),
+        model:           S.optionalWith(S.String, { default: () => 'text-embedding-3-small' }),
+        provider:        S.optionalWith(S.Literal('openai'), { default: () => 'openai' as const }),
+        windowMs:        S.optionalWith(S.Int, { default: () => 200 }),
+    });
+    const language = S.Struct({
+        fallback:    S.optionalWith(S.Array(AiProviderSchema), { default: () => [] }),
+        maxTokens:   S.optionalWith(S.Int,    { default: () => 4096 }),
+        model:       S.optionalWith(S.String, { default: () => 'gpt-4o' }),
+        provider:    S.optionalWith(AiProviderSchema, { default: () => 'openai' as const }),
+        temperature: S.optionalWith(S.Number, { default: () => 1  }),
+        topK:        S.optionalWith(S.Number, { default: () => 40 }),
+        topP:        S.optionalWith(S.Number, { default: () => 1  }),
+    });
+    const policy = S.Struct({
+        maxRequestsPerMinute: S.optionalWith(S.Int, { default: () => 60 }),
+        maxTokensPerDay:      S.optionalWith(S.Int, { default: () => 1_000_000 }),
+        maxTokensPerRequest:  S.optionalWith(S.Int, { default: () => 16_384 }),
+        tools:                S.optionalWith(S.Struct({
+            mode:  S.Literal('allow', 'deny'),
+            names: S.Array(S.String),
+        }), { default: () => ({ mode: 'allow' as const, names: [] as Array<string> }) }),
+    });
+    return S.Struct({
+        embedding: S.optionalWith(embedding, { default: () => S.decodeSync(embedding)({}) }),
+        language:  S.optionalWith(language,  { default: () => S.decodeSync(language)({})  }),
+        policy:    S.optionalWith(policy,    { default: () => S.decodeSync(policy)({})    }),
+    });
+})();
 const WebhookUrlSchema = S.String.pipe(
     S.filter((value) => {
         const parsed = URL.canParse(value) ? new URL(value) : null;
@@ -47,6 +83,7 @@ const WebhookUrlSchema = S.String.pipe(
     S.brand('WebhookUrl'),
 );
 const AppSettingsSchema = S.Struct({
+    ai:             S.optionalWith(AiSettingsSchema,   { default: () => S.decodeSync(AiSettingsSchema)({})   }),
     featureFlags:   S.optionalWith(FeatureFlagsSchema, { default: () => S.decodeSync(FeatureFlagsSchema)({}) }),
     oauthProviders: S.optionalWith(S.Array(
         S.Struct({
@@ -262,7 +299,7 @@ class AgentJournal extends Model.Class<AgentJournal>('AgentJournal')({
     runId:       S.UUID,
     sequence:    S.Int.pipe(S.greaterThanOrEqualTo(0)),
     entryKind:   S.Literal('session_start', 'tool_call', 'checkpoint', 'session_complete'),
-    status:      Model.FieldOption(S.Literal('running', 'completed', 'failed', 'interrupted')),
+    status:      Model.FieldOption(S.Literal('running', 'completed', 'failed', 'interrupted', 'ok', 'error')),
     operation:   Model.FieldOption(S.NonEmptyTrimmedString),
     payloadJson: S.Unknown,
     stateHash:   Model.FieldOption(S.String),
@@ -281,7 +318,7 @@ class KvStore extends Model.Class<KvStore>('KvStore')({
 // --- [EXPORT] ----------------------------------------------------------------
 
 export {
-    AgentJournal, ApiKey, App, Asset, AuditLog, Job, JobDlq, JobStatusSchema, KvStore, MfaSecret, Notification,
+    AgentJournal, AiProviderSchema, AiSettingsSchema, ApiKey, App, Asset, AuditLog, Job, JobDlq, JobStatusSchema, KvStore, MfaSecret, Notification,
     AppSettingsDefaults, AppSettingsSchema, FeatureFlagsSchema,
     AuditOperationSchema, PreferencesSchema, OAuthProviderSchema, OauthAccount,
     Permission, RoleSchema, Session, User, WebauthnCredential, WebhookUrlSchema,
