@@ -122,7 +122,7 @@ Features that seem good but create problems.
 
 ### Launch With (v1)
 
-Minimum viable product — what is needed to validate the concept.
+Minimum viable product launch scope (implementation status tracked in `.planning/ROADMAP.md` and `.planning/STATE.md`).
 
 - [ ] Plugin WebSocket server (TCP listener, background thread, `InvokeOnUiThread` marshaling) — everything gates on this
 - [ ] Natural language command execution via `RhinoApp.RunScript` — the core value, must ship
@@ -131,18 +131,18 @@ Minimum viable product — what is needed to validate the concept.
 - [ ] Tool call visibility in terminal output — builds trust
 - [ ] Undo integration (one undo record per agent action) — without this Rhino power users will not adopt
 - [ ] Layer 0 scene representation (~500 tokens, always present) — agent must know what is in the document
-- [ ] Session persistence via PostgreSQL (replace legacy in-memory traces) — validated in active scope
-- [ ] Basic RAG-backed command discovery (pgvector, seeded knowledge base) — enables command-agnostic NL input
+- [ ] Session persistence via PostgreSQL (replace legacy in-memory traces) — code implemented; keep as launch acceptance criterion
+- [ ] Basic RAG-backed command discovery (pgvector, seeded knowledge base) — code implemented; keep as launch acceptance criterion
 - [ ] Error messages with recovery suggestions — minimum bar for usability
 
 ### Add After Validation (v1.x)
 
 Features to add once core is working and users are providing feedback.
 
-- [ ] Architect/Editor model split — validated architecture (aider SWE-bench results); add once v1 loop is stable and model cost is measurable
-- [ ] Context compaction (75% trigger / 40% target) — needed once real users run long sessions; validate session length patterns first
+- [ ] Architect/Editor model split — code implemented in current phase line; keep as acceptance criterion until manual Rhino smoke sign-off
+- [ ] Context compaction (75% trigger / 40% target) — code implemented in current phase line; keep as acceptance criterion until manual Rhino smoke sign-off
 - [ ] Layers 1-3 on-demand scene representation — implement once Layer 0 is confirmed sufficient or insufficient by user sessions
-- [ ] Anthropic Tool Search Tool integration — enhances command discovery; add once knowledge base is seeded and basic RAG is proven
+- [ ] Anthropic Tool Search Tool integration — provider-gated seam is implemented; retrieval/runtime validation remains pending
 - [ ] Observation masking for tool output compaction — NeurIPS DL4C 2025 confirmed effective; implement after context budget patterns are observable in production sessions
 - [ ] Full audit trail UI / replay command — adds polish; implement after persistence layer is stable
 
@@ -150,8 +150,8 @@ Features to add once core is working and users are providing feedback.
 
 Features to defer until product-market fit is established.
 
-- [ ] Grasshopper 1 procedural automation — high value but high complexity; requires stable plugin and validated core loop first
-- [ ] Durable multi-step workflow execution with compensation — `@effect/workflow` is already in the stack; wire it after single-step execution is reliable
+- [ ] Grasshopper 1 procedural automation — high value but high complexity; remains deferred (`EXEC-06` pending)
+- [ ] Durable multi-step workflow execution with compensation — non-GH write-path integration is now in Phase 7 code; keep as acceptance criterion until live Rhino validation completes
 - [ ] Bifurcated read/write tool surface formalization — currently implicit; explicit bifurcation with schema-driven `Tool.make` adds correctness guarantees after tool surface stabilizes
 - [ ] Local LLM support — defer until strong model quality is validated as the correct constraint, then add as a catalog option
 

@@ -30,24 +30,25 @@ The agent can execute any operation a human can perform in Rhino 9 through natur
 <!-- Current scope. Building toward these. -->
 
 - [x] Generic agent loop in packages/ai: core PLAN/EXECUTE/VERIFY/PERSIST/DECIDE rails with typed transition plumbing
-- [ ] Dynamic command discovery: RAG-backed Rhino command knowledge base (pgvector) with Anthropic Tool Search Tool integration
+- [x] Dynamic command discovery: RAG-backed Rhino command knowledge base (pgvector/hybrid default) with optional provider-gated Anthropic discovery seam (runtime validation pending)
 - [x] Persistent agent sessions: PostgreSQL-backed conversation history, run events, snapshots, tool call audit log — replacing legacy in-memory traces
 - [x] Plugin WebSocket server: TCP/WebSocket listener inside Rhino plugin on localhost, background thread with InvokeOnUiThread marshaling
 - [x] RhinoDoc command executor: RhinoApp.RunScript wrapper for arbitrary command execution + direct RhinoCommon API calls for precise operations
 - [x] RhinoDoc event subscriptions: AddRhinoObject, DeleteRhinoObject, ModifyObjectAttributes, LayerTableEvent, UndoRedo — debounced at 200ms
 - [x] Undo integration: BeginUndoRecord/EndUndoRecord wrapping each logical AI action, AddCustomUndoEvent for agent state snapshots
 - [ ] CLI interface: terminal-based interaction with streaming progress, tool call visibility, plan-before-execute mode
-- [ ] Layered scene representation: Layer 0 compact summary (~500 tokens always present), Layers 1-3 on-demand via read tools
+- [x] Layered scene representation: Layer 0 compact summary (~500 tokens always present), Layers 1-3 on-demand via read tools (manual Rhino smoke pending)
 - [x] Plugin .NET target correction: net9.0 single-target for Rhino 9 WIP
 - [x] packages/ai agent toolkit: high-order Tool.make definitions and Toolkit composition with typed schemas
 - [x] apps/kargadan consumes packages/ai runtime/services for AI operations with NL planning over catalog+RAG
 - [ ] Schema convergence follow-up (SCHM-02): extract remaining universal concepts (protocol version, telemetry context, failure taxonomy, idempotency) to packages/
-- [ ] Context compaction: Tokenizer-gated rolling summarization with configurable thresholds (75% trigger, 40% target)
+- [x] Context compaction: Tokenizer-gated rolling compaction with configurable thresholds (75% trigger, 40% target)
 - [x] Session resumption: restore from PostgreSQL checkpoint, rebuild loop state from last snapshot
-- [ ] Architect/Editor model split: strong reasoning model (Opus/Sonnet) for planning, faster model for execution
+- [x] Architect/Editor model split: configurable architect override for planning, default/session profile for execution
+- [x] Durable write-path workflow refactor: single `@effect/workflow` paradigm in harness execution path (no dual rails)
 - [ ] Local integration testing workflow: real Rhino 9 WIP feedback loop with the plugin loaded
 - [x] Rhino command knowledge base seeding pipeline: handshake catalog first, env fallback override, hash-marked reseed guard
-- [ ] Vision-based verification: unified verification pipeline supporting both deterministic checks (geometry validity) and visual checks (ViewCapture.CaptureToBitmap with Metal-aware frame timing) — integrated from the start to avoid parallel systems
+- [x] Vision/deterministic verification convergence: deterministic checks are authority, optional `view.capture` evidence augments confidence (live Rhino validation pending)
 
 ### Out of Scope
 
@@ -122,16 +123,16 @@ Two research documents (`Rhino-Research1.md`, `Rhino-Research2.md`) provide deta
 | Two-process architecture (plugin + harness) | Only viable path on macOS — Rhino.Inside and Rhino.Compute are Windows-only | Accepted + implemented |
 | WebSocket bridge on localhost | Validated by RhinoMCP; full-duplex; no macOS sandbox restrictions | Accepted + implemented |
 | `RhinoApp.RunScript` as dynamic command interface | Agent can execute ANY Rhino command by string; no hardcoded command enum | Accepted + implemented |
-| Generic agent loop in packages/ai | Any future app needing AI agent orchestration reuses the same loop; prevents app-specific duplication | In progress (core rails merged) |
+| Generic agent loop in packages/ai | Any future app needing AI agent orchestration reuses the same loop; prevents app-specific duplication | Accepted + implemented |
 | Delete kargadan-schemas.ts and redesign | Current schemas conflate universal concepts with app-specific protocol; redesign separates concerns | Completed |
 | Plugin targets net9.0 (not net10.0) | Rhino 9 WIP confirmed running .NET 9; net10.0 unsupported | Completed (`net9.0` single target) |
-| RAG for command discovery (not hardcoded enum) | Rhino has hundreds of commands; embedding + Tool Search Tool scales without context bloat | In progress (catalog handshake + seeding wired) |
+| RAG for command discovery (not hardcoded enum) | Rhino has hundreds of commands; embedding + Tool Search Tool scales without context bloat | Implemented (pgvector/hybrid default + optional provider-gated Tool Search seam; runtime validation pending) |
 | PostgreSQL for session persistence | Existing infra in packages/database; event-sourced run log + pgvector for knowledge retrieval | Completed |
-| Anthropic Tool Search Tool for large tool catalogs | 85% token reduction; on-demand discovery beats upfront loading | Deferred to Phase 6 integration |
-| @effect/workflow for durable operations | Activity compensation + DurableDeferred approval gates map directly to undo-wrapped multi-step CAD writes | Deferred to Phase 7 |
+| Anthropic Tool Search Tool for large tool catalogs | 85% token reduction; on-demand discovery beats upfront loading | Phase 6 optional provider-gated seam implemented; default discovery remains pgvector-first |
+| @effect/workflow for durable operations | Activity compensation + DurableDeferred approval gates map directly to undo-wrapped multi-step CAD writes | Implemented for non-GH write path in Phase 7 line; live validation pending, `EXEC-06` deferred |
 | Apple Silicon only (no Intel) | Rhino 9 WIP dropped Intel Mac July 2025; no reason to support dead platform | Accepted |
 | No MCP for core execution | MCP adds protocol overhead; native typed tool calls via @effect/ai are the reliability substrate | Accepted |
 | Grasshopper 1 only (no GH2) | GH2 is alpha with unstable API; GH1 has stable C# SDK for programmatic access | Accepted |
 
 ---
-*Last updated: 2026-03-03 after Phase 5 implementation drift reconciliation*
+*Last updated: 2026-03-04 after Phase 7 non-GH implementation update*

@@ -7,7 +7,7 @@ import { ClusterService } from '@parametric-portal/server/infra/cluster';
 import { AuditService } from '@parametric-portal/server/observe/audit';
 import { MetricsService } from '@parametric-portal/server/observe/metrics';
 import { Telemetry } from '@parametric-portal/server/observe/telemetry';
-import { Array as A, Cron, Effect, Layer, Option, Schema as S } from 'effect';
+import { Array as A, Cron, Effect, Layer, Match, Option, Schema as S } from 'effect';
 import { AiRuntime } from './runtime.ts';
 import { AiError, AiRuntimeProvider } from './runtime-provider.ts';
 
@@ -121,16 +121,63 @@ class AiService extends Effect.Service<AiService>()('ai/Service', {
                 }, pagination?: { readonly cursor?: string | undefined; readonly limit?: number | undefined }) =>
                 Effect.gen(function* () {
                     const { ctx, scopeId, subjectId } = yield* _resolveSearchContext();
+                    const discovery = yield* model.discovery();
+                    const providerCandidates = yield* model.providerToolSearch({ limit: pagination?.limit, term: options.term }).pipe(
+                        Effect.catchAll((error) => Effect.logWarning('ai.discovery.provider.search.failed', { error: String(error) }).pipe(
+                            Effect.as([] as ReadonlyArray<string>),
+                        )),
+                    );
                     const settings = yield* model.settings();
                     const { dimensions, model: embeddingModel } = settings.embedding;
                     const embedding = yield* model.embed(options.term).pipe(
                         Effect.tapError((e) => Effect.logWarning('Search embedding failed', { error: String(e), tenantId: ctx.tenantId })),
                         Effect.option,
                     );
-                    const result = yield* database.search.search(
+                    const fallbackResult = yield* database.search.search(
                         { ...options, scopeId, ...Option.match(embedding, { onNone: () => ({}), onSome: (vector) => ({ embedding: { dimensions, model: embeddingModel, vector } }) }) },
                         pagination,
                     );
+                    const result = Match.value(providerCandidates.length).pipe(
+                        Match.when(0, () => fallbackResult),
+                        Match.orElse(() => {
+                            const itemById = new Map<string, (typeof fallbackResult.items)[number]>(
+                                fallbackResult.items.flatMap((item) =>
+                                    Option.fromNullable(item.metadata).pipe(
+                                        Option.flatMap((metadata) =>
+                                            Option.fromNullable((metadata as Record<string, unknown>)['id']).pipe(
+                                                Option.filter((id): id is string => typeof id === 'string'),
+                                            )),
+                                        Option.match({
+                                            onNone: () => [] as ReadonlyArray<readonly [string, (typeof fallbackResult.items)[number]]>,
+                                            onSome: (id) => [[id, item] as const],
+                                        }),
+                                    )),
+                            );
+                            const ranked = providerCandidates.flatMap((candidateId) =>
+                                Option.fromNullable(itemById.get(candidateId)).pipe(
+                                    Option.match({
+                                        onNone: () => [] as typeof fallbackResult.items,
+                                        onSome: (item) => [item] as typeof fallbackResult.items,
+                                    }),
+                                ),
+                            );
+                            return ranked.length === 0
+                                ? fallbackResult
+                                : {
+                                    ...fallbackResult,
+                                    cursor:  null,
+                                    hasNext: false,
+                                    hasPrev: false,
+                                    items:   ranked,
+                                    total:   ranked.length,
+                                };
+                        }),
+                    );
+                    yield* Effect.logDebug('ai.discovery.provider.candidates', {
+                        candidateCount: providerCandidates.length,
+                        provider: discovery.provider,
+                        toolSearchEnabled: discovery.anthropicToolSearchEnabled,
+                    });
                     yield* _track('Search.read', { entityTypes: options.entityTypes, resultCount: result.total, term: options.term }, subjectId, metrics.search.queries, MetricsService.label({ tenant: ctx.tenantId }));
                     return result;
                 }).pipe(Telemetry.span('search.query', { 'search.term': options.term })),

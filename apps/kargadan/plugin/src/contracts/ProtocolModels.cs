@@ -85,16 +85,9 @@ public sealed record SceneObjectRef {
         TypeTag = typeTag;
     }
     public static Fin<SceneObjectRef> Create(ObjectId objectId, int sourceRevision, SceneObjectType typeTag) =>
-        Require.NonNegative(value: sourceRevision, field: "SourceRevision")
-            .Match(
-                Succ: (int validSourceRevision) =>
-                    FinSucc(new SceneObjectRef(
-                        objectId: objectId,
-                        sourceRevision: validSourceRevision,
-                        typeTag: typeTag)),
-                Fail: static (Seq<Error> errors) =>
-                    FinFail<SceneObjectRef>(errors.HeadOrNone().IfNone(
-                        Error.New(message: "SourceRevision must be non-negative."))));
+        Require.NonNegative(value: sourceRevision, field: "SourceRevision").Match(
+            Succ: v => FinSucc(new SceneObjectRef(objectId: objectId, sourceRevision: v, typeTag: typeTag)),
+            Fail: e => FinFail<SceneObjectRef>(e.Head));
 }
 
 // --- [STRUCTS_EXTENDED] ------------------------------------------------------
@@ -171,15 +164,15 @@ public readonly record struct ScriptResult {
     public static Validation<Error, ScriptResult> Create(string commandName, int commandResult, int objectsCreatedCount) =>
         (string.IsNullOrWhiteSpace(commandName) switch {
             true => Fail<Error, string>(Error.New(message: "CommandName must not be empty.")),
-            false => Success<Error, string>(commandName),
+            _ => Success<Error, string>(commandName),
         },
          (commandResult is < 0 or > 6) switch {
              true => Fail<Error, int>(Error.New(message: "CommandResult must be in 0-6 range.")),
-             false => Success<Error, int>(commandResult),
+             _ => Success<Error, int>(commandResult),
          },
          (objectsCreatedCount < 0) switch {
              true => Fail<Error, int>(Error.New(message: "ObjectsCreatedCount must be non-negative.")),
-             false => Success<Error, int>(objectsCreatedCount),
+             _ => Success<Error, int>(objectsCreatedCount),
          })
             .Apply(static (string validName, int validResult, int validCount) =>
                 new ScriptResult(

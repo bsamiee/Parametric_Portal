@@ -13,6 +13,11 @@
             "import": "./src/mcp.ts",
             "default": "./src/mcp.ts"
         },
+        "./registry": {
+            "types": "./src/registry.ts",
+            "import": "./src/registry.ts",
+            "default": "./src/registry.ts"
+        },
         "./service": {
             "types": "./src/service.ts",
             "import": "./src/service.ts",

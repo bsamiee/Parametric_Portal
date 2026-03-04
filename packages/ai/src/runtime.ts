@@ -1,4 +1,4 @@
-import { AiError as AiSdkError, Chat, EmbeddingModel, LanguageModel, type Response, type Tool } from '@effect/ai';
+import { AiError as AiSdkError, Chat, EmbeddingModel, LanguageModel, Tokenizer, type Response, type Tool } from '@effect/ai';
 import { Array as A, Effect, Layer, Match, Stream } from 'effect';
 import { AiRegistry } from './registry.ts';
 import { AiError, AiRuntimeProvider } from './runtime-provider.ts';
@@ -102,7 +102,10 @@ class AiRuntime extends Effect.Service<AiRuntime>()('ai/Runtime', {
             );
         };
         const applyToolPolicy = <Tools extends Record<string, Tool.Any>, Options extends LanguageModel.GenerateTextOptions<Tools>>(descriptor: OperationDescriptor, context: OperationContext, options: Options) => {
-            const policy = context.appSettings.policy.tools;
+            const policy = {
+                ...context.appSettings.policy.tools,
+                names: context.appSettings.policy.tools.names.filter((name) => name !== AiRegistry.toolSearchFlag),
+            };
             const toolChoice = options.toolChoice as LanguageModel.ToolChoice<string> | undefined;
             const deny = (meta: {
                 readonly policy: typeof policy;
@@ -196,6 +199,39 @@ class AiRuntime extends Effect.Service<AiRuntime>()('ai/Runtime', {
                 Effect.flatMap((tenantId) => provider.resolveSettings(tenantId)),
                 Effect.map(_capMaxTokens),
             );
+        const countTokens = Effect.fn('AiRuntime.countTokens')((input: string) =>
+            provider.resolveTenantId.pipe(
+                Effect.flatMap((tenantId) => provider.resolveSettings(tenantId).pipe(Effect.map(_capMaxTokens))),
+                Effect.mapError(AiError.from(AI_OPERATIONS.chat.id)),
+                Effect.flatMap((appSettings) =>
+                    Tokenizer.Tokenizer.pipe(
+                        Effect.flatMap((tokenizer) => tokenizer.tokenize(input)),
+                        Effect.map((tokens) => tokens.length),
+                        Effect.provide(AiRegistry.layers(appSettings).language),
+                    ),
+                ),
+            ),
+        );
+        const discovery = () =>
+            settings().pipe(
+                Effect.map((current) => AiRegistry.resolveDiscovery(current)),
+            );
+        const providerToolSearch = Effect.fn('AiRuntime.providerToolSearch')((input: {
+            readonly limit?: number | undefined;
+            readonly term: string;
+        }) =>
+            discovery().pipe(
+                Effect.flatMap((resolved) => Match.value(resolved).pipe(
+                    Match.when({ anthropicToolSearchEnabled: true, provider: 'anthropic' as const }, () =>
+                        Effect.logDebug('ai.discovery.anthropic.tool_search.unavailable', {
+                            configuredFlag: AiRegistry.toolSearchFlag,
+                            limit:          input.limit,
+                            term:           input.term,
+                        }).pipe(Effect.as([] as ReadonlyArray<string>))),
+                    Match.orElse(() => Effect.succeed([] as ReadonlyArray<string>)),
+                )),
+            ),
+        );
         function embed(input: string): Effect.Effect<readonly number[], AiSdkError.AiError | AiError, never>;
         function embed(input: readonly string[]): Effect.Effect<readonly (readonly number[])[], AiSdkError.AiError | AiError, never>;
         function embed(input: string | readonly string[]): Effect.Effect<readonly number[] | readonly (readonly number[])[], unknown, unknown> {
@@ -257,7 +293,7 @@ class AiRuntime extends Effect.Service<AiRuntime>()('ai/Runtime', {
             resolveContext(AI_OPERATIONS.chat).pipe(
                 Effect.flatMap((context) => runEffectOperation(AI_OPERATIONS.chat, context, chatService.exportJson)),
             );
-        return { chat, deserializeChat, embed, generateObject, generateText, serializeChat, settings, streamText };
+        return { chat, countTokens, deserializeChat, discovery, embed, generateObject, generateText, providerToolSearch, serializeChat, settings, streamText };
     }),
 }) {
     static readonly Live = Layer.provide(AiRuntime.Default, AiRuntimeProvider.Server);

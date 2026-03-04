@@ -3,6 +3,7 @@
 **Domain:** CLI-based AI agent controlling Rhino 9 on macOS (brownfield Effect/TypeScript + C# monorepo)
 **Researched:** 2026-02-22
 **Confidence:** MEDIUM-HIGH — macOS/RhinoCommon pitfalls from official McNeel documentation and forums; AI agent pitfalls from Anthropic engineering blog and verified community sources; Tool Search Tool limitations from independent benchmark data (Arcade.dev)
+**Status note (2026-03-03):** Research artifact; implementation truth is tracked in `.planning/ROADMAP.md` and `.planning/STATE.md`.
 
 ---
 
@@ -304,7 +305,7 @@ Define a canonical protocol specification document (JSON Schema or OpenRPC) that
 |---------|---------------|----------------|
 | InvokeOnUiThread missing on one write path | MEDIUM | Audit all RhinoDoc call sites in plugin; add InvokeOnUiThread wrapper; test on macOS Apple Silicon specifically |
 | TFM drift blocking plugin load | LOW | Restore plugin TFM to `net9.0`; rebuild; reinstall `.rhp` in Rhino Plugin Manager |
-| Context window exhaustion mid-session | MEDIUM | Add tokenizer check before each PLAN step; truncate or summarize history to budget; restart session from PostgreSQL checkpoint once persistence is implemented |
+| Context window exhaustion mid-session | MEDIUM | Add tokenizer check before each PLAN step; truncate or summarize history to budget; restart session from the latest PostgreSQL checkpoint |
 | Tool Search Tool accuracy below threshold | MEDIUM | Add alias fields to all catalog entries; rerun embedding generation; retune search confidence threshold |
 | Undo stack corruption | HIGH | Requires RhinoDoc reload from last `.3dm` save; all AI-issued operations since last save are lost; prevention is the only viable strategy |
 | Schema boundary drift (TS vs C#) | HIGH | Requires versioned protocol negotiation or full re-sync; add field-level comparison test between schemas in CI before this becomes a production problem |

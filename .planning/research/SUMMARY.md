@@ -4,6 +4,7 @@
 **Domain:** Agentic CAD automation (brownfield Effect/TypeScript + C# monorepo extension)
 **Researched:** 2026-02-22
 **Confidence:** HIGH (stack fully grounded in existing workspace catalog; architecture validated against current codebase)
+**Status note (2026-03-04):** Research artifact; implementation truth is tracked in `.planning/ROADMAP.md` and `.planning/STATE.md`.
 
 ## Executive Summary
 
@@ -54,8 +55,7 @@ Effect v4 entered public beta on 2026-02-18 but must not be used; `effect 3.19.1
 - Layers 1-3 on-demand scene representation — implement once Layer 0 insufficiency is confirmed by real usage
 
 **Defer to v2+:**
-- Grasshopper 1 procedural automation — high value/high complexity; deferred behind Phase 7 workflow/verification closure
-- Durable multi-step workflow execution with full `@effect/workflow` compensation — wire after single-step execution is reliable and `@effect/workflow` stabilizes
+- Grasshopper 1 procedural automation — high value/high complexity; still deferred (`EXEC-06` pending)
 - Bifurcated tool surface formalization with schema-driven `Tool.make` — currently implicit; explicit bifurcation adds correctness guarantees after tool surface stabilizes
 - Local LLM support — defer until Anthropic/OpenAI quality bar is validated as the correct constraint
 
@@ -74,7 +74,7 @@ The system splits into two OS processes communicating over a localhost WebSocket
 2. **RhinoDoc Command Executor** (C#) — existing `RunScript` + direct RhinoCommon routes + undo wrapping.
 3. **KargadanSocketClient** (TypeScript) — existing Effect WebSocket client with pending-map correlation and command ack/result sequencing guard.
 4. **AgentLoop** (TypeScript) — existing PLAN→EXECUTE→VERIFY→PERSIST→DECIDE loop, rewired through generic `packages/ai` rails.
-5. **AiService Agent Core Rails** (`packages/ai`) — in progress; generic stage orchestration + high-order toolkit builders are implemented.
+5. **AiService Agent Core Rails** (`packages/ai`) — implemented; generic stage orchestration + high-order toolkit builders are in place (phase closeout still needs manual Rhino smoke sign-off).
 6. **PostgreSQL Session Store** — existing RunEvent/RunSnapshot/session hydration with checkpoint sequence selection.
 7. **pgvector Knowledge Base** — existing schema + seed pipeline; harness now seeds from plugin handshake catalog first.
 8. **CLI Surface** — pending; forward policy is `@effect/cli`.
@@ -100,11 +100,13 @@ Canonical phase sequencing is tracked in `.planning/ROADMAP.md`.
 Current roadmap implications (2026-03-03):
 - Phases 1-4 are complete (transport, execution, schema topology, persistence foundations).
 - Phase 5 code implementation is complete (catalog handshake path, harness ingestion/seeding, NL planning over RAG catalog search, typed agent-core rails, chat checkpoint roundtrip, provider override/fallback support); manual Rhino smoke sign-off remains before close.
-- Phase 6/7/8 remain pending and are still gated by Phase 5 close.
+- Phase 6 code implementation is complete (scene/context rails wired); manual Rhino smoke sign-off remains before close.
+- Phase 7 non-Grasshopper implementation is integrated in code (`view.capture`, deterministic-first verification, single `@effect/workflow` write rail); live Rhino validation and `EXEC-06` remain pending.
+- Phase 8 remains pending and gated by validated Phase 5/6/7 baseline.
 
 Research carry-forward flags for upcoming phases:
-- Phase 6: re-verify Anthropic Tool Search Tool contract at implementation start.
-- Phase 7: re-verify `@effect/workflow` stability before durable workflow implementation.
+- Phase 6 closeout: run manual Rhino smoke sign-off and AGNT-07 runtime validation before marking complete.
+- Phase 7 closeout: execute live protocol conformance + Rhino acceptance runbook and capture artifact bundle.
 - Phase 8: execute CLI surface through `@effect/cli` policy (not Ink).
 
 ---
@@ -124,7 +126,7 @@ Research carry-forward flags for upcoming phases:
 
 - **Tool Search Tool production accuracy at Rhino catalog scale**: independent testing shows 56-64% accuracy at 4,027-tool catalogs. The Rhino command catalog is smaller (~300 commands) but CAD vocabulary mismatch (e.g., "fillet" vs "round edge") may produce similar failure rates. Mitigation: alias enrichment strategy during Phase 4 seeding + hybrid trigram fallback. Validate with a 50-query evaluation set before enabling in production.
 
-- **`@effect/workflow` alpha stability timeline**: the library is alpha as of 2026-01-02. Phase 7 depends on it stabilizing before implementation. Mitigation: the existing PLAN→EXECUTE retry/compensation pattern in `apps/kargadan/harness/src/runtime/agent-loop.ts` covers single-step failure recovery and is an acceptable fallback if `@effect/workflow` remains alpha through Phases 1-6.
+- **`@effect/workflow` alpha stability timeline**: the library is alpha as of 2026-01-02. Non-Grasshopper Phase 7 already uses it in the write path, so the mitigation focus shifts to live compensation/reconnect evidence and conservative fallback handling.
 
 - **macOS event ordering edge cases with multiple documents**: the research explicitly flags multi-document scenarios as risky (v1 defers multi-document sessions for this reason). Single-document-per-session constraint removes most of the risk, but the document-identity resolution flow in Phase 2 should be tested with file open/close/reopen sequences on macOS before assuming correctness.
 

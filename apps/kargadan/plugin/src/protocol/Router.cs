@@ -46,26 +46,18 @@ internal static class CommandRouter {
                 Error.New(message: $"Envelope root must be an object; observed {envelope.ValueKind}.")),
         };
     private static Fin<Unit> EnsureCommandTag(JsonElement envelope) =>
-        envelope.TryGetProperty(JsonFields.Tag, out JsonElement tagElement) switch {
-            false => FinFail<Unit>(
-                Error.New(message: $"Envelope {JsonFields.Tag} must be 'command'; observed '<missing>'.")),
-            true when tagElement.ValueKind != JsonValueKind.String =>
-                FinFail<Unit>(
-                    Error.New(message: $"Envelope {JsonFields.Tag} must be 'command'; observed '<{tagElement.ValueKind}>'.")),
-            true =>
-                DomainBridge.ParseSmartEnum<TransportMessageTag, string>(
-                    candidate: (tagElement.GetString() ?? string.Empty).Trim())
-                .BiMap(
-                    Succ: static (TransportMessageTag tag) => tag,
-                    Fail: (Error _) => Error.New(
-                        message: $"Envelope {JsonFields.Tag} must be 'command'; observed '{(tagElement.GetString() ?? string.Empty).Trim()}'."))
-                .Bind((TransportMessageTag tag) =>
-                    tag.Equals(TransportMessageTag.Command) switch {
-                        true => FinSucc(unit),
-                        _ => FinFail<Unit>(
-                            Error.New(message: $"Envelope {JsonFields.Tag} must be 'command'; observed '{tag.Key}'.")),
-                    }),
-        };
+        from tagRaw in RequireStringProperty(
+            parent: envelope,
+            propertyName: JsonFields.Tag,
+            errorMessage: $"Envelope {JsonFields.Tag} must be 'command'.")
+        from tag in DomainBridge.ParseSmartEnum<TransportMessageTag, string>(candidate: tagRaw)
+            .BiMap(
+                Succ: static t => t,
+                Fail: _ => Error.New(message: $"Envelope {JsonFields.Tag} must be 'command'."))
+        from _ in tag.Equals(TransportMessageTag.Command)
+            ? FinSucc(unit)
+            : FinFail<Unit>(Error.New(message: $"Envelope {JsonFields.Tag} must be 'command'; observed '{tag.Key}'."))
+        select unit;
     private static Fin<CommandEnvelope> DecodeCommandEnvelope(
         JsonElement envelope,
         EnvelopeIdentity sessionIdentity) =>
@@ -100,28 +92,19 @@ internal static class CommandRouter {
             _ => FinFail<CommandOperation>(Error.New(message: $"Operation '{operationKey}' is not enabled in the current command route table.")),
         }
         select supportedOperation;
-    private static Fin<string> DecodeOperationKey(JsonElement envelope) {
-        Option<string> commandId = ReadOptionalString(
-            parent: envelope,
-            propertyName: JsonFields.CommandId);
-        Option<string> legacyOperation = ReadOptionalString(
-            parent: envelope,
-            propertyName: JsonFields.Operation);
-        return commandId.Match(
-            Some: commandValue =>
-                legacyOperation.Match(
-                    Some: legacyValue =>
-                        string.Equals(commandValue, legacyValue, StringComparison.Ordinal)
-                            ? FinSucc(commandValue)
-                            : FinFail<string>(Error.New(
-                                message: $"Envelope command identity mismatch: '{JsonFields.CommandId}'='{commandValue}' and '{JsonFields.Operation}'='{legacyValue}'.")),
-                    None: () => FinSucc(commandValue)),
-            None: () =>
-                legacyOperation.Match(
-                    Some: FinSucc,
-                    None: () => FinFail<string>(Error.New(
-                        message: $"Command envelope must include '{JsonFields.CommandId}' (preferred) or '{JsonFields.Operation}'."))));
-    }
+    private static Fin<string> DecodeOperationKey(JsonElement envelope) =>
+        (cmdId: ReadOptionalString(parent: envelope, propertyName: JsonFields.CommandId),
+         legacy: ReadOptionalString(parent: envelope, propertyName: JsonFields.Operation)) switch {
+             ( { IsSome: true } cmd, { IsSome: true } leg) when string.Equals((string)cmd, (string)leg, StringComparison.Ordinal) =>
+                 FinSucc((string)cmd),
+             ( { IsSome: true }, { IsSome: true } leg) =>
+                 FinFail<string>(Error.New(
+                     message: $"Envelope command identity mismatch: '{JsonFields.CommandId}' and '{JsonFields.Operation}'='{(string)leg}'.")),
+             ( { IsSome: true } cmd, _) => FinSucc((string)cmd),
+             (_, { IsSome: true } leg) => FinSucc((string)leg),
+             _ => FinFail<string>(Error.New(
+                 message: $"Command envelope must include '{JsonFields.CommandId}' (preferred) or '{JsonFields.Operation}'.")),
+         };
     private static Fin<int> DecodeDeadlineMs(
         JsonElement envelope,
         CommandOperation operation) =>
@@ -210,12 +193,7 @@ internal static class CommandRouter {
         envelope.TryGetProperty(JsonFields.ObjectRefs, out JsonElement objectRefsElement) switch {
             false => FinSucc(Seq<SceneObjectRef>()),
             true when objectRefsElement.ValueKind == JsonValueKind.Array =>
-                toSeq(objectRefsElement.EnumerateArray())
-                    .Fold(
-                        state: FinSucc(Seq<SceneObjectRef>()),
-                        folder: static (Fin<Seq<SceneObjectRef>> aggregate, JsonElement current) =>
-                            aggregate.Bind((Seq<SceneObjectRef> parsed) =>
-                                DecodeSceneObjectRef(current).Map((SceneObjectRef item) => parsed.Add(item)))),
+                toSeq(objectRefsElement.EnumerateArray()).Map(DecodeSceneObjectRef).Sequence(),
             _ => FinFail<Seq<SceneObjectRef>>(Error.New(message: "objectRefs must be an array when provided.")),
         };
     private static Fin<SceneObjectRef> DecodeSceneObjectRef(JsonElement element) =>

@@ -32,9 +32,9 @@ Requirements for initial release. Each maps to roadmap phases.
 - [x] **AGNT-03**: Agent translates natural language user input into appropriate Rhino commands or RhinoCommon API calls via LLM inference
 - [x] **AGNT-04**: C# bridge plugin exports the real Rhino command catalog as structured JSON on connection; harness decodes the catalog schema, seeds via `AiService.seedKnowledge` with a real embed function, and agent discovers relevant commands via pgvector cosine similarity over the populated knowledge base
 - [x] **AGNT-05**: Agent uses @effect/ai `Chat` for multi-turn conversation with Ref-based history accumulation
-- [ ] **AGNT-06**: Architect/Editor model split — strong reasoning model (configurable) plans the operation strategy, faster model executes the command sequence
-- [ ] **AGNT-07**: Anthropic Tool Search Tool integration for on-demand tool discovery from large catalogs without upfront context loading
-- [ ] **AGNT-08**: Durable multi-step workflows via @effect/workflow — Activity (execute-once), withCompensation (rollback on failure), DurableDeferred (human approval gates)
+- [x] **AGNT-06**: Architect/Editor model split — configurable architect override is used for PLAN generation while command execution remains deterministic
+- [ ] **AGNT-07**: Optional Anthropic Tool Search path can augment discovery only when provider + runtime feature flag allow it; baseline discovery remains pgvector-first with fallback-safe behavior. Provider-gated seam is implemented; runtime validation is pending.
+- [ ] **AGNT-08**: Durable multi-step workflows via @effect/workflow — Activity (execute-once), withCompensation (rollback on failure), DurableDeferred (human approval gates). Non-Grasshopper write-path integration is implemented; live Rhino validation is pending.
 - [x] **AGNT-09**: Read tools are stateless and high-frequency (no undo overhead); write tools are validated, undo-wrapped, and carry idempotency tokens — bifurcated by design
 - [x] **AGNT-10**: Agent loop follows PLAN/EXECUTE/VERIFY/PERSIST/DECIDE state machine with typed transitions for retry, correction, compensation, and fatal escalation
 
@@ -55,10 +55,10 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### Scene
 
-- [ ] **SCEN-01**: Layer 0 compact scene summary (~500 tokens) is always present in the agent's context — object counts by type, active layer, document units, bounding volume
-- [ ] **SCEN-02**: Layers 1-3 provide progressive on-demand detail — per-object metadata (Layer 1), full attribute data (Layer 2), geometry data (Layer 3) — fetched only when explicitly needed
-- [ ] **SCEN-03**: Context compaction triggers at configurable token threshold (default 75% of context window) and summarizes to a target size (default 40%), preserving session goal, recent turns, and artifact trail
-- [ ] **SCEN-04**: Tool outputs use observation masking — return compact summaries (object count + bounding box) rather than verbose geometry dumps; full data available via explicit read tool
+- [x] **SCEN-01**: Layer 0 compact scene summary (~500 tokens) is always present in the agent's context — object counts by type, active layer, document units, bounding volume
+- [x] **SCEN-02**: Layers 1-3 provide progressive on-demand detail — per-object metadata (Layer 1), full attribute data (Layer 2), geometry data (Layer 3) — fetched only when explicitly needed
+- [x] **SCEN-03**: Context compaction triggers at configurable token threshold (default 75% of context window) and summarizes to a target size (default 40%), preserving session goal, recent turns, and artifact trail
+- [x] **SCEN-04**: Tool outputs use observation masking — return compact summaries (object count + bounding box) rather than verbose geometry dumps; full data available via explicit read tool
 
 ### Verification
 
@@ -66,6 +66,8 @@ Requirements for initial release. Each maps to roadmap phases.
 - [ ] **VRFY-02**: Plugin captures viewport via `ViewCapture.CaptureToBitmap` and returns the image to the harness for vision model assessment, with Metal-aware frame timing to avoid blank/partial captures on macOS
 - [ ] **VRFY-03**: Vision model evaluates viewport captures against the agent's stated intent — confirming the operation produced the expected visual result (shape, position, relationship)
 - [ ] **VRFY-04**: Verification results (deterministic + visual) feed into the DECIDE stage — informing retry, correction, or completion decisions with both structural and visual evidence
+
+**Phase 7 closure prerequisite (non-GH line):** Live protocol conformance smoke must pass against a running Rhino plugin (handshake/ack/result/event decode + malformed envelope rejection) before requirements above can be marked complete.
 
 ### CLI
 
@@ -145,9 +147,9 @@ Which phases cover which requirements. Updated during roadmap creation.
 | AGNT-03 | Phase 5 | Complete |
 | AGNT-04 | Phase 5 | Complete |
 | AGNT-05 | Phase 5 | Complete |
-| AGNT-06 | Phase 6 | Pending |
-| AGNT-07 | Phase 6 | Pending |
-| AGNT-08 | Phase 7 | Pending |
+| AGNT-06 | Phase 6 | Complete |
+| AGNT-07 | Phase 6 | Implemented (validation pending) |
+| AGNT-08 | Phase 7 | Implemented (non-GH line, validation pending) |
 | AGNT-09 | Phase 5 | Complete |
 | AGNT-10 | Phase 5 | Complete |
 | PROV-01 | Phase 5 | Complete |
@@ -159,14 +161,14 @@ Which phases cover which requirements. Updated during roadmap creation.
 | PERS-03 | Phase 4 | Complete |
 | PERS-04 | Phase 4 | Complete |
 | PERS-05 | Phase 4 | Complete |
-| SCEN-01 | Phase 6 | Pending |
-| SCEN-02 | Phase 6 | Pending |
-| SCEN-03 | Phase 6 | Pending |
-| SCEN-04 | Phase 6 | Pending |
-| VRFY-01 | Phase 7 | Pending |
-| VRFY-02 | Phase 7 | Pending |
-| VRFY-03 | Phase 7 | Pending |
-| VRFY-04 | Phase 7 | Pending |
+| SCEN-01 | Phase 6 | Complete |
+| SCEN-02 | Phase 6 | Complete |
+| SCEN-03 | Phase 6 | Complete |
+| SCEN-04 | Phase 6 | Complete |
+| VRFY-01 | Phase 7 | Implemented (non-GH line, validation pending) |
+| VRFY-02 | Phase 7 | Implemented (non-GH line, validation pending) |
+| VRFY-03 | Phase 7 | Implemented (non-GH line, validation pending) |
+| VRFY-04 | Phase 7 | Implemented (non-GH line, validation pending) |
 | CLI-01 | Phase 8 | Pending |
 | CLI-02 | Phase 8 | Pending |
 | CLI-03 | Phase 8 | Pending |
@@ -187,4 +189,4 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 ---
 *Requirements defined: 2026-02-22*
-*Last updated: 2026-03-03 after Phase 5 implementation drift reconciliation*
+*Last updated: 2026-03-04 after Phase 7 non-GH implementation update*

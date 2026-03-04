@@ -60,6 +60,7 @@ const main = Effect.scoped(
             CommandDispatch, AgentLoop, AgentPersistenceService, ReconnectionSupervisor, HarnessConfig.sessionToken,
             HarnessConfig.appId, AiService, DatabaseService, HarnessConfig.agentIntent, HarnessConfig.resolveSessionOverride,
         ]);
+        const architectOverride = yield* HarnessConfig.resolveArchitectOverride;
         yield* FiberRef.set(AiRegistry.SessionOverrideRef, sessionOverride);
         const [manifestJson, manifestVersion, manifestEntityType, manifestNamespace, manifestScopeId] = yield* Effect.all([
             HarnessConfig.commandManifestJson,      HarnessConfig.commandManifestVersion, HarnessConfig.commandManifestEntityType,
@@ -82,10 +83,7 @@ const main = Effect.scoped(
                 ? Effect.log('kargadan.harness: resumable session corrupt or empty, starting fresh', { sessionId })
                 : Effect.log('kargadan.harness: resuming session', { diverged: r.diverged, sequence: r.sequence, sessionId }),
         });
-        yield* Option.match(resume, {
-            onNone: () => persistence.startSession({ appId, correlationId, sessionId }),
-            onSome: () => Effect.void,
-        });
+        yield* Option.isNone(resume) ? persistence.startSession({ appId, correlationId, sessionId }) : Effect.void;
         const identityBase = { appId, correlationId, sessionId };
         const outcome = yield* Context.Request.withinSync(
             appId,
@@ -99,7 +97,7 @@ const main = Effect.scoped(
                     const envManifest = yield* S.decodeUnknown(_ManifestSchema)(manifestJson).pipe(Effect.option);
                     const mergedManifest = _mergeManifest(handshakeCatalog, envManifest);
                     const seedProjection = mergedManifest.length === 0
-                        ? { manifest: manifestJson, source: 'env' as const, version: manifestVersion }
+                        ? { manifest: manifestJson,   source: 'env' as const,       version: manifestVersion }
                         : { manifest: mergedManifest, source: 'handshake' as const, version: `handshake:${ack.server?.pluginRevision ?? 'unknown'}:${String(mergedManifest.length)}` };
                     const serializedManifest = typeof seedProjection.manifest === 'string' ? seedProjection.manifest : JSON.stringify(seedProjection.manifest);
                     const scope = Option.getOrElse(manifestScopeId, () => 'global');
@@ -128,6 +126,8 @@ const main = Effect.scoped(
                     ).pipe(Effect.when(() => serializedManifest.trim().length > 0));
                     const runtimeIdentityBase = { appId: ack.appId, correlationId: ack.correlationId, sessionId: ack.sessionId };
                     return yield* loop.handle({
+                        architectOverride,
+                        capabilities: ack.acceptedCapabilities,
                         catalog:      mergedManifest,
                         identityBase: runtimeIdentityBase,
                         intent,

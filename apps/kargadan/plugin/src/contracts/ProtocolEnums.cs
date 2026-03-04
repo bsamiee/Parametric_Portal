@@ -65,6 +65,7 @@ public sealed partial class CommandOperation {
     public static readonly CommandOperation LayerState = new("read.layer.state");
     public static readonly CommandOperation ViewState = new("read.view.state");
     public static readonly CommandOperation ToleranceUnits = new("read.tolerance.units");
+    public static readonly CommandOperation ViewCapture = new("view.capture");
     public static readonly CommandOperation ObjectCreate = new("write.object.create");
     public static readonly CommandOperation ObjectUpdate = new("write.object.update");
     public static readonly CommandOperation ObjectDelete = new("write.object.delete");
@@ -77,6 +78,7 @@ public sealed partial class CommandOperation {
             layerState: CommandExecutionMode.DirectApi,
             viewState: CommandExecutionMode.DirectApi,
             toleranceUnits: CommandExecutionMode.DirectApi,
+            viewCapture: CommandExecutionMode.DirectApi,
             objectCreate: CommandExecutionMode.DirectApi,
             objectUpdate: CommandExecutionMode.DirectApi,
             objectDelete: CommandExecutionMode.DirectApi,
@@ -89,6 +91,7 @@ public sealed partial class CommandOperation {
             layerState: CommandCategory.Read,
             viewState: CommandCategory.Read,
             toleranceUnits: CommandCategory.Read,
+            viewCapture: CommandCategory.Read,
             objectCreate: CommandCategory.Write,
             objectUpdate: CommandCategory.Write,
             objectDelete: CommandCategory.Write,

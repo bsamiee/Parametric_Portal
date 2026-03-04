@@ -2,19 +2,19 @@
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-03-03)
+See: .planning/PROJECT.md (updated 2026-03-04)
 
 **Core value:** The agent can execute any operation a human can perform in Rhino 9 through natural language, with reliable state persistence and verification — without hardcoding individual commands.
-**Current focus:** Phase 5 - Agent Core and Provider Abstraction
+**Current focus:** Phase 7 - Verification and Durable Workflows (non-Grasshopper line)
 
 ## Current Position
 
-Phase: 5 of 8 (Agent Core and Provider Abstraction)
-Plan: 3 scopes defined; integrated execution active
-Status: Phase 05 implementation complete in code across plugin/harness/packages; manual Rhino smoke sign-off pending
-Last activity: 2026-03-03 -- Phase 5 closure pass applied (NL plan+RAG command selection, typed DECIDE-owned loop transitions, session-start provider/model override wiring, plugin idempotency duplicate handling, and full ts/cs/py validation)
+Phase: 7 of 8 (Verification, Workflows, and Grasshopper)
+Plan: Non-Grasshopper execution line integrated; live validation and closure evidence in progress
+Status: Phase 07 non-GH implementation is in code (deterministic+visual verification, `view.capture`, single `@effect/workflow` write rail); live Rhino validation pending and `EXEC-06` remains deferred
+Last activity: 2026-03-04 -- Phase 7 non-GH pass integrated (`view.capture` command route, deterministic-first verification evidence, workflow activity/compensation write execution, loop-state persistence enrichment, and live acceptance suite scaffolding)
 
-Progress: [█████████░] 90.0%
+Progress: [█████████░] 96.0%
 
 ## Performance Metrics
 
@@ -90,16 +90,46 @@ Recent decisions affecting current work:
 - [05]: Catalog source-of-truth is handshake ack payload from plugin; env manifest is fallback/dev metadata enrichment path only
 - [05]: Command dispatch boundary accepts `commandId` + structured `args` (legacy `operation`/`payload` compatibility kept at boundary)
 - [05]: C# protocol contracts remain canonical; TS schemas conform at decode boundaries
+- [05]: TS boundary parity now explicitly covers command `telemetryContext`, optional `result` payload decode, and remote `_tag: "error"` handling
+- [06]: PLAN stage requests `read.scene.summary` each cycle (when catalog-supported) and carries masked scene/observation context through loop state
+- [06]: Context compaction is tokenizer-gated with configurable thresholds (`KARGADAN_CONTEXT_COMPACTION_TRIGGER_PERCENT` default 75, `KARGADAN_CONTEXT_COMPACTION_TARGET_PERCENT` default 40)
+- [06]: Progressive read controls (`detail`, `includeHidden`, `limit`) are normalized in planner args and validated in plugin read handlers
+- [06]: Architect model override is independently configurable via `KARGADAN_AI_ARCHITECT_PROVIDER`, `KARGADAN_AI_ARCHITECT_MODEL`, and `KARGADAN_AI_ARCHITECT_FALLBACK`
+- [06]: Discovery keeps pgvector default; Anthropic tool-search path is provider-scoped and optional
+- [07]: Verification authority is deterministic; visual (`view.capture`) evidence is optional and augmenting only
+- [07]: Write-path durability now uses a single `@effect/workflow` execution rail with compensation hooks; duplicated ad-hoc rail removed
+- [07]: Non-Grasshopper scope is explicit for this execution line; `EXEC-06` remains pending by design
 
 ### Pending Todos
 
-- [Phase 5]: Execute manual Rhino smoke sign-off (handshake+catalog, one read command, one write command, one resume cycle)
+- [Phase 7 close]: Execute live protocol conformance smoke + non-GH Rhino validation and collect artifact bundle
+- [Phase 5/6 close]: Final manual Rhino smoke sign-off remains required for historical closure consistency
 
 ### Blockers/Concerns
 
-- [Phase 5 close]: End-to-end Rhino smoke (handshake+catalog, one read, one write, one resume cycle) still required before Phase 5 can be marked fully complete
-- [Phase 6 research]: Anthropic Tool Search Tool beta contract should be re-verified at implementation start
-- [Phase 7 research]: Re-verify `@effect/workflow` stability before durable workflow execution work begins
+- [Phase 7 close]: Live Rhino acceptance evidence is not yet captured (`KARGADAN_LIVE_TESTS=1` path still pending operator run)
+- [Phase 5/6 close]: End-to-end Rhino smoke across the combined Phase 5/6 path is still required before closeout can be marked complete
+- [Phase 6 follow-up]: Anthropic provider tool-search path is feature-gated/unavailable at runtime; command discovery currently degrades to pgvector fallback ranking
+- [Phase 7 split]: Grasshopper requirement (`EXEC-06`) is intentionally deferred in this execution line
+
+### Phase 7 Live Runbook (Non-GH)
+
+**Prerequisites**
+- Rhino 9 WIP running with the Kargadan plugin loaded (`net9.0` build)
+- Local PostgreSQL reachable via `KARGADAN_CHECKPOINT_DATABASE_URL`
+- Harness environment configured with valid session token/capabilities
+- Optional vision provider credentials if visual hint generation is enabled
+
+**Execution Steps**
+1. Run protocol conformance smoke with live gate enabled: `KARGADAN_LIVE_TESTS=1 pnpm exec vitest run tests/integration/kargadan/phase7-live.spec.ts`
+2. Run non-GH validation matrix: plugin restore/build, harness typecheck/check/test, package type/lint checks, global `pnpm ts:check`, `pnpm cs:check`, `pnpm py:check`
+3. Execute one manual Rhino session: handshake/catalog ingest -> write command -> Cmd+Z undo -> optional `view.capture` -> reconnect/resume checkpoint
+
+**Expected Artifacts Per Session**
+- Harness logs (PLAN/EXECUTE/VERIFY/DECIDE transitions + workflow execution ids)
+- Plugin logs (command execution + undo/compensation traces)
+- WebSocket transcript (handshake/ack/result/event envelopes)
+- PostgreSQL journal rows (checkpoint + tool-call continuity)
 
 ### Phase 5 Resolved Questions
 
@@ -111,6 +141,6 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-03-03
-Stopped at: Phase 5 code complete with validation green; pending manual Rhino smoke sign-off
-Resume file: Phase 5 validation + Phase 6 planning
+Last session: 2026-03-04
+Stopped at: Phase 7 non-GH code integration complete with automated validation gates green; pending live Rhino acceptance evidence
+Resume file: Phase 7 live acceptance run + Phase 5/6 historical smoke closure + `EXEC-06` planning

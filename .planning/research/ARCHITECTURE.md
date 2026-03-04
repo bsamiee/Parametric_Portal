@@ -3,6 +3,7 @@
 **Domain:** CLI-based AI agent controlling Rhino 9 on macOS — two-process Effect/TypeScript + C# architecture
 **Researched:** 2026-02-22
 **Confidence:** HIGH (grounded in existing codebase, official Effect docs, Anthropic Tool Search docs, validated prior Rhino research)
+**Status note (2026-03-04):** Research artifact; implementation truth is tracked in `.planning/ROADMAP.md` and `.planning/STATE.md`.
 
 ---
 
@@ -331,7 +332,7 @@ const toolkit = Toolkit.make(
 
 **When to use:** Write sequences with 3+ dependent steps, or any operation requiring human-in-the-loop approval before execution.
 
-**Trade-offs:** @effect/workflow is alpha. Until stable, the existing PLAN→EXECUTE retry/compensation pattern in `agent-loop.ts` handles simpler cases.
+**Trade-offs:** `@effect/workflow` remains alpha, but the non-Grasshopper Phase 7 write path now runs on a single workflow rail in `agent-loop.ts`. Live Rhino conformance/compensation evidence remains the closure gate.
 
 **Example:**
 ```typescript
@@ -453,19 +454,27 @@ Canonical build order is maintained in `.planning/ROADMAP.md`. Current phase sta
 Phase 1-4: Complete
     Transport + execution + schema topology + persistence foundations are implemented.
 
-Phase 5: In progress
+Phase 5: Code complete (manual Rhino smoke sign-off pending closeout)
     Handshake catalog transfer, harness ingestion/seeding, generic agent-core rails,
     chat checkpoint roundtrip, and provider override/fallback runtime paths are wired.
 
-Phase 6/7/8: Pending
-    Phase 6 (scene/context), Phase 7 (verification/workflow durability), and
-    Phase 8 (CLI surface via @effect/cli policy) remain gated on Phase 5 close.
+Phase 6: Code complete (manual Rhino smoke sign-off pending closeout)
+    Protocol telemetry parity, Layer-0 scene context, progressive detail controls,
+    tokenizer-gated compaction, architect override split, and provider-gated discovery seam are wired.
+
+Phase 7: Non-GH implementation integrated; live validation pending
+    Deterministic-first verification, optional `view.capture`, and single-paradigm `@effect/workflow`
+    write durability are wired. Grasshopper (`EXEC-06`) remains deferred in this execution line.
+
+Phase 8: Pending
+    CLI surface via @effect/cli policy remains queued behind validated Phase 5/6/7 baseline.
 ```
 
 **Critical dependencies:**
 - Phases 1→4 are sequential and complete foundations (transport, execution, schema topology, persistence).
-- Phase 5 depends on Phase 4 and is the current integration gate.
-- Phases 6, 7, and 8 all depend on Phase 5 completion and are otherwise independent.
+- Phase 5 depends on Phase 4 and Phase 5 closeout (manual Rhino smoke sign-off) remains the integration gate.
+- Phase 6 code is implemented but shares the same closeout validation gate as Phase 5.
+- Phases 7 and 8 depend on validated Phase 5/6 baseline and are otherwise independent.
 
 ---
 

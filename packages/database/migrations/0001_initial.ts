@@ -681,6 +681,7 @@ export default Effect.gen(function* () {
                 DELETE FROM search_chunks WHERE entity_type = _et AND entity_id = OLD.id;
                 RETURN OLD;
             END IF;
+            DELETE FROM search_chunks WHERE entity_type = _et AND entity_id = NEW.id;
             PERFORM upsert_search_chunk_from_source(_et, NEW.id);
             RETURN NEW;
         END; $$ LANGUAGE plpgsql;
@@ -694,8 +695,8 @@ export default Effect.gen(function* () {
     yield* sql.unsafe(String.raw`
         CREATE OR REPLACE FUNCTION refresh_search_chunks(p_scope_id uuid DEFAULT NULL, p_include_global boolean DEFAULT false)
             RETURNS void LANGUAGE plpgsql SECURITY INVOKER AS $$ BEGIN
-            IF p_scope_id IS NULL THEN DELETE FROM search_chunks;
-            ELSE DELETE FROM search_chunks WHERE scope_id = p_scope_id; IF p_include_global THEN DELETE FROM search_chunks WHERE scope_id IS NULL; END IF; END IF;
+            IF p_scope_id IS NULL THEN DELETE FROM search_chunks WHERE entity_type <> 'command';
+            ELSE DELETE FROM search_chunks WHERE scope_id = p_scope_id AND entity_type <> 'command'; IF p_include_global THEN DELETE FROM search_chunks WHERE scope_id IS NULL AND entity_type <> 'command'; END IF; END IF;
             INSERT INTO search_chunks (entity_type, entity_id, scope_id, display_text, content_text, metadata, normalized_text)
             SELECT s.entity_type, s.entity_id, s.scope_id, s.display_text, s.content_text, s.metadata,
                 normalize_search_text(s.display_text, s.content_text, s.metadata)

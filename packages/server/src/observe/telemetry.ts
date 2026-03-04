@@ -167,6 +167,8 @@ const _Default = Layer.unwrapEffect(
 
 // --- [ENTRY] -----------------------------------------------------------------
 
+const emit = (key: string, attrs: Record<string, unknown> = {}) => Effect.logWarning(key).pipe(Effect.annotateLogs(attrs));
+
 // biome-ignore lint/correctness/noUnusedVariables: const+namespace merge pattern
 const Telemetry = {
     collectorConfig:    _telemetryConfig.pipe(Effect.map((cfg) => ({
@@ -175,6 +177,7 @@ const Telemetry = {
         protocol:       cfg.protocol,
     }))),
     Default: _Default,
+    emit,
     span: _span,
 } as const;
 

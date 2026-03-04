@@ -17,8 +17,8 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 3: Schema Redesign and Topology** - Delete legacy schemas, extract universal concepts to packages/, isolate app-specific protocol in apps/kargadan (completed 2026-02-23)
 - [x] **Phase 4: Session Persistence and Knowledge Base** - PostgreSQL-backed session store replacing in-memory trace, plus Rhino command knowledge base for RAG (completed 2026-02-23)
 - [ ] **Phase 5: Agent Core and Provider Abstraction** - Generic agent loop in packages/ai with tool orchestration, RAG discovery, multi-provider support, and fallback chains
-- [ ] **Phase 6: Scene Representation and Context Management** - Layered scene summary, context compaction, Architect/Editor model split, and Tool Search Tool integration
-- [ ] **Phase 7: Verification, Workflows, and Grasshopper** - Unified verification pipeline, durable multi-step workflows with compensation, and Grasshopper 1 programmatic access
+- [ ] **Phase 6: Scene Representation and Context Management** - Protocol telemetry parity, always-present Layer-0 scene summary, progressive detail retrieval, context compaction rails, architect/editor split, and optional Anthropic discovery with pgvector-first baseline
+- [ ] **Phase 7: Verification, Workflows, and Grasshopper** - Unified verification pipeline and durable multi-step workflows are in the non-Grasshopper execution line; Grasshopper 1 (`EXEC-06`) remains deferred
 - [ ] **Phase 8: CLI Interface** - Terminal-based interaction with streaming progress, tool call visibility, plan-before-execute mode, and Effect-native CLI
 
 ## Phase Details
@@ -124,33 +124,39 @@ Tracks:
 **Depends on**: Phase 5
 **Requirements**: SCEN-01, SCEN-02, SCEN-03, SCEN-04, AGNT-06, AGNT-07
 **Success Criteria** (what must be TRUE):
-  1. A compact scene summary (~500 tokens) showing object counts, active layer, units, and bounding volume is always present in the agent's context
-  2. The agent can request progressive detail (per-object metadata, full attributes, geometry data) on demand without flooding context with unneeded information
-  3. Context compaction fires at 75% of the context window and reduces to 40% target — sessions of 50+ turns do not degrade in quality
-  4. A strong reasoning model handles planning while a faster model handles execution — reducing cost and latency for routine tool calls
-  5. Tool Search Tool discovers relevant tools from large catalogs on demand without loading the full catalog into context upfront
-**Plans**: TBD
+  1. Protocol command envelopes maintain telemetry parity across harness and plugin (`traceId`, `spanId`, `operationTag`, `attempt`)
+  2. Layer-0 scene summary is always present and includes `activeView`, `layerCount`, `objectCount`, `objectCountsByType`, `activeLayer`, `tolerances`, and `worldBoundingBox`
+  3. Progressive detail arguments are normalized per read operation (`detail`, `includeHidden`, `limit`) to request only required scene depth
+  4. Context compaction is tokenizer-gated with configurable thresholds (default trigger 75%, target 40%)
+  5. Architect planning can run under architect override while execution remains on default/session editor profile
+  6. Command discovery remains pgvector/hybrid-first; Anthropic Tool Search path is optional, provider-gated, and fallback-safe
+**Execution tracks**: 6 (integrated in working tree; closeout validation pending)
 
-Plans:
-- [ ] 06-01: TBD
-- [ ] 06-02: TBD
+Tracks:
+- [x] Protocol telemetry parity and remote error propagation
+- [x] Layer-0 scene summary enrichment and plan-context injection
+- [x] Progressive detail retrieval controls
+- [x] Context compaction gate + persistence
+- [x] Architect/editor model override split
+- [x] Optional provider-scoped Anthropic discovery seam with pgvector default (feature-gated; runtime validation pending)
 
 ### Phase 7: Verification, Workflows, and Grasshopper
-**Goal**: The agent verifies its own work through deterministic and visual checks, executes multi-step operations with rollback on failure, and accesses Grasshopper 1 definitions
+**Goal**: The agent verifies its own work through deterministic and visual checks and executes multi-step operations with rollback on failure (non-Grasshopper execution line)
 **Depends on**: Phase 5
 **Requirements**: VRFY-01, VRFY-02, VRFY-03, VRFY-04, AGNT-08, EXEC-06
+**Phase 7 pre-gate (required before closeout):** Live protocol conformance smoke against a running Rhino plugin validates handshake/ack/result/event decode and rejects malformed envelopes
 **Success Criteria** (what must be TRUE):
-  1. After executing an operation, the agent runs deterministic checks (geometry validity, bounding box, object existence) and reports pass/fail through a unified verification interface
-  2. The agent captures a viewport image via ViewCapture.CaptureToBitmap with Metal-aware frame timing and a vision model evaluates whether the result matches the stated intent
-  3. Verification results (deterministic + visual) feed into the DECIDE stage — informing whether to retry, correct, or mark complete
-  4. Multi-step write sequences use durable workflows with compensation — partial failure rolls back completed steps via the undo stack
-  5. The agent can load a Grasshopper 1 definition, set input parameters, solve, and extract outputs programmatically via the GH1 C# SDK
-**Plans**: TBD
+  1. Deterministic verification is the pass/fail authority after command execution (geometry/object/scene checks)
+  2. `view.capture` visual evidence is optional and augmenting — it never overrides deterministic pass/fail
+  3. Verification results feed the DECIDE stage with stable `status` + `failureClass` semantics and persisted evidence
+  4. Multi-step write sequences run through one durable workflow paradigm (`@effect/workflow`) with compensation on failure
+  5. Grasshopper implementation (`EXEC-06`) remains explicitly deferred in this execution line
+**Execution tracks**: 2/3 integrated in working tree (non-GH line; live validation pending)
 
 Plans:
-- [ ] 07-01: TBD
-- [ ] 07-02: TBD
-- [ ] 07-03: TBD
+- [x] 07-01: Unified verification pipeline (deterministic hard gate + optional `view.capture` visual augment)
+- [x] 07-02: Single-paradigm durable write execution using `@effect/workflow` activities + compensation + approval-gate scaffold
+- [ ] 07-03: Live Rhino protocol/usage validation, artifact runbook execution, and closure review with `EXEC-06` still pending
 
 ### Phase 8: CLI Interface
 **Goal**: The user interacts with the agent through a polished terminal interface that provides real-time feedback, approval gates, and clear error communication
@@ -182,6 +188,6 @@ Note: Phases 6, 7, and 8 all depend on Phase 5 but not on each other. They can b
 | 3. Schema Redesign and Topology | 2/2 | Complete | 2026-02-23 |
 | 4. Session Persistence and Knowledge Base | 2/2 | Complete    | 2026-02-23 |
 | 5. Agent Core and Provider Abstraction | 3/3 | Validation pending (manual Rhino smoke) | - |
-| 6. Scene Representation and Context Management | 0/2 | Not started | - |
-| 7. Verification, Workflows, and Grasshopper | 0/3 | Not started | - |
+| 6. Scene Representation and Context Management | 6/6 | Validation pending (manual Rhino smoke) | - |
+| 7. Verification, Workflows, and Grasshopper | 2/3 | In validation (non-GH line; `EXEC-06` pending) | - |
 | 8. CLI Interface | 0/2 | Not started | - |

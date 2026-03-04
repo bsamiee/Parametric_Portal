@@ -3,6 +3,7 @@
 **Domain:** CLI-based AI agent orchestrating tool calls against Rhino 9 (CAD), with persistent sessions, RAG-backed tool discovery, and durable workflows
 **Researched:** 2026-02-22
 **Confidence:** HIGH (all core choices verified against existing workspace catalog + official sources)
+**Status note (2026-03-03):** Research artifact; implementation truth is tracked in `.planning/ROADMAP.md` and `.planning/STATE.md`.
 
 ---
 
@@ -55,7 +56,7 @@ The workspace catalog already pins the core stack. This research documents what 
 
 ## Installation
 
-No additional stack dependency is required for Phase 5 closeout.  
+No additional stack dependency is required for Phase 5/6 closeout.  
 Phase 8 should adopt `@effect/cli` as the canonical CLI surface per project policy.
 
 ---

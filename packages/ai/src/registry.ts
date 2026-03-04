@@ -27,6 +27,7 @@ const _clients = {
     openai:    OpenAiClient.layerConfig({    apiKey: Config.redacted('OPENAI_API_KEY')    }).pipe(Layer.provide(FetchHttpClient.layer)),
 } as const;
 const _SessionOverrideRef = FiberRef.unsafeMake(Option.none<S.Schema.Type<typeof _SessionOverrideSchema>>());
+const _AnthropicToolSearchFlag = 'provider.anthropic.tool_search' as const;
 
 // --- [FUNCTIONS] -------------------------------------------------------------
 
@@ -111,8 +112,15 @@ const AiRegistry = {
         fallbackLanguage: settings.language.fallback.map((provider) => _providers[provider].language({ ...settings.language, provider })),
         language:         _providers[settings.language.provider].language(settings.language),
     }),
+    resolveDiscovery: (settings: S.Schema.Type<typeof AiSettingsSchema>) => ({
+        anthropicToolSearchEnabled: settings.language.provider === 'anthropic'
+            && settings.policy.tools.mode === 'allow'
+            && settings.policy.tools.names.includes(_AnthropicToolSearchFlag),
+        provider: settings.language.provider,
+    }),
     SessionOverrideRef: _SessionOverrideRef,
     schema:             AiSettingsSchema,
+    toolSearchFlag:     _AnthropicToolSearchFlag,
 } as const;
 
 // --- [NAMESPACE] -------------------------------------------------------------

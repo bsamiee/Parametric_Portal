@@ -4,6 +4,11 @@ import { Chunk, Effect, HashMap, HashSet, Layer, Match, Option, type ParseResult
 import type { AgentJournal } from './models.ts';
 import { DatabaseService } from './repos.ts';
 
+// --- [TYPES] -----------------------------------------------------------------
+
+type JournalEntry  = S.Schema.Type<typeof AgentJournal>;
+type HydrateResult = { readonly fresh: true } | { chatJson: string; diverged: boolean; fresh: false; sequence: number; state: unknown };
+
 // --- [SCHEMA] ----------------------------------------------------------------
 
 const CheckpointPayload = S.Struct({ chatJson:   S.String, loopState: S.Unknown });
@@ -15,11 +20,6 @@ const StartPayload =      S.Struct({ metadata:   S.optional(S.Record({
 });
 const CompletePayload = S.Struct({ endedAt:    S.optional(S.Union(S.DateFromSelf, S.String)), error: S.NullOr(S.String), toolCallCount: S.optional(S.Number) });
 const ToolCallPayload = S.Struct({ durationMs: S.optional(S.Number), params: S.optional(S.Unknown), result: S.optional(S.Unknown) });
-
-// --- [TYPES] -----------------------------------------------------------------
-
-type JournalEntry  = S.Schema.Type<typeof AgentJournal>;
-type HydrateResult = { readonly fresh: true } | { chatJson: string; diverged: boolean; fresh: false; sequence: number; state: unknown };
 
 // --- [FUNCTIONS] -------------------------------------------------------------
 
@@ -104,13 +104,13 @@ class AgentPersistenceService extends Effect.Service<AgentPersistenceService>()(
                                     sequence: checkpoint.sequence,
                                     state:    payload.loopState,
                                 })),
+                                Effect.catchAll((error) =>
+                                    Effect.logWarning('database.agentPersistence.hydrate.decode_failed', { error: String(error), sessionId }).pipe(
+                                        Effect.as({ fresh: true as const }),
+                                    ),
+                                ),
                             ),
                     }),
-                ),
-                Effect.catchAll((error) =>
-                    Effect.logWarning('database.agentPersistence.hydrate.decode_failed', { error: String(error), sessionId }).pipe(
-                        Effect.as({ fresh: true as const }),
-                    ),
                 ),
             ),
         );
@@ -152,7 +152,7 @@ class AgentPersistenceService extends Effect.Service<AgentPersistenceService>()(
             stateHash:   Option.none(), status: Option.some('running' as const),
         }]));
         const completeSession = Effect.fn('database.agentPersistence.completeSession')((params: {
-            readonly appId: string; readonly correlationId: string; readonly error: string | null;
+            readonly appId:    string; readonly correlationId: string; readonly error: string | null;
             readonly sequence: number; readonly sessionId: string; readonly status: 'completed' | 'failed' | 'interrupted'; readonly toolCallCount: number;
         }) => write([{
             appId:       params.appId, entryKind: 'session_complete' as const, operation: Option.none(),

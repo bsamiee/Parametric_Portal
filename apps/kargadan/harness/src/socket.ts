@@ -9,14 +9,15 @@ import { HarnessConfig } from './config';
 // --- [CONSTANTS] -------------------------------------------------------------
 
 const _FaultPolicy = {
-    connection_stale:    { retryable: true,  terminal: false },
-    disconnected:        { retryable: true,  terminal: true  },
-    port_file_invalid:   { retryable: false, terminal: false },
-    port_file_not_found: { retryable: true,  terminal: false },
-    port_file_stale:     { retryable: true,  terminal: false },
-    request_timeout:     { retryable: true,  terminal: false },
-    transport_failure:   { retryable: true,  terminal: false },
-} as const satisfies Record<string, { retryable: boolean; terminal: boolean }>
+    connection_stale:    { terminal: false },
+    disconnected:        { terminal: true  },
+    port_file_invalid:   { terminal: false },
+    port_file_not_found: { terminal: false },
+    port_file_stale:     { terminal: false },
+    protocol:            { terminal: false },
+    request_timeout:     { terminal: false },
+    transport_failure:   { terminal: false },
+} as const satisfies Record<string, { terminal: boolean }>
 
 // --- [ERRORS] ----------------------------------------------------------------
 
@@ -24,7 +25,6 @@ class SocketClientError extends Data.TaggedError('SocketClientError')<{
     readonly reason:   keyof typeof _FaultPolicy;
     readonly details?: unknown;
 }> {
-    get retryable() { return _FaultPolicy[this.reason].retryable }
     get terminal()  { return _FaultPolicy[this.reason].terminal }
     override get message() {
         const prefix = `SocketClient/${this.reason}`;
@@ -83,38 +83,58 @@ class KargadanSocketClient extends Effect.Service<KargadanSocketClient>()('karga
         const socket = yield* Socket.Socket;
         const reconnectSupervisor = yield* ReconnectionSupervisor;
         const writer = yield* socket.writer;
-        const pending = yield* Ref.make(HashMap.empty<string, { readonly deferred: Deferred.Deferred<Envelope.PendingReply>; readonly tag: Envelope.Outbound['_tag'] }>());
+        const pending = yield* Ref.make(HashMap.empty<string, {
+            readonly deferred: Deferred.Deferred<Envelope.PendingReply, SocketClientError>;
+            readonly tag:      Envelope.Outbound['_tag'];
+        }>());
         const events = yield* Queue.unbounded<Envelope.Event>();
         const lastMessageAt = yield* Ref.make<Option.Option<number>>(Option.none());
         const decode = S.decodeUnknown(S.parseJson(Envelope));
         const encode = S.encode(S.parseJson(Envelope));
-        const _failAllPending = (cause: string) =>
-            Ref.getAndSet(pending, HashMap.empty<string, { readonly deferred: Deferred.Deferred<Envelope.PendingReply>; readonly tag: Envelope.Outbound['_tag'] }>()).pipe(
-                Effect.flatMap((old) => Effect.forEach(HashMap.values(old), (entry) => Deferred.die(entry.deferred, new SocketClientError({ details: { cause }, reason: 'disconnected' })).pipe(Effect.ignore), { discard: true })),
+        const _failAllPending = (
+            cause:    string,
+            details?: Readonly<Record<string, unknown>>,
+            reason:   keyof typeof _FaultPolicy = 'disconnected',
+        ) =>
+            Ref.getAndSet(pending, HashMap.empty()).pipe(
+                Effect.flatMap((old) => Effect.forEach(HashMap.values(old), (entry) =>
+                    Deferred.fail(entry.deferred, new SocketClientError({ details: { cause, ...details }, reason })).pipe(Effect.ignore), { discard: true })),
             );
+        const _takePending = (requestId: string, retain: (entry: { readonly tag: Envelope.Outbound['_tag'] }) => boolean) =>
+            Ref.modify(pending, (entries) => pipe(HashMap.get(entries, requestId), Option.match({
+                onNone: () => [Option.none(), entries] as const,
+                onSome: (entry) => retain(entry) ? [Option.none(), entries] as const : [Option.some(entry.deferred), HashMap.remove(entries, requestId)] as const,
+            })));
+        const _failPendingByRequestId = (requestId: string, error: SocketClientError) =>
+            _takePending(requestId, () => false).pipe(Effect.flatMap(Option.match({
+                onNone: () => Effect.succeed(false),
+                onSome: (deferred) => Deferred.fail(deferred, error).pipe(Effect.as(true)),
+            })));
         const _resolveReply = (reply: Envelope.PendingReply) =>
-            Ref.modify(pending, (entries) =>
-                pipe(
-                    HashMap.get(entries, reply.requestId),
-                    Option.match({
-                        onNone: () => [Option.none<Deferred.Deferred<Envelope.PendingReply>>(), entries] as const,
-                        onSome: (entry) => Match.value({ pendingTag: entry.tag, replyTag: reply._tag }).pipe(
-                            Match.when({ pendingTag: 'command', replyTag: 'command.ack' }, () => [Option.none<Deferred.Deferred<Envelope.PendingReply>>(), entries] as const),
-                            Match.orElse(() => [Option.some(entry.deferred), HashMap.remove(entries, reply.requestId)] as const),
-                        ),
-                    }),
-                ),
-            ).pipe(
+            _takePending(reply.requestId, (entry) => entry.tag === 'command' && reply._tag === 'command.ack').pipe(
                 Effect.flatMap(Option.match({
                     onNone: () => Effect.succeed(false),
                     onSome: (deferred) => Deferred.succeed(deferred, reply),
                 })),
-                Effect.asVoid,
+                Effect.asVoid);
+        const _resolveRemoteError = (remoteError: Envelope.RemoteError) => {
+            const failure = new SocketClientError({ details: { message: remoteError.message, requestId: remoteError.requestId }, reason: 'protocol' });
+            return Option.fromNullable(remoteError.requestId).pipe(
+                Option.match({
+                    onNone: () => _failAllPending('remote_error', { message: remoteError.message }, 'protocol').pipe(
+                        Effect.zipRight(Effect.logWarning('kargadan.socket.remote.error', { hasRequestId: false, message: remoteError.message }))),
+                    onSome: (requestId) => _failPendingByRequestId(requestId, failure).pipe(
+                        Effect.flatMap((resolved) => resolved
+                            ? Effect.logWarning('kargadan.socket.remote.error', { hasRequestId: true, message: remoteError.message, requestId })
+                            : _failAllPending('remote_error', { message: remoteError.message, requestId }, 'protocol').pipe(
+                                Effect.zipRight(Effect.logWarning('kargadan.socket.remote.error.unmatched', { message: remoteError.message, requestId }))))),
+                }),
             );
+        };
         const _request = Effect.fn('kargadan.socket.request')((envelope: Envelope.Outbound) =>
             Effect.gen(function* () {
                 const timeoutMs = yield* HarnessConfig.commandDeadlineMs;
-                const deferred = yield* Deferred.make<Envelope.PendingReply>();
+                const deferred = yield* Deferred.make<Envelope.PendingReply, SocketClientError>();
                 yield* Ref.update(pending, HashMap.set(envelope.requestId, { deferred, tag: envelope._tag }));
                 yield* reconnectSupervisor.requireConnected;
                 const json = yield* encode(envelope).pipe(Effect.mapError((cause) => new SocketClientError({ details: { cause, stage: 'encode' }, reason: 'transport_failure' })),);
@@ -129,6 +149,7 @@ class KargadanSocketClient extends Effect.Service<KargadanSocketClient>()('karga
                 return yield* Match.value(envelope).pipe(
                     Match.when({ _tag: 'event' }, (e) => Queue.offer(events, e)),
                     Match.whenOr({ _tag: 'command.ack' }, { _tag: 'handshake.ack' }, { _tag: 'handshake.reject' }, { _tag: 'result' }, { _tag: 'heartbeat', mode: 'pong' as const }, _resolveReply),
+                    Match.when({ _tag: 'error' }, _resolveRemoteError),
                     Match.orElse((e) => Effect.logWarning('kargadan.socket.reply.ignored', { requestId: e.requestId, tag: e._tag })),
                 );
             }).pipe(Effect.catchTag('SocketClientError', (error) => Effect.logWarning('kargadan.socket.decode.failed', { reason: error.reason })));
