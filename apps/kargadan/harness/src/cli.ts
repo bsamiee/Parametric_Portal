@@ -140,7 +140,7 @@ const _runCommand = Command.make(
         architectProvider: Options.text('architect-provider').pipe(Options.withAlias('p'), Options.withDescription('Architect provider override'),
             Options.withFallbackConfig(Config.string('KARGADAN_AI_ARCHITECT_PROVIDER')), Options.optional),
         intent: Options.text('intent').pipe(Options.withAlias('i'), Options.withDescription('Natural language intent for the agent'),
-            Options.withFallbackConfig(Config.string('KARGADAN_INTENT')), Options.withFallbackPrompt(Prompt.text({
+            Options.withFallbackConfig(Config.string('KARGADAN_AGENT_INTENT')), Options.withFallbackPrompt(Prompt.text({
             message: 'Intent:',
             validate: (value) =>
                 value.trim().length === 0
@@ -148,8 +148,7 @@ const _runCommand = Command.make(
                     : Effect.succeed(value.trim()),
         }))),
         resume:    Options.choice('resume', ['auto', 'off'] as const).pipe(Options.withAlias('r'), Options.withDescription('Resume mode (auto/off)'), Options.withDefault('auto')),
-        sessionId: Options.text('session-id').pipe(Options.withAlias('s'), Options.withDescription('Target session UUID'),
-            Options.withFallbackConfig(Config.string('KARGADAN_SESSION_ID')), Options.optional),
+        sessionId: Options.text('session-id').pipe(Options.withAlias('s'), Options.withDescription('Target session UUID'), Options.optional),
     },
     (input) =>
         _runInteractive({

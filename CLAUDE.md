@@ -18,7 +18,7 @@ If reviewing, refining, editing, creating, or modifying X file type, use skill Y
 |   [1]   | TypeScript (`.ts`, `.tsx`) | `coding-ts`             |
 |   [2]   | C# (`.cs`)                 | `coding-csharp`         |
 |   [3]   | Python (`.py`)             | `coding-python`         |
-|   [4]   | Bash/sh (`.sh`, `.bash`)   | `bash-script-generator` |
+|   [4]   | Bash/sh (`.sh`, `.bash`)   | `coding-bash`           |
 
 ---
 ## [1][BEHAVIOR]
