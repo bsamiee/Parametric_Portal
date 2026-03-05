@@ -1,9 +1,31 @@
 import { AiRegistry } from '@parametric-portal/ai/registry';
+import { AgentPersistenceLayer } from '@parametric-portal/database/agent-persistence';
 import { Config, Duration, Effect, Match, Option, Schema as S } from 'effect';
 import { Client } from '@parametric-portal/database/client';
 import { DEFAULT_LOOP_OPERATIONS, NonNegInt, ObjectTypeTag, Operation } from './protocol/schemas';
 
 // --- [FUNCTIONS] -------------------------------------------------------------
+
+const decodeOverride = (selection: {
+    readonly fallback: ReadonlyArray<string>;
+    readonly model:    string;
+    readonly provider: string;
+}) =>
+    Match.value(selection).pipe(
+        Match.when(
+            (value) => value.model === '' && value.provider === '',
+            () => Effect.succeed(Option.none<AiRegistry.SessionOverride>()),
+        ),
+        Match.orElse((value) =>
+            AiRegistry.decodeSessionOverride({
+                language: {
+                    fallback: value.fallback,
+                    model:    value.model,
+                    provider: value.provider,
+                },
+            }).pipe(Effect.map(Option.some)),
+        ),
+    );
 
 const _resolveSessionOverride = (config: {
     readonly fallbackKey: string;
@@ -23,25 +45,7 @@ const _resolveSessionOverride = (config: {
             Config.withDefault(''),
             Config.map((value) => value.trim()),
         ),
-    }).pipe(
-        Effect.flatMap((selection) =>
-            Match.value(selection).pipe(
-                Match.when(
-                    (value) => value.model === '' && value.provider === '',
-                    () => Effect.succeed(Option.none<AiRegistry.SessionOverride>()),
-                ),
-                Match.orElse((value) =>
-                    AiRegistry.decodeSessionOverride({
-                        language: {
-                            fallback: value.fallback,
-                            model:    value.model,
-                            provider: value.provider,
-                        },
-                    }).pipe(Effect.map(Option.some)),
-                ),
-            ),
-        ),
-    );
+    }).pipe(Effect.flatMap(decodeOverride));
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
@@ -72,9 +76,12 @@ const HarnessConfig = {
     correctionCycles:        Config.integer('KARGADAN_CORRECTION_MAX_CYCLES').pipe(Config.withDefault(1)),
     heartbeatIntervalMs:     Config.integer('KARGADAN_HEARTBEAT_INTERVAL_MS').pipe(Config.withDefault(5_000)),
     heartbeatTimeoutMs:      Config.integer('KARGADAN_HEARTBEAT_TIMEOUT_MS').pipe(Config.withDefault(15_000)),
-    pgConnectTimeout:        Config.duration('KARGADAN_PG_CONNECT_TIMEOUT').pipe(Config.withDefault(Duration.seconds(10))),
-    pgIdleTimeout:           Config.duration('KARGADAN_PG_IDLE_TIMEOUT').pipe(Config.withDefault(Duration.seconds(30))),
-    pgMaxConnections:        Config.integer('KARGADAN_PG_MAX_CONNECTIONS').pipe(Config.withDefault(5)),
+    persistenceLayer: AgentPersistenceLayer({
+        connectTimeout: Config.duration('KARGADAN_PG_CONNECT_TIMEOUT').pipe(Config.withDefault(Duration.seconds(10))),
+        idleTimeout:    Config.duration('KARGADAN_PG_IDLE_TIMEOUT').pipe(Config.withDefault(Duration.seconds(30))),
+        maxConnections: Config.integer('KARGADAN_PG_MAX_CONNECTIONS').pipe(Config.withDefault(5)),
+        url:            Config.redacted('KARGADAN_CHECKPOINT_DATABASE_URL'),
+    }),
     protocolVersion:         Config.string('KARGADAN_PROTOCOL_VERSION').pipe(
         Config.withDefault('1.0'),
         Effect.map((v) => v.trim().split('.')),
@@ -118,4 +125,4 @@ const HarnessConfig = {
 
 // --- [EXPORT] ----------------------------------------------------------------
 
-export { HarnessConfig };
+export { decodeOverride, HarnessConfig };

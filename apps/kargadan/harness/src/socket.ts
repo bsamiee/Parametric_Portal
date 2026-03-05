@@ -34,7 +34,7 @@ class SocketClientError extends Data.TaggedError('SocketClientError')<{
 
 // --- [FUNCTIONS] -------------------------------------------------------------
 
-const _readPortFile = Effect.fn('kargadan.portDiscovery.read')(function* () {
+const readPortFile = Effect.fn('kargadan.portDiscovery.read')(function* () {
     const fs = yield* FileSystem.FileSystem;
     const portFilePath = join(homedir(), '.kargadan', 'port');
     const content = yield* fs.readFileString(portFilePath).pipe(
@@ -66,7 +66,7 @@ class ReconnectionSupervisor extends Effect.Service<ReconnectionSupervisor>()('k
         return {
             requireConnected: _requireConnected,
             supervise: Effect.fn('kargadan.reconnect.supervise')(<A, E, R>(connectOnce: (port: number) => Effect.Effect<A, E, R>) =>
-                _readPortFile().pipe(
+                readPortFile().pipe(
                     Effect.tap((info) => Ref.set(connectionState, 'connected').pipe(
                         Effect.zipRight(Effect.log('kargadan.reconnect: connected', { pid: info.pid, port: info.port })))),
                     Effect.flatMap((info) => connectOnce(info.port)),
@@ -175,10 +175,10 @@ class KargadanSocketClient extends Effect.Service<KargadanSocketClient>()('karga
 
 // --- [LAYERS] ----------------------------------------------------------------
 
-const KargadanSocketClientLive = Layer.unwrapEffect(_readPortFile().pipe(
+const KargadanSocketClientLive = Layer.unwrapEffect(readPortFile().pipe(
     Effect.map(({ port }) => Layer.provide(KargadanSocketClient.Default,
         Layer.mergeAll(Socket.layerWebSocketConstructorGlobal, Socket.layerWebSocket(`ws://127.0.0.1:${port}`))))));
 
 // --- [EXPORT] ----------------------------------------------------------------
 
-export { KargadanSocketClient, KargadanSocketClientLive, ReconnectionSupervisor };
+export { KargadanSocketClient, KargadanSocketClientLive, readPortFile, ReconnectionSupervisor, SocketClientError };

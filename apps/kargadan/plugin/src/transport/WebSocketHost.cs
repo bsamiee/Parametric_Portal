@@ -10,6 +10,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using LanguageExt;
 using LanguageExt.Common;
+using ParametricPortal.CSharp.Analyzers.Contracts;
 using ParametricPortal.Kargadan.Plugin.src.contracts;
 using Rhino;
 using static LanguageExt.Prelude;

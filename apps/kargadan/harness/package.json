@@ -6,13 +6,17 @@
     "scripts": {
         "build": "vite build --config vite.config.ts",
         "check": "biome check .",
+        "cli": "tsx src/cli.ts",
+        "cli:run": "tsx src/cli.ts run",
         "dev": "vite dev --host --config vite.config.ts",
         "fix": "biome check --write .",
         "test": "vitest run --passWithNoTests",
         "typecheck": "tsc --project tsconfig.json --noEmit"
     },
     "dependencies": {
+        "@effect/cli": "catalog:",
         "@effect/platform": "catalog:",
+        "@effect/platform-node": "catalog:",
         "@effect/workflow": "catalog:",
         "@parametric-portal/ai": "workspace:*",
         "@parametric-portal/database": "workspace:*",

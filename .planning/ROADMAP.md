@@ -168,11 +168,11 @@ Plans:
   3. In plan-before-execute mode, the agent shows proposed write actions and waits for user approval before executing
   4. Error messages include failure class (retryable/correctable/compensatable/fatal) and actionable recovery suggestions — not raw stack traces
   5. The CLI is built on @effect/cli with Effect-native argument parsing, command routing, and help generation
-**Plans**: TBD
+**Execution tracks**: 2/2 integrated in working tree (validation pending)
 
 Plans:
-- [ ] 08-01: TBD
-- [ ] 08-02: TBD
+- [x] 08-01: `@effect/cli` command graph (`run`, `sessions`, `diagnostics`) with built-ins, interactive stage/tool stream, approval gate, and typed failure UX
+- [x] 08-02: Persistence/operator refinements for `sessions list/trace/resume/export`, diagnostics checks, and non-TTY typed-failure smoke coverage
 
 ## Progress
 
@@ -190,4 +190,4 @@ Note: Phases 6, 7, and 8 all depend on Phase 5 but not on each other. They can b
 | 5. Agent Core and Provider Abstraction | 3/3 | Validation pending (manual Rhino smoke) | - |
 | 6. Scene Representation and Context Management | 6/6 | Validation pending (manual Rhino smoke) | - |
 | 7. Verification, Workflows, and Grasshopper | 2/3 | In validation (non-GH line; `EXEC-06` pending) | - |
-| 8. CLI Interface | 0/2 | Not started | - |
+| 8. CLI Interface | 2/2 | In validation (operator/live usage pass pending) | - |

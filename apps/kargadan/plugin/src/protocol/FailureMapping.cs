@@ -19,32 +19,28 @@ internal static class FailureMapping {
         string normalizedMessage = Normalize(
             message: error.Message,
             fallback: "Unhandled execution failure.");
-        ReadOnlySpan<char> span = normalizedMessage.AsSpan();
-        int firstColon = span.IndexOf(':');
-        int secondColon = firstColon >= 0
-            ? span[(firstColon + 1)..].IndexOf(':')
-            : -1;
-        int absoluteSecond = secondColon >= 0 ? firstColon + 1 + secondColon : -1;
-        string parsedCode = firstColon > 0
-            ? span[..firstColon].ToString()
-            : string.Empty;
-        string parsedMessage = absoluteSecond > firstColon
-            ? span[(absoluteSecond + 1)..].ToString()
-            : normalizedMessage;
-        return (firstColon > 0, absoluteSecond > firstColon) switch {
-            (true, true) => DomainBridge.ParseSmartEnum<ErrorCode, string>(
-                    candidate: parsedCode)
+        return SplitCodedMessage(normalizedMessage.AsSpan())
+            .Bind((SplitResult split) => DomainBridge.ParseSmartEnum<ErrorCode, string>(
+                candidate: split.Code)
                 .Map((ErrorCode code) => FailureMapping.FromCode(
                     code: code,
-                    message: parsedMessage))
-                .IfFail(FailureMapping.FromCode(
-                    code: ErrorCode.UnexpectedRuntime,
-                    message: normalizedMessage)),
-            _ => FailureMapping.FromCode(
+                    message: split.Message)))
+            .IfFail(FailureMapping.FromCode(
                 code: ErrorCode.UnexpectedRuntime,
-                message: normalizedMessage),
+                message: normalizedMessage));
+    }
+    private static Fin<SplitResult> SplitCodedMessage(ReadOnlySpan<char> span) {
+        Span<Range> segments = stackalloc Range[4];
+        int count = span.Split(segments, separator: ':', StringSplitOptions.None);
+        return count switch {
+            >= 3 => FinSucc(new SplitResult(
+                Code: span[segments[0]].ToString(),
+                Message: span[segments[2].Start..].ToString())),
+            _ => FinFail<SplitResult>(Error.New(message: "Not a coded error message.")),
         };
     }
+    [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Auto)]
+    private readonly record struct SplitResult(string Code, string Message);
     internal static FailureReason FromException(Exception exception) {
         FailureDefault template = SelectDefault(exception: exception);
         return BuildFailure(

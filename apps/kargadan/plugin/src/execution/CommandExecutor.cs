@@ -73,9 +73,7 @@ internal static class CommandExecutor {
         internal const string Transformed = "transformed";
     }
     private static readonly Error ScriptNotExecuted =
-        FailureMapping.ToError(FailureMapping.FromCode(
-            code: ErrorCode.UnexpectedRuntime,
-            message: "Rhino did not execute the script."));
+        CommandError(code: ErrorCode.UnexpectedRuntime, message: "Rhino did not execute the script.");
     private const int MaxReadListLimit = 200;
     private const int MinCaptureDimension = 256;
     private const int MaxCaptureDimension = 4096;
@@ -94,51 +92,31 @@ internal static class CommandExecutor {
     private static double[] ProjectPointOrZero(BoundingBox box, Func<BoundingBox, Point3d> selector) =>
         box.IsValid ? ProjectPoint(selector(box)) : ZeroPoint;
     private static readonly Seq<CommandRoute> Routes = Seq(
-        Read(CommandOperation.SceneSummary, "Read Scene Summary", "Returns active viewport, object count, layer count, and compact Layer-0 scene fields.", "Summarize the active scene.", false, ReadSceneSummary),
-        Read(
-            operation: CommandOperation.ObjectMetadata,
-            name: "Read Object Metadata",
-            description: "Returns metadata for the first object reference in the command envelope.",
-            exampleDescription: "Read metadata from objectRefs[0].",
+        Route(CommandOperation.SceneSummary, "Read Scene Summary", "Returns active viewport, object count, layer count, and compact Layer-0 scene fields.",
+            requiresObjectRefs: false, examples: Seq1(new CommandCatalogExample("{}", "Summarize the active scene.")), handler: ReadSceneSummary),
+        Route(CommandOperation.ObjectMetadata, "Read Object Metadata", "Returns metadata for the first object reference in the command envelope.",
             requiresObjectRefs: true,
-            @params: Params(
-                Parameter(JsonFields.Detail, ParameterTypes.String, false, "Detail level: compact|standard|full. Defaults to standard.")),
-            handler: ReadObjectMetadata),
-        Read(
-            operation: CommandOperation.ObjectGeometry,
-            name: "Read Object Geometry",
-            description: "Returns geometric bounds for the first object reference in the command envelope.",
-            exampleDescription: "Read geometric bounds from objectRefs[0].",
+            @params: Params(Parameter(JsonFields.Detail, ParameterTypes.String, false, "Detail level: compact|standard|full. Defaults to standard.")),
+            examples: Seq1(new CommandCatalogExample("{}", "Read metadata from objectRefs[0].")), handler: ReadObjectMetadata),
+        Route(CommandOperation.ObjectGeometry, "Read Object Geometry", "Returns geometric bounds for the first object reference in the command envelope.",
             requiresObjectRefs: true,
+            @params: Params(Parameter(JsonFields.Detail, ParameterTypes.String, false, "Detail level: compact|standard|full. Defaults to standard.")),
+            examples: Seq1(new CommandCatalogExample("{}", "Read geometric bounds from objectRefs[0].")), handler: ReadObjectGeometry),
+        Route(CommandOperation.LayerState, "Read Layer State", "Lists layer visibility and names.",
+            requiresObjectRefs: false,
             @params: Params(
-                Parameter(JsonFields.Detail, ParameterTypes.String, false, "Detail level: compact|standard|full. Defaults to standard.")),
-            handler: ReadObjectGeometry),
-        Read(
-            operation: CommandOperation.LayerState,
-            name: "Read Layer State",
-            description: "Lists layer visibility and names.",
-            exampleDescription: "Enumerate layers.",
+                Parameter(JsonFields.IncludeHidden, ParameterTypes.Boolean, false, "When true, hidden layers are included. Defaults to false."),
+                Parameter(JsonFields.Limit, ParameterTypes.Integer, false, "Caps layer entries returned. Must be >= 1.")),
+            examples: Seq1(new CommandCatalogExample("{}", "Enumerate layers.")), handler: ReadLayerState),
+        Route(CommandOperation.ViewState, "Read View State", "Returns active view and known viewport names.",
             requiresObjectRefs: false,
-                @params: Params(
-                    Parameter(JsonFields.IncludeHidden, ParameterTypes.Boolean, false, "When true, hidden layers are included. Defaults to false."),
-                    Parameter(JsonFields.Limit, ParameterTypes.Integer, false, "Caps layer entries returned. Must be >= 1.")),
-            handler: ReadLayerState),
-        Read(
-            operation: CommandOperation.ViewState,
-            name: "Read View State",
-            description: "Returns active view and known viewport names.",
-            exampleDescription: "Inspect viewport state.",
-            requiresObjectRefs: false,
-                @params: Params(
-                    Parameter(JsonFields.IncludeHidden, ParameterTypes.Boolean, false, "When true, page views are included. Defaults to false."),
-                    Parameter(JsonFields.Limit, ParameterTypes.Integer, false, "Caps viewport entries returned. Must be >= 1.")),
-            handler: ReadViewState),
-        Read(CommandOperation.ToleranceUnits, "Read Tolerance Units", "Returns model tolerances and unit system.", "Read document tolerance settings.", false, ReadToleranceUnits),
-        Read(
-            operation: CommandOperation.ViewCapture,
-            name: "Capture View",
-            description: "Captures the active view as a bounded PNG artifact for verification.",
-            exampleDescription: "Capture active view using defaults.",
+            @params: Params(
+                Parameter(JsonFields.IncludeHidden, ParameterTypes.Boolean, false, "When true, page views are included. Defaults to false."),
+                Parameter(JsonFields.Limit, ParameterTypes.Integer, false, "Caps viewport entries returned. Must be >= 1.")),
+            examples: Seq1(new CommandCatalogExample("{}", "Inspect viewport state.")), handler: ReadViewState),
+        Route(CommandOperation.ToleranceUnits, "Read Tolerance Units", "Returns model tolerances and unit system.",
+            requiresObjectRefs: false, examples: Seq1(new CommandCatalogExample("{}", "Read document tolerance settings.")), handler: ReadToleranceUnits),
+        Route(CommandOperation.ViewCapture, "Capture View", "Captures the active view as a bounded PNG artifact for verification.",
             requiresObjectRefs: false,
             @params: Params(
                 Parameter(JsonFields.Width, ParameterTypes.Integer, false, $"Capture width in pixels. Clamped to [{MinCaptureDimension}, {MaxCaptureDimension}]."),
@@ -146,43 +124,30 @@ internal static class CommandExecutor {
                 Parameter(JsonFields.Dpi, ParameterTypes.Number, false, $"Capture DPI. Clamped to [{MinCaptureDpi}, {MaxCaptureDpi}]."),
                 Parameter(JsonFields.TransparentBackground, ParameterTypes.Boolean, false, "When true, capture uses transparent background."),
                 Parameter(JsonFields.RealtimePasses, ParameterTypes.Integer, false, $"Realtime render passes. Clamped to [{MinRealtimePasses}, {MaxRealtimePasses}].")),
-            handler: ReadViewCapture),
-        Mutation(
-            operation: CommandOperation.ObjectCreate,
-            name: "Create Object",
-            description: "Creates a point or line object with optional layer/name attributes.",
+            examples: Seq1(new CommandCatalogExample("{}", "Capture active view using defaults.")), handler: ReadViewCapture),
+        Route(CommandOperation.ObjectCreate, "Create Object", "Creates a point or line object with optional layer/name attributes.",
+            requiresObjectRefs: false,
             @params: Params(
                 Parameter(JsonFields.Point, ParameterTypes.Number3, false, "Point coordinates [x,y,z]. Required when 'line' is absent."),
                 Parameter(JsonFields.Line, ParameterTypes.Line, false, "Line endpoints. Required when 'point' is absent."),
                 Parameter(JsonFields.LayerIndex, ParameterTypes.Integer, false, "Target layer index."),
                 Parameter(JsonFields.Name, ParameterTypes.String, false, "Object name metadata.")),
-            example: new("""{"point":[0,0,0]}""", "Create a point at origin."),
-            requiresObjectRefs: false,
-            handler: HandleObjectCreate),
-        Read(CommandOperation.ObjectDelete, "Delete Object", "Deletes the first referenced object.", "Delete objectRefs[0].", true, HandleObjectDelete),
-        Mutation(
-            operation: CommandOperation.ObjectUpdate,
-            name: "Update Object",
-            description: "Transforms object translation or updates basic attributes.",
+            examples: Seq1(new CommandCatalogExample("""{"point":[0,0,0]}""", "Create a point at origin.")), handler: HandleObjectCreate),
+        Route(CommandOperation.ObjectDelete, "Delete Object", "Deletes the first referenced object.",
+            requiresObjectRefs: true, examples: Seq1(new CommandCatalogExample("{}", "Delete objectRefs[0].")), handler: HandleObjectDelete),
+        Route(CommandOperation.ObjectUpdate, "Update Object", "Transforms object translation or updates basic attributes.",
+            requiresObjectRefs: true,
             @params: Params(
                 Parameter(JsonFields.Translation, ParameterTypes.Number3, false, "Translation vector [x,y,z]."),
                 Parameter(JsonFields.LayerIndex, ParameterTypes.Integer, false, "Target layer index."),
                 Parameter(JsonFields.Name, ParameterTypes.String, false, "Updated object name.")),
-            example: new("""{"translation":[0,10,0]}""", "Move object by +10 in Y."),
-            requiresObjectRefs: true,
-            handler: HandleObjectUpdate),
-        Mutation(
-            operation: CommandOperation.ScriptRun,
-            name: "Run Rhino Script",
-            description: "Runs a Rhino command script through RhinoApp.RunScript.",
-            @params: Params(
-                Parameter(JsonFields.Script, ParameterTypes.String, true, "Rhino command script to execute.")),
-            example: new("""{"script":"_Line 0,0,0 10,0,0 _Enter"}""", "Run a Rhino line command script."),
+            examples: Seq1(new CommandCatalogExample("""{"translation":[0,10,0]}""", "Move object by +10 in Y.")), handler: HandleObjectUpdate),
+        Route(CommandOperation.ScriptRun, "Run Rhino Script", "Runs a Rhino command script through RhinoApp.RunScript.",
             requiresObjectRefs: false,
+            @params: Params(Parameter(JsonFields.Script, ParameterTypes.String, true, "Rhino command script to execute.")),
+            examples: Seq1(new CommandCatalogExample("""{"script":"_Line 0,0,0 10,0,0 _Enter"}""", "Run a Rhino line command script.")),
             handler: static (RhinoDoc doc, CommandEnvelope envelope) =>
-                ExecuteScriptOperation(
-                    doc: doc,
-                    payload: envelope.Payload)));
+                ExecuteScriptOperation(doc: doc, payload: envelope.Payload)));
     private static readonly Dictionary<CommandOperation, CommandRoute> RoutesByOperation =
         Routes.ToDictionary(static route => route.Operation);
     internal static Seq<string> SupportedCapabilities { get; } =
@@ -233,61 +198,14 @@ internal static class CommandExecutor {
                 return FinFail<JsonElement>(error);
             });
     }
-    private static CommandRoute Read(
-        CommandOperation operation,
-        string name,
-        string description,
-        string exampleDescription,
-        bool requiresObjectRefs,
-        Func<RhinoDoc, CommandEnvelope, Fin<JsonElement>> handler) =>
-        Read(
-            operation: operation,
-            name: name,
-            description: description,
-            exampleDescription: exampleDescription,
-            requiresObjectRefs: requiresObjectRefs,
-            @params: NoParams,
-            handler: handler);
-    private static CommandRoute Read(
-        CommandOperation operation,
-        string name,
-        string description,
-        string exampleDescription,
-        bool requiresObjectRefs,
-        Seq<CommandCatalogParameter> @params,
-        Func<RhinoDoc, CommandEnvelope, Fin<JsonElement>> handler) =>
-        Route(
-            operation: operation,
-            name: name,
-            description: description,
-            requiresObjectRefs: requiresObjectRefs,
-            @params: @params,
-            examples: Seq1(new CommandCatalogExample("{}", exampleDescription)),
-            handler: handler);
-    private static CommandRoute Mutation(
-        CommandOperation operation,
-        string name,
-        string description,
-        Seq<CommandCatalogParameter> @params,
-        CommandCatalogExample example,
-        bool requiresObjectRefs,
-        Func<RhinoDoc, CommandEnvelope, Fin<JsonElement>> handler) =>
-        Route(
-            operation: operation,
-            name: name,
-            description: description,
-            requiresObjectRefs: requiresObjectRefs,
-            @params: @params,
-            examples: Seq1(example),
-            handler: handler);
     private static CommandRoute Route(
         CommandOperation operation,
         string name,
         string description,
         bool requiresObjectRefs,
-        Seq<CommandCatalogParameter> @params,
         Seq<CommandCatalogExample> examples,
-        Func<RhinoDoc, CommandEnvelope, Fin<JsonElement>> handler) =>
+        Func<RhinoDoc, CommandEnvelope, Fin<JsonElement>> handler,
+        Seq<CommandCatalogParameter> @params = default) =>
         new(
             Operation: operation,
             Name: name,
@@ -296,7 +214,7 @@ internal static class CommandExecutor {
                 RequiresTelemetryContext: true,
                 RequiresObjectRefs: requiresObjectRefs,
                 MinimumObjectRefCount: requiresObjectRefs ? 1 : 0),
-            Parameters: @params,
+            Parameters: @params.IsEmpty ? NoParams : @params,
             Examples: examples,
             Handler: handler);
     private static Seq<CommandCatalogParameter> Params(params CommandCatalogParameter[] parameters) =>
@@ -329,7 +247,7 @@ internal static class CommandExecutor {
             envelope.Operation,
             out CommandRoute route) switch {
                 true => FinSucc(route),
-                _ => FinFail<CommandRoute>(UnsupportedOperation(operation: envelope.Operation.Key)),
+                _ => FinFail<CommandRoute>(CommandError(code: ErrorCode.CapabilityUnsupported, message: $"Operation '{envelope.Operation.Key}' is unsupported.")),
             };
     private static Fin<JsonElement> ExecuteScriptOperation(
         RhinoDoc doc,
@@ -386,6 +304,11 @@ internal static class CommandExecutor {
             },
         }));
     }
+    private static Dictionary<string, object> CompactBase(RhinoObject found) =>
+        new(StringComparer.Ordinal) {
+            ["id"] = found.Id,
+            ["objectType"] = found.ObjectType.ToString(),
+        };
     private static Fin<JsonElement> ReadObjectMetadata(
         RhinoDoc doc,
         CommandEnvelope envelope) =>
@@ -393,36 +316,41 @@ internal static class CommandExecutor {
             doc: doc,
             envelope: envelope,
             project: static (RhinoObject found, RhinoDoc d, ReadDetailLevel detail) => {
+                Dictionary<string, object> props = CompactBase(found);
                 string layerName = d.Layers[found.Attributes.LayerIndex]?.Name ?? string.Empty;
                 return detail switch {
-                    ReadDetailLevel.Compact => JsonSerializer.SerializeToElement(new {
-                        id = found.Id,
-                        objectType = found.ObjectType.ToString(),
-                    }),
-                    ReadDetailLevel.Standard => JsonSerializer.SerializeToElement(new {
-                        id = found.Id,
-                        layerIndex = found.Attributes.LayerIndex,
-                        layerName,
-                        name = found.Attributes.Name,
-                        objectType = found.ObjectType.ToString(),
-                    }),
-                    _ => JsonSerializer.SerializeToElement(new {
-                        id = found.Id,
-                        layerIndex = found.Attributes.LayerIndex,
-                        layerName,
-                        name = found.Attributes.Name,
-                        objectType = found.ObjectType.ToString(),
-                        isDeleted = found.IsDeleted,
-                        isHidden = found.IsHidden,
-                        isLocked = found.IsLocked,
-                        isReference = found.IsReference,
-                        isVisible = found.Attributes.Visible,
-                        displayOrder = found.Attributes.DisplayOrder,
-                        materialIndex = found.Attributes.MaterialIndex,
-                        materialSource = found.Attributes.MaterialSource.ToString(),
-                    }),
+                    ReadDetailLevel.Compact => JsonSerializer.SerializeToElement(props),
+                    ReadDetailLevel.Standard or ReadDetailLevel.Full => AccumulateMetadata(
+                        props: props, found: found, layerName: layerName, detail: detail),
+                    _ => JsonSerializer.SerializeToElement(props),
                 };
             });
+    private static JsonElement AccumulateMetadata(
+        Dictionary<string, object> props,
+        RhinoObject found,
+        string layerName,
+        ReadDetailLevel detail) {
+        props["layerIndex"] = found.Attributes.LayerIndex;
+        props["layerName"] = layerName;
+        props["name"] = found.Attributes.Name;
+        return detail switch {
+            ReadDetailLevel.Full => AccumulateFullMetadata(props: props, found: found),
+            _ => JsonSerializer.SerializeToElement(props),
+        };
+    }
+    private static JsonElement AccumulateFullMetadata(
+        Dictionary<string, object> props,
+        RhinoObject found) {
+        props["isDeleted"] = found.IsDeleted;
+        props["isHidden"] = found.IsHidden;
+        props["isLocked"] = found.IsLocked;
+        props["isReference"] = found.IsReference;
+        props["isVisible"] = found.Attributes.Visible;
+        props["displayOrder"] = found.Attributes.DisplayOrder;
+        props["materialIndex"] = found.Attributes.MaterialIndex;
+        props["materialSource"] = found.Attributes.MaterialSource.ToString();
+        return JsonSerializer.SerializeToElement(props);
+    }
     private static Fin<JsonElement> ReadObjectGeometry(
         RhinoDoc doc,
         CommandEnvelope envelope) =>
@@ -430,32 +358,36 @@ internal static class CommandExecutor {
             doc: doc,
             envelope: envelope,
             project: static (RhinoObject found, RhinoDoc _, ReadDetailLevel detail) => {
+                Dictionary<string, object> props = CompactBase(found);
                 BoundingBox box = found.Geometry.GetBoundingBox(accurate: true);
                 return detail switch {
-                    ReadDetailLevel.Compact => JsonSerializer.SerializeToElement(new {
-                        id = found.Id,
-                        objectType = found.ObjectType.ToString(),
-                    }),
-                    ReadDetailLevel.Standard => JsonSerializer.SerializeToElement(new {
-                        id = found.Id,
-                        min = ProjectPointOrZero(box, static b => b.Min),
-                        max = ProjectPointOrZero(box, static b => b.Max),
-                        objectType = found.ObjectType.ToString(),
-                        boxIsValid = box.IsValid,
-                    }),
-                    _ => JsonSerializer.SerializeToElement(new {
-                        id = found.Id,
-                        min = ProjectPointOrZero(box, static b => b.Min),
-                        max = ProjectPointOrZero(box, static b => b.Max),
-                        objectType = found.ObjectType.ToString(),
-                        boxIsValid = box.IsValid,
-                        center = ProjectPointOrZero(box, static b => b.Center),
-                        diagonalLength = box.IsValid ? box.Diagonal.Length : 0.0,
-                        area = box.IsValid ? box.Area : 0.0,
-                        volume = box.IsValid ? box.Volume : 0.0,
-                    }),
+                    ReadDetailLevel.Compact => JsonSerializer.SerializeToElement(props),
+                    ReadDetailLevel.Standard or ReadDetailLevel.Full => AccumulateGeometry(
+                        props: props, box: box, detail: detail),
+                    _ => JsonSerializer.SerializeToElement(props),
                 };
             });
+    private static JsonElement AccumulateGeometry(
+        Dictionary<string, object> props,
+        BoundingBox box,
+        ReadDetailLevel detail) {
+        props["min"] = ProjectPointOrZero(box, static b => b.Min);
+        props["max"] = ProjectPointOrZero(box, static b => b.Max);
+        props["boxIsValid"] = box.IsValid;
+        return detail switch {
+            ReadDetailLevel.Full => AccumulateFullGeometry(props: props, box: box),
+            _ => JsonSerializer.SerializeToElement(props),
+        };
+    }
+    private static JsonElement AccumulateFullGeometry(
+        Dictionary<string, object> props,
+        BoundingBox box) {
+        props["center"] = ProjectPointOrZero(box, static b => b.Center);
+        props["diagonalLength"] = box.IsValid ? box.Diagonal.Length : 0.0;
+        props["area"] = box.IsValid ? box.Area : 0.0;
+        props["volume"] = box.IsValid ? box.Volume : 0.0;
+        return JsonSerializer.SerializeToElement(props);
+    }
     private static Fin<JsonElement> ReadObjectWith(
         RhinoDoc doc,
         CommandEnvelope envelope,
@@ -520,7 +452,7 @@ internal static class CommandExecutor {
                     };
                     using System.Drawing.Bitmap? bitmap = capture.CaptureToBitmap(activeView);
                     return bitmap switch {
-                        null => FinFail<JsonElement>(DirectApiOperationFailed(operation: "ViewCapture.CaptureToBitmap")),
+                        null => FinFail<JsonElement>(CommandError(code: ErrorCode.UnexpectedRuntime, message: "Direct API operation 'ViewCapture.CaptureToBitmap' failed.")),
                         _ => SerializeViewCapture(
                             bitmap: bitmap,
                             activeView: activeView,
@@ -528,11 +460,11 @@ internal static class CommandExecutor {
                     };
                 }));
     private static Fin<ViewCaptureOptions> ParseViewCaptureOptions(JsonElement payload) =>
-        from width in ParseClampedInt(payload, JsonFields.Width, DefaultCaptureWidth, MinCaptureDimension, MaxCaptureDimension)
-        from height in ParseClampedInt(payload, JsonFields.Height, DefaultCaptureHeight, MinCaptureDimension, MaxCaptureDimension)
-        from dpi in ParseClampedDouble(payload, JsonFields.Dpi, DefaultCaptureDpi, MinCaptureDpi, MaxCaptureDpi)
+        from width in ParseClamped(payload, JsonFields.Width, DefaultCaptureWidth, MinCaptureDimension, MaxCaptureDimension, TryParseInt, "an integer")
+        from height in ParseClamped(payload, JsonFields.Height, DefaultCaptureHeight, MinCaptureDimension, MaxCaptureDimension, TryParseInt, "an integer")
+        from dpi in ParseClamped(payload, JsonFields.Dpi, DefaultCaptureDpi, MinCaptureDpi, MaxCaptureDpi, TryParseFiniteDouble, "a finite number")
         from transparentBackground in ParseBoolean(payload, JsonFields.TransparentBackground, false)
-        from realtimePasses in ParseClampedInt(payload, JsonFields.RealtimePasses, DefaultRealtimePasses, MinRealtimePasses, MaxRealtimePasses)
+        from realtimePasses in ParseClamped(payload, JsonFields.RealtimePasses, DefaultRealtimePasses, MinRealtimePasses, MaxRealtimePasses, TryParseInt, "an integer")
         select new ViewCaptureOptions(width, height, dpi, transparentBackground, realtimePasses);
     private static Fin<JsonElement> SerializeViewCapture(
         System.Drawing.Bitmap bitmap,
@@ -558,34 +490,28 @@ internal static class CommandExecutor {
             width = options.Width,
         }));
     }
-    private static Fin<int> ParseClampedInt(
+    private delegate bool TryParseNumeric<T>(JsonElement element, out T value);
+    private static Fin<T> ParseClamped<T>(
         JsonElement payload,
         string propertyName,
-        int defaultValue,
-        int minInclusive,
-        int maxInclusive) =>
+        T defaultValue,
+        T minInclusive,
+        T maxInclusive,
+        TryParseNumeric<T> tryParse,
+        string typeLabel) where T : IComparable<T> =>
         payload.TryGetProperty(propertyName, out JsonElement element) switch {
-            true when element.ValueKind == JsonValueKind.Number && element.TryGetInt32(out int parsed) =>
-                FinSucc(Math.Clamp(parsed, minInclusive, maxInclusive)),
-            true when element.ValueKind == JsonValueKind.Number => FinFail<int>(ParseError(propertyName, "an integer")),
-            true => FinFail<int>(ParseError(propertyName, "numeric")),
+            true when element.ValueKind == JsonValueKind.Number && tryParse(element, out T parsed) =>
+                FinSucc(parsed.CompareTo(minInclusive) < 0 ? minInclusive : parsed.CompareTo(maxInclusive) > 0 ? maxInclusive : parsed),
+            true when element.ValueKind == JsonValueKind.Number => FinFail<T>(ParseError(propertyName, typeLabel)),
+            true => FinFail<T>(ParseError(propertyName, "numeric")),
             _ => FinSucc(defaultValue),
         };
-    private static Fin<double> ParseClampedDouble(
-        JsonElement payload,
-        string propertyName,
-        double defaultValue,
-        double minInclusive,
-        double maxInclusive) =>
-        payload.TryGetProperty(propertyName, out JsonElement element) switch {
-            true when element.ValueKind == JsonValueKind.Number
-                      && element.TryGetDouble(out double parsed)
-                      && double.IsFinite(parsed) =>
-                FinSucc(Math.Clamp(parsed, minInclusive, maxInclusive)),
-            true when element.ValueKind == JsonValueKind.Number => FinFail<double>(ParseError(propertyName, "a finite number")),
-            true => FinFail<double>(ParseError(propertyName, "numeric")),
-            _ => FinSucc(defaultValue),
-        };
+    private static bool TryParseInt(JsonElement element, out int value) =>
+        element.TryGetInt32(out value);
+    private static bool TryParseFiniteDouble(JsonElement element, out double value) {
+        bool parsed = element.TryGetDouble(out value);
+        return parsed && double.IsFinite(value);
+    }
     private static Fin<bool> ParseBoolean(
         JsonElement payload,
         string propertyName,
@@ -664,7 +590,7 @@ internal static class CommandExecutor {
                 geometry: geometry,
                 attributes: attributes);
             return (objectId == Guid.Empty) switch {
-                true => FinFail<JsonElement>(DirectApiOperationFailed(operation: "AddObject")),
+                true => FinFail<JsonElement>(CommandError(code: ErrorCode.UnexpectedRuntime, message: "Direct API operation 'AddObject' failed.")),
                 _ => FinSucc(SerializeObjectResult(objectId: objectId, status: None)),
             };
         });
@@ -676,7 +602,7 @@ internal static class CommandExecutor {
             MapObjectStatus(
                 operation: doc.Objects.Delete(objectId: objectId, quiet: true) switch {
                     true => FinSucc(unit),
-                    false => FinFail<Unit>(ObjectNotFound(objectId: objectId)),
+                    false => FinFail<Unit>(CommandError(code: ErrorCode.PayloadMalformed, message: $"Object {objectId} not found.")),
                 },
                 objectId: objectId,
                 status: TextValues.Deleted));
@@ -693,7 +619,7 @@ internal static class CommandExecutor {
                             objectId: objectId,
                             xform: Transform.Translation(new Vector3d(translation.X, translation.Y, translation.Z)),
                             deleteOriginal: true) == Guid.Empty) switch {
-                                true => FinFail<Unit>(ObjectNotFound(objectId: objectId)),
+                                true => FinFail<Unit>(CommandError(code: ErrorCode.PayloadMalformed, message: $"Object {objectId} not found.")),
                                 false => FinSucc(unit),
                             },
                         objectId: objectId,
@@ -712,41 +638,36 @@ internal static class CommandExecutor {
                                 newAttributes: attributes,
                                 quiet: true) switch {
                                     true => FinSucc(unit),
-                                    false => FinFail<Unit>(ObjectNotFound(objectId: objectId)),
+                                    false => FinFail<Unit>(CommandError(code: ErrorCode.PayloadMalformed, message: $"Object {objectId} not found.")),
                                 },
                             objectId: objectId,
                             status: TextValues.AttributesModified));
                     }),
             });
+    private static Fin<Unit> ApplyOptionalAttribute(
+        JsonElement payload,
+        string field,
+        Func<JsonElement, Fin<Unit>> validate) =>
+        payload.TryGetProperty(field, out JsonElement element) switch {
+            true => validate(element),
+            _ => FinSucc(unit),
+        };
     private static Fin<Unit> ApplyAttributesFromPayload(
         RhinoDoc doc,
         ObjectAttributes attributes,
-        JsonElement payload) {
-        Fin<Unit> layerResult = payload.TryGetProperty(JsonFields.LayerIndex, out JsonElement layerElement) switch {
-            true when layerElement.TryGetInt32(out int layerIndex) =>
-                (layerIndex >= 0 && layerIndex < doc.Layers.Count)
-                    ? FinSucc(attributes).Map((ObjectAttributes current) => {
-                        current.LayerIndex = layerIndex;
-                        return unit;
-                    })
-                    : FinFail<Unit>(
-                        Error.New(message: $"{JsonFields.LayerIndex} {layerIndex} is out of range [0, {doc.Layers.Count}).")),
-            true => FinFail<Unit>(
-                Error.New(message: $"{JsonFields.LayerIndex} must be an integer when provided.")),
-            _ => FinSucc(unit),
-        };
-        return layerResult.Bind((_) =>
-            payload.TryGetProperty(JsonFields.Name, out JsonElement nameElement) switch {
-                true when nameElement.ValueKind == JsonValueKind.String =>
-                    FinSucc(attributes).Map((ObjectAttributes current) => {
-                        current.Name = nameElement.GetString() ?? string.Empty;
-                        return unit;
-                    }),
-                true => FinFail<Unit>(
-                    Error.New(message: $"{JsonFields.Name} must be a string when provided.")),
-                _ => FinSucc(unit),
-            });
-    }
+        JsonElement payload) =>
+        ApplyOptionalAttribute(payload, JsonFields.LayerIndex, (JsonElement element) =>
+            element.TryGetInt32(out int layerIndex) switch {
+                true when layerIndex >= 0 && layerIndex < doc.Layers.Count =>
+                    FinSucc(attributes).Map((ObjectAttributes current) => { current.LayerIndex = layerIndex; return unit; }),
+                true => FinFail<Unit>(Error.New(message: $"{JsonFields.LayerIndex} {layerIndex} is out of range [0, {doc.Layers.Count}).")),
+                _ => FinFail<Unit>(Error.New(message: $"{JsonFields.LayerIndex} must be an integer when provided.")),
+            })
+        .Bind((_) => ApplyOptionalAttribute(payload, JsonFields.Name, (JsonElement element) =>
+            element.ValueKind switch {
+                JsonValueKind.String => FinSucc(attributes).Map((ObjectAttributes current) => { current.Name = element.GetString() ?? string.Empty; return unit; }),
+                _ => FinFail<Unit>(Error.New(message: $"{JsonFields.Name} must be a string when provided.")),
+            }));
     [BoundaryImperativeExemption(
         ruleId: "CSP0001",
         reason: BoundaryImperativeReason.ProtocolRequired,
@@ -784,7 +705,7 @@ internal static class CommandExecutor {
                                     errors.HeadOrNone().IfNone(
                                         Error.New(message: "Script result validation failed.")))),
                         Result.Cancel => FinFail<ScriptResult>(
-                            ScriptCancelled(commandName: commandArgs.CommandEnglishName)),
+                            CommandError(code: ErrorCode.TransientIo, message: $"Command '{commandArgs.CommandEnglishName}' was cancelled.")),
                         _ => FinFail<ScriptResult>(
                             Error.New(message: $"Command '{commandArgs.CommandEnglishName}' failed: {commandArgs.CommandResult}")),
                     }),
@@ -794,7 +715,7 @@ internal static class CommandExecutor {
         RhinoDoc doc,
         Guid objectId) =>
         Optional(doc.Objects.FindId(objectId))
-            .ToFin(ObjectNotFound(objectId: objectId));
+            .ToFin(CommandError(code: ErrorCode.PayloadMalformed, message: $"Object {objectId} not found."));
     private static EventHandler<CustomUndoEventArgs> MakeUndoHandler(
         AgentStateCallback onUndoRedo) =>
         (object? sender, CustomUndoEventArgs args) => {
@@ -840,22 +761,8 @@ internal static class CommandExecutor {
         };
     private static Error ParseError(string field, string expectedType) =>
         Error.New(message: $"{field} must be {expectedType} when provided.");
-    private static Error ScriptCancelled(string commandName) =>
-        FailureMapping.ToError(FailureMapping.FromCode(
-            code: ErrorCode.TransientIo,
-            message: $"Command '{commandName}' was cancelled."));
-    private static Error ObjectNotFound(Guid objectId) =>
-        FailureMapping.ToError(FailureMapping.FromCode(
-            code: ErrorCode.PayloadMalformed,
-            message: $"Object {objectId} not found."));
-    private static Error DirectApiOperationFailed(string operation) =>
-        FailureMapping.ToError(FailureMapping.FromCode(
-            code: ErrorCode.UnexpectedRuntime,
-            message: $"Direct API operation '{operation}' failed."));
-    private static Error UnsupportedOperation(string operation) =>
-        FailureMapping.ToError(FailureMapping.FromCode(
-            code: ErrorCode.CapabilityUnsupported,
-            message: $"Operation '{operation}' is unsupported."));
+    private static Error CommandError(ErrorCode code, string message) =>
+        FailureMapping.ToError(FailureMapping.FromCode(code: code, message: message));
     private enum ReadDetailLevel {
         Compact,
         Standard,

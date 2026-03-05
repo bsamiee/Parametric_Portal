@@ -71,12 +71,12 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### CLI
 
-- [ ] **CLI-01**: Agent streams progress output to the terminal in real time — showing what stage the loop is in and what tools are firing
-- [ ] **CLI-02**: Each tool call displays its name, condensed arguments, and result summary in the terminal as it executes
-- [ ] **CLI-03**: Plan-before-execute mode shows the agent's proposed actions and waits for user approval before executing any write operations
-- [ ] **CLI-04**: Error messages include the failure class (retryable/correctable/compensatable/fatal) and actionable recovery suggestions
-- [ ] **CLI-05**: CLI built on @effect/cli for Effect-native argument parsing, command routing, and help generation — no React/Ink dependency
-- [ ] **CLI-06**: Terminal UI provides modern, responsive output without hand-rolled rendering — leveraging existing Effect-ecosystem TUI capabilities
+- [x] **CLI-01**: Agent streams progress output to the terminal in real time — showing what stage the loop is in and what tools are firing
+- [x] **CLI-02**: Each tool call displays its name, condensed arguments, and result summary in the terminal as it executes
+- [x] **CLI-03**: Plan-before-execute mode shows the agent's proposed actions and waits for user approval before executing any write operations
+- [x] **CLI-04**: Error messages include the failure class (retryable/correctable/compensatable/fatal) and actionable recovery suggestions
+- [x] **CLI-05**: CLI built on @effect/cli for Effect-native argument parsing, command routing, and help generation — no React/Ink dependency
+- [x] **CLI-06**: Terminal UI provides modern, responsive output without hand-rolled rendering — leveraging existing Effect-ecosystem TUI capabilities
 
 ### Schema
 
@@ -169,12 +169,12 @@ Which phases cover which requirements. Updated during roadmap creation.
 | VRFY-02 | Phase 7 | Implemented (non-GH line, validation pending) |
 | VRFY-03 | Phase 7 | Implemented (non-GH line, validation pending) |
 | VRFY-04 | Phase 7 | Implemented (non-GH line, validation pending) |
-| CLI-01 | Phase 8 | Pending |
-| CLI-02 | Phase 8 | Pending |
-| CLI-03 | Phase 8 | Pending |
-| CLI-04 | Phase 8 | Pending |
-| CLI-05 | Phase 8 | Pending |
-| CLI-06 | Phase 8 | Pending |
+| CLI-01 | Phase 8 | Implemented (validation pending) |
+| CLI-02 | Phase 8 | Implemented (validation pending) |
+| CLI-03 | Phase 8 | Implemented (validation pending) |
+| CLI-04 | Phase 8 | Implemented (validation pending) |
+| CLI-05 | Phase 8 | Implemented (validation pending) |
+| CLI-06 | Phase 8 | Implemented (validation pending) |
 | SCHM-01 | Phase 3 | Complete |
 | SCHM-02 | Phase 3 | Pending |
 | SCHM-03 | Phase 3 | Complete |

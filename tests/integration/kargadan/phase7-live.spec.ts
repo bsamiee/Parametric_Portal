@@ -6,7 +6,7 @@ import { HarnessConfig } from '../../../apps/kargadan/harness/src/config.ts';
 import { CommandDispatch } from '../../../apps/kargadan/harness/src/protocol/dispatch.ts';
 import { Envelope, type ObjectTypeTag } from '../../../apps/kargadan/harness/src/protocol/schemas.ts';
 import { KargadanSocketClientLive, ReconnectionSupervisor } from '../../../apps/kargadan/harness/src/socket.ts';
-import { AgentPersistenceLayer, AgentPersistenceService } from '../../../packages/database/src/agent-persistence.ts';
+import { AgentPersistenceService } from '../../../packages/database/src/agent-persistence.ts';
 import { Duration, Effect, Exit, Layer, Match, Option, Schema as S } from 'effect';
 import { expect } from 'vitest';
 
@@ -28,12 +28,7 @@ const _dispatchLayer = Layer.mergeAll(
     ReconnectionSupervisor.Default,
     CommandDispatch.Default,
 );
-const _persistenceLayer = AgentPersistenceLayer({
-    connectTimeout: HarnessConfig.pgConnectTimeout,
-    idleTimeout: HarnessConfig.pgIdleTimeout,
-    maxConnections: HarnessConfig.pgMaxConnections,
-    url: HarnessConfig.checkpointDatabaseUrl,
-});
+const _persistenceLayer = HarnessConfig.persistenceLayer;
 const _liveIt = _liveEnabled ? it : it.skip;
 const _liveDbIt = _liveDbEnabled ? it : it.skip;
 type LiveDispatch = {
