@@ -97,13 +97,13 @@ flowchart LR
   DB --> PG[("PostgreSQL 18.2\npgvector 0.8+")]
 ```
 
-| Component                | Responsibility                                                                                                                                           |
-| ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Harness** (`harness/`) | Agent loop orchestration, CLI interface, WebSocket client, session persistence, context compaction, AI provider management                               |
-| **Plugin** (`plugin/`)   | WebSocket server inside Rhino, command execution (RunScript + direct API), event observation pipeline, undo integration, protocol contracts              |
-| **packages/ai**          | Multi-provider LLM abstraction (Anthropic/OpenAI/Gemini), embedding, semantic search via reciprocal rank fusion, toolkit composition, budget enforcement |
-| **packages/database**    | Polymorphic repo factory, pgvector search, Model.Class definitions, tenant scoping, keyset pagination, agent persistence service                         |
-| **packages/server**      | Context propagation (FiberRef-backed), telemetry (OTLP), metrics, cache (Redis), resilience patterns                                                     |
+| Component            | Responsibility                                                                                                                                           |
+| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Harness (`harness/`) | Agent loop orchestration, CLI interface, WebSocket client, session persistence, context compaction, AI provider management                               |
+| Plugin (`plugin/`)   | WebSocket server inside Rhino, command execution (RunScript + direct API), event observation pipeline, undo integration, protocol contracts              |
+| packages/ai          | Multi-provider LLM abstraction (Anthropic/OpenAI/Gemini), embedding, semantic search via reciprocal rank fusion, toolkit composition, budget enforcement |
+| packages/database    | Polymorphic repo factory, pgvector search, Model.Class definitions, tenant scoping, keyset pagination, agent persistence service                         |
+| packages/server      | Context propagation (FiberRef-backed), telemetry (OTLP), metrics, cache (Redis), resilience patterns                                                     |
 
 ---
 
@@ -384,20 +384,20 @@ Multi-provider language model abstraction (Anthropic, OpenAI, Gemini) with per-t
 
 ### packages/database
 
-| Module              | Files                                        | Exports                                                                           |
-| ------------------- | -------------------------------------------- | --------------------------------------------------------------------------------- |
-| `agent-persistence` | cli.ts, config.ts, harness.ts, agent-loop.ts | `AgentPersistenceService`, `AgentPersistenceLayer` (session/call/trace/resume)    |
-| `client`            | config.ts, harness.ts                        | `Client.tenant.Id.system` (system tenant UUID)                                    |
-| `repos`             | harness.ts                                   | `DatabaseService` (polymorphic repo composition root)                             |
+| Module              | Files                                        | Exports                                                                        |
+| ------------------- | -------------------------------------------- | ------------------------------------------------------------------------------ |
+| `agent-persistence` | cli.ts, config.ts, harness.ts, agent-loop.ts | `AgentPersistenceService`, `AgentPersistenceLayer` (session/call/trace/resume) |
+| `client`            | config.ts, harness.ts                        | `Client.tenant.Id.system` (system tenant UUID)                                 |
+| `repos`             | harness.ts                                   | `DatabaseService` (polymorphic repo composition root)                          |
 
 `AgentPersistenceService` manages the `agent_journal` table with entry kinds: `session_start`, `tool_call`, `checkpoint`, `session_complete`. Session hydration restores `chatJson`, `loopState`, and `sequence` for resumption (with divergence detection). The polymorphic repo factory provides `find`, `one`, `put`, `set`, `upsert`, `merge`, `page`, `stream` with tenant scoping, OCC, soft-delete, and keyset pagination. pgvector support via `HALFVEC(3072)` with HNSW indexing powers the knowledge base semantic search.
 
 ### packages/server
 
-| Module               | Files              | Exports                                                                |
-| -------------------- | ------------------ | ---------------------------------------------------------------------- |
-| `context`            | cli.ts, harness.ts | `Context.Request` (FiberRef tenant/session scoping)                    |
-| `observe/telemetry`  | agent-loop.ts      | `Telemetry` (OTLP span wrapping with auto SpanKind, diagnostics emit) |
+| Module              | Files              | Exports                                                               |
+| ------------------- | ------------------ | --------------------------------------------------------------------- |
+| `context`           | cli.ts, harness.ts | `Context.Request` (FiberRef tenant/session scoping)                   |
+| `observe/telemetry` | agent-loop.ts      | `Telemetry` (OTLP span wrapping with auto SpanKind, diagnostics emit) |
 
 `Context.Request` provides tenant isolation via FiberRef. Telemetry auto-injects request context attributes into OTLP spans with SpanKind inference from prefix (`kargadan.*` -> INTERNAL). CacheService (Redis) provides rate limiting and idempotency caching consumed transitively by the AI budget enforcement layer.
 
@@ -471,11 +471,11 @@ All environment variables are decoded in `harness/src/config.ts` via Effect Conf
 
 ### Write Object Reference
 
-| Variable                                | Default                                | Description                                                                  |
-| --------------------------------------- | -------------------------------------- | ---------------------------------------------------------------------------- |
-| `KARGADAN_WRITE_OBJECT_ID`              | "00000000-0000-0000-0000-000000000100" | Object UUID for write commands                                               |
-| `KARGADAN_WRITE_OBJECT_SOURCE_REVISION` | 0                                      | Object revision for OCC                                                      |
-| `KARGADAN_WRITE_OBJECT_TYPE_TAG`        | "Brep"                                 | Object type (Brep, Mesh, Curve, Surface, Annotation, Instance, LayoutDetail) |
+| Variable                                | Default                                | Description                                                    |
+| --------------------------------------- | -------------------------------------- | -------------------------------------------------------------- |
+| `KARGADAN_WRITE_OBJECT_ID`              | "00000000-0000-0000-0000-000000000100" | UUID for write commands                                        |
+| `KARGADAN_WRITE_OBJECT_SOURCE_REVISION` | 0                                      | Revision for OCC                                               |
+| `KARGADAN_WRITE_OBJECT_TYPE_TAG`        | "Brep"                                 | Brep, Mesh, Curve, Surface, Annotation, Instance, LayoutDetail |
 
 ### Database Connection
 
