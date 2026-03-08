@@ -8,7 +8,7 @@ import { createConfig } from '../../../vite.factory.ts';
 export default defineConfig(
     Effect.runSync(
         createConfig({
-            entry: './src/harness.ts',
+            entry: './src/cli.ts',
             external: [],
             mode: 'server',
             name: 'KargadanHarness',

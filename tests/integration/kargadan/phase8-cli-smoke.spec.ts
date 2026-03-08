@@ -21,9 +21,11 @@ it('P8-CLI-NTTY-01: non-TTY invocation fails with typed tty_required rail', () =
     expect(output).toContain('recovery:');
 });
 
-it('P8-CLI-HELP-01: --help output contains all 3 top-level commands', () => {
+it('P8-CLI-HELP-01: --help output contains the main top-level commands', () => {
     const result = _runCli(['--help']);
     const output = `${result.stdout}\n${result.stderr}`;
+    expect(output).toContain('auth');
+    expect(output).toContain('init');
     expect(output).toContain('run');
     expect(output).toContain('sessions');
     expect(output).toContain('diagnostics');
@@ -41,6 +43,14 @@ it('P8-CLI-HELP-03: diagnostics check --help shows description', () => {
     const result = _runCli(['diagnostics', 'check', '--help']);
     const output = `${result.stdout}\n${result.stderr}`;
     expect(output).toContain('Validate environment');
+});
+
+it('P8-CLI-HELP-04: diagnostics live --help shows launch and prepare options', () => {
+    const result = _runCli(['diagnostics', 'live', '--help']);
+    const output = `${result.stdout}\n${result.stderr}`;
+    expect(output).toContain('--launch');
+    expect(output).toContain('--prepare');
+    expect(output).toContain('--rhino-app');
 });
 
 it('P8-CLI-VAL-01: invalid --format=xml produces validation error', () => {

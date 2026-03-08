@@ -3,8 +3,13 @@
     "version": "0.1.0",
     "private": true,
     "type": "module",
+    "bin": {
+        "kargadan": "./dist/main.js"
+    },
     "scripts": {
         "build": "vite build --config vite.config.ts",
+        "build:binary": "node --experimental-sea-config sea-config.json && cp $(which node) dist/kargadan && npx postject dist/kargadan NODE_SEA_BLOB dist/kargadan-sea.blob --sentinel-fuse NODE_SEA_FUSE_fce680ab2cc467b6e072b8b5df1996b2",
+        "build:sea": "pnpm build && pnpm build:binary",
         "check": "biome check .",
         "cli": "tsx src/cli.ts",
         "cli:run": "tsx src/cli.ts run",
@@ -17,6 +22,7 @@
         "@effect/cli": "catalog:",
         "@effect/platform": "catalog:",
         "@effect/platform-node": "catalog:",
+        "@effect/sql": "catalog:",
         "@effect/workflow": "catalog:",
         "@parametric-portal/ai": "workspace:*",
         "@parametric-portal/database": "workspace:*",

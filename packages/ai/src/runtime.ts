@@ -13,7 +13,7 @@ const AI_OPERATIONS = {
     streamText:     { id: 'ai.streamText',     kind: 'language'  },
 } as const;
 type OperationDescriptor = (typeof AI_OPERATIONS)[keyof typeof AI_OPERATIONS];
-type OperationContext = { readonly appSettings: AiRegistry.Settings; readonly tenantId: string };
+type OperationContext = { readonly appSettings: AiRegistry.Settings; readonly credentials: AiRegistry.Credentials; readonly tenantId: string };
 
 // --- [FUNCTIONS] -------------------------------------------------------------
 
@@ -66,10 +66,18 @@ class AiRuntime extends Effect.Service<AiRuntime>()('ai/Runtime', {
                     provider.writeBudget(tenantId, { dailyTokens: current.dailyTokens + totalTokens, rateCount: current.rateCount + 1 }),
                 ),
             );
+        const resolveLayers = (appSettings: AiRegistry.Settings) =>
+            Effect.forEach(AiRegistry.requiredProviders(appSettings), (name) =>
+                provider.resolveCredential(name).pipe(Effect.map((credential) => [name, credential] as const)),
+            ).pipe(Effect.map((entries) => AiRegistry.layers(appSettings, Object.fromEntries(entries) as AiRegistry.Credentials)));
         const resolveContext = (descriptor: OperationDescriptor) =>
             provider.resolveTenantId.pipe(
                 Effect.bindTo('tenantId'),
                 Effect.bind('appSettings', ({ tenantId }) => provider.resolveSettings(tenantId).pipe(Effect.map(_capMaxTokens))),
+                Effect.bind('credentials', ({ appSettings }) =>
+                    Effect.forEach(AiRegistry.requiredProviders(appSettings), (name) =>
+                        provider.resolveCredential(name).pipe(Effect.map((credential) => [name, credential] as const)),
+                    ).pipe(Effect.map((entries) => Object.fromEntries(entries) as AiRegistry.Credentials))),
                 Effect.tap(({ tenantId, appSettings }) =>
                     provider.readBudget(tenantId).pipe(
                         Effect.filterOrFail(
@@ -149,7 +157,7 @@ class AiRuntime extends Effect.Service<AiRuntime>()('ai/Runtime', {
         ) => Effect.gen(function* () {
             const context = yield* resolveContext(descriptor);
             const policyOptions = yield* applyToolPolicy<Tools, Options>(descriptor, context, options);
-            const layers = AiRegistry.layers(context.appSettings);
+            const layers = AiRegistry.layers(context.appSettings, context.credentials);
             const fallbackLayers = layers.fallbackLanguage.map((layer, index) => ({ layer, providerName: context.appSettings.language.fallback[index] ?? context.appSettings.language.provider }));
             const runWithLayer = (layer: typeof layers.language) => run(policyOptions).pipe(Effect.provide(layer));
             const primary = runWithLayer(layers.language);
@@ -172,7 +180,7 @@ class AiRuntime extends Effect.Service<AiRuntime>()('ai/Runtime', {
                 const context = yield* resolveContext(descriptor);
                 const policyOptions = yield* applyToolPolicy<Tools, LanguageModel.GenerateTextOptions<Tools>>(descriptor, context, options);
                 const meta = _operationMeta(descriptor, context);
-                const layers = AiRegistry.layers(context.appSettings);
+                const layers = AiRegistry.layers(context.appSettings, context.credentials);
                 const handleFinish = (finish: { readonly usage: Response.Usage }) =>
                     incrementBudget(context.tenantId, finish.usage.totalTokens ?? 0).pipe(
                         Effect.ignore,
@@ -204,32 +212,13 @@ class AiRuntime extends Effect.Service<AiRuntime>()('ai/Runtime', {
                 Effect.flatMap((tenantId) => provider.resolveSettings(tenantId).pipe(Effect.map(_capMaxTokens))),
                 Effect.mapError(AiError.from(AI_OPERATIONS.chat.id)),
                 Effect.flatMap((appSettings) =>
-                    Tokenizer.Tokenizer.pipe(
-                        Effect.flatMap((tokenizer) => tokenizer.tokenize(input)),
-                        Effect.map((tokens) => tokens.length),
-                        Effect.provide(AiRegistry.layers(appSettings).language),
-                    ),
+                    resolveLayers(appSettings).pipe(Effect.flatMap((layers) =>
+                        Tokenizer.Tokenizer.pipe(
+                            Effect.flatMap((tokenizer) => tokenizer.tokenize(input)),
+                            Effect.map((tokens) => tokens.length),
+                            Effect.provide(layers.language),
+                        ))),
                 ),
-            ),
-        );
-        const discovery = () =>
-            settings().pipe(
-                Effect.map((current) => AiRegistry.resolveDiscovery(current)),
-            );
-        const providerToolSearch = Effect.fn('AiRuntime.providerToolSearch')((input: {
-            readonly limit?: number | undefined;
-            readonly term: string;
-        }) =>
-            discovery().pipe(
-                Effect.flatMap((resolved) => Match.value(resolved).pipe(
-                    Match.when({ anthropicToolSearchEnabled: true, provider: 'anthropic' as const }, () =>
-                        Effect.logDebug('ai.discovery.anthropic.tool_search.unavailable', {
-                            configuredFlag: AiRegistry.toolSearchFlag,
-                            limit:          input.limit,
-                            term:           input.term,
-                        }).pipe(Effect.as([] as ReadonlyArray<string>))),
-                    Match.orElse(() => Effect.succeed([] as ReadonlyArray<string>)),
-                )),
             ),
         );
         function embed(input: string): Effect.Effect<readonly number[], AiSdkError.AiError | AiError, never>;
@@ -245,7 +234,7 @@ class AiRuntime extends Effect.Service<AiRuntime>()('ai/Runtime', {
             );
             return resolveContext(AI_OPERATIONS.embed).pipe(
                 Effect.flatMap((context) => {
-                    const layers = AiRegistry.layers(context.appSettings);
+                    const layers = AiRegistry.layers(context.appSettings, context.credentials);
                     const embedOp = EmbeddingModel.EmbeddingModel.pipe(Effect.flatMap(resolved.run), Effect.provide(layers.embedding));
                     return enforceRequestTokens(AI_OPERATIONS.embed, context, 'embedding.estimatedTokens', resolved.estimatedTokens).pipe(
                         Effect.zipRight(runEffectOperation(AI_OPERATIONS.embed, context, embedOp, (_result, meta) =>
@@ -293,7 +282,7 @@ class AiRuntime extends Effect.Service<AiRuntime>()('ai/Runtime', {
             resolveContext(AI_OPERATIONS.chat).pipe(
                 Effect.flatMap((context) => runEffectOperation(AI_OPERATIONS.chat, context, chatService.exportJson)),
             );
-        return { chat, countTokens, deserializeChat, discovery, embed, generateObject, generateText, providerToolSearch, serializeChat, settings, streamText };
+        return { chat, countTokens, deserializeChat, embed, generateObject, generateText, serializeChat, settings, streamText };
     }),
 }) {
     static readonly Live = Layer.provide(AiRuntime.Default, AiRuntimeProvider.Server);

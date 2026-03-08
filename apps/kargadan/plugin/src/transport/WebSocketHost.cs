@@ -25,7 +25,6 @@ internal delegate Seq<EventEnvelope> EventEnvelopeDrain();
 internal delegate Unit EventEnvelopeRequeue(Seq<EventEnvelope> envelopes);
 internal sealed class WebSocketHost : IDisposable {
     private const string EnvelopeTagField = "_tag";
-    private const string EventEnvelopeTag = "event";
     private const int EventPumpIntervalMs = 25;
     private const int ReceiveBufferSize = 16_384;
     private static readonly TimeSpan KeepAliveInterval = TimeSpan.FromSeconds(5);
@@ -400,26 +399,9 @@ internal sealed class WebSocketHost : IDisposable {
                 message = error.Message,
             }, options: JsonOptions));
     private static byte[] SerializeEvent(EventEnvelope envelope) =>
-        envelope.CausationRequestId.Match(
-            Some: causationRequestId => JsonSerializer.SerializeToUtf8Bytes(new {
-                _tag = EventEnvelopeTag,
-                causationRequestId = (Guid)causationRequestId,
-                delta = envelope.Delta,
-                eventId = (Guid)envelope.EventId,
-                eventType = envelope.EventType.Key,
-                identity = envelope.Identity,
-                sourceRevision = envelope.SourceRevision,
-                telemetryContext = envelope.TelemetryContext,
-            }, options: JsonOptions),
-            None: () => JsonSerializer.SerializeToUtf8Bytes(new {
-                _tag = EventEnvelopeTag,
-                delta = envelope.Delta,
-                eventId = (Guid)envelope.EventId,
-                eventType = envelope.EventType.Key,
-                identity = envelope.Identity,
-                sourceRevision = envelope.SourceRevision,
-                telemetryContext = envelope.TelemetryContext,
-            }, options: JsonOptions));
+        JsonSerializer.SerializeToUtf8Bytes(
+            value: TransportJson.Event(envelope, JsonOptions),
+            options: JsonOptions);
     private static Fin<TransportMessageTag> ParseTransportTag(JsonElement message) =>
         message.TryGetProperty(EnvelopeTagField, out JsonElement tagElement) switch {
             true when tagElement.ValueKind == JsonValueKind.String =>

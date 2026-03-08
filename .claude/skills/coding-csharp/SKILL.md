@@ -28,6 +28,7 @@ All code follows six governing principles:
 - **Expression control flow**: LINQ comprehension (`from..in..select`), `Bind`/`Map`/`BiMap`, zero statement branching
 - **Programmatic logic**: named parameters at domain call sites, `SmartEnum<T>` over strings, bounded vocabularies
 - **Surface ownership**: one polymorphic entrypoint, `params ReadOnlySpan<T>` for arity collapse, no helpers
+- **Private integration**: module logic is the export's implementation, not its neighbor — `private`/`internal` members are nested types, closures, or inline compositions inside the public class/service, not standalone file-level declarations consumed by a single caller
 - **Cross-cutting composition**: Scrutor `Decorate`/`TryDecorate` for service-level AOP, `K<F,A>` for higher-kinded abstraction
 
 
@@ -71,7 +72,9 @@ All code follows six governing principles:
 
 **Surface**
 - One polymorphic entrypoint per concern — `params ReadOnlySpan<T>` for arity collapse.
-- No helper files, no single-caller extracted functions, no one-use module-level declarations.
+- Private-by-default: every non-public member is `private` (or `internal` for assembly-level sharing). Public API surface is 1–2 types per file maximum.
+- Internal logic integrates INTO exports — `private` nested classes, closures inside methods, `private static` composed pipelines inside the owning class. Not defined alongside as standalone file-level declarations consumed by a single caller.
+- No helper files, no single-caller extracted functions, no one-use file-level declarations.
 - No convenience wrappers that rename or forward external APIs.
 - `~350 LOC` scrutiny threshold — investigate for compression via polymorphism, not file splitting.
 - Expression-bodied members where body is a single expression. Primary constructors preferred.

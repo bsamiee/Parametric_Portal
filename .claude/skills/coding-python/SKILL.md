@@ -28,6 +28,7 @@ All code follows six governing principles:
 - **Expression control flow**: `pipe` + curried projections (`result.bind`, `result.map`, `seq.filter`), `@effect.result` / `@effect.async_result` generators, zero statement branching
 - **Programmatic logic**: `Literal` types for bounded vocabularies, `singledispatch` for open extension, zero stringly-typed routing
 - **Surface ownership**: one polymorphic entrypoint per concern, `ParamSpec`-preserving decorators, no helpers
+- **Private integration**: module logic is the export's implementation, not its neighbor — `_`-prefixed internals are closures, nested functions, or inline compositions inside the public function/class, not standalone module-level declarations consumed by a single caller
 - **Cross-cutting composition**: decorator stacks (`trace > authorize > validate > cache > retry`), `Protocol`-first DI via `@effect.result` dependency threading
 
 
@@ -77,6 +78,8 @@ All code follows six governing principles:
 
 **Surface**
 - One polymorphic entrypoint per concern.
+- Private-by-default: every non-exported symbol carries `_` prefix. Module exports 1–2 symbols maximum via `__all__`.
+- Internal logic integrates INTO exports — closures/nested functions inside the public function or class, inline compositions inside pipe chains. Not defined alongside as standalone module-level declarations consumed by a single caller.
 - No helper files (`helpers.py`, `*_utils.py`) — colocate in domain module.
 - No single-caller extracted functions, no one-use module-level declarations.
 - `~350 LOC` scrutiny threshold — investigate for compression via polymorphism, not file splitting.

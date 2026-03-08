@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { SqlClient } from '@effect/sql';
 import { PgClient } from '@effect/sql-pg';
-import { Chunk, Effect, HashMap, HashSet, Layer, Match, Option, Schema as S } from 'effect';
+import { Chunk, Config, Effect, HashMap, HashSet, Layer, Match, Option, Schema as S, String as Str } from 'effect';
 import type { AgentJournal } from './models.ts';
 import { DatabaseService } from './repos.ts';
 
@@ -286,7 +286,9 @@ class AgentPersistenceService extends Effect.Service<AgentPersistenceService>()(
 
 // --- [LAYERS] ----------------------------------------------------------------
 
-const AgentPersistenceLayer = (config: Parameters<typeof PgClient.layerConfig>[0]) => AgentPersistenceService.Default.pipe(Layer.provideMerge(PgClient.layerConfig(config)));
+const AgentPersistenceLayer = (config: Parameters<typeof PgClient.layerConfig>[0]) => AgentPersistenceService.Default.pipe(Layer.provideMerge(PgClient.layerConfig({
+    ...config, transformJson: Config.succeed(true), transformQueryNames: Config.succeed(Str.camelToSnake), transformResultNames: Config.succeed(Str.snakeToCamel),
+})));
 
 // --- [EXPORT] ----------------------------------------------------------------
 

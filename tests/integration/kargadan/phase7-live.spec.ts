@@ -23,10 +23,8 @@ const _ForbiddenFakeFlags = [
 ] as const;
 const _SceneSummaryCodec = S.Struct({ objectCount: S.Int.pipe(S.greaterThanOrEqualTo(0)) });
 const _CreateResultCodec = S.Struct({ objectId: S.UUID });
-const _dispatchLayer = Layer.mergeAll(
-    KargadanSocketClientLive,
-    ReconnectionSupervisor.Default,
-    CommandDispatch.Default,
+const _dispatchLayer = CommandDispatch.Default.pipe(
+    Layer.provideMerge(KargadanSocketClientLive.pipe(Layer.provideMerge(ReconnectionSupervisor.Default))),
 );
 const _persistenceLayer = HarnessConfig.persistenceLayer;
 const _liveIt = _liveEnabled ? it : it.skip;
@@ -112,22 +110,21 @@ const _withLiveDispatch = <A, E>(
     Effect.scoped(
         Effect.gen(function* () {
             yield* _assertNoFakeFlags;
-            const [rawDispatch, appId, token] = yield* Effect.all([
+            const [rawDispatch, cfg] = yield* Effect.all([
                 CommandDispatch,
-                HarnessConfig.appId,
-                HarnessConfig.sessionToken,
+                HarnessConfig,
             ]);
             const dispatch = rawDispatch as LiveDispatch;
             yield* Effect.forkScoped(dispatch.start()).pipe(Effect.asVoid);
             const identityBase = {
-                appId,
+                appId: cfg.appId,
                 correlationId: crypto.randomUUID().replaceAll('-', ''),
                 sessionId: crypto.randomUUID(),
             } satisfies Envelope.IdentityBase;
             const ack = yield* dispatch.handshake({
                 ...identityBase,
                 requestId: crypto.randomUUID(),
-                token,
+                token: cfg.sessionToken,
             } satisfies Envelope.Identity & { readonly token: string }).pipe(
                 Effect.map((value) => value as HandshakeAck),
             );
@@ -288,9 +285,9 @@ _liveIt('P7-LIVE-03: duplicate idempotency key does not execute write twice', as
 _liveDbIt('P7-LIVE-04: persisted compaction checkpoint hydrates to equivalent loop state', async () => {
     await _runPromiseUnsafe(Effect.gen(function* () {
         yield* _assertNoFakeFlags;
-        const [appId, persistence] = yield* Effect.all([HarnessConfig.appId, AgentPersistenceService]);
+        const [cfg, persistence] = yield* Effect.all([HarnessConfig, AgentPersistenceService]);
         const identity = {
-            appId,
+            appId: cfg.appId,
             correlationId: crypto.randomUUID().replaceAll('-', ''),
             sessionId: crypto.randomUUID(),
         } as const;

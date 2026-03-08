@@ -1,6 +1,91 @@
 # Surface
 
-Surface owns protocol semantics: route graphs, transport channels, security schemes, compatibility classification, and client derivation. Runtime lifecycle and domain translation stay owned by `effects.md`, `composition.md`, and `errors.md`.
+Module surface discipline: 1–2 exports per file, everything else `_`-prefixed and integrated INTO those exports. Protocol surface (HTTP API, clients, security) follows the same principle at the transport layer.
+
+
+## Module surface compression
+
+The difference between a module with 6 exports and one with 1 export is not indirection — it is integration. `_`-prefixed logic becomes closures inside scoped constructors, static methods on classes, inline compositions in pipe chains. Consumers interact with the export; the implementation substrate is invisible.
+
+```ts
+import { Data, Duration, Effect, Metric, MetricLabel, Pool, Schedule } from "effect"
+
+// _-prefixed: private substrate. Consumers never import these.
+const _ChannelPolicy = {
+  email:   { retries: 5, delay: Duration.millis(500),  timeout: Duration.seconds(10), log: Effect.logWarning },
+  sms:     { retries: 0, delay: Duration.zero,         timeout: Duration.seconds(5),  log: Effect.logError   },
+  push:    { retries: 3, delay: Duration.millis(200),  timeout: Duration.seconds(8),  log: Effect.logWarning },
+  webhook: { retries: 4, delay: Duration.seconds(1),   timeout: Duration.seconds(15), log: Effect.logError   },
+} as const satisfies Record<string, {
+  retries: number; delay: Duration.Duration; timeout: Duration.Duration
+  log: (...args: ReadonlyArray<unknown>) => Effect.Effect<void>
+}>
+
+type _Channel = keyof typeof _ChannelPolicy
+
+const _Metrics = {
+  sent:   Metric.counter("notification_sent_total"),
+  failed: Metric.counter("notification_failed_total"),
+} as const
+
+type _Reason = Data.TaggedEnum<{
+  RateLimited:      { readonly retryAfterMs: number  }
+  InvalidRecipient: { readonly recipient:    string  }
+  TokenExpired:     { readonly tokenId:      string  }
+  Timeout:          { readonly elapsedMs:    number  }
+  TransportFailure: { readonly cause:        unknown }
+}>
+const _Reason = Data.taggedEnum<_Reason>()
+
+// one export: the error class. Uses _Reason internally for exhaustive dispatch.
+class DeliveryFault extends Data.TaggedError("DeliveryFault")<{
+  readonly channel: _Channel; readonly reason: _Reason; readonly recipient: string
+}> {
+  get retryable() {
+    return _ChannelPolicy[this.channel].retries > 0 && _Reason.$match(this.reason, {
+      RateLimited:      () => true,  Timeout:      () => true, TransportFailure: () => true,
+      InvalidRecipient: () => false, TokenExpired: () => false,
+    })
+  }
+}
+
+// one export: the service. All logic integrated via closures in scoped constructor.
+class NotificationService extends Effect.Service<NotificationService>()("domain/Notification", {
+  scoped: Effect.gen(function* () {
+    const pool = yield* Effect.acquireRelease(
+      Pool.make({ acquire: Effect.succeed({ id: crypto.randomUUID() }), size: 10 }),
+      (p) => Effect.sync(() => void p),
+    )
+    // _withRetry: closure inside scoped constructor, NOT module-level function
+    const _withRetry = (channel: _Channel) => {
+      const p = _ChannelPolicy[channel]
+      return <A, R>(self: Effect.Effect<A, DeliveryFault, R>) => self.pipe(
+        Effect.retry(Schedule.exponential(p.delay).pipe(
+          Schedule.intersect(Schedule.recurs(p.retries)),
+          Schedule.whileInput((e: DeliveryFault) => e.retryable))),
+        Effect.timeoutFail({ duration: p.timeout,
+          onTimeout: () => new DeliveryFault({ channel, reason: _Reason.Timeout({ elapsedMs: Duration.toMillis(p.timeout) }), recipient: "" }) }))
+    }
+    // one polymorphic entrypoint
+    const send = Effect.fn("Notification.send")(
+      (channel: _Channel, recipient: string, payload: string) =>
+        Pool.get(pool).pipe(
+          Effect.mapError((cause) => new DeliveryFault({ channel, reason: _Reason.TransportFailure({ cause }), recipient })),
+          Effect.asVoid,
+          Effect.tapError((e) => _ChannelPolicy[e.channel].log(e.reason._tag))),
+      (effect, channel: _Channel) => effect.pipe(
+        _withRetry(channel),
+        Effect.tap(() => Metric.increment(Metric.tagged(_Metrics.sent, "channel", channel)))))
+    return { send } as const
+  }),
+}) {}
+```
+
+**Integration contracts:**
+- `_ChannelPolicy`, `_Metrics`, `_Reason`, `_Channel` — all `_`-prefixed. None exported. Consumers import `NotificationService` and `DeliveryFault`, nothing else.
+- `_withRetry` is a closure inside the scoped constructor — it captures `_ChannelPolicy` from module scope but exists only within the service's lifecycle. Not a module-level function; not extractable; not testable in isolation (by design — it's implementation, not API).
+- `send` is the one polymorphic entrypoint. No `sendEmail`/`sendSms` family. Channel dispatch happens through vocabulary lookup, not method proliferation.
+- Adding a channel: one `_ChannelPolicy` entry. Adding a failure mode: one `_Reason` variant + one `$match` arm in `retryable`. The compiler enforces exhaustion at both sites.
 
 
 ## Contract governance
@@ -12,7 +97,7 @@ import { HttpApi, OpenApi } from "@effect/platform"
 import { Array as A, HashMap, Match, pipe } from "effect"
 
 const _Diff = {
-  RemovedEndpoint: { severity: "breaking",  gate: "reject" }, AddedEndpoint: { severity: "additive", gate: "allow" },
+  RemovedEndpoint: { severity: "breaking",  gate: "reject" }, AddedEndpoint:  { severity: "additive", gate: "allow"  },
   PathMutation:    { severity: "breaking",  gate: "reject" }, SchemaMutation: { severity: "breaking", gate: "review" },
   MethodChanged:   { severity: "breaking",  gate: "reject" },
 } as const satisfies Record<string, { severity: "breaking" | "additive"; gate: "reject" | "allow" | "review" }>
