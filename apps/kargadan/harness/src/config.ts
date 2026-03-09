@@ -10,7 +10,7 @@ import { SqlClient } from '@effect/sql';
 import { AiRegistry } from '@parametric-portal/ai/registry';
 import { AgentPersistenceLayer } from '@parametric-portal/database/agent-persistence';
 import { Client } from '@parametric-portal/database/client';
-import { Config, ConfigProvider, Context as Ctx, Data, Duration, Effect, Layer, Match, Option, Redacted, Schema as S, pipe } from 'effect';
+import { Config, ConfigProvider, Context as Ctx, Data, Duration, Effect, Layer, Match, Option, Redacted, Ref, Schema as S, pipe } from 'effect';
 import * as KargadanMigration from '../migrations/0001_kargadan';
 import { DEFAULT_LOOP_OPERATIONS, NonNegInt, ObjectTypeTag, Operation } from './protocol/schemas';
 
@@ -96,6 +96,7 @@ const _keychainValue = (provider: AiRegistry.Provider) =>
 const _writeKeychain = (provider: AiRegistry.Provider, value: string) =>
     _exec('security', ['add-generic-password', '-U', '-a', _KEYCHAIN.accounts[provider], '-s', _KEYCHAIN.service, '-w', value]).pipe(
         Effect.mapError((detail) => new HarnessHostError({ detail, message: `Keychain write failed for ${provider}.`, reason: 'keychain' })));
+const _keychainDecodeFailures = Ref.unsafeMake<ReadonlyArray<{ readonly error: string; readonly provider: AiRegistry.Provider }>>([] as const);
 const _keychainPairs = Effect.forEach(Object.keys(AiRegistry.providerVocabulary) as ReadonlyArray<AiRegistry.Provider>, (provider) =>
     _keychainValue(provider).pipe(Effect.flatMap(Option.match({
         onNone: () => Effect.succeed([] as ReadonlyArray<readonly [string, string]>),
@@ -103,7 +104,7 @@ const _keychainPairs = Effect.forEach(Object.keys(AiRegistry.providerVocabulary)
             Match.when('gemini', () => { const _c = AiRegistry.providerVocabulary.gemini.credential; return S.decodeUnknown(_GeminiSessionSchema)(value).pipe(Effect.map((s) =>
                 [[_c.accessTokenKey, s.accessToken], [_c.refreshTokenKey, s.refreshToken], [_c.expiryKey, s.expiresAt]] as ReadonlyArray<readonly [string, string]>)); }),
             Match.orElse((name) => Effect.succeed([[AiRegistry.providerVocabulary[name].credential.key, value]] as ReadonlyArray<readonly [string, string]>)),
-        ).pipe(Effect.catchAll((detail) => Effect.logWarning('kargadan.keychain.decode_failed', { detail, provider }).pipe(
+        ).pipe(Effect.catchAll((detail) => Ref.update(_keychainDecodeFailures, (prev) => [...prev, { error: String(detail), provider }]).pipe(
             Effect.as([] as ReadonlyArray<readonly [string, string]>)))),
     }))), { concurrency: 'unbounded' }).pipe(Effect.map((entries) => entries.flat()));
 const loadConfigProvider = Effect.all([
@@ -235,10 +236,15 @@ const KargadanHost = {
                 _exec('security', ['delete-generic-password', '-a', _KEYCHAIN.accounts[name], '-s', _KEYCHAIN.service]).pipe(Effect.catchAll(() => Effect.void)), { discard: true }),
         onTokenRefresh: (data: { readonly accessToken: string; readonly expiresAt: string; readonly refreshToken: string }) =>
             _writeKeychain('gemini', JSON.stringify(data)).pipe(Effect.ignore),
-        status: Effect.forEach(Object.keys(AiRegistry.providerVocabulary) as ReadonlyArray<AiRegistry.Provider>, (provider) =>
-            _keychainValue(provider).pipe(Effect.map((value) =>
-                ({ enrolled: Option.isSome(value), kind: AiRegistry.providerVocabulary[provider].credential.kind, provider }))),
-            { concurrency: 'unbounded' }),
+        status: Ref.get(_keychainDecodeFailures).pipe(Effect.flatMap((failures) => {
+            const failuresByProvider = new Map(failures.map((f) => [f.provider, f.error]));
+            return Effect.forEach(Object.keys(AiRegistry.providerVocabulary) as ReadonlyArray<AiRegistry.Provider>, (provider) =>
+                _keychainValue(provider).pipe(Effect.map((value) => ({
+                    decodeError: Option.fromNullable(failuresByProvider.get(provider)),
+                    enrolled:    Option.isSome(value),
+                    kind:        AiRegistry.providerVocabulary[provider].credential.kind,
+                    provider,
+                }))), { concurrency: 'unbounded' }); })),
     },
     postgres: {
         bootstrap:     _bootstrapPostgres,

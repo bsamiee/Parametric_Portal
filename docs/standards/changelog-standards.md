@@ -47,7 +47,7 @@ Based on [Keep a Changelog](https://keepachangelog.com/) with Semantic Versionin
 
 [CRITICAL]:
 - [NEVER] Invent new categories—six above are exhaustive.
-- [NEVER] Use past tense—entries use imperative mood: "Add X" not "Added X."
+- [NEVER] Use past tense in bullet entries—entries use imperative mood: "Add X" not "Added X." *(Section headers like "Added", "Fixed" retain past participle per Keep a Changelog convention.)*
 
 ---
 ## [3][ENTRY_DISCIPLINE]

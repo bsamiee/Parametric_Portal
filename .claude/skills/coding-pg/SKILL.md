@@ -159,5 +159,5 @@ All SQL follows five governing principles:
 
 After writing or modifying SQL, run in order:
 
-1. **Automated lint**: `bash scripts/pg_lint.sh [PATH...]` — 22 anti-pattern detectors (rg-based + structural). Errors (E) block merge; warnings (W) require justification. Supports `--json` for CI integration, `--sql-only`/`--ts-only` for targeted scans.
+1. **Automated lint**: `bash .claude/skills/coding-pg/scripts/pg_lint.sh [PATH...]` — 25 anti-pattern detectors (rg-based + structural). Errors (E) block merge; warnings (W) require justification. Supports `--json` for CI integration, `--sql-only`/`--ts-only` for targeted scans.
 2. **Manual checklist**: `references/validation.md` — compliance gates not automatable (Effect-SQL alignment, migration safety, lock-level awareness).

@@ -46,13 +46,19 @@ const _Aux = {
     undoScript:     '_Undo _Enter',         viewCapture:  'view.capture',
 } as const;
 const _Limits = { maxCandidates: 8, truncationLength: 280 } as const;
-const _norm = <T>(guard: (x: unknown) => x is T, fallback: T, transform?: (v: T) => T) => (v: unknown): unknown =>
-    Option.fromNullable(v).pipe(Option.flatMap((x) => guard(x) ? Option.some(x) : Option.none()), Option.map((x) => transform ? transform(x) : x), Option.getOrElse(() => fallback));
-const _ParamNorm = [
-    ['detail',        _norm((x): x is string => typeof x === 'string' && ['compact', 'standard', 'full'].includes(x), 'standard')],
-    ['includeHidden', _norm(S.is(S.Boolean), false)],
-    ['limit',         _norm((x): x is number => typeof x === 'number' && Number.isFinite(x), 25, (x) => Math.max(1, Math.min(200, Math.trunc(x))))],
-] as const satisfies ReadonlyArray<readonly [string, (v: unknown) => unknown]>;
+const _ParamNormSchema = S.transform(
+    S.Struct({
+        detail:        S.optional(S.Union(S.Literal('compact', 'standard', 'full'), S.Undefined)),
+        includeHidden: S.optional(S.Union(S.Boolean, S.Undefined)),
+        limit:         S.optional(S.Union(S.Number.pipe(S.finite()), S.Undefined)),
+    }),
+    S.Struct({ detail: S.Literal('compact', 'standard', 'full'), includeHidden: S.Boolean, limit: S.Int }),
+    { decode: ({ detail, includeHidden, limit }) => ({
+        detail:        detail ?? 'standard' as const,
+        includeHidden: includeHidden ?? false,
+        limit:         Math.max(1, Math.min(200, Math.trunc(limit ?? 25))),
+    }), encode: ({ detail, includeHidden, limit }) => ({ detail, includeHidden, limit }) },
+);
 const _FailureGuidance = {
     compensatable: 'Workflow compensation is available; inspect undo scope and rerun after validation.',
     correctable:   'Adjust parameters or scene constraints, then retry planning.',
@@ -217,8 +223,11 @@ class AgentLoop extends Effect.Service<AgentLoop>()('kargadan/AgentLoop', {
                     onNone: () => Effect.fail(new CommandDispatchError({ details: { commandId: planned.commandId, message: 'Operation missing from session catalog' }, reason: 'protocol' })),
                     onSome: Effect.succeed }));
                 const paramSet = HashSet.fromIterable(A.map(entry.params, (p) => p.name));
-                const args = Object.fromEntries([...Object.entries(planned.args),
-                    ..._ParamNorm.filter(([name]) => HashSet.has(paramSet, name)).map(([name, norm]) => [name, norm(planned.args[name])])]);
+                const _normKeys = ['detail', 'includeHidden', 'limit'] as const;
+                const normFields = Object.fromEntries(_normKeys
+                    .filter((name) => HashSet.has(paramSet, name)).map((name) => [name, planned.args[name]]));
+                const normalized = S.decodeUnknownSync(_ParamNormSchema)(normFields);
+                const args = { ...planned.args, ...normalized };
                 yield* Effect.filterOrFail(Effect.succeed(entry.params.filter((p) => p.required && !Object.hasOwn(args, p.name))), (m) => m.length === 0,
                     (m) => new CommandDispatchError({ details: { commandId: planned.commandId, message: `Missing required: ${m.map((p) => p.name).join(', ')}` }, reason: 'protocol' }));
                 const kind = Match.value(entry.dispatch.mode).pipe(Match.when('script', () => 'script' as const),

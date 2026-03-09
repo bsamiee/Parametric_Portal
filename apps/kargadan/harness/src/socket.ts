@@ -89,7 +89,7 @@ class KargadanSocketClient extends Effect.Service<KargadanSocketClient>()('karga
             readonly deferred: Deferred.Deferred<Envelope.PendingReply, SocketClientError>;
             readonly tag:      Envelope.Outbound['_tag'];
         }>());
-        const events = yield* Queue.bounded<Envelope.Event>(1024);
+        const events = yield* Queue.sliding<Envelope.Event>(1024);
         const lastMessageAt = yield* Ref.make<Option.Option<number>>(Option.none());
         const decode = S.decodeUnknown(S.parseJson(Envelope));
         const encode = S.encode(S.parseJson(Envelope));

@@ -87,7 +87,8 @@ type Morph[A: Stage, B: Stage] = Callable[[Signal[A]], Result[Signal[B], Rejecti
 type Transform = Morph["raw", "cal"]
 
 def is_calibrated(sig: Signal) -> TypeIs[Signal["cal"]]:
-    return 0 <= sig.phase < tau
+    rms = pipe(sig.samples, block.fold(lambda a, x: fma(x, x, a), 0.0), lambda s: sqrt(s / max(sig.samples.length, 1)))
+    return 0 <= sig.phase < tau and sig.samples.length > 0 and abs(rms - 1.0) < 1e-9
 
 def project(t: Transition) -> Transform:
     match t:
@@ -102,7 +103,7 @@ def project(t: Transition) -> Transform:
 ```
 
 - `Literal["raw", "cal"]` phantom tags via PEP 695 `type` alias eliminate sentinel class declarations — `Signal["cal"]` reads identically to `Signal[Cal]` with zero class definitions. PEP 696 default `P: Stage = "raw"` bounds the phantom parameter to the vocabulary while defaulting to uncalibrated state.
-- `TypeIs` (PEP 742) bridges phantom parameter erasure at boundaries — `isinstance` cannot distinguish `Signal["raw"]` from `Signal["cal"]` at runtime. The predicate re-derives the phantom tag from domain invariants (phase $\in [0, \tau)$ is `PhaseAlign`'s post-condition), narrowing **both** branches (complement narrowing). Domain-internal code uses `Morph[A, B]` for static proof; `TypeIs` is reserved for deserialization, FFI, and dynamic dispatch boundaries.
+- `TypeIs` (PEP 742) bridges phantom parameter erasure at boundaries — `isinstance` cannot distinguish `Signal["raw"]` from `Signal["cal"]` at runtime. The predicate re-derives the phantom tag from **both** calibration post-conditions: phase $\in [0, \tau)$ (`PhaseAlign`) **and** RMS $\approx 1.0$ (`RmsNorm` normalizes samples by their RMS). Checking phase bounds alone is unsound — a raw signal with naturally-bounded phase would pass. Both stages must leave observable invariants for the predicate to be a valid witness. Domain-internal code uses `Morph[A, B]` for static proof; `TypeIs` is reserved for deserialization, FFI, and dynamic dispatch boundaries.
 - `Morph[A: Stage, B: Stage]` constrains the callable algebra to valid stage transitions — unbounded phantom parameters accept any type including nonsense tags. `block.fold` accumulates sum-of-squares via `fma` and count in one pass; `filter_with` gates on the energy floor with `Rejection[P]` carrying the failing configuration. `PhaseAlign` demonstrates total refinement — modular wrapping maps all reals to the valid range without failure witness.
 
 ---
@@ -144,7 +145,7 @@ def refine(field: ViolationField, con: Constraint, v: float) -> Result[float, Vi
     match con:
         case Modular(period=p): return Ok(v % p)
         case Bounded(lo=lo, hi=hi): return Ok(v).filter_with(lambda x: lo <= x <= hi and isfinite(x) and frexp(x)[1] > -1022, err)
-        case "bit_aligned": return Ok(float(int(v))).filter_with(lambda n: int(n) > 0 and int(n) & (int(n) - 1) == 0, err)
+        case "bit_aligned": return Ok(v).filter_with(lambda x: x == int(x) and int(x) > 0 and int(x) & (int(x) - 1) == 0, err)
         case _ as u: assert_never(u)
 
 def mk_tone(p: float, a: float, r: float) -> Result[Tone, Violation]:
@@ -157,7 +158,7 @@ def mk_tone(p: float, a: float, r: float) -> Result[Tone, Violation]:
     return _build()
 ```
 
-`Literal["bit_aligned"]` replaces the zero-field marker dataclass `BitAligned()` — marker classes with no fields add no information beyond their tag, which `Literal` provides natively with exhaustive `match/case` support via `case "bit_aligned":`. `ViolationField` PEP 695 alias replaces the nested `Enum` class — bounded string vocabularies are `Literal`'s domain per type discipline; `Enum` is reserved for vocabularies needing programmatic iteration or runtime methods. `Bounded` rejects IEEE 754 specials — `isfinite` gates infinities/NaN, `frexp` exponent $\leq -1022$ rejects subnormals (denormalized representation causes DSP pipeline stalls). `@effect.result` flattens the three-bind chain into `yield from` sequencing. `kw_only=True` on `Tone` prevents silent positional swap of type-compatible `NewType` fields.
+`Literal["bit_aligned"]` replaces the zero-field marker dataclass `BitAligned()` — marker classes with no fields add no information beyond their tag, which `Literal` provides natively with exhaustive `match/case` support via `case "bit_aligned":`. `ViolationField` PEP 695 alias replaces the nested `Enum` class — bounded string vocabularies are `Literal`'s domain per type discipline when they serve as phantom tags or dataclass field discriminants; `StrEnum` is reserved for vocabularies needing programmatic iteration, runtime identity, or method dispatch. `Bounded` rejects IEEE 754 specials — `isfinite` gates infinities/NaN, `frexp` exponent $\leq -1022$ rejects subnormals (denormalized representation causes DSP pipeline stalls). `bit_aligned` gates on integrality of the original value before power-of-2 validation — `float(int(v))` truncation would silently accept non-integral inputs like `8.5` as valid. `@effect.result` flattens the three-bind chain into `yield from` sequencing. `kw_only=True` on `Tone` prevents silent positional swap of type-compatible `NewType` fields.
 
 ---
 
@@ -420,7 +421,7 @@ Match outside the wrapper binds concern coefficients at decoration time — per-
 - One canonical type anchor per domain concept; derive all projections — never parallel type families.
 - `NewType` for opaque scalar distinction, `Annotated` + constraints for validated scalars — never mix. Zero bare primitives in public signatures when a typed atom exists.
 - Exhaust `@tagged_union` / `Annotated[Union, Discriminator]` via `match`/`case` + `assert_never` — silent fallthrough is a type error.
-- `StrEnum` for bounded vocabularies, `Literal` for finite non-string value sets — zero stringly-typed routing.
+- `StrEnum` for bounded string vocabularies requiring iteration, runtime identity, or method dispatch. `Literal` for phantom type tags, dataclass field discriminants, and finite non-string value sets — zero stringly-typed routing.
 - Domain collections immutable: `tuple[T, ...]`, `frozenset[T]`, `Mapping[K, V]`, `Block[T]`/`Seq[T]`. Non-empty witness types mandatory for `fold`/`reduce`/`head`.
 - Boundary projections derive from canonical model via field subsetting — no independent schema classes for the same concept.
 - `Result[T, E]` for fallible returns, `Option[T]` for absence — sole monadic rails. Zero `Optional[T]`; `X | None` only in Pydantic fields requiring JSON Schema nullability.

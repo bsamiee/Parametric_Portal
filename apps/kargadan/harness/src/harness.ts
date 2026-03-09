@@ -8,7 +8,7 @@ import { Context } from '@parametric-portal/server/context';
 import { Array as A, Effect, FiberRef, HashMap, Layer, Match, Option, Schema as S } from 'effect';
 import { HarnessConfig, KargadanHost } from './config';
 import { CommandDispatch } from './protocol/dispatch';
-import type { CatalogEntrySchema, Envelope } from './protocol/schemas';
+import type { Envelope } from './protocol/schemas';
 import { AgentLoop } from './runtime/agent-loop';
 import { KargadanSocketClientLive, ReconnectionSupervisor } from './socket';
 
@@ -20,8 +20,8 @@ const _LiveSceneSummary = S.Struct({ objectCount: S.Int.pipe(S.greaterThanOrEqua
 // --- [FUNCTIONS] -------------------------------------------------------------
 
 const _mergeManifest = (
-    base:      ReadonlyArray<typeof CatalogEntrySchema.Type>,
-    overrides: Option.Option<ReadonlyArray<typeof ManifestEntrySchema.Type>>,
+    base:      ReadonlyArray<Envelope.CatalogEntry>,
+    overrides: Option.Option<ReadonlyArray<S.Schema.Type<typeof ManifestEntrySchema>>>,
 ) =>
     Option.match(overrides, {
         onNone: () => base,

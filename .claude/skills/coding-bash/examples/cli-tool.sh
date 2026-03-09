@@ -137,7 +137,9 @@ _handle_create_env() {
     [[ -d "${DATA_DIR}/projects/${slug}" ]] || _die "Not found: ${slug}"
     [[ "${key}" =~ ^[A-Za-z_][A-Za-z_.0-9]*$ ]] || _die "Invalid key: ${key}"
     local existing; _read_field "${file}" "${key}" existing && _die "Key exists: ${key}"
-    printf '%s=%s\n' "${key}" "${value}" >> "${file}"; _info "Set ${slug}/${key}"
+    local current; current="$(<"${file}")"
+    local updated; printf -v updated '%s\n%s=%s' "${current}" "${key}" "${value}"
+    _write_atomic "${file}" "${updated}"; _info "Set ${slug}/${key}"
 }
 _handle_delete_proj() {
     local -r slug="$1" dir="${DATA_DIR}/projects/${1}"

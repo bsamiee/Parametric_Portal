@@ -38,7 +38,7 @@ class AiService extends Effect.Service<AiService>()('ai/Service', {
         const audit    = yield* AuditService;
         const database = yield* DatabaseService;
         const metrics  = yield* MetricsService;
-        const _track = (label: string, details: Record<string, unknown>, subjectId: string, metricCounter: typeof metrics.search.queries, metricLabels: ReturnType<typeof MetricsService.label>) =>
+        const _track = (label: string, details: Record<string, string | number | boolean | null | ReadonlyArray<string> | undefined>, subjectId: string, metricCounter: typeof metrics.search.queries, metricLabels: ReturnType<typeof MetricsService.label>) =>
             Effect.all([
                 audit.log(label, { details, subjectId }),
                 MetricsService.inc(metricCounter, metricLabels),

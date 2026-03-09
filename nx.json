@@ -178,7 +178,7 @@
             "options": { "command": "pnpm exec serve .vite -l 8080" }
         },
         "build": {
-            "dependsOn": ["^build"],
+            "dependsOn": ["restore", "^build"],
             "inputs": ["production", "^production", "{workspaceRoot}/vite.factory.ts"],
             "outputs": ["{projectRoot}/dist/**/*.js", "{projectRoot}/dist/**/*.d.ts", "{projectRoot}/dist/**/*.map"]
         },

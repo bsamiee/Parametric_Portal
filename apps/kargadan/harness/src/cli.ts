@@ -38,6 +38,11 @@ class CliError extends Data.TaggedError('CliError')<{
         tty_required: { advice: 'Run kargadan commands in a TTY session.',                  failureClass: 'correctable' },
         validation:   { advice: 'Adjust parameters or rerun with explicit flags.',          failureClass: 'correctable' },
     } as const;
+    static readonly from = (error: unknown) => Match.value(error).pipe(
+        Match.when(Match.instanceOf(CliError), (e) => e),
+        Match.when(Match.instanceOf(HarnessHostError), (e) => new CliError({ detail: e.detail, message: e.message,
+            reason: ({ auth: 'validation', config: 'validation', keychain: 'runtime', postgres: 'not_found' } as const satisfies Record<HarnessHostError['reason'], CliError['reason']>)[e.reason] })),
+        Match.orElse((e) => new CliError({ detail: e, message: String(e), reason: 'runtime' })));
     get policy() { return CliError.reasons[this.reason]; }
     get doc() {
         return HelpDoc.blocks([HelpDoc.h1(Span.error(`kargadan ${this.reason}`)), HelpDoc.p(Span.text(`failureClass: ${this.policy.failureClass}`)),
@@ -50,28 +55,20 @@ class CliError extends Data.TaggedError('CliError')<{
 const _compact = (value: unknown) => ((s: string) => s.length <= 140 ? s : `${s.slice(0, 140)}...`)(typeof value === 'string' ? value : JSON.stringify(value) ?? String(value));
 const _print = (title: string, lines: ReadonlyArray<string>) => Console.log(HelpDoc.toAnsiText(HelpDoc.blocks([HelpDoc.h1(Span.text(title)), ...lines.map((l) => HelpDoc.p(Span.text(l)))])));
 const _withAppTenant = <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.flatMap(HarnessConfig, (config) => Context.Request.within(config.appId, effect));
-const _nonBlank = (value: string | null | undefined) => Option.fromNullable(value).pipe(Option.map((entry) => entry.trim()), Option.filter((entry) => entry.length > 0));
 const _requireTty = Terminal.Terminal.pipe(Effect.flatMap((terminal) => terminal.isTTY),
     Effect.filterOrFail((isTTY) => isTTY, () => new CliError({ message: 'Interactive terminal required.', reason: 'tty_required' })), Effect.asVoid);
-const _toCliError = (error: unknown) => Match.value(error).pipe(
-    Match.when(Match.instanceOf(CliError), (e) => e),
-    Match.when(Match.instanceOf(HarnessHostError), (e) => new CliError({ detail: e.detail, message: e.message,
-        reason: ({ auth: 'validation', config: 'validation', keychain: 'runtime', postgres: 'not_found' } as const satisfies Record<HarnessHostError['reason'], CliError['reason']>)[e.reason] })),
-    Match.orElse((e) => new CliError({ detail: e, message: String(e), reason: 'runtime' })));
-const _selectProvider = (message: string) =>
-    Prompt.run(Prompt.select({ choices: Object.entries(AiRegistry.providerVocabulary).map(([value, meta]) => ({ title: meta.title, value: value as keyof typeof AiRegistry.providerVocabulary })), message }));
-const _promptSecret = (provider: keyof typeof AiRegistry.providerVocabulary) =>
-    Prompt.run(Prompt.hidden({ message: `${provider} API secret:`,
-        validate: (value) => value.trim().length === 0 ? Effect.fail('Credential cannot be empty') : Effect.succeed(value.trim()) })).pipe(Effect.map(Redacted.value));
 const _enrollProvider = (provider: keyof typeof AiRegistry.providerVocabulary, config: typeof KargadanConfigSchema.Type, clientPathHint?: Option.Option<string>) =>
     Match.value(AiRegistry.providerVocabulary[provider].credential.kind).pipe(
-        Match.when('api-secret', () => _promptSecret(provider).pipe(
-            Effect.flatMap((secret) => KargadanHost.auth.login({ provider, secret })), Effect.as(Option.none<string>()))),
+        Match.when('api-secret', () => Prompt.run(Prompt.hidden({ message: `${provider} API secret:`,
+            validate: (value) => value.trim().length === 0 ? Effect.fail('Credential cannot be empty') : Effect.succeed(value.trim()) })).pipe(
+            Effect.map(Redacted.value), Effect.flatMap((secret) => KargadanHost.auth.login({ provider, secret })), Effect.as(Option.none<string>()))),
         Match.orElse(() => {
             const hint = clientPathHint ?? Option.none<string>();
+            const existingPath = Option.fromNullable(ConfigFile.get(config, 'ai.geminiClientPath') as string | undefined).pipe(
+                Option.map((entry) => entry.trim()), Option.filter((entry) => entry.length > 0));
             return Option.match(hint, {
                 onNone: () => Prompt.run(Prompt.text({
-                    ...(Option.match(_nonBlank(ConfigFile.get(config, 'ai.geminiClientPath') as string | undefined), { onNone: () => ({}), onSome: (value) => ({ default: value }) })),
+                    ...(Option.match(existingPath, { onNone: () => ({}), onSome: (value) => ({ default: value }) })),
                     message: 'Gemini desktop client JSON path:',
                     validate: (value) => value.trim().length === 0 ? Effect.fail('Client JSON path cannot be empty') : Effect.succeed(value.trim()),
                 })).pipe(Effect.map(Option.some)),
@@ -80,7 +77,7 @@ const _enrollProvider = (provider: keyof typeof AiRegistry.providerVocabulary, c
                 provider, ...Option.match(clientPath, { onNone: () => ({}), onSome: (value) => ({ clientPath: value }) }),
             }).pipe(Effect.as(clientPath))));
         }),
-    ).pipe(Effect.mapError(_toCliError));
+    ).pipe(Effect.mapError(CliError.from));
 const _runExternal = (label: string, command: ProcessCommand.Command) =>
     ProcessCommand.exitCode(ProcessCommand.stdout(ProcessCommand.stderr(command, 'inherit'), 'inherit')).pipe(Effect.provide(NodeCommandExecutor.layer),
         Effect.flatMap((code) => code === 0 ? Effect.void : Effect.fail(new CliError({ message: `${label} exited with code ${String(code)}.`, reason: 'runtime' }))));
@@ -90,21 +87,20 @@ const _resolvePath = (override: Option.Option<string>, configFallback: Option.Op
         onSome: (path) => fs.exists(path).pipe(
             Effect.filterOrFail((exists) => exists, () => new CliError({ message: `${label} not found at ${path}.`, reason: 'not_found' })), Effect.as(path)),
     }));
+const _rankRhinoApp = (entry: string) => { const i = [/^Rhino 9/i, /^Rhino WIP/i, /^Rhino/i, /^Rhinoceros/i].findIndex((p) => p.test(entry)); return i === -1 ? Number.MAX_SAFE_INTEGER : i; };
 const _resolveRhinoApp = (override: Option.Option<string>) => Effect.flatMap(HarnessConfig, (config) => _resolvePath(
-    override, _nonBlank(config.rhinoAppPath),
+    override, Option.fromNullable(config.rhinoAppPath).pipe(Option.map((entry) => entry.trim()), Option.filter((entry) => entry.length > 0)),
     Effect.flatMap(FileSystem.FileSystem, (fs) => fs.readDirectory('/Applications').pipe(
-        Effect.map((entries) => {
-            const _rank = (entry: string) => { const i = [/^Rhino 9/i, /^Rhino WIP/i, /^Rhino/i, /^Rhinoceros/i].findIndex((p) => p.test(entry)); return i === -1 ? Number.MAX_SAFE_INTEGER : i; };
-            return entries.filter((e) => e.endsWith('.app') && /(Rhino|Rhinoceros)/i.test(e))
-                .sort((left, right) => { const d = _rank(left) - _rank(right); return d === 0 ? left.localeCompare(right) : d; })
-                .map((e) => join('/Applications', e));
-        }),
+        Effect.map((entries) => entries.filter((e) => e.endsWith('.app') && /(Rhino|Rhinoceros)/i.test(e))
+            .sort((left, right) => { const d = _rankRhinoApp(left) - _rankRhinoApp(right); return d === 0 ? left.localeCompare(right) : d; })
+            .map((e) => join('/Applications', e))),
         Effect.flatMap((apps) => apps.length > 0 ? Effect.succeed(apps[0] as string)
             : Effect.fail(new CliError({ message: 'Rhino.app was not discovered under /Applications. Set rhino.appPath or pass --rhino-app.', reason: 'not_found' }))),
-        Effect.mapError(_toCliError))),
+        Effect.mapError(CliError.from))),
     'Rhino.app'));
 const _resolveYakPath = (appPath: string, override: Option.Option<string>) => Effect.flatMap(HarnessConfig, (config) => _resolvePath(
-    override, Option.orElse(_nonBlank(config.rhinoYakPath), () => Option.some(join(appPath, 'Contents/Resources/bin/yak'))),
+    override, Option.orElse(Option.fromNullable(config.rhinoYakPath).pipe(Option.map((entry) => entry.trim()), Option.filter((entry) => entry.length > 0)),
+        () => Option.some(join(appPath, 'Contents/Resources/bin/yak'))),
     Effect.fail(new CliError({ message: 'Yak path could not be resolved.', reason: 'not_found' })), 'yak executable'));
 const _assertPrepareSafe = readPortFile().pipe(Effect.map(Option.some),
     Effect.catchTag('SocketClientError', () => Effect.succeed(Option.none<{ readonly pid: number; readonly port: number; readonly startedAt: string }>())),
@@ -257,7 +253,7 @@ const _diagnosticsCheckCommand = Command.make('check', {}, () => _withAppTenant(
             Effect.succeed({ message: error.message, status: ({ port_file_not_found: 'missing', port_file_stale: 'stale' } as Record<string, string>)[error.reason] ?? 'invalid' })));
     const [config, fs] = yield* Effect.all([HarnessConfig, FileSystem.FileSystem]);
     const [auth, persistenceProbe] = yield* Effect.all([
-        KargadanHost.auth.status.pipe(Effect.mapError(_toCliError)),
+        KargadanHost.auth.status.pipe(Effect.mapError(CliError.from)),
         AgentPersistenceService.pipe(Effect.flatMap((svc) => svc.list({ limit: 1 })))]);
     const configIntegrity = yield* fs.readFileString(ConfigFile.path).pipe(
         Effect.map((raw) => ({ hash: createHash('sha256').update(raw).digest('hex').slice(0, 16), status: 'ok' as const })),
@@ -268,7 +264,7 @@ const _diagnosticsCheckCommand = Command.make('check', {}, () => _withAppTenant(
         `appId=${config.appId}`, `protocol=${String(config.protocolVersion.major)}.${String(config.protocolVersion.minor)}`,
         `dbReachable=true totalSessions=${String(persistenceProbe.total)}`,
         `languageOverride=${_fmtOverride(config.resolveSessionOverride)}`, `architectOverride=${_fmtOverride(config.resolveArchitectOverride)}`,
-        `auth=${auth.map((entry) => `${entry.provider}:${entry.enrolled ? 'ok' : 'missing'}`).join(',')}`,
+        `auth=${auth.map((entry) => `${entry.provider}:${entry.enrolled ? 'ok' : 'missing'}${Option.isSome(entry.decodeError) ? ':DECODE_ERROR' : ''}`).join(',')}`,
         `transport=${transport.status} (${transport.message})`, `configIntegrity=${configIntegrity.status} hash=${configIntegrity.hash}`,
         `dataDir=${dataDirProbe} (${ConfigFile.dir})`]);
 }))).pipe(Command.withDescription('Validate environment, DB connectivity, transport, config integrity, and data directory.'), Command.provide(HarnessConfig.persistenceLayer));
@@ -319,22 +315,22 @@ const _confirmOverwrite = (exists: boolean) =>
         Effect.filterOrFail((confirmed) => confirmed, () => new CliError({ message: 'Init cancelled.', reason: 'validation' }))), () => exists);
 const _enrollAndSaveConfig = (provider: keyof typeof AiRegistry.providerVocabulary, config: Effect.Effect.Success<typeof ConfigFile.read>) =>
     Prompt.run(Prompt.text({ default: AiRegistry.providerVocabulary[provider].defaultModel, message: 'Language model:' })).pipe(
-        Effect.flatMap((model) => KargadanHost.postgres.bootstrap.pipe(Effect.mapError(_toCliError),
+        Effect.flatMap((model) => KargadanHost.postgres.bootstrap.pipe(Effect.mapError(CliError.from),
             Effect.flatMap((databaseUrl) => _enrollProvider(provider, config).pipe(
                 Effect.flatMap((geminiClientPath) => ConfigFile.write({
                     ...config, ai: { ...config.ai, geminiClientPath: Option.getOrUndefined(geminiClientPath), languageModel: model, languageProvider: provider },
                     database: { ...config.database, url: databaseUrl },
-                }).pipe(Effect.mapError(_toCliError), Effect.zipRight(_print('Kargadan initialized',
+                }).pipe(Effect.mapError(CliError.from), Effect.zipRight(_print('Kargadan initialized',
                     [`provider: ${provider}`, `model: ${model}`, `config: ${ConfigFile.path}`, `database: ${databaseUrl}`, `auth: enrolled in macOS Keychain`])))))))));
 const _initWizard = _requireTty.pipe(Effect.zipRight(Effect.all([ConfigFile.read, FileSystem.FileSystem])), Effect.flatMap(([config, fs]) =>
     fs.exists(ConfigFile.path).pipe(Effect.flatMap(_confirmOverwrite),
-        Effect.zipRight(_selectProvider('AI provider:')),
+        Effect.zipRight(Prompt.run(Prompt.select({ choices: Object.entries(AiRegistry.providerVocabulary).map(([value, meta]) => ({ title: meta.title, value: value as keyof typeof AiRegistry.providerVocabulary })), message: 'AI provider:' }))),
         Effect.flatMap((provider) => _enrollAndSaveConfig(provider, config)))));
-const _authStatusCommand = Command.make('status', {}, () => Effect.all([ConfigFile.read, KargadanHost.auth.status.pipe(Effect.mapError(_toCliError))]).pipe(
+const _authStatusCommand = Command.make('status', {}, () => Effect.all([ConfigFile.read, KargadanHost.auth.status.pipe(Effect.mapError(CliError.from))]).pipe(
     Effect.flatMap(([config, statuses]) => {
         const sel = (key: string) => ConfigFile.get(config, key) ?? 'unset';
         return _print('auth status', [`selected=${sel('ai.languageProvider')}:${sel('ai.languageModel')}`,
-            ...statuses.map((s) => `${s.provider} | ${s.kind} | ${s.enrolled ? 'enrolled' : 'missing'}${s.provider === 'gemini' ? ` | client=${sel('ai.geminiClientPath')}` : ''}`)]);
+            ...statuses.map((s) => `${s.provider} | ${s.kind} | ${s.enrolled ? 'enrolled' : 'missing'}${Option.match(s.decodeError, { onNone: () => '', onSome: (e) => ` | DECODE_ERROR: ${e}` })}${s.provider === 'gemini' ? ` | client=${sel('ai.geminiClientPath')}` : ''}`)]);
     })));
 const _authLoginCommand = Command.make('login', {
     clientPath: Options.text('client-path').pipe(Options.withDescription('Gemini desktop client JSON path'), Options.optional),
@@ -342,23 +338,23 @@ const _authLoginCommand = Command.make('login', {
 }, (input) => _requireTty.pipe(Effect.zipRight(ConfigFile.read), Effect.flatMap((config) =>
     input.provider.pipe(Option.map((v) => v.trim()),
         Option.filter((v): v is keyof typeof AiRegistry.providerVocabulary => Object.hasOwn(AiRegistry.providerVocabulary, v)),
-        Option.match({ onNone: () => _selectProvider('Credential provider:'), onSome: Effect.succeed })).pipe(
+        Option.match({ onNone: () => Prompt.run(Prompt.select({ choices: Object.entries(AiRegistry.providerVocabulary).map(([value, meta]) => ({ title: meta.title, value: value as keyof typeof AiRegistry.providerVocabulary })), message: 'Credential provider:' })), onSome: Effect.succeed })).pipe(
         Effect.flatMap((provider) => {
             const clientHint = input.clientPath.pipe(Option.map((v) => v.trim()), Option.filter((v) => v.length > 0));
             return _enrollProvider(provider, config, clientHint).pipe(Effect.tap((geminiClientPath) =>
                 Effect.when(ConfigFile.write(ConfigFile.set(config, 'ai.geminiClientPath', Option.getOrUndefined(geminiClientPath))).pipe(
-                    Effect.mapError(_toCliError)), () => Option.isSome(geminiClientPath))),
+                    Effect.mapError(CliError.from)), () => Option.isSome(geminiClientPath))),
                 Effect.tap((geminiClientPath) => _print('auth login', [`provider=${provider}`, `stored=macOS Keychain`,
                     ...Option.match(geminiClientPath, { onNone: () => [] as ReadonlyArray<string>, onSome: (v) => [`client=${v}`] })])));
         })))));
 const _authLogoutCommand = Command.make('logout', {
     provider: Options.text('provider').pipe(Options.withDescription('Provider name (anthropic|gemini|openai); omit to clear all'), Options.optional),
 }, (input) => Option.match(input.provider, {
-    onNone: () => KargadanHost.auth.logout().pipe(Effect.mapError(_toCliError), Effect.zipRight(_print('auth logout', ['providers=all', 'status=cleared']))),
+    onNone: () => KargadanHost.auth.logout().pipe(Effect.mapError(CliError.from), Effect.zipRight(_print('auth logout', ['providers=all', 'status=cleared']))),
     onSome: (raw) => Effect.filterOrFail(Effect.succeed(raw.trim()),
         (v): v is keyof typeof AiRegistry.providerVocabulary => Object.hasOwn(AiRegistry.providerVocabulary, v),
         () => new CliError({ message: `Unknown provider '${raw.trim()}'. Valid: ${Object.keys(AiRegistry.providerVocabulary).join(', ')}`, reason: 'validation' })).pipe(
-        Effect.flatMap((name) => KargadanHost.auth.logout(name).pipe(Effect.mapError(_toCliError), Effect.zipRight(_print('auth logout', [`provider=${name}`, 'status=cleared']))))),
+        Effect.flatMap((name) => KargadanHost.auth.logout(name).pipe(Effect.mapError(CliError.from), Effect.zipRight(_print('auth logout', [`provider=${name}`, 'status=cleared']))))),
 }));
 const _authCommand = Command.make('auth', {}, () => Effect.void).pipe(
     Command.withSubcommands([_authLoginCommand, _authStatusCommand, _authLogoutCommand]), Command.withDescription('Credential enrollment and status commands.'));
@@ -371,7 +367,7 @@ const _rootCommand = Command.make('kargadan', {}, () => Effect.gen(function* () 
 })).pipe(
     Command.withSubcommands([_runCommand, Command.make('init', {}, () => _initWizard).pipe(Command.withDescription('Initialize Kargadan configuration.')),
         _authCommand, _sessionsCommand, _configCommand, _diagnosticsCommand]),
-    Command.transformHandler((handler) => handler.pipe(Effect.withSpan('kargadan.cli.command'), Effect.mapError(_toCliError))),
+    Command.transformHandler((handler) => handler.pipe(Effect.withSpan('kargadan.cli.command'), Effect.mapError(CliError.from))),
     Command.provide(HarnessConfig.Default));
 
 // --- [ENTRY] -----------------------------------------------------------------
