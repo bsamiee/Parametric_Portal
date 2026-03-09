@@ -6,7 +6,7 @@ import { it } from '@effect/vitest';
 import { AiRegistry } from '../../../packages/ai/src/registry';
 import { AiRuntimeProvider } from '../../../packages/ai/src/runtime-provider';
 import { ConfigProvider, Effect, Layer, Match, Option, Redacted, Schema as S } from 'effect';
-import { ConfigFile, decodeOverride, HarnessConfig, HarnessHostError, KargadanConfigSchema, KargadanHost } from '../../../apps/kargadan/harness/src/config';
+import { ConfigFile, HarnessConfig, HarnessHostError, KargadanConfigSchema, KargadanHost } from '../../../apps/kargadan/harness/src/config';
 import { expect } from 'vitest';
 
 const _configLayer = (entries: Record<string, string>) =>
@@ -89,7 +89,7 @@ it.effect('P8-CFG-CT-04: compactionTriggerPercent rejects 100', () =>
 );
 
 it.effect('P8-CFG-DO-01: decodeOverride with empty model+provider returns Option.none', () =>
-    decodeOverride({ fallback: [], model: '', provider: '' }).pipe(
+    AiRegistry.decodeSessionOverrideFromInput({ fallback: [], model: '', provider: '' }).pipe(
         Effect.tap((result) => { expect(Option.isNone(result)).toBe(true); }),
     ),
 );

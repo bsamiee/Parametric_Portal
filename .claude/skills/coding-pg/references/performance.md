@@ -5,27 +5,27 @@ AIO, JIT, parallel query, vacuum optimization, cost model tuning, connection poo
 
 ## Asynchronous I/O (PG 18)
 
-AIO subsystem queues multiple read requests, overlapping disk with CPU. 2-3x throughput for sequential scans, bitmap heap scans, and vacuum on Linux with io_uring.
+2-3x throughput for sequential scans, bitmap heap scans, and vacuum on Linux with io_uring.
 
-```
-io_method = io_uring                      # Linux only; 'worker' fallback for other OS
+```ini
+io_method = io_uring                      # Linux 5.6+ (IORING_FEAT_NODROP); 'worker' is compile-time only, not a runtime fallback
 io_max_concurrency = 0                    # 0 = auto (based on max_parallel_workers)
 io_combine_limit = 128kB                  # combine adjacent page reads into single I/O
-effective_io_concurrency = 200            # hint for bitmap heap scans
-maintenance_io_concurrency = 100          # hint for vacuum, CREATE INDEX
+effective_io_concurrency = 200            # bitmap heap prefetch distance; SSD: 200, HDD: 2-4
+maintenance_io_concurrency = 100          # vacuum, CREATE INDEX prefetch
 ```
 
 AIO contracts:
-- `io_uring` requires Linux kernel 5.6+ (needs IORING_FEAT_NODROP) -- falls back to `worker` (thread-based) on other platforms
-- AIO benefits sequential scans, bitmap heap scans, VACUUM -- minimal impact on index point lookups (already single-page)
-- `effective_io_concurrency`: prefetch distance for bitmap heap scan -- SSD: 200, HDD: 2-4
+- Primary benefit: sequential scans, bitmap heap scans, VACUUM (2-3x throughput). Index point lookups see modest improvement (10-20%) only under high-concurrency prefetch conditions — already single-page I/O
+- `io_uring` requires Linux 5.6+ with `IORING_FEAT_NODROP`; non-Linux platforms degrade to synchronous I/O (no thread-based fallback). `worker` mode is a compile-time option, not automatic
+- Breakeven: AIO overhead (submission queue management) exceeds benefit for queries returning <100 rows via index scan — disable per-session with `SET LOCAL io_max_concurrency = 1` for OLTP-heavy connections
 
 
 ## JIT Compilation
 
 JIT compiles query expressions to native code. Beneficial for complex expressions on large datasets; overhead for simple queries.
 
-```
+```ini
 jit = on                                  # enable JIT (default on since PG 12)
 jit_above_cost = 100000                   # JIT kicks in above this estimated cost
 jit_inline_above_cost = 500000            # inline functions above this cost
@@ -36,46 +36,36 @@ JIT contracts:
 - JIT benefits: complex WHERE expressions, aggregation with many columns, complex JOIN conditions
 - JIT overhead: ~50-200ms compilation time -- amortized only for queries processing many rows
 - Disable per-query: `SET LOCAL jit = off` for queries where JIT overhead exceeds benefit (small result sets, OLTP)
+- JIT compiled plans are NOT cached across executions — each `EXECUTE` of a prepared statement re-compiles if JIT threshold met. High-concurrency OLTP with many unique query shapes: set `jit = off` globally, enable per-session for analytics
 - `EXPLAIN ANALYZE` shows JIT time: `JIT: Functions: N, Generation Time: X.Xms, Optimization Time: X.Xms, Emission Time: X.Xms`
 
 
 ## Parallel Query
 
-Parallel execution for scans, joins, and aggregation.
-
-```
+```ini
 max_parallel_workers_per_gather = 4       # workers per Gather node
-max_parallel_workers = 8                  # total parallel workers across all queries
-max_parallel_maintenance_workers = 4      # workers for CREATE INDEX, VACUUM
-min_parallel_table_scan_size = 8MB        # minimum table size for parallel scan
-min_parallel_index_scan_size = 512kB      # minimum index size for parallel index scan
-parallel_setup_cost = 1000                # estimated cost to launch worker
-parallel_tuple_cost = 0.1                 # estimated cost per tuple transfer to leader
+max_parallel_workers = 8                  # total across all queries; each consumes a connection slot
+max_parallel_maintenance_workers = 4      # CREATE INDEX, VACUUM, parallel GIN build (PG 18)
+min_parallel_table_scan_size = 8MB        # threshold for parallel seq scan
+min_parallel_index_scan_size = 512kB      # threshold for parallel index scan
+parallel_setup_cost = 1000                # estimated launch cost
+parallel_tuple_cost = 0.1                 # per-tuple transfer cost to leader
+# Eligible: seq/index/bitmap scan, hash/merge/NL join, aggregation, sort, append
+# Ineligible: serializable isolation, PARALLEL UNSAFE functions
 ```
-
-Parallel-eligible operations:
-- Sequential scan, index scan, bitmap heap scan
-- Hash join, merge join, nested loop (inner side)
-- Aggregation (partial then final), Sort
-- Append (union all of partitions)
-- PG 18: parallel GIN index builds
-
-Parallel-ineligible:
-- Queries in serializable isolation
-- Functions marked PARALLEL UNSAFE
 
 Parallel contracts:
-- Each parallel worker is a separate backend -- consumes a connection slot from `max_connections`
-- Parallel aggregation: workers compute partial aggregates, leader combines -- requires associative/commutative aggregate
-- `EXPLAIN` shows `Workers Planned: N, Workers Launched: N` -- launched < planned means `max_parallel_workers` saturated
-- Mark custom functions PARALLEL SAFE when they have no side effects and do not access backend-private state
+- Partial aggregation: workers compute partials, leader combines -- requires associative/commutative aggregate
+- `Workers Launched` < `Workers Planned` in EXPLAIN → `max_parallel_workers` saturated globally
+- Mark custom functions `PARALLEL SAFE` when side-effect-free and no backend-private state access
+- Breakeven: parallel overhead (process launch + tuple transfer) exceeds benefit below ~100K qualifying rows. Force serial for small tables: `SET LOCAL max_parallel_workers_per_gather = 0`
 
 
 ## Vacuum Optimization
 
 Vacuum reclaims dead tuples, updates visibility map, and freezes old transactions.
 
-```
+```ini
 autovacuum_vacuum_cost_delay = 2ms        # pause between cost-limited work (default 2ms, was 20ms)
 autovacuum_vacuum_cost_limit = 200        # cost limit per round (default 200)
 autovacuum_vacuum_scale_factor = 0.05     # trigger at 5% dead tuples (default 0.2 is too conservative)
@@ -100,7 +90,7 @@ Vacuum contracts:
 
 The planner's cost model determines whether it chooses index scans or sequential scans. Incorrect cost parameters directly undermine index strategy.
 
-```
+```ini
 random_page_cost = 1.1                    # SSD (default 4.0 assumes spinning disk)
 seq_page_cost = 1.0                       # sequential page read cost (baseline)
 cpu_tuple_cost = 0.01                     # per-tuple processing cost (default)
@@ -109,17 +99,17 @@ cpu_operator_cost = 0.0025                # per-operator evaluation cost (defaul
 effective_cache_size = '24GB'             # hint: total OS + PG cache (50-75% of RAM)
 ```
 
-Critical interactions:
-- `random_page_cost = 4.0` (default) causes planner to heavily penalize index scans on SSD -- set to 1.1-1.5 for SSD storage. The ratio `random_page_cost / seq_page_cost` governs the relative preference for sequential vs random access; on SSD this ratio should approach 1.0
-- `seq_page_cost = 1.0` is the baseline against which all other costs are measured -- rarely changed, but the ratio matters more than absolute values
-- `effective_cache_size` does NOT allocate memory -- it tells the planner how much data is likely cached. Typically 50-75% of total system RAM. Higher values make index scans cheaper (planner assumes random reads will hit cache). Undersized value causes unnecessary sequential scan preference
-- Verify cost model alignment: if EXPLAIN shows sequential scan on a selective indexed query (few rows returned from large table), `random_page_cost` is likely too high
-- Per-tablespace cost override: `ALTER TABLESPACE ssd_space SET (random_page_cost = 1.1)` -- useful for mixed SSD/HDD deployments
+Cost model contracts:
+- `random_page_cost / seq_page_cost` ratio governs index vs seq scan preference -- SSD ratio should approach 1.0; default 4.0 heavily penalizes index scans
+- `effective_cache_size` is a planner hint (no memory allocated) -- undersized value causes seq scan preference on indexed queries; set to 50-75% of total RAM
+- Diagnosis: EXPLAIN shows seq scan on selective indexed query → `random_page_cost` too high
+- Mixed storage: `ALTER TABLESPACE ssd_space SET (random_page_cost = 1.1)` for per-tablespace override
+- Verification: `EXPLAIN (ANALYZE, BUFFERS)` on representative queries after cost tuning. If `Seq Scan` persists on queries with <5% selectivity and a matching index, the cost model is miscalibrated — not the index strategy
 
 
 ## Connection and Memory Tuning
 
-```
+```ini
 shared_buffers = '8GB'                    # 25% of RAM for dedicated DB server
 work_mem = '64MB'                         # per-operation sort/hash memory
 maintenance_work_mem = '2GB'              # for VACUUM, CREATE INDEX
@@ -134,15 +124,17 @@ Memory contracts:
 
 ## Connection Pooling and Prepared Statements
 
-PgBouncer transaction-mode pooling prepared statement strategies (preference order):
+PgBouncer transaction-mode prepared statement strategies:
 
-1. **PgBouncer 1.21+ `prepared_statement` mode** (preferred) -- transparently manages prepared statements across pooled connections; no application changes
-2. **Application-level `protocol = 'simple'`** (fallback) -- disables extended query protocol, forces parse-on-every-execute; slight overhead per query
-3. **`PREPARE`/`EXECUTE` with transaction pooling** (anti-pattern) -- server connection may lack the prepared statement; breaks silently
+| Strategy                             | Mechanism                                             | Status       |
+| ------------------------------------ | ----------------------------------------------------- | ------------ |
+| PgBouncer 1.21+ `prepared_statement` | Transparent PS management across pooled connections   | Preferred    |
+| `protocol = 'simple'`                | Disables extended query protocol; parse-on-every-exec | Fallback     |
+| App-level `PREPARE`/`EXECUTE`        | Server may lack PS after pool reassignment            | Anti-pattern |
 
 `SET LOCAL` scoping:
-- `SET LOCAL work_mem = '256MB'` applies only within the current transaction -- safe with transaction-mode pooling
-- Use for per-query memory overrides, `jit` toggling, and `statement_timeout` without affecting other clients on the same server connection
+- `SET LOCAL work_mem = '256MB'` applies within current transaction only -- safe with transaction-mode pooling
+- Use for per-query `work_mem`, `jit`, `statement_timeout` overrides without affecting other clients
 
 
 ## EXPLAIN Analysis
@@ -158,27 +150,38 @@ ROLLBACK;  -- wrap write queries to prevent side effects
 PG 18 enhancements: automatic buffer reporting, index lookup counts, VERBOSE includes CPU/WAL/read stats, `Settings` shows non-default GUCs affecting the plan.
 
 Key metrics per node:
-- `actual time`: first-row and last-row timings in milliseconds (inclusive of children -- subtract child time for node's own cost)
-- `rows`: actual vs estimated -- ratio > 10x indicates stale statistics, missing histogram, or correlated columns the planner cannot model
-- `Buffers: shared hit/read/dirtied/written` -- high `read` relative to `hit` means cold cache or undersized shared_buffers
-- `I/O Timings` (requires `track_io_timing = on`): separates I/O wait from CPU time -- essential for distinguishing compute-bound from I/O-bound queries
-- `WAL: records/fpi/bytes` -- full page images (fpi) dominate WAL volume after checkpoint; high fpi count suggests checkpoint interval is too short
 
-Key plan nodes:
-- `Index Only Scan` -- covering index working (check `Heap Fetches` -- should be near 0 after VACUUM; see indexes.md for visibility map mechanics)
-- `Bitmap Heap Scan` -- multiple index conditions combined via bitmap; `lossy` blocks indicate `work_mem` too low for exact bitmap
-- `Hash Join` vs `Nested Loop` -- planner choosing correct join strategy for data size
-- `Parallel Seq Scan` -- parallel workers engaged for large table scans
-- `Memoize` (PG 14+) -- nested loop inner side cached -- check `Hits` vs `Misses`; `Evictions` > 0 means cache undersized
+| Metric        | Reading                             | Signal                                            |
+| ------------- | ----------------------------------- | ------------------------------------------------- |
+| `actual time` | First/last-row ms (inclusive)       | Subtract child time for node cost                 |
+| `rows`        | Actual vs estimated cardinality     | >10x → stale stats / correlated cols              |
+| `Buffers`     | `shared hit` vs `read` ratio        | High `read` → cold cache / small `shared_buffers` |
+| `I/O Timings` | I/O wait vs CPU (`track_io_timing`) | Compute-bound vs I/O-bound                        |
+| `WAL`         | `records` / `fpi` / `bytes`         | High `fpi` → checkpoint too frequent              |
+
+Plan node diagnostics:
+
+| Node                     | Indicates                  | Diagnostic                              |
+| ------------------------ | -------------------------- | --------------------------------------- |
+| `Index Only Scan`        | Covering index working     | `Heap Fetches` ≈ 0 after VACUUM         |
+| `Bitmap Heap Scan`       | Multi-index merge          | `lossy` → increase `work_mem`           |
+| `Hash Join`              | Large equijoin             | `Batches` > 1 → spill to disk           |
+| `Nested Loop`            | Small outer, indexed inner | High outer x seq inner → missing index  |
+| `Parallel Seq Scan`      | Workers engaged            | `Launched` < `Planned` → saturated      |
+| `Memoize` (14+)          | NL inner cache             | `Evictions` > 0 → raise `work_mem`      |
+| `Incremental Sort` (13+) | Partial presort via index  | Composite index on full key avoids sort |
 
 Plan pathologies:
-- Nested loop with high outer rows + seq scan inner: missing index on join column
-- Hash join batch > 1: `work_mem` too low, spilling to disk
-- Sort method `external merge`: `work_mem` insufficient for in-memory sort
-- Bitmap heap scan with `lossy` blocks: `work_mem` too low for bitmap (reverts to page-level granularity)
-- Rows removed by filter >> rows returned: missing partial index or predicate pushdown opportunity
-- Sequential scan on selective indexed query: `random_page_cost` too high (see Cost Model Tuning)
-- `actual rows` uniformly 0 but `estimated rows` > 0: query returned no data -- plan analysis still valid for structure but timing meaningless
+
+| Symptom                             | Cause                       | Fix                            |
+| ----------------------------------- | --------------------------- | ------------------------------ |
+| NL: high outer x seq inner          | Missing join index          | Add index on join column       |
+| Hash: `Batches` > 1                 | `work_mem` spill            | Increase `work_mem`            |
+| Sort: `external merge`              | `work_mem` insufficient     | Increase `work_mem`            |
+| Bitmap: `lossy` blocks              | Bitmap exceeds `work_mem`   | Increase `work_mem`            |
+| Filter removes >> rows returned     | Missing partial index       | Add partial index              |
+| Seq scan on selective indexed query | `random_page_cost` too high | Set 1.1-1.5 for SSD            |
+| `actual rows` = 0, `estimated` > 0  | Empty result                | Plan valid; timing meaningless |
 
 EXPLAIN contracts:
 - `ANALYZE` actually executes the query -- use `BEGIN; EXPLAIN ANALYZE ...; ROLLBACK;` for write queries
@@ -245,7 +248,7 @@ Optimization contracts:
 
 ## WAL and Checkpoint Tuning
 
-```
+```ini
 wal_level = replica                       # minimum for replication; 'logical' for CDC
 max_wal_size = '4GB'                      # trigger checkpoint after this much WAL
 min_wal_size = '1GB'                      # reclaim WAL below this threshold
@@ -264,7 +267,7 @@ WAL contracts:
 
 Partition pruning eliminates irrelevant partitions at plan time and execution time.
 
-```
+```ini
 enable_partition_pruning = on             # default on; planner eliminates non-matching partitions
 ```
 

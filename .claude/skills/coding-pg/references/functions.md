@@ -34,16 +34,16 @@ PG 14+ simplified syntax: `RETURN expr` for single-expression functions. Set-ret
 
 Function attribute contracts:
 
-| Attribute | Semantics | Planner effect |
-| --------- | --------- | -------------- |
-| IMMUTABLE | Same input always same output, no database access | Constant-folding, index expression eligibility |
-| STABLE | Result constant within single transaction | Safe for index scans within query, not for index creation |
-| VOLATILE (default) | May return different results on successive calls | Prevents all planner optimizations |
-| PARALLEL SAFE | No side effects, no backend-private state | Eligible for parallel query workers |
-| PARALLEL RESTRICTED | Accesses backend-private state (temp tables, cursors) | Runs in parallel leader only |
-| PARALLEL UNSAFE | Side effects or non-thread-safe code | Disables parallelism entirely |
-| SECURITY INVOKER (default) | Executes with caller's privileges | Permits inlining |
-| SECURITY DEFINER | Executes with owner's privileges; MUST set `SET search_path = pg_catalog, public` | Prevents inlining |
+| Attribute                  | Semantics                                                     | Planner effect                                      |
+| -------------------------- | ------------------------------------------------------------- | --------------------------------------------------- |
+| IMMUTABLE                  | Same input → same output; no DB access                        | Constant-folding; index expression eligible         |
+| STABLE                     | Constant within single transaction                            | Safe for index scans; ineligible for index creation |
+| VOLATILE (default)         | May differ on successive calls                                | Prevents all planner optimizations                  |
+| PARALLEL SAFE              | No side effects; no backend-private state                     | Eligible for parallel query workers                 |
+| PARALLEL RESTRICTED        | Accesses backend-private state (temp tables, cursors)         | Runs in parallel leader only                        |
+| PARALLEL UNSAFE            | Side effects or non-thread-safe code                          | Disables parallelism entirely                       |
+| SECURITY INVOKER (default) | Executes with caller's privileges                             | Permits inlining                                    |
+| SECURITY DEFINER           | Owner privileges; MUST set `search_path = pg_catalog, public` | Prevents inlining                                   |
 
 SECURITY INVOKER has always been the default for functions in all PG versions. PG 15 changed the default for views (not functions) via `CREATE VIEW ... WITH (security_invoker = on)`.
 
@@ -155,11 +155,11 @@ PL/pgSQL performance:
 
 Prepared statement vs dynamic SQL tradeoff (Effect-SQL):
 
-| Path | Mechanism | Re-plans? | Use when |
-| ---- | --------- | --------- | -------- |
-| `sql` tagged template | Extended query protocol, auto-prepared after 5 calls | No (generic plan cached) | Fixed-shape queries (CRUD, pagination) — >99% of queries |
-| `sql.reserve` | Session-pinned connection, PREPARE explicit | No | Advisory locks, temp tables, SET LOCAL through PgBouncer |
-| PL/pgSQL `EXECUTE ... USING` | Re-plans every call | Yes | Dynamic SQL — table name interpolation, polymorphic dispatch |
+| Path                         | Mechanism                                            | Re-plans? | Use when                                             |
+| ---------------------------- | ---------------------------------------------------- | --------- | ---------------------------------------------------- |
+| `sql` tagged template        | Extended query protocol, auto-prepared after 5 calls | No        | Fixed-shape queries (CRUD, pagination)               |
+| `sql.reserve`                | Session-pinned connection, PREPARE explicit          | No        | Advisory locks, temp tables, SET LOCAL via PgBouncer |
+| PL/pgSQL `EXECUTE ... USING` | Re-plans every call                                  | Yes       | Dynamic SQL: table name interpolation, dispatch      |
 
 - For >10K calls/sec on fixed-shape queries: `sql` tagged template (auto-prepared) — zero re-plan overhead
 - For polymorphic functions with table-name dispatch: `EXECUTE ... USING` is unavoidable — the table name changes per call, so plan reuse is impossible
@@ -230,13 +230,13 @@ FROM metrics;
 
 Aggregate contracts:
 
-| Clause | Purpose | Consequence of omission |
-| ------ | ------- | ----------------------- |
-| COMBINEFUNC | Merge partial states from parallel workers | Aggregate runs single-threaded |
-| INITCOND | Text representation of initial STYPE value | State starts as NULL; SFUNC must handle NULL input |
-| FINALFUNC_MODIFY = READ_ONLY | Final function does not modify state | Required when STYPE is pass-by-reference and state is reused |
-| MSFUNC/MSTYPE/MINVFUNC | Moving-aggregate optimization | Window aggregates recompute from scratch on each frame slide |
-| SORTOP | Aggregate can exploit sorted input | No sort-based optimization |
+| Clause                       | Purpose                                    | Consequence of omission                                      |
+| ---------------------------- | ------------------------------------------ | ------------------------------------------------------------ |
+| COMBINEFUNC                  | Merge partial states from parallel workers | Aggregate runs single-threaded                               |
+| INITCOND                     | Text representation of initial STYPE value | State starts as NULL; SFUNC must handle NULL input           |
+| FINALFUNC_MODIFY = READ_ONLY | Final function does not modify state       | Required when STYPE is pass-by-reference and state is reused |
+| MSFUNC/MSTYPE/MINVFUNC       | Moving-aggregate optimization              | Window aggregates recompute from scratch on each frame slide |
+| SORTOP                       | Aggregate can exploit sorted input         | No sort-based optimization                                   |
 
 Ordered-set aggregates: `CREATE AGGREGATE ... (ORDER BY ...)` with `WITHIN GROUP (ORDER BY ...)` at call site -- for percentile_cont, mode, and similar rank-dependent computations.
 
@@ -338,17 +338,17 @@ AS $$ SELECT array_agg(elem) FROM unnest(arr) AS elem WHERE elem IS NOT NULL $$;
 
 Polymorphic type resolution:
 
-| Pseudo-type | Resolution rule |
-| ----------- | --------------- |
-| anyelement | All anyelement params and return must resolve to same concrete type |
-| anyarray | Array of anyelement -- must agree on element type with any anyelement in signature |
-| anynonarray | Same as anyelement but rejects array types |
-| anyenum | Same as anyelement but rejects non-enum types |
-| anycompatible (PG 13+) | Params may differ -- planner finds common supertype via implicit cast |
-| anycompatiblearray | Array of anycompatible element type -- already an array type, no `[]` suffix needed |
-| anycompatiblenonarray | anycompatible but rejects arrays |
-| anycompatiblerange | Range over anycompatible element type |
-| anycompatiblemultirange (PG 14+) | Multirange over anycompatible element type |
+| Pseudo-type                      | Resolution rule                                                    |
+| -------------------------------- | ------------------------------------------------------------------ |
+| anyelement                       | All params and return resolve to the same concrete type            |
+| anyarray                         | Array of anyelement; element type must match all anyelement params |
+| anynonarray                      | Same as anyelement but rejects array types                         |
+| anyenum                          | Same as anyelement but rejects non-enum types                      |
+| anycompatible (PG 13+)           | Params may differ; planner casts to common supertype               |
+| anycompatiblearray               | Array of anycompatible — already an array type; no `[]` suffix     |
+| anycompatiblenonarray            | anycompatible but rejects arrays                                   |
+| anycompatiblerange               | Range over anycompatible element type                              |
+| anycompatiblemultirange (PG 14+) | Multirange over anycompatible element type                         |
 
 Resolution contracts:
 - At least one input parameter must be polymorphic for the return type to be polymorphic

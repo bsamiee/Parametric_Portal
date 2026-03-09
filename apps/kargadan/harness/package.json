@@ -7,13 +7,13 @@
         "kargadan": "./dist/main.js"
     },
     "scripts": {
-        "build": "vite build --config vite.config.ts",
+        "build": "vite build",
         "build:binary": "node --experimental-sea-config sea-config.json && cp $(which node) dist/kargadan && npx postject dist/kargadan NODE_SEA_BLOB dist/kargadan-sea.blob --sentinel-fuse NODE_SEA_FUSE_fce680ab2cc467b6e072b8b5df1996b2",
         "build:sea": "pnpm build && pnpm build:binary",
         "check": "biome check .",
         "cli": "tsx src/cli.ts",
         "cli:run": "tsx src/cli.ts run",
-        "dev": "vite dev --host --config vite.config.ts",
+        "dev": "tsx watch src/cli.ts",
         "fix": "biome check --write .",
         "test": "vitest run --passWithNoTests",
         "typecheck": "tsc --project tsconfig.json --noEmit"
@@ -33,6 +33,7 @@
     "devDependencies": {
         "@effect/vitest": "catalog:",
         "@types/node": "catalog:",
+        "tsx": "catalog:",
         "typescript": "catalog:",
         "vite": "catalog:",
         "vitest": "catalog:"

@@ -15,7 +15,7 @@ description: Structural specification for Changelogs and Release Notes
 
 <br>
 
-Base on [Keep a Changelog](https://keepachangelog.com/) with Semantic Versioning. Group entries by release version, categories within each release.
+Based on [Keep a Changelog](https://keepachangelog.com/) with Semantic Versioning. Group entries by release version, categories within each release. Nx generates changelogs from conventional commits on main — `feat` maps to Added, `fix` to Fixed, `perf` to Changed. Other types (`refactor`, `docs`, `chore`, `ci`, `test`, `build`, `style`) are excluded from changelog output.
 
 | [INDEX] | [ELEMENT]            | [FORMAT]                                                               |
 | :-----: | -------------------- | ---------------------------------------------------------------------- |
@@ -47,7 +47,7 @@ Base on [Keep a Changelog](https://keepachangelog.com/) with Semantic Versioning
 
 [CRITICAL]:
 - [NEVER] Invent new categories—six above are exhaustive.
-- [NEVER] Use past tense—entries use imperative mood: "Add X" not "Added X."
+- [NEVER] Use past tense in bullet entries—entries use imperative mood: "Add X" not "Added X." *(Section headers like "Added", "Fixed" retain past participle per Keep a Changelog convention.)*
 
 ---
 ## [3][ENTRY_DISCIPLINE]

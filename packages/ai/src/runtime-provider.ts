@@ -51,7 +51,7 @@ const _resolveGeminiCredential = Effect.gen(function* () {
     const reusableAccessToken = Option.flatMap(accessToken, (token) =>
         tokenExpiry.pipe(Option.filter((value) => {
             const expiresAt = Date.parse(value);
-            return Number.isFinite(expiresAt) && expiresAt > Date.now() + 60_000;
+            return Number.isFinite(expiresAt) && expiresAt > Date.now() + AiRegistry.providerVocabulary.gemini.credential.tokenExpiryBufferMs;
         }), Option.as(token)));
     const resolvedAccessToken = yield* Option.match(reusableAccessToken, {
         onNone: () =>
@@ -64,7 +64,7 @@ const _resolveGeminiCredential = Effect.gen(function* () {
                     })),
                     onSome: (token) => Option.match(tokenExpiry, {
                         onNone: () => Effect.succeed(token),
-                        onSome: (value) => Number.isFinite(Date.parse(value)) && Date.parse(value) <= Date.now() + 60_000
+                        onSome: (value) => Number.isFinite(Date.parse(value)) && Date.parse(value) <= Date.now() + AiRegistry.providerVocabulary.gemini.credential.tokenExpiryBufferMs
                             ? Effect.fail(new AiError({
                                 cause:     { clientPath, expired: value, provider: 'gemini', refreshTokenAvailable: false },
                                 operation: 'ai.provider.credentials.gemini.expired',
@@ -74,6 +74,17 @@ const _resolveGeminiCredential = Effect.gen(function* () {
                     }),
                 })),
                 onSome: (token) => AiRegistry.refreshGeminiAccessToken({ client, refreshToken: Redacted.value(token) }).pipe(
+                    Effect.tap((next) => FiberRef.get(AiRegistry.OnTokenRefreshRef).pipe(
+                        Effect.flatMap(Option.match({
+                            onNone: () => Effect.void,
+                            onSome: (persist) => persist({
+                                accessToken:  next.accessToken,
+                                expiresAt:    next.expiresAt,
+                                refreshToken: next.refreshToken ?? Redacted.value(token),
+                            }).pipe(Effect.catchAll((error) =>
+                                Effect.logWarning('ai.provider.credentials.gemini.persist_failed', { error }))),
+                        })),
+                    )),
                     Effect.map((next) => Redacted.make(next.accessToken)),
                     Effect.mapError(AiError.from('ai.provider.credentials.gemini.refresh')),
                 ),

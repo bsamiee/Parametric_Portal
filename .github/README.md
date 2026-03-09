@@ -33,16 +33,16 @@
 ---
 ### [1.2][ACTIONS]
 
-| [INDEX] | [ACTION]           | [PURPOSE]                                                   |
-| :-----: | ------------------ | ----------------------------------------------------------- |
-|   [1]   | `node-env`         | Node.js + pnpm setup from package.json                      |
-|   [2]   | `meta-fixer`       | AI-powered title/label/body normalization (Claude fallback) |
-|   [3]   | `issue-ops`        | Unified issue operations (stale, duplicate, labels)         |
-|   [4]   | `label`            | Label-triggered behaviors (pin/unpin/comment)               |
-|   [5]   | `pr-hygiene`       | Resolve outdated review threads, cleanup prompts            |
-|   [6]   | `auto-fix`         | Run fixers (Biome), commit, push                            |
-|   [7]   | `git-identity`     | Configure git user for commits                              |
-|   [8]   | `slash-dispatch`   | Slash command dispatcher (prepared, not active)             |
+| [INDEX] | [ACTION]         | [PURPOSE]                                                   |
+| :-----: | ---------------- | ----------------------------------------------------------- |
+|   [1]   | `node-env`       | Node.js + pnpm setup from package.json                      |
+|   [2]   | `meta-fixer`     | AI-powered title/label/body normalization (Claude fallback) |
+|   [3]   | `issue-ops`      | Unified issue operations (stale, duplicate, labels)         |
+|   [4]   | `label`          | Label-triggered behaviors (pin/unpin/comment)               |
+|   [5]   | `pr-hygiene`     | Resolve outdated review threads, cleanup prompts            |
+|   [6]   | `auto-fix`       | Run fixers (Biome), commit, push                            |
+|   [7]   | `git-identity`   | Configure git user for commits                              |
+|   [8]   | `slash-dispatch` | Slash command dispatcher (prepared, not active)             |
 
 ---
 ### [1.3][SCRIPTS]
@@ -314,13 +314,16 @@ Permission: write
 
 <br>
 
-| [INDEX] | [CONTEXT]       | [FORMAT]      | [EXAMPLE]                        |
-| :-----: | --------------- | ------------- | -------------------------------- |
-|   [1]   | Issue/PR title  | `[TYPE]:`     | `[FEAT]: Add dark mode`          |
-|   [2]   | Commit message  | `type!:`      | `feat!: breaking change`         |
-|   [3]   | Dashboard issue | `[DASHBOARD]` | `[DASHBOARD] Repository Metrics` |
+| [INDEX] | [CONTEXT]       | [FORMAT]                 | [EXAMPLE]                        |
+| :-----: | --------------- | ------------------------ | -------------------------------- |
+|   [1]   | Issue/PR title  | `[TYPE]:` / `[TYPE!]:`   | `[FEAT]: add dark mode`          |
+|   [2]   | Commit message  | `type:` / `type(scope):` | `feat(search): add pagination`   |
+|   [3]   | Branch name     | `type/short-description` | `feat/add-pagination`            |
+|   [4]   | Dashboard issue | `[DASHBOARD]`            | `[DASHBOARD] Repository Metrics` |
 
-**Note**: Commits use lowercase, no scope required. Exclamation mark indicates breaking change.
+**Merge strategy**: Rebase merge — linear history, individual commits preserved on main.
+**Breaking**: `!` suffix on type for both formats. `BREAKING CHANGE:` footer for migration notes.
+**Changelog**: Nx parses commits via `conventionalCommits` — `feat` / `fix` / `perf` produce entries.
 
 ---
 ## [8][INFRASTRUCTURE]

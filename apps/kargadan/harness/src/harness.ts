@@ -1,28 +1,27 @@
 import { createHash } from 'node:crypto';
 import { AiRegistry } from '@parametric-portal/ai/registry';
-import { AiService } from '@parametric-portal/ai/service';
+import { AiService, ManifestArraySchema, type ManifestEntrySchema } from '@parametric-portal/ai/service';
 import { AgentPersistenceService } from '@parametric-portal/database/agent-persistence';
 import { Client } from '@parametric-portal/database/client';
 import { DatabaseService } from '@parametric-portal/database/repos';
 import { Context } from '@parametric-portal/server/context';
 import { Array as A, Effect, FiberRef, HashMap, Layer, Match, Option, Schema as S } from 'effect';
-import { decodeOverride, HarnessConfig } from './config';
+import { HarnessConfig, KargadanHost } from './config';
 import { CommandDispatch } from './protocol/dispatch';
-import { CatalogEntrySchema, type Envelope } from './protocol/schemas';
+import type { Envelope } from './protocol/schemas';
 import { AgentLoop } from './runtime/agent-loop';
 import { KargadanSocketClientLive, ReconnectionSupervisor } from './socket';
 
 // --- [SCHEMA] ----------------------------------------------------------------
 
 const _MarkerSchema     = S.Struct({ hash: S.String, manifestVersion: S.String });
-const _ManifestSchema   = S.parseJson(S.Array(CatalogEntrySchema));
 const _LiveSceneSummary = S.Struct({ objectCount: S.Int.pipe(S.greaterThanOrEqualTo(0)) });
 
 // --- [FUNCTIONS] -------------------------------------------------------------
 
 const _mergeManifest = (
-    base:      ReadonlyArray<typeof CatalogEntrySchema.Type>,
-    overrides: Option.Option<ReadonlyArray<typeof CatalogEntrySchema.Type>>,
+    base:      ReadonlyArray<Envelope.CatalogEntry>,
+    overrides: Option.Option<ReadonlyArray<S.Schema.Type<typeof ManifestEntrySchema>>>,
 ) =>
     Option.match(overrides, {
         onNone: () => base,
@@ -31,25 +30,15 @@ const _mergeManifest = (
             return A.map(base, (entry) => Option.match(HashMap.get(byId, entry.id), {
                 onNone: () => entry,
                 onSome: (enriched) => ({ ...entry,
-                    aliases:       A.dedupe(A.appendAll(entry.aliases, enriched.aliases)), category: enriched.category,
+                    aliases:       A.dedupe(A.appendAll(entry.aliases, enriched.aliases)), category: enriched.category ?? entry.category,
                     description:   enriched.description, examples: enriched.examples.length === 0 ? entry.examples : enriched.examples,
-                    isDestructive: enriched.isDestructive, name: enriched.name,
-                    params:        enriched.params.length === 0 ? entry.params : enriched.params, requirements: entry.requirements }),
+                    isDestructive: enriched.isDestructive ?? entry.isDestructive, name: enriched.name,
+                    params:        enriched.params.length === 0 ? entry.params : enriched.params, requirements: entry.requirements,
+                }) as typeof entry,
             }));
         },
     });
-const _needsKbSeed = (
-    appId:       string,
-    markerKey:   string,
-    markerValue: { readonly hash: string; readonly manifestVersion: string },
-    database:    DatabaseService,
-) =>
-    Client.tenant.with(appId, database.kvStore.getJson(markerKey, _MarkerSchema)).pipe(
-        Effect.map(Option.match({
-            onNone: () => true,
-            onSome: (value) => value.hash !== markerValue.hash || value.manifestVersion !== markerValue.manifestVersion,
-        })));
-const _makeInteractiveHooks = (
+const makeInteractiveHooks = (
     emit:    (kind: 'error' | 'code', tag: string, content: string) => Effect.Effect<void>,
     compact: (value: unknown) => string,
 ) => ({
@@ -63,7 +52,7 @@ const _makeInteractiveHooks = (
         return emit('code', `[tool:${e.source}]`, `${e.phase} ${e.command.commandId} (${e.durationMs}ms) ${suffix}`);
     },
 }) satisfies Pick<NonNullable<Parameters<AgentLoop['handle']>[0]['hooks']>, 'onFailure' | 'onStage' | 'onTool'>;
-const _runHarness = Effect.fn('kargadan.harness.runHarness')((input?: {
+const run = Effect.fn('kargadan.harness.runHarness')((input?: {
     readonly architectFallback?: ReadonlyArray<string>;
     readonly architectModel?:    string;
     readonly architectProvider?: string;
@@ -77,7 +66,7 @@ const _runHarness = Effect.fn('kargadan.harness.runHarness')((input?: {
             const [dispatch, loop, persistence, reconnect, cfg, ai, database] = yield* Effect.all([
                 CommandDispatch, AgentLoop, AgentPersistenceService, ReconnectionSupervisor, HarnessConfig, AiService, DatabaseService,
             ]);
-            const architectOverrideInput = yield* decodeOverride({
+            const architectOverrideInput = yield* AiRegistry.decodeSessionOverrideFromInput({
                 fallback: (input?.architectFallback ?? []).map((entry) => entry.trim()).filter((entry) => entry.length > 0),
                 model:    input?.architectModel?.trim() ?? '',
                 provider: input?.architectProvider?.trim() ?? '',
@@ -87,6 +76,7 @@ const _runHarness = Effect.fn('kargadan.harness.runHarness')((input?: {
             const resumeMode = input?.resume ?? 'auto';
             const requestedSessionId = Option.fromNullable(input?.sessionId);
             yield* FiberRef.set(AiRegistry.SessionOverrideRef, cfg.resolveSessionOverride);
+            yield* FiberRef.set(AiRegistry.OnTokenRefreshRef, Option.some(KargadanHost.auth.onTokenRefresh));
             const correlationId = crypto.randomUUID().replaceAll('-', '');
             const resumableSessionId = yield* Match.value(resumeMode).pipe(
                 Match.when('off', () => Effect.succeed(Option.none<string>())),
@@ -105,20 +95,17 @@ const _runHarness = Effect.fn('kargadan.harness.runHarness')((input?: {
                 onSome: (sid) => Context.Request.withinSync(cfg.appId, persistence.hydrate(sid).pipe(Effect.map(Option.some)), { requestId: correlationId }),
             });
             const resume = Option.flatMap(hydration, (r) => r.fresh ? Option.none() : Option.some({ chatJson: r.chatJson, sequence: r.sequence, state: r.state }));
-            const sessionId = Option.match(resumableSessionId, {
-                onNone: () => crypto.randomUUID(),
-                onSome: (id) => Option.match(resume, {
-                    onNone: () => Option.getOrElse(requestedSessionId, () => crypto.randomUUID()), onSome: () => id }),
-            });
+            const sessionId = Option.isSome(resume) ? resumableSessionId.pipe(Option.getOrElse(() => crypto.randomUUID()))
+                : Option.getOrElse(requestedSessionId, () => crypto.randomUUID());
             yield* Option.match(hydration, {
                 onNone: () => Effect.log('kargadan.harness: no resumable session, starting fresh'),
                 onSome: (r) => r.fresh
                     ? Effect.log('kargadan.harness: resumable session corrupt or empty, starting fresh', { sessionId })
                     : Effect.log('kargadan.harness: resuming session', { diverged: r.diverged, sequence: r.sequence, sessionId }),
             });
-            yield* Option.isNone(resume)
-                ? Context.Request.withinSync(cfg.appId, persistence.startSession({ appId: cfg.appId, correlationId, sessionId }), { requestId: correlationId })
-                : Effect.void;
+            yield* Effect.when(
+                Context.Request.withinSync(cfg.appId, persistence.startSession({ appId: cfg.appId, correlationId, sessionId }), { requestId: correlationId }),
+                () => Option.isNone(resume));
             const identityBase = { appId: cfg.appId, correlationId, sessionId };
             const outcome = yield* Context.Request.withinSync(
                 cfg.appId,
@@ -129,7 +116,7 @@ const _runHarness = Effect.fn('kargadan.harness.runHarness')((input?: {
                         const ack = yield* dispatch.handshake({ ...identityBase, requestId: crypto.randomUUID(), token: cfg.sessionToken });
                         const receivedCatalog = yield* dispatch.receiveCatalog();
                         const handshakeCatalog = receivedCatalog.length === 0 ? ack.catalog : receivedCatalog;
-                        const envManifest = yield* S.decodeUnknown(_ManifestSchema)(cfg.commandManifestJson).pipe(Effect.option);
+                        const envManifest = yield* S.decodeUnknown(ManifestArraySchema)(cfg.commandManifestJson).pipe(Effect.option);
                         const mergedManifest = _mergeManifest(handshakeCatalog, envManifest);
                         const seedProjection = mergedManifest.length === 0
                             ? { manifest: cfg.commandManifestJson, source: 'env' as const, version: cfg.commandManifestVersion }
@@ -140,7 +127,11 @@ const _runHarness = Effect.fn('kargadan.harness.runHarness')((input?: {
                         const markerKey = `kargadan:manifest:${cfg.commandManifestNamespace}:${cfg.commandManifestEntityType}:${scope}`;
                         const markerValue = { hash: createHash('sha256').update(`${seedProjection.version}\n${serializedManifest}`).digest('hex'),
                             manifestVersion: seedProjection.version };
-                        yield* _needsKbSeed(cfg.appId, markerKey, markerValue, database).pipe(
+                        yield* Client.tenant.with(cfg.appId, database.kvStore.getJson(markerKey, _MarkerSchema)).pipe(
+                            Effect.map(Option.match({
+                                onNone: () => true,
+                                onSome: (stored) => stored.hash !== markerValue.hash || stored.manifestVersion !== markerValue.manifestVersion,
+                            })),
                             Effect.flatMap((needs) => Effect.when(
                                 ai.seedKnowledge({ entityType: cfg.commandManifestEntityType, manifest: seedProjection.manifest,
                                     namespace: cfg.commandManifestNamespace, scopeId: Option.getOrNull(cfg.commandManifestScopeId) }).pipe(
@@ -190,7 +181,7 @@ const _RuntimeLayer = AgentLoop.Default.pipe(
     Layer.provideMerge(AiService.KnowledgeDefault),
     Layer.provideMerge(HarnessConfig.persistenceLayer),
 );
-const _probeLive = Effect.scoped(
+const probeLive = Effect.scoped(
     Effect.gen(function* () {
         const [dispatch, cfg, reconnect] = yield* Effect.all([CommandDispatch, HarnessConfig, ReconnectionSupervisor]);
         const identityBase = { appId: cfg.appId, correlationId: crypto.randomUUID().replaceAll('-', ''), sessionId: crypto.randomUUID() };
@@ -216,9 +207,9 @@ const _probeLive = Effect.scoped(
     }).pipe(Effect.provide(_TransportLayer)),
 );
 
-// --- [ENTRY_POINT] -----------------------------------------------------------
+// --- [FUNCTIONS] -------------------------------------------------------------
 
-const HarnessRuntime = { makeInteractiveHooks: _makeInteractiveHooks, probeLive: _probeLive, run: _runHarness } as const;
+const HarnessRuntime = { makeInteractiveHooks, probeLive, run } as const;
 
 // --- [EXPORT] ----------------------------------------------------------------
 

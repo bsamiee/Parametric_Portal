@@ -99,6 +99,54 @@ FILTER contracts:
 - CASE WHEN inside aggregates is an anti-pattern -- use FILTER (WHERE) exclusively
 
 
+## Multi-dimensional aggregation
+
+GROUPING SETS, CUBE, and ROLLUP replace N separate GROUP BY queries with a single scan -- set-algebraic multi-level aggregation:
+
+```sql
+-- GROUPING SETS: explicit dimension combinations
+SELECT region, product_category, date_trunc('month', sale_date) AS month,
+       SUM(revenue) AS total_revenue,
+       COUNT(*) AS sale_count,
+       GROUPING(region, product_category, date_trunc('month', sale_date)) AS grouping_bits
+FROM sales
+WHERE tenant_id = current_setting('app.current_tenant')::uuid
+GROUP BY GROUPING SETS (
+    (region, product_category, date_trunc('month', sale_date)),   -- full detail
+    (region, product_category),                                   -- by region+product
+    (region),                                                     -- by region
+    ()                                                            -- grand total
+);
+
+-- CUBE: all 2^n combinations of grouped columns
+SELECT region, category, status,
+       SUM(amount) AS total,
+       GROUPING(region, category, status) AS gid
+FROM orders
+GROUP BY CUBE (region, category, status);
+
+-- ROLLUP: hierarchical subtotals (n+1 levels)
+SELECT date_trunc('year', created_at) AS yr,
+       date_trunc('quarter', created_at) AS qtr,
+       date_trunc('month', created_at) AS mo,
+       SUM(revenue) AS total
+FROM invoices
+GROUP BY ROLLUP (
+    date_trunc('year', created_at),
+    date_trunc('quarter', created_at),
+    date_trunc('month', created_at)
+);
+```
+
+Multi-dimensional aggregation contracts:
+- `GROUPING(col1, col2, ...)` returns a bitmask: bit=1 when column is aggregated (NULL because of grouping, not data) -- use to distinguish NULL-from-data vs NULL-from-rollup
+- CUBE(a, b, c) produces 2^3 = 8 grouping sets -- exponential growth; limit to 3-4 columns
+- ROLLUP(a, b, c) produces 4 grouping sets: (a,b,c), (a,b), (a), () -- hierarchical, not combinatorial
+- Mixed syntax: `GROUP BY a, ROLLUP(b, c), CUBE(d)` composes via cross-product of grouping set lists
+- Planner uses HashAggregate or GroupAggregate with Sort -- partial indexes on grouping columns accelerate sorted strategies
+- `FILTER (WHERE ...)` composes with GROUPING SETS -- conditional aggregation within each dimension slice
+
+
 ## Window functions
 
 GROUPS framing + EXCLUDE + FILTER in single query:
@@ -129,14 +177,89 @@ FROM request_metrics
 GROUP BY region;
 ```
 
+RANGE with INTERVAL -- time-based windowing without physical row counting:
+
+```sql
+SELECT tenant_id, event_date, revenue,
+       AVG(revenue) OVER (
+           PARTITION BY tenant_id
+           ORDER BY event_date
+           RANGE BETWEEN INTERVAL '7 days' PRECEDING AND CURRENT ROW
+       ) AS rolling_7day_avg,
+       SUM(revenue) OVER (
+           PARTITION BY tenant_id
+           ORDER BY event_date
+           RANGE BETWEEN INTERVAL '30 days' PRECEDING AND CURRENT ROW
+       ) AS rolling_30day_sum
+FROM daily_metrics;
+```
+
+FIRST_VALUE / LAST_VALUE / NTH_VALUE -- positional extraction with frame trap:
+
+```sql
+SELECT product_id, price_date, price,
+       FIRST_VALUE(price) OVER w AS initial_price,
+       LAST_VALUE(price) OVER w AS current_price,
+       NTH_VALUE(price, 2) OVER w AS second_price,
+       price - FIRST_VALUE(price) OVER w AS price_delta
+FROM product_price_history
+WINDOW w AS (
+    PARTITION BY product_id ORDER BY price_date
+    ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING
+);
+```
+
+Distribution analytics -- PERCENT_RANK and CUME_DIST:
+
+```sql
+SELECT employee_id, department, salary,
+       PERCENT_RANK() OVER w AS pct_rank,
+       CUME_DIST() OVER w AS cumulative_dist
+FROM employees
+WINDOW w AS (PARTITION BY department ORDER BY salary);
+```
+
+Gap/island detection via LAG -- boolean expression, no CASE:
+
+```sql
+SELECT user_id, action_time,
+       action_time - LAG(action_time) OVER w AS gap,
+       (EXTRACT(EPOCH FROM (
+           action_time - LAG(action_time) OVER w
+       )) / 60 > 30)::int AS new_session
+FROM user_actions
+WINDOW w AS (PARTITION BY user_id ORDER BY action_time);
+```
+
+Time-series gap fill -- generate_series + LEFT JOIN + window:
+
+```sql
+SELECT gs.day,
+       COALESCE(s.revenue, 0) AS revenue,
+       AVG(COALESCE(s.revenue, 0)) OVER (
+           ORDER BY gs.day
+           ROWS BETWEEN 6 PRECEDING AND CURRENT ROW
+       ) AS ma_7day
+FROM generate_series(
+    '2024-01-01'::date, '2024-12-31'::date, '1 day'::interval
+) AS gs(day)
+LEFT JOIN daily_sales s ON gs.day = s.sale_date;
+```
+
 Window contracts:
 - GROUPS framing counts distinct peer groups, not individual rows -- different from ROWS
-- RANGE framing operates on value distance from current row's ORDER BY value
+- RANGE framing operates on value distance from current row's ORDER BY value -- composable with INTERVAL for time-based windows
+- RANGE with INTERVAL requires a single ORDER BY column of date/timestamp/interval type -- multi-column ORDER BY invalid with RANGE INTERVAL
 - Default frame: `RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW` (when ORDER BY specified)
+- LAST_VALUE / NTH_VALUE frame trap: default frame ends at CURRENT ROW -- always specify `ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING` for full-partition extraction
+- FIRST_VALUE is safe with default frame (starts at UNBOUNDED PRECEDING)
 - Frame exclusion modes: EXCLUDE CURRENT ROW, EXCLUDE GROUP, EXCLUDE TIES, EXCLUDE NO OTHERS
 - `COUNT(DISTINCT ...) OVER (...)` is not supported -- use subquery or LATERAL join
 - Named windows: `WINDOW w AS (PARTITION BY tenant_id ORDER BY created_at)` then `OVER (w ROWS ...)` for DRY framing
 - `WITHIN GROUP (ORDER BY ...)` is required for ordered-set aggregates (percentile_cont, percentile_disc, mode)
+- PERCENT_RANK: (rank - 1) / (total_rows - 1), range [0, 1] -- use for relative standing within partition
+- CUME_DIST: count(values <= current) / total_rows, range (0, 1] -- use for cumulative distribution
+- Gap detection: `(expression)::int` coercion preferred over CASE for boolean-to-integer projection
 
 
 ## JSON_TABLE and SQL/JSON (PG 17+)
@@ -219,6 +342,52 @@ LATERAL contracts:
 - `CROSS JOIN LATERAL` excludes rows where lateral returns empty; `LEFT JOIN LATERAL ... ON TRUE` preserves them with NULLs
 - Planner may convert LATERAL to nested loop -- verify with EXPLAIN for large outer sets
 - LATERAL + LIMIT is the canonical top-N-per-group pattern -- index on `(foreign_key, sort_column DESC)` required
+
+
+## Temporal queries (tstzrange)
+
+Range containment -- find entity version valid at a specific moment:
+
+```sql
+SELECT id, entity_id, payload, valid_period
+FROM entity_versions
+WHERE entity_id = $1
+  AND valid_period @> $2::timestamptz
+ORDER BY lower(valid_period) DESC
+LIMIT 1;
+```
+
+Temporal diff -- detect changes between two points in time:
+
+```sql
+SELECT v_new.entity_id,
+       v_old.payload AS before_state,
+       v_new.payload AS after_state
+FROM entity_versions v_new
+JOIN entity_versions v_old ON v_new.entity_id = v_old.entity_id
+WHERE v_new.valid_period @> $2::timestamptz   -- "now" snapshot
+  AND v_old.valid_period @> $1::timestamptz   -- "then" snapshot
+  AND v_new.id != v_old.id;                   -- different version rows
+```
+
+Contiguous coverage verification -- detect gaps in temporal history:
+
+```sql
+SELECT entity_id,
+       unnest(range_agg(valid_period) - tstzrange(MIN(lower(valid_period)), MAX(upper(valid_period)))) AS gap
+FROM entity_versions
+WHERE entity_id = $1
+GROUP BY entity_id
+HAVING range_agg(valid_period) != tstzrange(MIN(lower(valid_period)), MAX(upper(valid_period)));
+```
+
+Temporal contracts:
+- `@>` (range contains point): index via GiST on `valid_period` -- primary temporal lookup operator
+- `&&` (ranges overlap): detects temporal conflicts; `WITHOUT OVERLAPS` in PK/UNIQUE prevents at schema level
+- `-|-` (ranges adjacent): detects gapless sequences; `range_agg()` (PG 14+) collapses overlapping/adjacent ranges -- subtract from bounding range to expose gaps
+- `upper(range)` / `lower(range)`: extract bounds for display or cursor-based temporal pagination
+- Temporal tables with `WITHOUT OVERLAPS` guarantee at-most-one-match for point-in-time `@>` lookups -- no `LIMIT 1` needed on containment queries when constraint is present
+- `PERIOD` in temporal FK enforces containment: child range must fall entirely within parent range
 
 
 ## Keyset pagination

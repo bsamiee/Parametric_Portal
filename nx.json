@@ -155,11 +155,11 @@
                 "build": { "changelog": false },
                 "chore": { "changelog": false },
                 "ci": { "changelog": false },
-                "docs": { "changelog": { "title": "[DOCUMENTATION]" }, "semverBump": "none" },
-                "feat": { "changelog": { "title": "[FEATURES]" }, "semverBump": "minor" },
-                "fix": { "changelog": { "title": "[BUG_FIXES]" }, "semverBump": "patch" },
-                "perf": { "changelog": { "title": "[PERFORMANCE]" }, "semverBump": "patch" },
-                "refactor": { "changelog": { "title": "[REFACTORING]" }, "semverBump": "patch" },
+                "docs": { "changelog": false, "semverBump": "none" },
+                "feat": { "changelog": { "title": "Added" }, "semverBump": "minor" },
+                "fix": { "changelog": { "title": "Fixed" }, "semverBump": "patch" },
+                "perf": { "changelog": { "title": "Changed" }, "semverBump": "patch" },
+                "refactor": { "changelog": false, "semverBump": "patch" },
                 "style": { "changelog": false },
                 "test": { "changelog": false }
             }
@@ -178,7 +178,7 @@
             "options": { "command": "pnpm exec serve .vite -l 8080" }
         },
         "build": {
-            "dependsOn": ["^build"],
+            "dependsOn": ["restore", "^build"],
             "inputs": ["production", "^production", "{workspaceRoot}/vite.factory.ts"],
             "outputs": ["{projectRoot}/dist/**/*.js", "{projectRoot}/dist/**/*.d.ts", "{projectRoot}/dist/**/*.map"]
         },

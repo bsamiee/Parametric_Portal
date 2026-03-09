@@ -36,18 +36,18 @@ All SQL follows five governing principles:
 
 ## Conventions
 
-| Layer               | Mechanism                      | Owns                                                         |
-| ------------------- | ------------------------------ | ------------------------------------------------------------ |
-| Identity            | `uuidv7()`                     | PK generation — timestamp-ordered, B-tree friendly           |
-| Temporal            | `WITHOUT OVERLAPS` + `PERIOD`  | Range integrity — temporal PKs, FKs, exclusion constraints   |
-| Projection          | Virtual generated columns      | Computed fields — zero storage, instant `ALTER TABLE`         |
-| Write strategy      | `MERGE ... RETURNING OLD/NEW`  | Upsert + audit trail in single statement                     |
-| Type safety         | Domain types + composite types | Semantic column typing — branded scalars, structured records  |
-| Search              | GIN + pg_trgm / pgvector       | Full-text, trigram similarity, vector nearest-neighbor        |
-| Partitioning        | Declarative + pg_partman       | Time/hash/list partitioning with automatic lifecycle          |
-| Scheduling          | pg_cron                        | In-database job scheduling — maintenance, materialized views  |
-| Security            | RLS + SECURITY INVOKER         | Row-level tenant isolation, least-privilege function execution|
-| Observability       | pg_stat_statements + auto_explain | Query fingerprinting, automatic slow-query plan capture     |
+| Layer          | Mechanism                         | Owns                                                           |
+| -------------- | --------------------------------- | -------------------------------------------------------------- |
+| Identity       | `uuidv7()`                        | PK generation — timestamp-ordered, B-tree friendly             |
+| Temporal       | `WITHOUT OVERLAPS` + `PERIOD`     | Range integrity — temporal PKs, FKs, exclusion constraints     |
+| Projection     | Virtual generated columns         | Computed fields — zero storage, instant `ALTER TABLE`          |
+| Write strategy | `MERGE ... RETURNING OLD/NEW`     | Upsert + audit trail in single statement                       |
+| Type safety    | Domain types + composite types    | Semantic column typing — branded scalars, structured records   |
+| Search         | GIN + pg_trgm / pgvector          | Full-text, trigram similarity, vector nearest-neighbor         |
+| Partitioning   | Declarative + pg_partman          | Time/hash/list partitioning with automatic lifecycle           |
+| Scheduling     | pg_cron                           | In-database job scheduling — maintenance, materialized views   |
+| Security       | RLS + SECURITY INVOKER            | Row-level tenant isolation, least-privilege function execution |
+| Observability  | pg_stat_statements + auto_explain | Query fingerprinting, automatic slow-query plan capture        |
 
 - Effect-SQL (`@effect/sql` + `@effect/sql-pg`) is the assumed TypeScript integration layer.
 - `Model.Class` field modifiers (`Generated`, `FieldOnly`, `FieldExcept`, `Sensitive`) must align with DDL constraints — `Generated` fields map to `DEFAULT` or `GENERATED ALWAYS AS` columns.
@@ -90,28 +90,30 @@ All SQL follows five governing principles:
 
 ## Anti-Patterns
 
-| Label                     | Symptom                                                                          |
-| ------------------------- | -------------------------------------------------------------------------------- |
-| STRING_TYPING             | `text` column storing structured data (JSON, enum values, composite structures)  |
-| DUAL_COLUMN_RANGE         | `start_date`/`end_date` columns instead of `tstzrange` with exclusion constraint |
-| IMPERATIVE_BATCH          | PL/pgSQL `LOOP` with row-at-a-time `UPDATE` instead of set-based `MERGE`/CTE    |
-| INDEX_SPRAWL              | Redundant single-column indexes subsumed by existing composite indexes           |
-| NULLABLE_DEFAULT          | Columns nullable without documented justification                                |
-| TRIGGER_LOGIC             | Business logic in triggers instead of `MERGE RETURNING` or generated columns     |
-| OFFSET_PAGINATION         | `LIMIT/OFFSET` instead of keyset pagination for client-facing endpoints          |
-| SECURITY_DEFINER_LEAK     | `SECURITY DEFINER` without `SET search_path` — search_path injection vector      |
-| STRINGLY_POLICY           | RLS policy referencing hardcoded string literals instead of `current_setting()`   |
-| FUNCTION_PROLIFERATION    | Separate functions for each query variant instead of one polymorphic function     |
-| APPLICATION_SIDE_JSON     | Fetching raw JSONB and parsing in application instead of `jsonb_path_query`       |
-| MANUAL_PARTITION          | Hand-written partition creation instead of pg_partman lifecycle management        |
-| UNVALIDATED_CONSTRAINT    | `ADD CONSTRAINT ... NOT VALID` without subsequent `VALIDATE CONSTRAINT`           |
-| IF_THEN_DISPATCH          | PL/pgSQL `IF p_op = 'get' THEN ... ELSIF` instead of VALUES-based dynamic SQL    |
-| NONCOMPOSABLE_CAGG        | `PERCENTILE_CONT` in hierarchical CAGG (non-composable across aggregation tiers) |
-| LEGACY_UUID               | `gen_random_uuid()` or `uuid_generate_v4()` instead of `uuidv7()` (PG 18)       |
-| STALE_HEALTH_VIEW         | Materialized views for real-time health monitoring instead of inline queries      |
-| EXCLUDE_OVER_WITHOUT_OVERLAPS | EXCLUDE constraint for temporal overlap when WITHOUT OVERLAPS PK/UNIQUE available (PG 17+) |
-| RAW_UUID_ID               | Raw `S.UUID` for entity PK/FK fields instead of `S.UUID.pipe(S.brand('EntityId'))` |
-| BARE_FOR_UPDATE           | `FOR UPDATE` without `SKIP LOCKED` on batch/queue processing patterns              |
+| Label                         | Symptom                                                                        |
+| ----------------------------- | ------------------------------------------------------------------------------ |
+| STRING_TYPING                 | `text` for structured data (JSON, enum values, composite structures)           |
+| DUAL_COLUMN_RANGE             | `start_date`/`end_date` instead of `tstzrange` with exclusion constraint       |
+| IMPERATIVE_BATCH              | PL/pgSQL `LOOP` with row-at-a-time `UPDATE` instead of set-based `MERGE`/CTE   |
+| INDEX_SPRAWL                  | Redundant single-column indexes subsumed by existing composite indexes         |
+| NULLABLE_DEFAULT              | Columns nullable without documented justification                              |
+| TRIGGER_LOGIC                 | Business logic in triggers instead of `MERGE RETURNING` or generated columns   |
+| OFFSET_PAGINATION             | `LIMIT/OFFSET` instead of keyset pagination for client-facing endpoints        |
+| SECURITY_DEFINER_LEAK         | `SECURITY DEFINER` without `SET search_path` — search_path injection vector    |
+| STRINGLY_POLICY               | RLS policy with hardcoded literals instead of `current_setting()`              |
+| FUNCTION_PROLIFERATION        | Separate functions for each query variant instead of one polymorphic function  |
+| APPLICATION_SIDE_JSON         | Fetching raw JSONB and parsing in application instead of `jsonb_path_query`    |
+| MANUAL_PARTITION              | Hand-written partition creation instead of pg_partman lifecycle management     |
+| UNVALIDATED_CONSTRAINT        | `ADD CONSTRAINT ... NOT VALID` without subsequent `VALIDATE CONSTRAINT`        |
+| IF_THEN_DISPATCH              | PL/pgSQL `IF p_op = 'get' THEN ... ELSIF` instead of VALUES-based dynamic SQL  |
+| NONCOMPOSABLE_CAGG            | `PERCENTILE_CONT` in hierarchical CAGG; non-composable across tiers            |
+| LEGACY_UUID                   | `gen_random_uuid()` or `uuid_generate_v4()` instead of `uuidv7()` (PG 18)      |
+| STALE_HEALTH_VIEW             | Materialized views for real-time health monitoring instead of inline queries   |
+| EXCLUDE_OVER_WITHOUT_OVERLAPS | EXCLUDE instead of WITHOUT OVERLAPS PK/UNIQUE for temporal overlap (PG 17+)    |
+| RAW_UUID_ID                   | Raw `S.UUID` for PK/FK instead of `S.UUID.pipe(S.brand('EntityId'))`           |
+| BARE_FOR_UPDATE               | `FOR UPDATE` without `SKIP LOCKED` on batch/queue processing patterns          |
+| NULL_UNSAFE_ANTIJOIN          | `NOT IN (SELECT ...)` instead of `NOT EXISTS`; NULL in subquery yields UNKNOWN |
+| DISTINCT_OVER_EXISTS          | `SELECT DISTINCT` on joined data; use `EXISTS` semi-join (avoids sort/dedup)   |
 
 
 ## Load Sequence
@@ -135,24 +137,27 @@ All SQL follows five governing principles:
 
 ## First-Class Extensions
 
-| Extension           | Owns                                                    | Load When                              |
-| ------------------- | ------------------------------------------------------- | -------------------------------------- |
-| `pgvector`          | Vector storage, HNSW/IVFFlat/DiskANN indexes             | Embedding search, similarity queries   |
-| `pgvectorscale`     | DiskANN index, Statistical Binary Quantization           | >1M vectors, memory-constrained        |
-| `pg_search`         | BM25 full-text via Tantivy, `@@@` operator               | Search-quality ranking, hybrid search  |
-| `pg_trgm`           | Trigram similarity, GIN trigram indexes, `%` operator     | Fuzzy text search, typo tolerance      |
-| `PostGIS`           | Geometry/geography types, spatial indexes, ST_* funcs     | Geospatial queries, proximity search   |
-| `TimescaleDB`       | Hypertables, continuous aggregates, compression           | Time-series ingestion, rollup queries  |
-| `pg_cron`           | In-database scheduled jobs                                | Materialized view refresh, maintenance |
-| `pg_partman`        | Partition lifecycle management                            | Non-time-series partitioning           |
-| `pg_duckdb`         | Embedded DuckDB, analytical acceleration, lake access     | OLAP queries, Parquet/Iceberg reads    |
-| `pg_jsonschema`     | JSONB validation via JSON Schema CHECK constraints        | Structured JSONB columns               |
-| `btree_gist`        | GiST equality operators for EXCLUDE constraints           | Range + equality exclusion constraints |
-| `bloom`             | Bloom filter index for wide-table equality                | >5 columns, arbitrary WHERE combos     |
-| `pg_stat_statements`| Query fingerprinting, execution statistics                | Performance analysis, regression detect|
-| `pgaudit`           | Compliance-grade audit logging (session + object)         | SOC 2, HIPAA, PCI-DSS compliance       |
+| Extension            | Owns                                                  | Load When                               |
+| -------------------- | ----------------------------------------------------- | --------------------------------------- |
+| `pgvector`           | Vector storage, HNSW/IVFFlat/DiskANN indexes          | Embedding search, similarity queries    |
+| `pgvectorscale`      | DiskANN index, Statistical Binary Quantization        | >1M vectors, memory-constrained         |
+| `pg_search`          | BM25 full-text via Tantivy, `@@@` operator            | Search-quality ranking, hybrid search   |
+| `pg_trgm`            | Trigram similarity, GIN trigram indexes, `%` operator | Fuzzy text search, typo tolerance       |
+| `PostGIS`            | Geometry/geography types, spatial indexes, ST_* funcs | Geospatial queries, proximity search    |
+| `TimescaleDB`        | Hypertables, continuous aggregates, compression       | Time-series ingestion, rollup queries   |
+| `pg_cron`            | In-database scheduled jobs                            | Materialized view refresh, maintenance  |
+| `pg_partman`         | Partition lifecycle management                        | Non-time-series partitioning            |
+| `pg_duckdb`          | Embedded DuckDB, analytical acceleration, lake access | OLAP queries, Parquet/Iceberg reads     |
+| `pg_jsonschema`      | JSONB validation via JSON Schema CHECK constraints    | Structured JSONB columns                |
+| `btree_gist`         | GiST equality operators for EXCLUDE constraints       | Range + equality exclusion constraints  |
+| `bloom`              | Bloom filter index for wide-table equality            | >5 columns, arbitrary WHERE combos      |
+| `pg_stat_statements` | Query fingerprinting, execution statistics            | Performance analysis, regression detect |
+| `pgaudit`            | Compliance-grade audit logging (session + object)     | SOC 2, HIPAA, PCI-DSS compliance        |
 
 
 ## Validation Gate
 
-After writing or modifying SQL: `references/validation.md` checklist (includes Effect-SQL alignment and migration safety).
+After writing or modifying SQL, run in order:
+
+1. **Automated lint**: `bash .claude/skills/coding-pg/scripts/pg_lint.sh [PATH...]` — 25 anti-pattern detectors (rg-based + structural). Errors (E) block merge; warnings (W) require justification. Supports `--json` for CI integration, `--sql-only`/`--ts-only` for targeted scans.
+2. **Manual checklist**: `references/validation.md` — compliance gates not automatable (Effect-SQL alignment, migration safety, lock-level awareness).
