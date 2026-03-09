@@ -1,13 +1,12 @@
-import { homedir } from 'node:os';
-import { join } from 'node:path';
 import * as FileSystem from '@effect/platform/FileSystem';
 import * as Socket from '@effect/platform/Socket';
-import { Data, Deferred, Duration, Effect, HashMap, Layer, Match, Option, pipe, Queue, Ref, Schedule, Schema as S } from 'effect';
+import { Cause, Data, Deferred, Duration, Effect, HashMap, Layer, Match, Option, pipe, Queue, Ref, Schedule, Schema as S } from 'effect';
 import { Envelope } from './protocol/schemas';
-import { HarnessConfig } from './config';
+import { HarnessConfig, PORT_FILE_PATH } from './config';
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
+const _decoder = new TextDecoder();
 const _FaultPolicy = {
     connection_stale:    { terminal: false },
     disconnected:        { terminal: true  },
@@ -36,15 +35,14 @@ class SocketClientError extends Data.TaggedError('SocketClientError')<{
 
 const readPortFile = Effect.fn('kargadan.portDiscovery.read')(function* () {
     const fs = yield* FileSystem.FileSystem;
-    const portFilePath = join(homedir(), '.kargadan', 'port');
-    const content = yield* fs.readFileString(portFilePath).pipe(
-        Effect.mapError(() => new SocketClientError({ details: { path: portFilePath }, reason: 'port_file_not_found' })),
+    const content = yield* fs.readFileString(PORT_FILE_PATH).pipe(
+        Effect.mapError(() => new SocketClientError({ details: { path: PORT_FILE_PATH }, reason: 'port_file_not_found' })),
     );
     const parsed = yield* S.decodeUnknown(S.parseJson(S.Struct({ pid: S.Int, port: S.Int, startedAt: S.String })))(content).pipe(
-        Effect.mapError((cause) => new SocketClientError({ details: { cause, path: portFilePath }, reason: 'port_file_invalid' })),
+        Effect.mapError((cause) => new SocketClientError({ details: { cause, path: PORT_FILE_PATH }, reason: 'port_file_invalid' })),
     );
     yield* Effect.try(() => process.kill(parsed.pid, 0)).pipe(
-        Effect.mapError(() => new SocketClientError({ details: { path: portFilePath, pid: parsed.pid }, reason: 'port_file_stale' })),
+        Effect.mapError(() => new SocketClientError({ details: { path: PORT_FILE_PATH, pid: parsed.pid }, reason: 'port_file_stale' })),
     );
     return parsed;
 });
@@ -54,10 +52,10 @@ const readPortFile = Effect.fn('kargadan.portDiscovery.read')(function* () {
 class ReconnectionSupervisor extends Effect.Service<ReconnectionSupervisor>()('kargadan/ReconnectionSupervisor', {
     effect: Effect.gen(function* () {
         const connectionState = yield* Ref.make<'connected' | 'disconnected' | 'reconnecting'>('disconnected');
-        const cfg = yield* Effect.all({ attempts: HarnessConfig.reconnectMaxAttempts, base: HarnessConfig.reconnectBackoffBaseMs, max: HarnessConfig.reconnectBackoffMaxMs });
-        const _retrySchedule = Schedule.exponential(Duration.millis(cfg.base), 2).pipe(
-            Schedule.jittered, Schedule.upTo(Duration.millis(cfg.max)), Schedule.intersect(Schedule.recurs(cfg.attempts)),
-            Schedule.tapInput(() => Effect.log('kargadan.reconnect: retrying')),
+        const cfg = yield* HarnessConfig;
+        const _retrySchedule = Schedule.exponential(Duration.millis(cfg.reconnectBackoffBaseMs), 2).pipe(
+            Schedule.jittered, Schedule.upTo(Duration.millis(cfg.reconnectBackoffMaxMs)), Schedule.intersect(Schedule.recurs(cfg.reconnectMaxAttempts)),
+            Schedule.tapInput (() => Effect.log('kargadan.reconnect: retrying')),
             Schedule.tapOutput(() => Ref.set(connectionState, 'connected')));
         const _requireConnected = Ref.get(connectionState).pipe(
             Effect.filterOrFail((s) => s === 'connected', (s) => new SocketClientError({ details: { state: s }, reason: 'disconnected' })),
@@ -70,8 +68,11 @@ class ReconnectionSupervisor extends Effect.Service<ReconnectionSupervisor>()('k
                     Effect.tap((info) => Ref.set(connectionState, 'connected').pipe(
                         Effect.zipRight(Effect.log('kargadan.reconnect: connected', { pid: info.pid, port: info.port })))),
                     Effect.flatMap((info) => connectOnce(info.port)),
-                    Effect.onError(() => Ref.set(connectionState, 'reconnecting').pipe(
-                        Effect.zipRight(Effect.log('kargadan.reconnect: disconnected, starting backoff')))),
+                    Effect.catchAllCause((cause) => Cause.isInterruptedOnly(cause)
+                        ? Effect.failCause(cause)
+                        : Ref.set(connectionState, 'reconnecting').pipe(
+                            Effect.zipRight(Effect.log('kargadan.reconnect: disconnected, starting backoff')),
+                            Effect.zipRight(Effect.failCause(cause)))),
                     Effect.retry(_retrySchedule),
                 ),
             ),
@@ -82,6 +83,7 @@ class KargadanSocketClient extends Effect.Service<KargadanSocketClient>()('karga
     effect: Effect.gen(function* () {
         const socket = yield* Socket.Socket;
         const reconnectSupervisor = yield* ReconnectionSupervisor;
+        const cfg = yield* HarnessConfig;
         const writer = yield* socket.writer;
         const pending = yield* Ref.make(HashMap.empty<string, {
             readonly deferred: Deferred.Deferred<Envelope.PendingReply, SocketClientError>;
@@ -133,39 +135,37 @@ class KargadanSocketClient extends Effect.Service<KargadanSocketClient>()('karga
         };
         const _request = Effect.fn('kargadan.socket.request')((envelope: Envelope.Outbound) =>
             Effect.gen(function* () {
-                const timeoutMs = yield* HarnessConfig.commandDeadlineMs;
                 const deferred = yield* Deferred.make<Envelope.PendingReply, SocketClientError>();
                 yield* Ref.update(pending, HashMap.set(envelope.requestId, { deferred, tag: envelope._tag }));
                 yield* reconnectSupervisor.requireConnected;
                 const json = yield* encode(envelope).pipe(Effect.mapError((cause) => new SocketClientError({ details: { cause, stage: 'encode' }, reason: 'transport_failure' })),);
                 yield* writer(json).pipe(Effect.mapError((cause) => new SocketClientError({ details: { cause, stage: 'write' }, reason: 'transport_failure' })),);
-                return yield* Deferred.await(deferred).pipe(Effect.timeoutFail({ duration: Duration.millis(timeoutMs), onTimeout: () => new SocketClientError({ details: { requestId: envelope.requestId }, reason: 'request_timeout' }) }),);
+                return yield* Deferred.await(deferred).pipe(Effect.timeoutFail({ duration: Duration.millis(cfg.commandDeadlineMs), onTimeout: () => new SocketClientError({ details: { requestId: envelope.requestId }, reason: 'request_timeout' }) }),);
             }).pipe(Effect.ensuring(Ref.update(pending, HashMap.remove(envelope.requestId)))),
         );
         const _dispatchChunk = (chunk: Uint8Array) =>
             Effect.gen(function* () {
-                const envelope = yield* decode(new TextDecoder().decode(chunk)).pipe(Effect.mapError((cause) => new SocketClientError({ details: { cause, stage: 'decode' }, reason: 'transport_failure' })),);
+                const envelope = yield* decode(_decoder.decode(chunk)).pipe(Effect.mapError((cause) => new SocketClientError({ details: { cause, stage: 'decode' }, reason: 'transport_failure' })),);
                 yield* Ref.set(lastMessageAt, Option.some(Date.now()));
                 return yield* Match.value(envelope).pipe(
-                    Match.when({ _tag: 'event' }, (e) => Queue.offer(events, e)),
+                    Match.when  ({ _tag: 'event' }, (e) => Queue.offer(events, e)),
                     Match.whenOr({ _tag: 'command.ack' }, { _tag: 'handshake.ack' }, { _tag: 'handshake.reject' }, { _tag: 'result' }, { _tag: 'heartbeat', mode: 'pong' as const }, _resolveReply),
-                    Match.when({ _tag: 'error' }, _resolveRemoteError),
+                    Match.when  ({ _tag: 'error' }, _resolveRemoteError),
                     Match.orElse((e) => Effect.logWarning('kargadan.socket.reply.ignored', { requestId: e.requestId, tag: e._tag })),
                 );
             }).pipe(Effect.catchTag('SocketClientError', (error) => Effect.logWarning('kargadan.socket.decode.failed', { reason: error.reason })));
-        const _heartbeatStalenessChecker = HarnessConfig.heartbeatTimeoutMs.pipe(Effect.flatMap((timeoutMs) =>
-            Ref.get(lastMessageAt).pipe(
-                Effect.flatMap(Option.match({
-                    onNone: () => Effect.void,
-                    onSome: (t) => pipe(Date.now() - t, (elapsed) => elapsed > timeoutMs
-                        ? _failAllPending('connection_stale').pipe(Effect.zipRight(Effect.fail(new SocketClientError({ details: { lastMessageAgoMs: elapsed }, reason: 'connection_stale' }))))
-                        : Effect.void),
-                })),
-                Effect.schedule(Schedule.fixed(Duration.millis(timeoutMs))))));
+        const _heartbeatStalenessChecker = Ref.get(lastMessageAt).pipe(
+            Effect.flatMap(Option.match({
+                onNone: () => Effect.void,
+                onSome: (t) => pipe(Date.now() - t, (elapsed) => elapsed > cfg.heartbeatTimeoutMs
+                    ? _failAllPending('connection_stale').pipe(Effect.zipRight(Effect.fail(new SocketClientError({ details: { lastMessageAgoMs: elapsed }, reason: 'connection_stale' }))))
+                    : Effect.void),
+            })),
+            Effect.schedule(Schedule.fixed(Duration.millis(cfg.heartbeatTimeoutMs))));
         return {
             request:          _request,
             stalenessChecker: _heartbeatStalenessChecker,
-            start: () => Effect.all([socket.run(_dispatchChunk), _heartbeatStalenessChecker], { discard: true }).pipe(
+            start:            () => Effect.all([socket.run(_dispatchChunk), _heartbeatStalenessChecker], { discard: true }).pipe(
                 Effect.onError(() => _failAllPending('socket_closed')),
             ),
             takeEvent: () => Queue.take(events),
@@ -175,9 +175,10 @@ class KargadanSocketClient extends Effect.Service<KargadanSocketClient>()('karga
 
 // --- [LAYERS] ----------------------------------------------------------------
 
-const KargadanSocketClientLive = Layer.unwrapEffect(readPortFile().pipe(
-    Effect.map(({ port }) => Layer.provide(KargadanSocketClient.Default,
-        Layer.mergeAll(Socket.layerWebSocketConstructorGlobal, Socket.layerWebSocket(`ws://127.0.0.1:${port}`))))));
+const KargadanSocketClientLive = Layer.unwrapEffect(
+    Effect.all([readPortFile(), HarnessConfig]).pipe(
+        Effect.map(([{ port }, cfg]) => Layer.provide(KargadanSocketClient.Default,
+            Layer.provide(Socket.layerWebSocket(`ws://${cfg.wsHost}:${port}`), Socket.layerWebSocketConstructorGlobal)))));
 
 // --- [EXPORT] ----------------------------------------------------------------
 

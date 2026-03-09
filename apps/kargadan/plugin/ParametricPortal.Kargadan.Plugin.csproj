@@ -3,7 +3,14 @@
         <TargetFramework>net9.0</TargetFramework>
         <AssemblyName>ParametricPortal.Kargadan.Plugin</AssemblyName>
         <RootNamespace>ParametricPortal.Kargadan.Plugin</RootNamespace>
+        <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+        <Description>Kargadan Rhino plugin for Parametric Portal.</Description>
+        <Authors>Parametric Portal</Authors>
+        <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
         <IsPackable>false</IsPackable>
+        <TargetExt>.rhp</TargetExt>
+        <Title>ParametricPortal.Kargadan.Plugin</Title>
+        <Version>0.1.0</Version>
     </PropertyGroup>
 
     <ItemGroup>
@@ -30,6 +37,12 @@
     </ItemGroup>
 
     <ItemGroup>
-        <PackageReference Include="RhinoCommon" Version="$(RhinoCommonVersion)" />
+        <PackageReference Include="RhinoCommon" Version="$(RhinoCommonVersion)" ExcludeAssets="runtime" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <AssemblyAttribute Include="System.Runtime.InteropServices.GuidAttribute">
+            <_Parameter1>15905e8c-00e7-4996-84ab-7e96d1384bce</_Parameter1>
+        </AssemblyAttribute>
     </ItemGroup>
 </Project>

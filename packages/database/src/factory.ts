@@ -190,7 +190,7 @@ const repo = <M extends Model.AnyNoContext, const C extends Config<M>>(model: M,
         const $fromWhere = (predicate: RepoPredicate | readonly RepoPredicate[], $s: Statement.Fragment) => sql`FROM ${sql(table)} WHERE ${$where(predicate)}${$active}${$fresh}${$s}`;
         const $pagedCte = (predicate: RepoPredicate | readonly RepoPredicate[], $s: Statement.Fragment, tail: Statement.Fragment) => sql`WITH base AS (SELECT * ${$fromWhere(predicate, $s)}), totals AS (SELECT COUNT(*)::int AS total_count FROM base) SELECT base.*, totals.total_count FROM base CROSS JOIN totals ${tail}`;
         // --- Base repository + resolvers -------------------------------------
-        const base = yield* Model.makeRepository(model, { idColumn: pkCol, spanPrefix: table, tableName: table });
+        const base = yield* Model.makeRepository(model, { idColumn: _pkField, spanPrefix: table, tableName: table });
         // Why: Normalizes join vs direct specs into { $from, $select, refs, $match } — one polymorphic builder replaces _isJoinResolve + _extractResolveFields + _resolveSchema + _resolveWhere + 2 near-identical branches
         const _buildResolver = (spec: ResolveSpec<Model.AnyNoContext>) => {
             const obj = typeof spec === 'object' && 'field' in (spec as object) ? spec as { field: string | readonly string[]; many?: true; through?: { base?: string; table: string; target: string } } : undefined;

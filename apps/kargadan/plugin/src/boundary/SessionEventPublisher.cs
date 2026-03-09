@@ -88,20 +88,22 @@ internal sealed class SessionEventPublisher {
         OperationTag operationTag,
         Instant publishedAt,
         Func<SessionSnapshot, JsonElement> buildDelta) =>
-        _sessionHost.Snapshot().Bind((SessionSnapshot snapshot) =>
-            BuildTelemetryContext(
-                requestId: requestId,
-                operationTag: operationTag).Bind((TelemetryContext telemetryContext) =>
-                PublishEventEnvelope(
-                    eventType: eventType,
-                    identity: snapshot.Identity with {
-                        RequestId = requestId,
-                        IssuedAt = publishedAt,
-                    },
-                    sourceRevision: 0,
-                    causationRequestId: causationRequestId,
-                    delta: buildDelta(snapshot),
-                    telemetryContext: telemetryContext)));
+        _sessionHost.Snapshot().Match(
+            Succ: (SessionSnapshot snapshot) =>
+                BuildTelemetryContext(
+                    requestId: requestId,
+                    operationTag: operationTag).Bind((TelemetryContext telemetryContext) =>
+                    PublishEventEnvelope(
+                        eventType: eventType,
+                        identity: snapshot.Identity with {
+                            RequestId = requestId,
+                            IssuedAt = publishedAt,
+                        },
+                        sourceRevision: 0,
+                        causationRequestId: causationRequestId,
+                        delta: buildDelta(snapshot),
+                        telemetryContext: telemetryContext)),
+            Fail: FinFail<Unit>);
     private Fin<Unit> PublishEventEnvelope(
         EventType eventType,
         EnvelopeIdentity identity,

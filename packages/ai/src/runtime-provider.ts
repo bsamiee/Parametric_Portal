@@ -1,9 +1,10 @@
 import { AiError as AiSdkError, Telemetry as AiTelemetry, type Response } from '@effect/ai';
+import { readFileSync } from 'node:fs';
 import { DatabaseService } from '@parametric-portal/database/repos';
 import { Context } from '@parametric-portal/server/context';
 import { MetricsService } from '@parametric-portal/server/observe/metrics';
 import { CacheService } from '@parametric-portal/server/platform/cache';
-import { Data, Duration, Effect, FiberRef, Layer, Match, Option, PrimaryKey, Ref, Schema as S, Stream } from 'effect';
+import { Config, Data, Duration, Effect, FiberRef, Layer, Match, Option, PrimaryKey, Ref, Redacted, Schema as S, Stream } from 'effect';
 import { identity } from 'effect/Function';
 import { AiRegistry } from './registry.ts';
 
@@ -30,6 +31,68 @@ const _BudgetCacheKey = {
     daily: (tenantId: string) => `ai:budget:daily:${tenantId}`,
     rate:  (tenantId: string) => `ai:rate:${tenantId}`,
 } as const;
+const _resolveApiSecret = (provider: 'anthropic' | 'openai') =>
+    Config.redacted(AiRegistry.providerVocabulary[provider].credential.key).pipe(
+        Config.orElse(() => Config.redacted(AiRegistry.providerVocabulary[provider].credential.legacyKey)),
+        Effect.map((secret) => ({ kind: 'api-secret' as const, secret })),
+    );
+const _resolveGeminiCredential = Effect.gen(function* () {
+    const metadata = AiRegistry.providerVocabulary.gemini.credential;
+    const [accessToken, clientPath, refreshToken, tokenExpiry] = yield* Effect.all([
+        Config.redacted(metadata.accessTokenKey).pipe(Config.option),
+        Config.string(metadata.clientPathKey),
+        Config.redacted(metadata.refreshTokenKey).pipe(Config.option),
+        Config.string(metadata.expiryKey).pipe(Config.option),
+    ]);
+    const client = yield* Effect.try({
+        catch: (cause) => new AiError({ cause, operation: 'ai.provider.credentials.gemini.client', reason: 'unknown' }),
+        try:   () => readFileSync(clientPath, 'utf8'),
+    }).pipe(Effect.flatMap(AiRegistry.decodeGeminiClient), Effect.mapError(AiError.from('ai.provider.credentials.gemini.client')));
+    const reusableAccessToken = Option.flatMap(accessToken, (token) =>
+        tokenExpiry.pipe(Option.filter((value) => {
+            const expiresAt = Date.parse(value);
+            return Number.isFinite(expiresAt) && expiresAt > Date.now() + 60_000;
+        }), Option.as(token)));
+    const resolvedAccessToken = yield* Option.match(reusableAccessToken, {
+        onNone: () =>
+            Option.match(refreshToken, {
+                onNone: () => accessToken.pipe(Option.match({
+                    onNone: () => Effect.fail(new AiError({
+                        cause:     { clientPath, provider: 'gemini' },
+                        operation: 'ai.provider.credentials.gemini',
+                        reason:    'unknown',
+                    })),
+                    onSome: (token) => Option.match(tokenExpiry, {
+                        onNone: () => Effect.succeed(token),
+                        onSome: (value) => Number.isFinite(Date.parse(value)) && Date.parse(value) <= Date.now() + 60_000
+                            ? Effect.fail(new AiError({
+                                cause:     { clientPath, expired: value, provider: 'gemini', refreshTokenAvailable: false },
+                                operation: 'ai.provider.credentials.gemini.expired',
+                                reason:    'unknown',
+                            }))
+                            : Effect.succeed(token),
+                    }),
+                })),
+                onSome: (token) => AiRegistry.refreshGeminiAccessToken({ client, refreshToken: Redacted.value(token) }).pipe(
+                    Effect.map((next) => Redacted.make(next.accessToken)),
+                    Effect.mapError(AiError.from('ai.provider.credentials.gemini.refresh')),
+                ),
+            }),
+        onSome: Effect.succeed,
+    });
+    return { accessToken: resolvedAccessToken, kind: 'oauth-desktop' as const, projectId: client.projectId } satisfies AiRegistry.Credential<'gemini'>;
+});
+const _resolveCredential = (provider: AiRegistry.Provider) =>
+    Match.value(provider).pipe(
+        Match.when('anthropic', () => _resolveApiSecret('anthropic')),
+        Match.when('gemini', () => _resolveGeminiCredential),
+        Match.orElse(() => _resolveApiSecret('openai')),
+    );
+const _withOverride = (settings: AiRegistry.Settings, override: Option.Option<AiRegistry.SessionOverride>) =>
+    Option.match(override, {
+        onNone: () => settings,
+        onSome: (o) => AiRegistry.applySessionOverride(settings, o),
+    });
 
 // --- [SCHEMA] ----------------------------------------------------------------
 
@@ -44,11 +107,6 @@ class SettingsKey extends S.TaggedRequest<SettingsKey>()('SettingsKey', {
 class AiRuntimeProvider extends Effect.Service<AiRuntimeProvider>()('ai/RuntimeProvider', {
     effect: Effect.gen(function* () {
         const budgets = yield* Ref.make(new Map<string, typeof _EMPTY_BUDGET>());
-        const withOverride = (settings: AiRegistry.Settings, override: Option.Option<AiRegistry.SessionOverride>) =>
-            Option.match(override, {
-                onNone: () => settings,
-                onSome: (o) => AiRegistry.applySessionOverride(settings, o),
-            });
         const resolveAppSettings = (tenantId: string) =>
             Effect.serviceOption(DatabaseService).pipe(
                 Effect.flatMap(Option.match({
@@ -71,9 +129,10 @@ class AiRuntimeProvider extends Effect.Service<AiRuntimeProvider>()('ai/RuntimeP
             observeRequest:      (_op: string, _labels: Record<string, string>) => Effect.void,
             observeTokens:       (_labels: Record<string, string>, _usage: Response.Usage) => Effect.void,
             readBudget:          (tenantId: string) => Ref.get(budgets).pipe(Effect.map((m) => m.get(tenantId) ?? _EMPTY_BUDGET)),
+            resolveCredential:   (provider: AiRegistry.Provider) => _resolveCredential(provider).pipe(Effect.mapError(AiError.from(`ai.provider.credentials.${provider}`))),
             resolveSettings:     (tenantId: string) =>
                 Effect.all([resolveAppSettings(tenantId), FiberRef.get(AiRegistry.SessionOverrideRef)]).pipe(
-                    Effect.map(([settings, override]) => withOverride(settings, override)),
+                    Effect.map(([settings, override]) => _withOverride(settings, override)),
                     Effect.mapError(AiError.from('ai.provider.settings')),
                 ),
             resolveTenantId:     Context.Request.currentTenantId.pipe(Effect.catchAll(() => Effect.succeed('system'))),
@@ -113,6 +172,7 @@ class AiRuntimeProvider extends Effect.Service<AiRuntimeProvider>()('ai/RuntimeP
                     Effect.map(([d, r]) => ({ dailyTokens: Option.getOrElse(d, () => _EMPTY_BUDGET.dailyTokens), rateCount: Option.getOrElse(r, () => _EMPTY_BUDGET.rateCount) })),
                     Effect.catchAll(() => Effect.succeed(_EMPTY_BUDGET)),
                 ),
+            resolveCredential: (provider) => _resolveCredential(provider).pipe(Effect.mapError(AiError.from(`ai.provider.credentials.${provider}`))),
             resolveSettings: (tenantId) =>
                 Effect.all([settingsCache.get(new SettingsKey({ tenantId })), FiberRef.get(AiRegistry.SessionOverrideRef)]).pipe(
                     Effect.map(([settings, override]) => Option.match(override, {

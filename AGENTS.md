@@ -8,7 +8,7 @@ If reviewing, refining, editing, creating, or modifying X file type, use skill Y
 - Typescript: `coding-ts`
 - C#: `coding-csharp`
 - Python: `coding-python`
-- Bash/sh: `bash-script-generator`
+- Bash/sh: `coding-bash`
 
 ## Deterministic Command Matrix
 

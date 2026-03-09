@@ -1,9 +1,11 @@
 import { AnthropicClient, AnthropicLanguageModel } from '@effect/ai-anthropic';
 import { GoogleClient, GoogleLanguageModel } from '@effect/ai-google';
+import * as HttpClient from '@effect/platform/HttpClient';
+import * as HttpClientRequest from '@effect/platform/HttpClientRequest';
 import { OpenAiClient, OpenAiEmbeddingModel, OpenAiLanguageModel } from '@effect/ai-openai';
 import { FetchHttpClient } from '@effect/platform';
 import { AiProviderSchema, AiSettingsSchema } from '@parametric-portal/database/models';
-import { Config, Duration, Effect, FiberRef, Layer, Match, Option, Schema as S } from 'effect';
+import { Duration, Effect, FiberRef, Layer, Match, Option, Redacted, Schema as S } from 'effect';
 
 // --- [SCHEMA] ----------------------------------------------------------------
 
@@ -18,31 +20,84 @@ const _SessionOverrideSchema = S.Struct({
         provider: AiProviderSchema,
     })),
 });
+const _GeminiDesktopClientSchema = S.parseJson(S.Struct({
+    installed: S.Struct({
+        auth_uri:      S.String,
+        client_id:     S.NonEmptyTrimmedString,
+        client_secret: S.NonEmptyTrimmedString,
+        project_id:    S.NonEmptyTrimmedString,
+        token_uri:     S.String,
+    }),
+}));
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
-const _clients = {
-    anthropic: AnthropicClient.layerConfig({ apiKey: Config.redacted('ANTHROPIC_API_KEY') }).pipe(Layer.provide(FetchHttpClient.layer)),
-    gemini:    GoogleClient.layerConfig({    apiKey: Config.redacted('GEMINI_API_KEY')    }).pipe(Layer.provide(FetchHttpClient.layer)),
-    openai:    OpenAiClient.layerConfig({    apiKey: Config.redacted('OPENAI_API_KEY')    }).pipe(Layer.provide(FetchHttpClient.layer)),
+const _ProviderVocabulary = {
+    anthropic: {
+        credential: { key: 'KARGADAN_AI_ANTHROPIC_API_SECRET', kind: 'api-secret', legacyKey: 'ANTHROPIC_API_KEY' },
+        defaultModel: 'claude-sonnet-4-20250514',
+        title:        'Anthropic (Claude)',
+    },
+    gemini: {
+        credential: {
+            accessTokenKey: 'KARGADAN_AI_GEMINI_ACCESS_TOKEN',
+            clientPathKey:  'KARGADAN_AI_GEMINI_CLIENT_PATH',
+            expiryKey:      'KARGADAN_AI_GEMINI_TOKEN_EXPIRY',
+            kind:           'oauth-desktop',
+            refreshTokenKey:'KARGADAN_AI_GEMINI_REFRESH_TOKEN',
+            scopes:         [
+                'https://www.googleapis.com/auth/cloud-platform',
+                'https://www.googleapis.com/auth/generative-language.retriever',
+            ],
+        },
+        defaultModel: 'gemini-2.5-pro',
+        title:        'Google (Gemini)',
+    },
+    openai: {
+        credential: { key: 'KARGADAN_AI_OPENAI_API_SECRET', kind: 'api-secret', legacyKey: 'OPENAI_API_KEY' },
+        defaultModel: 'gpt-4.1',
+        title:        'OpenAI',
+    },
 } as const;
 const _SessionOverrideRef = FiberRef.unsafeMake(Option.none<S.Schema.Type<typeof _SessionOverrideSchema>>());
 const _AnthropicToolSearchFlag = 'provider.anthropic.tool_search' as const;
+const _GeminiTokenResponse = S.Struct({
+    access_token:  S.NonEmptyTrimmedString,
+    expires_in:    S.Int.pipe(S.greaterThan(0)),
+    refresh_token: S.optional(S.NonEmptyTrimmedString),
+});
 
 // --- [FUNCTIONS] -------------------------------------------------------------
 
+const _clientLayers = {
+    anthropic: (credential: AiRegistry.Credential<'anthropic'>) =>
+        AnthropicClient.layer({ apiKey: credential.secret }).pipe(Layer.provide(FetchHttpClient.layer)),
+    gemini: (credential: AiRegistry.Credential<'gemini'>) =>
+        GoogleClient.layer({
+            transformClient: (client) =>
+                client.pipe(HttpClient.mapRequest((request) =>
+                    request.pipe(
+                        HttpClientRequest.bearerToken(Redacted.value(credential.accessToken)),
+                        HttpClientRequest.setHeader('x-goog-user-project', credential.projectId),
+                    ))),
+        }).pipe(Layer.provide(FetchHttpClient.layer)),
+    openai: (credential: AiRegistry.Credential<'openai'>) =>
+        OpenAiClient.layer({ apiKey: credential.secret }).pipe(Layer.provide(FetchHttpClient.layer)),
+} as const;
+const _credential = <P extends AiRegistry.Provider>(credentials: AiRegistry.Credentials, provider: P) =>
+    Option.getOrThrowWith(Option.fromNullable(credentials[provider]), () => new Error(`Missing credential for provider: ${provider}`)) as AiRegistry.Credential<P>;
 const _providers = {
     anthropic: {
-        language: (settings: typeof AiSettingsSchema.Type['language']) =>
+        language: (settings: typeof AiSettingsSchema.Type['language'], credentials: AiRegistry.Credentials) =>
             AnthropicLanguageModel.modelWithTokenizer(settings.model, {
                 max_tokens:  settings.maxTokens,
                 temperature: settings.temperature,
                 top_k:       settings.topK,
                 top_p:       settings.topP,
-            }).pipe(Layer.provide(_clients.anthropic)),
+            }).pipe(Layer.provide(_clientLayers.anthropic(_credential(credentials, 'anthropic')))),
     },
     gemini: {
-        language: (settings: typeof AiSettingsSchema.Type['language']) =>
+        language: (settings: typeof AiSettingsSchema.Type['language'], credentials: AiRegistry.Credentials) =>
             GoogleLanguageModel.model(settings.model, {
                 generationConfig: {
                     maxOutputTokens: settings.maxTokens,
@@ -51,10 +106,10 @@ const _providers = {
                     topP:            settings.topP,
                 },
                 toolConfig: {},
-            }).pipe(Layer.provide(_clients.gemini)),
+            }).pipe(Layer.provide(_clientLayers.gemini(_credential(credentials, 'gemini')))),
     },
     openai: {
-        embedding: (settings: typeof AiSettingsSchema.Type['embedding']) =>
+        embedding: (settings: typeof AiSettingsSchema.Type['embedding'], credentials: AiRegistry.Credentials) =>
             Match.value(settings.mode).pipe(
                 Match.when('batched', () =>
                     OpenAiEmbeddingModel.model(settings.model, {
@@ -62,7 +117,7 @@ const _providers = {
                         dimensions:   settings.dimensions,
                         maxBatchSize: settings.maxBatchSize,
                         mode:         'batched',
-                    }).pipe(Layer.provide(_clients.openai)),
+                    }).pipe(Layer.provide(_clientLayers.openai(_credential(credentials, 'openai')))),
                 ),
                 Match.when('data-loader', () =>
                     OpenAiEmbeddingModel.model(settings.model, {
@@ -70,16 +125,16 @@ const _providers = {
                         maxBatchSize: settings.maxBatchSize,
                         mode:         'data-loader',
                         window:       Duration.millis(settings.windowMs),
-                    }).pipe(Layer.provide(_clients.openai)),
+                    }).pipe(Layer.provide(_clientLayers.openai(_credential(credentials, 'openai')))),
                 ),
                 Match.exhaustive,
             ),
-        language: (settings: typeof AiSettingsSchema.Type['language']) =>
+        language: (settings: typeof AiSettingsSchema.Type['language'], credentials: AiRegistry.Credentials) =>
             OpenAiLanguageModel.modelWithTokenizer(settings.model, {
                 max_output_tokens: settings.maxTokens,
                 temperature:       settings.temperature,
                 top_p:             settings.topP,
-            }).pipe(Layer.provide(_clients.openai)),
+            }).pipe(Layer.provide(_clientLayers.openai(_credential(credentials, 'openai')))),
     },
 } as const;
 
@@ -106,18 +161,90 @@ const AiRegistry = {
         S.decodeUnknown(S.Struct({ ai: S.optional(AiSettingsSchema) }))(raw).pipe(
             Effect.flatMap(({ ai }) => ai === undefined ? S.decodeUnknown(AiSettingsSchema)({}) : Effect.succeed(ai)),
         ),
+    decodeGeminiClient: (raw: unknown) => S.decodeUnknown(_GeminiDesktopClientSchema)(raw).pipe(
+        Effect.map(({ installed }) => ({
+            authUri:      installed.auth_uri,
+            clientId:     installed.client_id,
+            clientSecret: installed.client_secret,
+            projectId:    installed.project_id,
+            tokenUri:     installed.token_uri,
+        })),
+    ),
     decodeSessionOverride: (raw: unknown) => S.decodeUnknown(_SessionOverrideSchema)(raw),
-    layers: (settings: S.Schema.Type<typeof AiSettingsSchema>) => ({
-        embedding:        _providers[settings.embedding.provider].embedding(settings.embedding),
-        fallbackLanguage: settings.language.fallback.map((provider) => _providers[provider].language({ ...settings.language, provider })),
-        language:         _providers[settings.language.provider].language(settings.language),
+    exchangeGeminiAuthorizationCode: (input: {
+        readonly client:       AiRegistry.GeminiDesktopClient;
+        readonly code:         string;
+        readonly codeVerifier: string;
+        readonly redirectUri:  string;
+    }) =>
+        Effect.tryPromise({
+            catch: (cause) => cause,
+            try: () => fetch(input.client.tokenUri, {
+                body: new URLSearchParams({
+                    client_id:     input.client.clientId,
+                    client_secret: input.client.clientSecret,
+                    code:          input.code,
+                    code_verifier: input.codeVerifier,
+                    grant_type:    'authorization_code',
+                    redirect_uri:  input.redirectUri,
+                }),
+                headers: { 'content-type': 'application/x-www-form-urlencoded' },
+                method:  'POST',
+            }).then((r) => r.json() as Promise<unknown>),
+        }).pipe(
+            Effect.flatMap(S.decodeUnknown(_GeminiTokenResponse)),
+            Effect.map((decoded) => ({
+                accessToken:  decoded.access_token,
+                expiresAt:    new Date(Date.now() + decoded.expires_in * 1_000).toISOString(),
+                refreshToken: decoded.refresh_token,
+            })),
+        ),
+    geminiAuthorizationUrl: (input: {
+        readonly client:        AiRegistry.GeminiDesktopClient;
+        readonly codeChallenge: string;
+        readonly redirectUri:   string;
+        readonly state:         string;
+    }) =>
+        ((url: URL) => {
+            url.searchParams.set('access_type', 'offline');
+            url.searchParams.set('client_id', input.client.clientId);
+            url.searchParams.set('code_challenge', input.codeChallenge);
+            url.searchParams.set('code_challenge_method', 'S256');
+            url.searchParams.set('prompt', 'consent');
+            url.searchParams.set('redirect_uri', input.redirectUri);
+            url.searchParams.set('response_type', 'code');
+            url.searchParams.set('scope', _ProviderVocabulary.gemini.credential.scopes.join(' '));
+            url.searchParams.set('state', input.state);
+            return url;
+        })(new URL(input.client.authUri)),
+    layers: (settings: S.Schema.Type<typeof AiSettingsSchema>, credentials: AiRegistry.Credentials) => ({
+        embedding:        _providers[settings.embedding.provider].embedding(settings.embedding, credentials),
+        fallbackLanguage: settings.language.fallback.map((provider) => _providers[provider].language({ ...settings.language, provider }, credentials)),
+        language:         _providers[settings.language.provider].language(settings.language, credentials),
     }),
-    resolveDiscovery: (settings: S.Schema.Type<typeof AiSettingsSchema>) => ({
-        anthropicToolSearchEnabled: settings.language.provider === 'anthropic'
-            && settings.policy.tools.mode === 'allow'
-            && settings.policy.tools.names.includes(_AnthropicToolSearchFlag),
-        provider: settings.language.provider,
-    }),
+    providerVocabulary:  _ProviderVocabulary,
+    refreshGeminiAccessToken: (input: { readonly client: AiRegistry.GeminiDesktopClient; readonly refreshToken: string }) =>
+        Effect.tryPromise({
+            catch: (cause) => cause,
+            try: () => fetch(input.client.tokenUri, {
+                body: new URLSearchParams({
+                    client_id:     input.client.clientId,
+                    client_secret: input.client.clientSecret,
+                    grant_type:    'refresh_token',
+                    refresh_token: input.refreshToken,
+                }),
+                headers: { 'content-type': 'application/x-www-form-urlencoded' },
+                method:  'POST',
+            }).then((r) => r.json() as Promise<unknown>),
+        }).pipe(
+            Effect.flatMap(S.decodeUnknown(_GeminiTokenResponse)),
+            Effect.map((decoded) => ({
+                accessToken: decoded.access_token,
+                expiresAt:   new Date(Date.now() + decoded.expires_in * 1_000).toISOString(),
+            })),
+        ),
+    requiredProviders: (settings: S.Schema.Type<typeof AiSettingsSchema>) =>
+        [...new Set([settings.embedding.provider, settings.language.provider, ...settings.language.fallback])] as ReadonlyArray<AiRegistry.Provider>,
     SessionOverrideRef: _SessionOverrideRef,
     schema:             AiSettingsSchema,
     toolSearchFlag:     _AnthropicToolSearchFlag,
@@ -126,6 +253,20 @@ const AiRegistry = {
 // --- [NAMESPACE] -------------------------------------------------------------
 
 namespace AiRegistry {
+    export type Credential<P extends Provider = Provider> = ({
+        anthropic: { readonly kind: 'api-secret'; readonly secret: Redacted.Redacted<string> };
+        gemini:    { readonly accessToken: Redacted.Redacted<string>; readonly kind: 'oauth-desktop'; readonly projectId: string };
+        openai:    { readonly kind: 'api-secret'; readonly secret: Redacted.Redacted<string> };
+    })[P];
+    export type Credentials      = Partial<{ [P in Provider]: Credential<P> }>;
+    export type GeminiDesktopClient = {
+        readonly authUri:      string;
+        readonly clientId:     string;
+        readonly clientSecret: string;
+        readonly projectId:    string;
+        readonly tokenUri:     string;
+    };
+    export type Provider        = typeof AiProviderSchema.Type;
     export type SessionOverride = S.Schema.Type<typeof _SessionOverrideSchema>;
     export type Settings        = S.Schema.Type<typeof AiSettingsSchema>;
 }

@@ -1,317 +1,178 @@
 # Types
 
-## Type Extraction Utilities
+The `[TYPES]` section should be the **rarest section** in any file. Most modules need zero standalone type declarations — types derive from runtime values, schemas, and function signatures. A standalone `type` or `interface` declaration is justified only when no runtime anchor exists to derive from.
 
-```typescript
-// Extract - Extract types from union
-type AllTypes = 'a' | 'b' | 'c' | 1 | 2 | 3;
-type StringTypes = Extract<AllTypes, string>; // 'a' | 'b' | 'c'
-type NumberTypes = Extract<AllTypes, number>; // 1 | 2 | 3
-// Exclude - Remove types from union
-type WithoutNumbers = Exclude<AllTypes, number>; // 'a' | 'b' | 'c'
-// NonNullable - Remove null and undefined
-type MaybeString = string | null | undefined;
-type DefiniteString = NonNullable<MaybeString>; // string
-// ReturnType - Extract function return type
-function getUser() {
-  return { id: 1, name: 'Ahmad' };
+## Inline-first principle
+
+Schema fields, branded primitives, and literal unions belong **inline at the point of use** — never as standalone module-level declarations unless genuinely reused by 2+ consumers within the same file.
+
+```ts
+// WRONG: 2 module-level consts for single-use field schemas
+const _Status =   S.Literal("todo", "in_progress", "done")
+const _Priority = S.Literal("low", "medium", "high")
+class Task extends Model.Class<Task>("Task")({
+  status:   _Status,
+  priority: _Priority,
+}) {}
+
+// RIGHT: inline — zero module-level members for single-use fields
+class Task extends Model.Class<Task>("Task")({
+  id:        Model.Generated(S.String.pipe(S.brand("TaskId"))),
+  title:     S.NonEmptyTrimmedString,
+  status:    S.Literal("todo", "in_progress", "done"),
+  priority:  S.Literal("low", "medium", "high"),
+  tenantId:  Model.FieldExcept("update", "jsonUpdate")(S.String.pipe(S.brand("TenantId"))),
+  createdAt: Model.DateTimeInsertFromDate,
+}) {}
+// Task.insert.Type, Task.update.Type, Task.fields.status.Type — all derived
+
+// ACCEPTABLE: single const when genuinely reused (query predicates + field)
+const _Status = S.Literal("todo", "in_progress", "done")
+class Task extends Model.Class<Task>("Task")({
+  status: _Status,
+}) {
+  static readonly repo = Effect.gen(function* () {
+    // _Status.Type used here in predicate composition
+    const _predicate = (filters: { readonly status?: typeof _Status.Type }) => /* ... */
+    return { query: _predicate } as const
+  })
 }
-type User = ReturnType<typeof getUser>; // { id: number; name: string }
-// Parameters - Extract function parameter types
-function createUser(name: string, age: number) {
-  return { name, age };
-}
-type CreateUserParams = Parameters<typeof createUser>; // [string, number]
-// ConstructorParameters - Extract constructor parameters
-class Point {
-  constructor(public x: number, public y: number) {}
-}
-type PointParams = ConstructorParameters<typeof Point>; // [number, number]
-// InstanceType - Extract instance type from constructor
-type PointInstance = InstanceType<typeof Point>; // Point
+// One const justified by 2 consumption sites — never 2+ consts for parallel fields
 ```
 
----
+**Inline contracts:**
+- `S.Literal(...)` and `S.String.pipe(S.brand("X"))` go directly in field position unless reused.
+- When a field schema IS reused (e.g., in query predicates), extract **one** `const _X = ...` — never proliferate parallel consts for every field.
+- A module with N schema fields should have 0-1 extracted consts, not N.
 
-## Custom Utilities
+## Derivation hierarchy
 
-```typescript
-// Nullable - Add null and undefined
-type Nullable<T> = T | null | undefined;
-// ValueOf - Get union of all property values
-type ValueOf<T> = T[keyof T];
-interface Codes {
-  success: 200;
-  notFound: 404;
-  error: 500;
-}
-type StatusCode = ValueOf<Codes>;  // 200 | 404 | 500
-// RequireAtLeastOne - Require at least one property
-type RequireAtLeastOne<T, Keys extends keyof T = keyof T> =
-  Pick<T, Exclude<keyof T, Keys>> &
-  {
-    [K in Keys]-?: Required<Pick<T, K>> & Partial<Pick<T, Exclude<Keys, K>>>;
-  }[Keys];
-interface Options {
-  id?:    number;
-  name?:  string;
-  email?: string;
-}
-type AtLeastOne = RequireAtLeastOne<Options>;  // Must have at least one of id, name, or email
-// RequireOnlyOne - Require exactly one property
-type RequireOnlyOne<T, Keys extends keyof T = keyof T> =
-  Pick<T, Exclude<keyof T, Keys>> &
-  {
-    [K in Keys]-?:
-      Required<Pick<T, K>> &
-      Partial<Record<Exclude<Keys, K>, undefined>>;
-  }[Keys];
-type OnlyOne = RequireOnlyOne<Options>;  // Must have exactly one of id, name, or email
-// Merge - Deep merge two types
-type Merge<T, U> = Omit<T, keyof U> & U;
-interface Base {
-  id:   number;
-  name: string;
-}
-interface Extension {
-  name:  string; // Override
-  email: string; // Add
-}
-type Combined = Merge<Base, Extension>;  // { id: number; name: string; email: string }
-// ConditionalKeys - Get keys matching condition
-type ConditionalKeys<T, Condition> = {
-  [K in keyof T]: T[K] extends Condition ? K : never;
-}[keyof T];
-type FunctionKeys = ConditionalKeys<typeof Math, Function>;  // 'abs' | 'acos' | 'sin' | ...
+Derive types from runtime declarations. Never declare what the compiler already infers.
+
+```ts
+// 1. From schema — the schema IS the type
+class Task extends Model.Class<Task>("Task")({ /* fields */ }) {}
+// Task, Task.insert.Type, Task.update.Type, Task.fields.id.Type — all derived
+
+// 2. From const — typeof + keyof inference
+const _Policy = {
+  normal:  { maxRate: 0.10, retries: 3 },
+  blocked: { maxRate: 1.00, retries: 0 },
+} as const satisfies Record<string, { maxRate: number; retries: number }>
+type _Tier = keyof typeof _Policy  // derived from runtime anchor
+
+// 3. From function — ReturnType / Parameters
+const buildQuery = (filters: Filters, limit: number) => /* ... */
+type _QueryArgs = Parameters<typeof buildQuery>
+
+// 4. From Effect service — class IS both value and type
+class Cache extends Effect.Service<Cache>()("Cache", { /* ... */ }) {}
 ```
 
----
+**Derivation contracts:**
+- `typeof X.Type` when a Schema/Model exists — never redeclare the shape manually.
+- `keyof typeof` when a vocabulary object defines the domain — the type narrows to literal keys.
+- `ReturnType<typeof fn>` / `Parameters<typeof fn>` for function-derived types.
+- `as const satisfies Record<K, V>` preserves literal types while constraining shape — without `as const`, literals widen; without `satisfies`, shape is unconstrained.
 
-## Tuple Utilities
+## Compression
 
-```typescript
-// First - Get first element type
-type First<T extends any[]> = T extends [infer F, ...any[]] ? F : never;
-type FirstType = First<[string, number, boolean]>; // string
-// Last - Get last element type
-type Last<T extends any[]> = T extends [...any[], infer L] ? L : never;
-type LastType = Last<[string, number, boolean]>; // boolean
-// Tail - Remove first element
-type Tail<T extends any[]> = T extends [any, ...infer Rest] ? Rest : never;
-type TailTypes = Tail<[string, number, boolean]>; // [number, boolean]
-// Prepend - Add element to beginning
-type Prepend<T extends any[], U> = [U, ...T];
-type WithString = Prepend<[number, boolean], string>; // [string, number, boolean]
-// Reverse - Reverse tuple
-type Reverse<T extends any[]> =
-  T extends [infer First, ...infer Rest]
-    ? [...Reverse<Rest>, First]
-    : [];
-type Reversed = Reverse<[1, 2, 3]>; // [3, 2, 1]
+One complex type with intersection/mapped/conditional logic replaces 4-5 simple type aliases. The `[TYPES]` section earns its place only when expressing constraints the type system enforces at compile time — not for documentation.
+
+```ts
+// WRONG: 5 simple types that mirror runtime shapes
+type TaskId =       string & Brand<"TaskId">
+type TaskStatus =   "todo" | "in_progress" | "done"
+type TaskPriority = "low" | "medium" | "high"
+type TaskInput =    { title: string; status: TaskStatus; priority: TaskPriority }
+type TaskOutput =   TaskInput & { id: TaskId; createdAt: Date }
+
+// RIGHT: zero standalone types — Schema derives everything inline
+class Task extends Model.Class<Task>("Task")({
+  id:        Model.Generated(S.String.pipe(S.brand("TaskId"))),
+  title:     S.NonEmptyTrimmedString,
+  status:    S.Literal("todo", "in_progress", "done"),
+  priority:  S.Literal("low", "medium", "high"),
+  createdAt: Model.DateTimeInsertFromDate,
+}) {}
+// Task.insert.Type, Task.update.Type — all derived, zero standalone types
 ```
 
----
+**Compression contracts:**
+- Zero standalone `type`/`interface` when a Schema, Model, or `as const` object exists for that concept.
+- Branded primitives as inline field modifiers (`S.String.pipe(S.brand("X"))`) inside the owning class — never standalone module-level branded type exports.
+- `Data.TaggedEnum<{ A: { ... }; B: { ... } }>` for file-internal discriminated unions — one type declaration replaces N individual types.
+- When a type IS needed (no runtime anchor), prefer intersection/mapped/conditional composition over multiple simple aliases.
 
-## String Utilities
+## Advanced type-level patterns
 
-```typescript
-// Split - Split string into tuple
-type Split<S extends string, D extends string> =
-  S extends `${infer T}${D}${infer U}`
-    ? [T, ...Split<U, D>]
-    : [S];
-type Parts = Split<'a-b-c', '-'>; // ['a', 'b', 'c']
-// Join - Join tuple into string
-type Join<T extends string[], D extends string> =
-  T extends [infer F extends string, ...infer R extends string[]]
-    ? R extends []
-      ? F
-      : `${F}${D}${Join<R, D>}`
-    : '';
-type Joined = Join<['a', 'b', 'c'], '-'>; // 'a-b-c'
-// Replace - Replace substring
-type Replace<
-  S extends string,
-  From extends string,
-  To extends string
-> = S extends `${infer L}${From}${infer R}`
-  ? `${L}${To}${R}`
-  : S;
-type Replaced = Replace<'hello world', 'world', 'TypeScript'>;  // 'hello TypeScript'
-// TrimLeft - Remove leading whitespace
-type TrimLeft<S extends string> =
-  S extends ` ${infer Rest}` ? TrimLeft<Rest> : S;
-type Trimmed = TrimLeft<'  hello'>; // 'hello'
-```
+Use these to compress multiple type declarations into single, high-value constructs.
 
----
-
-## Mapped Types
-
-```typescript
-// Basic mapped type
-type ReadOnly<T> = {
-  readonly [K in keyof T]: T[K];
-};
-// Optional properties
-type Partial<T> = {
-  [K in keyof T]?: T[K];
-};
-// Required properties
-type Required<T> = {
-  [K in keyof T]-?: T[K]; // Remove optional modifier
-};
-// Key remapping with 'as'
-type Getters<T> = {
-  [K in keyof T as `get${Capitalize<string & K>}`]: () => T[K];
-};
-interface Person {
-  name: string;
-  age:  number;
+```ts
+// Conditional extraction — one type replaces manual per-variant types
+type FieldsOf<T, Condition> = {
+  [K in keyof T as T[K] extends Condition ? K : never]: T[K]
 }
-type PersonGetters = Getters<Person>;  // { getName: () => string; getAge: () => number; }
-// Filtering keys
-type PickByType<T, U> = {
-  [K in keyof T as T[K] extends U ? K : never]: T[K];
-};
-type StringFields = PickByType<Person, string>; // { name: string }
-```
 
----
+// Mapped key remapping — derive accessor shapes from source
+type Accessors<T> = {
+  [K in keyof T as `get${Capitalize<string & K>}`]: () => T[K]
+}
 
-## Recursive Types
+// Distributive conditional — flatten nested structures
+type Flatten<T> = T extends ReadonlyArray<infer U>
+  ? U extends ReadonlyArray<infer V> ? Flatten<V> : U
+  : T
 
-```typescript
-// JSON type
-type JSONValue =
-  | string
-  | number
-  | boolean
-  | null
-  | JSONValue[]
-  | { [key: string]: JSONValue };
-// Deep partial
-type DeepPartial<T> = T extends object ? {
-  [K in keyof T]?: DeepPartial<T[K]>;
-} : T;
-// Deep readonly
-type DeepReadonly<T> = T extends object ? {
-  readonly [K in keyof T]: DeepReadonly<T[K]>;
-} : T;
-// Path type for nested objects
-type PathsToProps<T> = T extends object ? {
+// Recursive deep readonly — one type for arbitrary depth
+type DeepReadonly<T> = T extends object
+  ? { readonly [K in keyof T]: DeepReadonly<T[K]> }
+  : T
+
+// Exclusive union — exactly one variant at a time
+type XOR<A, B> =
+  | (A & { [K in Exclude<keyof B, keyof A>]?: never })
+  | (B & { [K in Exclude<keyof A, keyof B>]?: never })
+
+// Path extraction — compile-time safe deep access keys
+type Paths<T> = T extends object ? {
   [K in keyof T]: K extends string
-    ? T[K] extends object
-      ? K | `${K}.${PathsToProps<T[K]>}`
-      : K
-    : never;
-}[keyof T] : never;
-interface User {
-  profile: {
-    name: string;
-    settings: {
-      theme: string;
-    };
-  };
-}
-type UserPaths = PathsToProps<User>;  // 'profile' | 'profile.name' | 'profile.settings' | 'profile.settings.theme'
+    ? T[K] extends object ? K | `${K}.${Paths<T[K]>}` : K
+    : never
+}[keyof T] : never
 ```
 
----
+**When to reach for type-level computation:**
+- Enforcing mutual exclusion, required-at-least-one, or exact-one-of constraints.
+- Deriving accessor/builder/proxy shapes from source types automatically.
+- Deep transformation (readonly, partial, required) beyond built-in utility depth.
+- Never for shapes that Schema already derives — type-level ops complement Schema, they do not replace it.
 
-# Type-Level Programming
+## Built-in utility types
 
-```typescript
-// Type-level addition (limited)
-type Length<T extends any[]> = T['length'];
-type Concat<A extends any[], B extends any[]> = [...A, ...B];
-// Type-level conditionals
-type If<Condition extends boolean, Then, Else> =
-  Condition extends true ? Then : Else;
-// Type-level equality
-type Equal<X, Y> =
-  (<T>() => T extends X ? 1 : 2) extends
-  (<T>() => T extends Y ? 1 : 2) ? true : false;
-// Assert equal types (for testing)
-type Assert<T extends true> = T;
-type Test = Assert<Equal<1 | 2, 2 | 1>>; // OK
-```
+Use TypeScript built-in utilities before reaching for custom type-level computation:
 
----
+| Utility          | Purpose                        |
+| ---------------- | ------------------------------ |
+| `Pick<T, K>`     | Select subset of properties    |
+| `Omit<T, K>`     | Remove subset of properties    |
+| `Partial<T>`     | Make all properties optional   |
+| `Required<T>`    | Make all properties required   |
+| `Readonly<T>`    | Make all properties readonly   |
+| `Record<K, V>`   | Create object type with keys K |
+| `Extract<T, U>`  | Extract types assignable to U  |
+| `Exclude<T, U>`  | Remove types assignable to U   |
+| `NonNullable<T>` | Remove null and undefined      |
+| `ReturnType<T>`  | Extract function return type   |
+| `Parameters<T>`  | Extract function parameters    |
+| `Awaited<T>`     | Unwrap Promise type            |
+| `NoInfer<T>`     | Prevent inference from arg     |
 
-## Higher-Kinded Types (Simulation)
+## Anti-patterns
 
-```typescript
-// Type-level function simulation
-interface TypeClass<F> {
-  map: <A, B>(f: (a: A) => B, fa: any) => any;
-}
-// Functor pattern
-type Maybe<T> = { type: 'just'; value: T } | { type: 'nothing' };
-const MaybeFunctor: TypeClass<Maybe<any>> = {
-  map: <A, B>(f: (a: A) => B, ma: Maybe<A>): Maybe<B> => {
-    return ma.type === 'just'
-      ? { type: 'just', value: f(ma.value) }
-      : { type: 'nothing' };
-  }
-};
-// Builder pattern with generics
-type Builder<T, K extends keyof T = never> = {
-  with<P extends Exclude<keyof T, K>>(
-    key: P,
-    value: T[P]
-  ): Builder<T, K | P>;
-  build(): K extends keyof T ? T : never;
-};
-```
-
----
-
-## Conditional Types
-
-```typescript
-// Basic conditional type
-type IsString<T> = T extends string ? true : false;
-// Distributive conditional types
-type ToArray<T> = T extends any ? T[] : never;
-type StringOrNumberArray = ToArray<string | number>; // string[] | number[]
-// Non-distributive (use tuple)
-type ToArrayNonDist<T> = [T] extends [any] ? T[] : never;
-type BothArray = ToArrayNonDist<string | number>; // (string | number)[]
-// Nested conditionals for type extraction
-type Flatten<T> = T extends Array<infer U>
-  ? U extends Array<infer V>
-    ? Flatten<V>
-    : U
-  : T;
-type Nested = Flatten<string[][][]>; // string
-// Exclude null/undefined
-type NonNullable<T> = T extends null | undefined ? never : T;
-```
-
----
-
-## Quick Reference
-
-| Pattern               | Use Case                       |
-| --------------------- | ------------------------------ |
-| `Partial<T>`          | Make all properties optional   |
-| `Required<T>`         | Make all properties required   |
-| `Readonly<T>`         | Make all properties readonly   |
-| `Pick<T, K>`          | Select subset of properties    |
-| `Omit<T, K>`          | Remove subset of properties    |
-| `Record<K, T>`        | Create object type with keys K |
-| `Extract<T, U>`       | Extract types assignable to U  |
-| `Exclude<T, U>`       | Remove types assignable to U   |
-| `NonNullable<T>`      | Remove null and undefined      |
-| `ReturnType<T>`       | Extract function return type   |
-| `Parameters<T>`       | Extract function parameters    |
-| `Awaited<T>`          | Unwrap Promise type            |
-| `T extends U ? X : Y` | Conditional type logic         |
-| `infer R`             | Extract types from patterns    |
-| `K in keyof T`        | Iterate over object keys       |
-| `as NewKey`           | Remap keys in mapped types     |
-| `T extends any`       | Distributive conditionals      |
-| `[T] extends [any]`   | Non-distributive check         |
-| `-?` modifier         | Remove optional                |
-| `readonly` modifier   | Make immutable                 |
+- TYPE PROLIFERATION: `type X = { a: string; b: number }` when `typeof schema.Type` gives the same shape. Delete the type, derive from runtime.
+- INTERFACE CEREMONY: `interface IService { method(): void }` separate from the class that implements it. The `Effect.Service` class IS both value and type.
+- BRAND SPRAWL: `type TenantId = string & Brand<"TenantId">` as standalone export. Inline `S.String.pipe(S.brand("TenantId"))` as field modifier inside the owning Model/Class.
+- MIRROR TYPES: `type TaskInsert = Omit<Task, "id" | "createdAt">` manually mirroring what `Model.Class` derives via field modifiers (`Task.insert.Type`).
+- TYPE-ONLY FILES: A module containing only type declarations with no runtime anchor. Types live adjacent to their runtime anchors, not in separate files.
+- CONST SPAM: `const _A = S.Literal(...)` + `const _B = S.Literal(...)` + `const _C = S.brand(...)` before a class when all three are single-use field schemas. Inline directly in field position.

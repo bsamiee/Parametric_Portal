@@ -1,0 +1,7 @@
+{
+    "disableExperimentalSEAWarning": true,
+    "main": "dist/main.js",
+    "output": "dist/kargadan-sea.blob",
+    "useCodeCache": true,
+    "useSnapshot": false
+}

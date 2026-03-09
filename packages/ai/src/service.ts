@@ -1,13 +1,12 @@
 import { createHash } from 'node:crypto';
 import { Toolkit, Tool } from '@effect/ai';
 import { DatabaseService } from '@parametric-portal/database/repos';
-import { SearchRepo } from '@parametric-portal/database/search';
 import { Context } from '@parametric-portal/server/context';
 import { ClusterService } from '@parametric-portal/server/infra/cluster';
 import { AuditService } from '@parametric-portal/server/observe/audit';
 import { MetricsService } from '@parametric-portal/server/observe/metrics';
 import { Telemetry } from '@parametric-portal/server/observe/telemetry';
-import { Array as A, Cron, Effect, Layer, Match, Option, Schema as S } from 'effect';
+import { Array as A, Cron, Effect, Layer, Option, Schema as S } from 'effect';
 import { AiRuntime } from './runtime.ts';
 import { AiError, AiRuntimeProvider } from './runtime-provider.ts';
 
@@ -121,63 +120,16 @@ class AiService extends Effect.Service<AiService>()('ai/Service', {
                 }, pagination?: { readonly cursor?: string | undefined; readonly limit?: number | undefined }) =>
                 Effect.gen(function* () {
                     const { ctx, scopeId, subjectId } = yield* _resolveSearchContext();
-                    const discovery = yield* model.discovery();
-                    const providerCandidates = yield* model.providerToolSearch({ limit: pagination?.limit, term: options.term }).pipe(
-                        Effect.catchAll((error) => Effect.logWarning('ai.discovery.provider.search.failed', { error: String(error) }).pipe(
-                            Effect.as([] as ReadonlyArray<string>),
-                        )),
-                    );
                     const settings = yield* model.settings();
                     const { dimensions, model: embeddingModel } = settings.embedding;
                     const embedding = yield* model.embed(options.term).pipe(
-                        Effect.tapError((e) => Effect.logWarning('Search embedding failed', { error: String(e), tenantId: ctx.tenantId })),
-                        Effect.option,
+                        Effect.map((vector) => Option.some({ dimensions, model: embeddingModel, vector })),
+                        Effect.catchAll((cause) => Telemetry.emit('search.embed.degraded', { error: String(cause), term: options.term }).pipe(Effect.as(Option.none()))),
                     );
-                    const fallbackResult = yield* database.search.search(
-                        { ...options, scopeId, ...Option.match(embedding, { onNone: () => ({}), onSome: (vector) => ({ embedding: { dimensions, model: embeddingModel, vector } }) }) },
+                    const result = yield* database.search.search(
+                        { ...options, ...Option.match(embedding, { onNone: () => ({}), onSome: (e) => ({ embedding: e }) }), scopeId },
                         pagination,
                     );
-                    const result = Match.value(providerCandidates.length).pipe(
-                        Match.when(0, () => fallbackResult),
-                        Match.orElse(() => {
-                            const itemById = new Map<string, (typeof fallbackResult.items)[number]>(
-                                fallbackResult.items.flatMap((item) =>
-                                    Option.fromNullable(item.metadata).pipe(
-                                        Option.flatMap((metadata) =>
-                                            Option.fromNullable((metadata as Record<string, unknown>)['id']).pipe(
-                                                Option.filter((id): id is string => typeof id === 'string'),
-                                            )),
-                                        Option.match({
-                                            onNone: () => [] as ReadonlyArray<readonly [string, (typeof fallbackResult.items)[number]]>,
-                                            onSome: (id) => [[id, item] as const],
-                                        }),
-                                    )),
-                            );
-                            const ranked = providerCandidates.flatMap((candidateId) =>
-                                Option.fromNullable(itemById.get(candidateId)).pipe(
-                                    Option.match({
-                                        onNone: () => [] as typeof fallbackResult.items,
-                                        onSome: (item) => [item] as typeof fallbackResult.items,
-                                    }),
-                                ),
-                            );
-                            return ranked.length === 0
-                                ? fallbackResult
-                                : {
-                                    ...fallbackResult,
-                                    cursor:  null,
-                                    hasNext: false,
-                                    hasPrev: false,
-                                    items:   ranked,
-                                    total:   ranked.length,
-                                };
-                        }),
-                    );
-                    yield* Effect.logDebug('ai.discovery.provider.candidates', {
-                        candidateCount: providerCandidates.length,
-                        provider: discovery.provider,
-                        toolSearchEnabled: discovery.anthropicToolSearchEnabled,
-                    });
                     yield* _track('Search.read', { entityTypes: options.entityTypes, resultCount: result.total, term: options.term }, subjectId, metrics.search.queries, MetricsService.label({ tenant: ctx.tenantId }));
                     return result;
                 }).pipe(Telemetry.span('search.query', { 'search.term': options.term })),
@@ -275,28 +227,16 @@ class AiService extends Effect.Service<AiService>()('ai/Service', {
             }),
         );
         const runAgentCore = Effect.fn('AiService.runAgentCore')(<
-            State,
-            Plan,
-            Execution,
-            Verification,
-            PlanError,
-            ExecuteError,
-            VerifyError,
-            DecideError,
-            PersistError,
-            PlanContext,
-            ExecuteContext,
-            VerifyContext,
-            DecideContext,
-            PersistContext,
+            State,       Plan,         Execution,   Verification,   PlanError,     ExecuteError,  VerifyError,
+            DecideError, PersistError, PlanContext, ExecuteContext, VerifyContext, DecideContext, PersistContext,
         >(input: {
-            readonly decide: (state: State, plan: Plan, execution: Execution, verification: Verification) => Effect.Effect<State, DecideError, DecideContext>;
-            readonly execute: (state: State, plan: Plan) => Effect.Effect<Execution, ExecuteError, ExecuteContext>;
+            readonly decide:     (state: State, plan: Plan, execution: Execution, verification: Verification) => Effect.Effect<State, DecideError, DecideContext>;
+            readonly execute:    (state: State, plan: Plan) => Effect.Effect<Execution, ExecuteError, ExecuteContext>;
             readonly initialState: State;
             readonly isTerminal: (state: State) => boolean;
-            readonly persist: (state: State, plan: Plan, execution: Execution, verification: Verification, decision: State) => Effect.Effect<void, PersistError, PersistContext>;
-            readonly plan: (state: State) => Effect.Effect<Plan, PlanError, PlanContext>;
-            readonly verify: (state: State, plan: Plan, execution: Execution) => Effect.Effect<Verification, VerifyError, VerifyContext>;
+            readonly persist:    (state: State, plan: Plan, execution: Execution, verification: Verification, decision: State) => Effect.Effect<void, PersistError, PersistContext>;
+            readonly plan:       (state: State) => Effect.Effect<Plan, PlanError, PlanContext>;
+            readonly verify:     (state: State, plan: Plan, execution: Execution) => Effect.Effect<Verification, VerifyError, VerifyContext>;
         }) =>
             Effect.iterate(input.initialState, {
                 body: (state) => Effect.gen(function* () {
@@ -323,9 +263,12 @@ class AiService extends Effect.Service<AiService>()('ai/Service', {
         }),
         name: 'refresh-embeddings',
     });
-    static readonly KnowledgeDefault = Layer.mergeAll(AiService.Default, AiRuntime.Default, AiRuntimeProvider.Default        );
-    static readonly KnowledgeLive =    Layer.mergeAll(AiService.Default, AiRuntime.Live, DatabaseService.Default, SearchRepo.Default);
-    static readonly Live =             Layer.mergeAll(AiService.Default, AiRuntime.Live                                                    );
+    static readonly KnowledgeDefault = AiService.Default.pipe(
+        Layer.provideMerge(AiRuntime.Default.pipe(Layer.provideMerge(AiRuntimeProvider.Default))),
+        Layer.provideMerge(DatabaseService.Default),
+    );
+    static readonly KnowledgeLive =    AiService.Default.pipe(Layer.provideMerge(AiRuntime.Live), Layer.provideMerge(DatabaseService.Default));
+    static readonly Live =             AiService.Default.pipe(Layer.provideMerge(AiRuntime.Live));
 }
 
 // --- [EXPORT] ----------------------------------------------------------------

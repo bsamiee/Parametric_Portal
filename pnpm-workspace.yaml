@@ -96,6 +96,7 @@ catalog:
   colorjs.io: 0.6.1
   date-fns: 4.1.0
   effect: 3.19.19
+  embedded-postgres: 18.3.0-beta.16
   exceljs: 4.4.0
   fake-indexeddb: 6.2.5
   fast-check: 4.5.3

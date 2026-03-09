@@ -8,22 +8,21 @@ const DEFAULT_LOOP_OPERATIONS = ['read.object.metadata', 'write.object.update'] 
 // --- [SCHEMA] ----------------------------------------------------------------
 
 const NonNegInt =        S.Int.pipe(S.greaterThanOrEqualTo(0));
-const _DedupeDecision =  S.Literal('executed', 'duplicate', 'rejected');
 const FailureClass =     S.Literal('retryable', 'correctable', 'compensatable', 'fatal');
 const ResultStatus =     S.Literal('ok', 'error');
+const DedupeDecision =   S.Literal('executed', 'duplicate', 'rejected');
 const ErrorPayload =     S.Struct({ code: S.NonEmptyTrimmedString, details: S.optional(S.Unknown), failureClass: FailureClass, message: S.NonEmptyTrimmedString });
 const _EventSubtype =    S.Literal('added', 'deleted', 'replaced', 'modified', 'undeleted', 'selected', 'deselected', 'deselect_all', 'properties_changed');
 const _ObservationType = S.Literal('objects.changed', 'layers.changed', 'view.changed', 'selection.changed', 'material.changed', 'properties.changed', 'tables.changed');
 const _Identity =        S.Struct({ appId:   S.UUID, correlationId: S.String.pipe(S.pattern(/^[A-Fa-f0-9]{8,64}$/)), requestId: S.UUID, sessionId: S.UUID });
 const _EventBase =       S.extend(_Identity, S.Struct({ _tag: S.Literal('event'), causationRequestId: S.optional(S.UUID), eventId: S.UUID, sourceRevision: NonNegInt }));
 const WorkflowExecutionId = S.NonEmptyTrimmedString.annotations({ identifier:'WorkflowExecutionId' });
-const _TelemetryContext =   S.Struct({
+const _TracedBase = S.extend(_Identity, S.Struct({ telemetryContext: S.Struct({
     attempt:      S.Int.pipe(S.greaterThanOrEqualTo(1)),
     operationTag: S.NonEmptyTrimmedString,
     spanId:       S.String.pipe(S.pattern(/^[A-Fa-f0-9]{8,64}$/)),
     traceId:      S.String.pipe(S.pattern(/^[A-Fa-f0-9]{8,64}$/)),
-});
-const _TracedBase =        S.extend(_Identity, S.Struct({ telemetryContext: _TelemetryContext }));
+}) }));
 const CatalogEntrySchema = S.Struct({
     ...ManifestEntrySchema.fields,
     category:      S.NonEmptyTrimmedString,
@@ -50,15 +49,15 @@ const Envelope = S.Union(
         operation:   S.optional(Operation),
         payload:     S.optional(S.Record({ key: S.String, value: S.Unknown })),
         undoScope:   S.optional(S.NonEmptyTrimmedString) })),
-    S.extend(_TracedBase, S.Struct({ _tag: S.Literal('handshake.init'),
-        auth:             S.Struct({ token: S.NonEmptyTrimmedString, tokenExpiresAt: S.DateFromString }),
+    S.extend(_TracedBase, S.Struct({ _tag:     S.Literal('handshake.init'),
+        auth:             S.Struct({ token:    S.NonEmptyTrimmedString, tokenExpiresAt: S.DateFromString }),
         capabilities:     S.Struct({ optional: S.Array(S.NonEmptyTrimmedString), required: S.Array(S.NonEmptyTrimmedString) }),
-        protocolVersion:  S.Struct({ major: NonNegInt, minor: NonNegInt }),
+        protocolVersion:  S.Struct({ major:    NonNegInt, minor: NonNegInt }),
     })),
     S.extend(_TracedBase, S.Struct({
         _tag:                 S.Literal('handshake.ack'),
         acceptedCapabilities: S.optionalWith(S.Array(S.NonEmptyTrimmedString), { default: () => [] }),
-        catalog:              S.optionalWith(S.Array(CatalogEntrySchema), { default: () => [] }),
+        catalog:              S.optionalWith(S.Array(CatalogEntrySchema),      { default: () => [] }),
         server:               S.optional(S.Struct({ pluginRevision: S.NonEmptyTrimmedString, rhinoVersion: S.NonEmptyTrimmedString })),
     })),
     S.extend(_TracedBase, S.Struct({ _tag: S.Literal('handshake.reject'),
@@ -90,7 +89,7 @@ const Envelope = S.Union(
         })),
         S.extend(_EventBase, S.Struct({
             delta: S.Struct({
-                dedupeDecision: S.optional(_DedupeDecision),
+                dedupeDecision: S.optional(DedupeDecision),
                 errorCode:      S.optional(S.NonEmptyTrimmedString),
                 failureClass:   S.optional(FailureClass),
                 status:         ResultStatus,
@@ -113,7 +112,7 @@ const Envelope = S.Union(
     ),
     S.extend(_Identity, S.Struct({
         _tag:   S.Literal('result'),
-        dedupe: S.optional(S.Struct({ decision: _DedupeDecision, originalRequestId: S.UUID })),
+        dedupe: S.optional(S.Struct({ decision: DedupeDecision, originalRequestId: S.UUID })),
         error:  S.optional(ErrorPayload),
         result: S.optional(S.Unknown),
         status: ResultStatus })),
@@ -140,4 +139,4 @@ namespace Envelope {
 
 // --- [EXPORT] ----------------------------------------------------------------
 
-export { CatalogEntrySchema, DEFAULT_LOOP_OPERATIONS, Envelope, ErrorPayload, FailureClass, NonNegInt, ObjectTypeTag, Operation, ResultStatus, WorkflowExecutionId };
+export { CatalogEntrySchema, DedupeDecision, DEFAULT_LOOP_OPERATIONS, Envelope, ErrorPayload, FailureClass, NonNegInt, ObjectTypeTag, Operation, ResultStatus, WorkflowExecutionId };

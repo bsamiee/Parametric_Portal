@@ -66,10 +66,24 @@ const analyze = (prices: Stream.Stream<number>) =>
 ```
 
 **Accumulation contracts:**
-- State immutable: compound record, returned fresh each step — no `Ref`, no mutation, no closed-over counters.
+- State immutable: compound record, returned fresh each step — no `Ref`, no mutation, no closed-over counters. **Keyed accumulator state uses `HashMap`** — `HashMap.set` returns a new map (persistent, structurally shared). Never `new Map()` + `.set()` — that mutates in place and breaks referential transparency. `HashMap.fromIterable` at initialization, `HashMap.get`/`HashMap.set` for lookup and update.
 - State/emission zero overlap: state fields serve computation (`n`, `mean`, `m2`, `peak`), emission fields serve consumption (`price`, `dd`, `σ`, `regime`). `σ` derives from two state fields — the decoupling is structural.
 - Welford update order is load-bearing: `δ` before mean update, `(dd - mean)` after. Reversing gives `δ²` (overcounts). Bessel's correction (`n - 1`) with `n > 1` guard prevents 0/0 at single observation. Regime boundaries derive from accumulator fields at point of use — no extracted threshold logic.
 - Run-length segmentation via `groupAdjacentBy` on emission field, not via counter in accumulator state. `Chunk.reduce` folds each `NonEmptyChunk` to scalar — no re-expansion after aggregation.
+
+```ts
+// HashMap accumulator in mapAccum — persistent update, zero mutation
+import { HashMap, Option, Stream } from "effect"
+
+Stream.mapAccum(HashMap.empty<string, State>(), (clients, event) => {
+  const prev = HashMap.get(clients, event.clientId).pipe(
+    Option.getOrElse(() => initialState),
+  )
+  const next = updateState(prev, event)
+  const updated = HashMap.set(clients, event.clientId, next)
+  return [updated, { ...emission }] as const
+})
+```
 
 
 ## Keyed merge
@@ -195,6 +209,42 @@ const timed = (readings: Stream.Stream<Reading>) =>
       Schedule.spaced("5 seconds"),
     ))
 ```
+
+## Pipeline factory closure
+
+When a module has no `Effect.Service` (stateless pipeline, pure transform), the exported factory function acts as the scoped constructor. Single-caller helpers inline into this factory rather than floating at module level. The factory captures shared resources (vocabularies, metrics, config) in its closure and returns the composed pipeline.
+
+```ts
+import { Chunk, Effect, HashMap, Metric, Option, Stream } from "effect"
+
+// _-prefixed module-level: semantic anchors serving 2+ call sites or algorithm implementations
+const _Policy = { /* vocabulary */ } as const satisfies Record<string, { /* shape */ }>
+const _signal = { processed: Metric.counter("x_total") } as const
+const _classify = (stats: Stats): Tier => /* reusable pure transform */
+
+// exported factory IS the scoped constructor — single-caller helpers inline here
+const Pipeline = (events: Stream.Stream<Event>) =>
+  events.pipe(
+    Stream.mapAccum(HashMap.empty<string, State>(), (acc, event) => {
+      // inline: single-caller logic lives inside the factory, not at module level
+      const prev = HashMap.get(acc, event.id).pipe(Option.getOrElse(() => init))
+      const next = update(prev, event)
+      return [HashMap.set(acc, event.id, next), { ...emission }] as const
+    }),
+    Stream.mapEffect(({ stats }) =>
+      Metric.increment(_signal.processed).pipe(Effect.as(stats)),
+    ),
+    Stream.runCollect,
+    Effect.map(Chunk.toReadonlyArray),
+  )
+
+export { Pipeline }
+```
+
+**Factory closure contracts:**
+- Module-level `_`-prefixed symbols are semantic anchors (vocabularies, metrics, reusable algorithms) serving 2+ call sites or embodying domain knowledge worth naming.
+- Single-caller logic inlines into the factory body — no `_helper` at module level consumed by one pipeline stage.
+- The factory captures nothing mutable — vocabularies and metrics are immutable; mutable state flows through `mapAccum`/`Ref` only.
 
 **Terminal contracts:**
 - `Sink.foldWeighted` with `costFn` and `budget` produces `Sink<Chunk<A>, A, A>` — `L = In` satisfies `transduce`'s self-resetting contract. `costFn = () => 1` degenerates to count-based batching; the cost projection and the fold triple are independently configurable.

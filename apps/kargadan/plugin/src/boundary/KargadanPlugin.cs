@@ -21,7 +21,6 @@ namespace ParametricPortal.Kargadan.Plugin.src.boundary;
 [BoundaryAdapter]
 public sealed class KargadanPlugin : PlugIn {
     private readonly record struct DecodedCommand(BoundaryState State, CommandEnvelope Envelope);
-    private const string CommandAckTag = "command.ack";
     private readonly record struct BoundaryState(
         SessionEventPublisher SessionEvents,
         SessionHost SessionHost,
@@ -107,15 +106,12 @@ public sealed class KargadanPlugin : PlugIn {
         JsonElement message,
         CancellationToken cancellationToken) {
         Fin<JsonElement> result = await RunOnUiThreadAsync(() => {
-            HandshakeEnvelope.Init? init = JsonSerializer.Deserialize<HandshakeEnvelope.Init>(
-                element: message,
-                options: JsonOptions);
-            return init switch {
-                null => FinFail<JsonElement>(
-                    Error.New(message: "Failed to deserialize handshake init envelope.")),
-                _ => HandleHandshake(init: init).Map(
-                    (HandshakeEnvelope envelope) => JsonSerializer.SerializeToElement(value: envelope, options: JsonOptions)),
-            };
+            Instant now = Instant.FromDateTimeOffset(_timeProvider.GetUtcNow());
+            return CommandRouter.DecodeHandshake(
+                envelope: message,
+                now: now).Bind((HandshakeEnvelope.Init init) =>
+                    HandleHandshake(init: init).Map(
+                        (HandshakeEnvelope envelope) => TransportJson.Response(envelope, JsonOptions)));
         }).WaitAsync(cancellationToken).ConfigureAwait(false);
         return result;
     }
@@ -153,7 +149,7 @@ public sealed class KargadanPlugin : PlugIn {
                     state: command.State,
                     envelope: command.Envelope)
                 .Map((CommandResultEnvelope resultEnvelope) =>
-                    JsonSerializer.SerializeToElement(value: resultEnvelope, options: JsonOptions))
+                    TransportJson.Response(resultEnvelope, JsonOptions))
             ).WaitAsync(timeoutCts.Token).ConfigureAwait(false);
         }
         return await (decoded.IsFail
@@ -161,9 +157,7 @@ public sealed class KargadanPlugin : PlugIn {
             : ExecuteDecodedAsync(decoded.IfFail(default(DecodedCommand)))).ConfigureAwait(false);
     }
     private static JsonElement BuildCommandAckPayload(CommandEnvelope envelope) =>
-        JsonSerializer.SerializeToElement(new CommandAckEnvelope(
-            Tag: CommandAckTag,
-            RequestId: (Guid)envelope.Identity.RequestId));
+        TransportJson.CommandAck(envelope, JsonOptions);
     private static FailureReason ResolveFailureReason(Error error) =>
         FailureMapping.FromError(error);
     private Fin<CommandResultEnvelope> ExecuteCommand(
@@ -241,15 +235,15 @@ public sealed class KargadanPlugin : PlugIn {
     private static int CurrentSourceRevision() =>
         (int)Math.Min((long)RhinoObject.NextRuntimeSerialNumber, int.MaxValue);
     private Fin<JsonElement> SerializeHeartbeat(JsonElement message) {
-        HeartbeatEnvelope? heartbeat = JsonSerializer.Deserialize<HeartbeatEnvelope>(
-            element: message,
-            options: JsonOptions);
-        return heartbeat switch {
-            null => FinFail<JsonElement>(
-                Error.New(message: "Failed to deserialize heartbeat envelope.")),
-            _ => HandleHeartbeat(heartbeat: heartbeat).Map(
-                (HeartbeatEnvelope envelope) => JsonSerializer.SerializeToElement(value: envelope, options: JsonOptions)),
-        };
+        Instant now = Instant.FromDateTimeOffset(_timeProvider.GetUtcNow());
+        return ReadState().Bind((BoundaryState state) =>
+            state.SessionHost.Snapshot().Bind((SessionSnapshot snapshot) =>
+                CommandRouter.DecodeHeartbeat(
+                    envelope: message,
+                    protocolVersion: snapshot.Identity.ProtocolVersion,
+                    now: now).Bind((HeartbeatEnvelope heartbeat) =>
+                    HandleHeartbeat(heartbeat: heartbeat).Map(
+                        (HeartbeatEnvelope envelope) => TransportJson.Response(envelope, JsonOptions)))));
     }
     private Fin<BoundaryState> ReadState() =>
         _state.Value.ToFin(Error.New(message: "Plugin boundary state is unavailable before plugin load."));

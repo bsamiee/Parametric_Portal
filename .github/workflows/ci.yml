@@ -94,7 +94,7 @@ jobs:
 
       - name: Quality Gates (Lint, Typecheck, Build)
         if: steps.auto-fix.outputs.has-changes != 'true'
-        run: pnpm exec nx affected -t lint,typecheck,build --parallel=4
+        run: pnpm exec nx affected -t restore,lint,typecheck,build --parallel=4
 
       - name: C# Helper Naming Guard
         if: steps.auto-fix.outputs.has-changes != 'true'
@@ -306,18 +306,23 @@ jobs:
           script: |
             const fs = require('fs');
             const auditResults = JSON.parse(fs.readFileSync('audit-results.json', 'utf8'));
+            // Advisories that cannot be resolved via overrides (upstream consumer pins)
+            const SUPPRESSED = new Set([
+              'GHSA-5c6j-r48x-rmvq', // serialize-javascript <=7.0.2 — consumers pin ^6
+            ]);
+            const advisories = auditResults.advisories || {};
+            const actionable = Object.values(advisories).filter(
+              (a) => !SUPPRESSED.has(a.github_advisory_id) && (a.severity === 'critical' || a.severity === 'high')
+            );
             const vulns = auditResults.metadata?.vulnerabilities || {};
             const critical = vulns.critical || 0;
             const high = vulns.high || 0;
-            core.info(`[PASS] Vulnerability summary: ${critical} critical, ${high} high`);
-            if (critical > 0 || high > 0) {
-              const advisories = auditResults.advisories || {};
-              for (const [id, advisory] of Object.entries(advisories)) {
-                if (advisory.severity === 'critical' || advisory.severity === 'high') {
-                  core.error(`[${advisory.severity.toUpperCase()}] ${advisory.module_name}: ${advisory.title}`);
-                }
-              }
-              core.setFailed(`Found ${critical} critical and ${high} high severity vulnerabilities`);
+            core.info(`[PASS] Vulnerability summary: ${critical} critical, ${high} high (${SUPPRESSED.size} suppressed, ${actionable.length} actionable)`);
+            for (const a of actionable) {
+              core.error(`[${a.severity.toUpperCase()}] ${a.module_name}: ${a.title}`);
+            }
+            if (actionable.length > 0) {
+              core.setFailed(`Found ${actionable.length} actionable high/critical vulnerabilities (${Object.keys(advisories).length - actionable.length} suppressed)`);
             }
 
   dependency-review:
