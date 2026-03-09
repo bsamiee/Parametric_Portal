@@ -1,5 +1,5 @@
 import { AiError as AiSdkError, Chat, EmbeddingModel, LanguageModel, Tokenizer, type Response, type Tool } from '@effect/ai';
-import { Array as A, Effect, Layer, Match, Stream } from 'effect';
+import { Array as A, Effect, Layer, Match, Option, Stream } from 'effect';
 import { AiRegistry } from './registry.ts';
 import { AiError, AiRuntimeProvider } from './runtime-provider.ts';
 
@@ -13,11 +13,11 @@ const AI_OPERATIONS = {
     streamText:     { id: 'ai.streamText',     kind: 'language'  },
 } as const;
 type OperationDescriptor = (typeof AI_OPERATIONS)[keyof typeof AI_OPERATIONS];
-type OperationContext = { readonly appSettings: AiRegistry.Settings; readonly credentials: AiRegistry.Credentials; readonly tenantId: string };
+type OperationContext    = {readonly appSettings: AiRegistry.Settings; readonly credentials: AiRegistry.Credentials; readonly tenantId: string};
 
 // --- [FUNCTIONS] -------------------------------------------------------------
 
-const _capMaxTokens =  (s: AiRegistry.Settings): AiRegistry.Settings => ({ ...s, language: { ...s.language, maxTokens: Math.min(s.language.maxTokens, s.policy.maxTokensPerRequest) } });
+const _capMaxTokens  = (s: AiRegistry.Settings): AiRegistry.Settings => ({ ...s, language: { ...s.language, maxTokens: Math.min(s.language.maxTokens, s.policy.maxTokensPerRequest) } });
 const _operationMeta = (descriptor: OperationDescriptor, context: OperationContext) =>
     Match.value(descriptor.kind).pipe(
         Match.when('embedding', () => ({
@@ -174,7 +174,7 @@ class AiRuntime extends Effect.Service<AiRuntime>()('ai/Runtime', {
         });
         const runLanguageStream = <Tools extends Record<string, Tool.Any> = Record<string, never>>(
             descriptor: OperationDescriptor,
-            options: LanguageModel.GenerateTextOptions<Tools>,
+            options:    LanguageModel.GenerateTextOptions<Tools>,
         ) => {
             const buildStream = Effect.gen(function* () {
                 const context = yield* resolveContext(descriptor);
@@ -282,7 +282,41 @@ class AiRuntime extends Effect.Service<AiRuntime>()('ai/Runtime', {
             resolveContext(AI_OPERATIONS.chat).pipe(
                 Effect.flatMap((context) => runEffectOperation(AI_OPERATIONS.chat, context, chatService.exportJson)),
             );
-        return { chat, countTokens, deserializeChat, embed, generateObject, generateText, serializeChat, settings, streamText };
+        const compactChat = Effect.fn('AiRuntime.compactChat')((
+            currentChat: Chat.Service,
+            options: {
+                readonly buildPrompt: (context: { readonly before: number; readonly serialized: string }) => string;
+                readonly target: number;
+                readonly trigger: number;
+            },
+        ) =>
+            serializeChat(currentChat).pipe(
+                Effect.catchAll(() => Effect.succeed('')),
+                Effect.flatMap((serialized) =>
+                    countTokens(serialized).pipe(
+                        Effect.option,
+                        Effect.flatMap(Option.match({
+                            onNone: () => Effect.succeed(Option.none<{ readonly after: number; readonly before: number; readonly compacted: Chat.Service }>()),
+                            onSome: (before) =>
+                                before < options.trigger
+                                    ? Effect.succeed(Option.none())
+                                    : chat({ prompt: options.buildPrompt({ before, serialized }) }).pipe(
+                                        Effect.flatMap((compacted) =>
+                                            serializeChat(compacted).pipe(
+                                                Effect.catchAll(() => Effect.succeed('')),
+                                                Effect.flatMap((json) =>
+                                                    countTokens(json).pipe(
+                                                        Effect.option,
+                                                        Effect.map(Option.flatMap((after) =>
+                                                            after <= options.target ? Option.some({ after, before, compacted }) : Option.none())),
+                                                    )),
+                                            )),
+                                    ),
+                        })),
+                    )),
+            ),
+        );
+        return { chat, compactChat, countTokens, deserializeChat, embed, generateObject, generateText, serializeChat, settings, streamText };
     }),
 }) {
     static readonly Live = Layer.provide(AiRuntime.Default, AiRuntimeProvider.Server);

@@ -114,12 +114,12 @@ All code follows six governing principles:
 
 **Specialized** (load when task matches):
 
-| Reference                                       | Load when                                                   |
-| ----------------------------------------------- | ----------------------------------------------------------- |
-| [concurrency.md](references/concurrency.md)     | TaskGroup, CancelScope, ExceptionGroup, sub-interpreters    |
-| [observability.md](references/observability.md) | structlog, OpenTelemetry, RED metrics, context propagation  |
-| [serialization.md](references/serialization.md) | Pydantic ingress, msgspec egress, TypeAdapter, BaseSettings |
-| [performance.md](references/performance.md)     | Memory layout, CPython internals, profiling, JIT            |
+| Reference                                       | Load when                                                                                                              |
+| ----------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| [concurrency.md](references/concurrency.md)     | TaskGroup, CancelScope, ExceptionGroup, sub-interpreters                                                               |
+| [observability.md](references/observability.md) | structlog, OpenTelemetry, RED metrics, context propagation                                                             |
+| [serialization.md](references/serialization.md) | Pydantic ingress, msgspec egress/msgpack, suitkaise cucumber/sk/circuits/timing, codec pipelines, transport boundaries |
+| [performance.md](references/performance.md)     | Memory layout, CPython internals, profiling, JIT                                                                       |
 
 
 ## Validation gate
@@ -133,16 +133,17 @@ All code follows six governing principles:
 
 These packages are standard libraries — use over stdlib equivalents.
 
-| Package       | Provides                                                                           |
-| ------------- | ---------------------------------------------------------------------------------- |
-| expression    | Tagged unions, Result/Option, pipe/compose, @effect builders, Block/Map/Seq, curry |
-| anyio         | Structured async concurrency                                                       |
-| Pydantic      | Frozen models, validation, serialization                                           |
-| structlog     | Structured logging                                                                 |
-| OpenTelemetry | Distributed tracing, metrics                                                       |
-| msgspec       | High-performance serialization                                                     |
-| httpx         | Async HTTP client                                                                  |
-| polars        | DataFrame operations                                                               |
-| beartype      | Runtime type checking                                                              |
-| pytest        | Test framework                                                                     |
-| hypothesis    | Property-based testing                                                             |
+| Package       | Provides                                                                                |
+| ------------- | --------------------------------------------------------------------------------------- |
+| expression    | Tagged unions, Result/Option, pipe/compose, @effect builders, Block/Map/Seq, curry      |
+| anyio         | Structured async concurrency                                                            |
+| Pydantic      | Frozen models, validation, serialization                                                |
+| structlog     | Structured logging                                                                      |
+| OpenTelemetry | Distributed tracing, metrics                                                            |
+| msgspec       | High-performance serialization                                                          |
+| httpx         | Async HTTP client                                                                       |
+| polars        | DataFrame operations                                                                    |
+| suitkaise     | Cross-process transport of unpicklable objects (cucumber modules: sk, circuits, timing) |
+| beartype      | Runtime type checking                                                                   |
+| pytest        | Test framework                                                                          |
+| hypothesis    | Property-based testing                                                                  |

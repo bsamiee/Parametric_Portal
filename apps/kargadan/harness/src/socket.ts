@@ -13,7 +13,7 @@ const _FaultPolicy = {
     port_file_invalid:   { terminal: false },
     port_file_not_found: { terminal: false },
     port_file_stale:     { terminal: false },
-    protocol:            { terminal: false },
+    protocol:            { terminal: true  },
     request_timeout:     { terminal: false },
     transport_failure:   { terminal: false },
 } as const satisfies Record<string, { terminal: boolean }>
@@ -52,9 +52,9 @@ const readPortFile = Effect.fn('kargadan.portDiscovery.read')(function* () {
 class ReconnectionSupervisor extends Effect.Service<ReconnectionSupervisor>()('kargadan/ReconnectionSupervisor', {
     effect: Effect.gen(function* () {
         const connectionState = yield* Ref.make<'connected' | 'disconnected' | 'reconnecting'>('disconnected');
-        const cfg = yield* HarnessConfig;
-        const _retrySchedule = Schedule.exponential(Duration.millis(cfg.reconnectBackoffBaseMs), 2).pipe(
-            Schedule.jittered, Schedule.upTo(Duration.millis(cfg.reconnectBackoffMaxMs)), Schedule.intersect(Schedule.recurs(cfg.reconnectMaxAttempts)),
+        const config = yield* HarnessConfig;
+        const _retrySchedule = Schedule.exponential(Duration.millis(config.reconnectBackoffBaseMs), 2).pipe(
+            Schedule.jittered, Schedule.upTo(Duration.millis(config.reconnectBackoffMaxMs)), Schedule.intersect(Schedule.recurs(config.reconnectMaxAttempts)),
             Schedule.tapInput (() => Effect.log('kargadan.reconnect: retrying')),
             Schedule.tapOutput(() => Ref.set(connectionState, 'connected')));
         const _requireConnected = Ref.get(connectionState).pipe(
@@ -83,13 +83,13 @@ class KargadanSocketClient extends Effect.Service<KargadanSocketClient>()('karga
     effect: Effect.gen(function* () {
         const socket = yield* Socket.Socket;
         const reconnectSupervisor = yield* ReconnectionSupervisor;
-        const cfg = yield* HarnessConfig;
+        const config = yield* HarnessConfig;
         const writer = yield* socket.writer;
         const pending = yield* Ref.make(HashMap.empty<string, {
             readonly deferred: Deferred.Deferred<Envelope.PendingReply, SocketClientError>;
             readonly tag:      Envelope.Outbound['_tag'];
         }>());
-        const events = yield* Queue.unbounded<Envelope.Event>();
+        const events = yield* Queue.bounded<Envelope.Event>(1024);
         const lastMessageAt = yield* Ref.make<Option.Option<number>>(Option.none());
         const decode = S.decodeUnknown(S.parseJson(Envelope));
         const encode = S.encode(S.parseJson(Envelope));
@@ -107,11 +107,6 @@ class KargadanSocketClient extends Effect.Service<KargadanSocketClient>()('karga
                 onNone: () => [Option.none(), entries] as const,
                 onSome: (entry) => retain(entry) ? [Option.none(), entries] as const : [Option.some(entry.deferred), HashMap.remove(entries, requestId)] as const,
             })));
-        const _failPendingByRequestId = (requestId: string, error: SocketClientError) =>
-            _takePending(requestId, () => false).pipe(Effect.flatMap(Option.match({
-                onNone: () => Effect.succeed(false),
-                onSome: (deferred) => Deferred.fail(deferred, error).pipe(Effect.as(true)),
-            })));
         const _resolveReply = (reply: Envelope.PendingReply) =>
             _takePending(reply.requestId, (entry) => entry.tag === 'command' && reply._tag === 'command.ack').pipe(
                 Effect.flatMap(Option.match({
@@ -121,15 +116,19 @@ class KargadanSocketClient extends Effect.Service<KargadanSocketClient>()('karga
                 Effect.asVoid);
         const _resolveRemoteError = (remoteError: Envelope.RemoteError) => {
             const failure = new SocketClientError({ details: { message: remoteError.message, requestId: remoteError.requestId }, reason: 'protocol' });
+            const _failScoped = (requestId: string) =>
+                _takePending(requestId, () => false).pipe(
+                    Effect.flatMap(Option.match({
+                        onNone: () => _failAllPending('remote_error', { message: remoteError.message, requestId }, 'protocol').pipe(
+                            Effect.zipRight(Effect.logWarning('kargadan.socket.remote.error.unmatched', { message: remoteError.message, requestId }))),
+                        onSome: (deferred) => Deferred.fail(deferred, failure).pipe(
+                            Effect.zipRight(Effect.logWarning('kargadan.socket.remote.error', { hasRequestId: true, message: remoteError.message, requestId }))),
+                    })));
             return Option.fromNullable(remoteError.requestId).pipe(
                 Option.match({
                     onNone: () => _failAllPending('remote_error', { message: remoteError.message }, 'protocol').pipe(
                         Effect.zipRight(Effect.logWarning('kargadan.socket.remote.error', { hasRequestId: false, message: remoteError.message }))),
-                    onSome: (requestId) => _failPendingByRequestId(requestId, failure).pipe(
-                        Effect.flatMap((resolved) => resolved
-                            ? Effect.logWarning('kargadan.socket.remote.error', { hasRequestId: true, message: remoteError.message, requestId })
-                            : _failAllPending('remote_error', { message: remoteError.message, requestId }, 'protocol').pipe(
-                                Effect.zipRight(Effect.logWarning('kargadan.socket.remote.error.unmatched', { message: remoteError.message, requestId }))))),
+                    onSome: _failScoped,
                 }),
             );
         };
@@ -140,7 +139,7 @@ class KargadanSocketClient extends Effect.Service<KargadanSocketClient>()('karga
                 yield* reconnectSupervisor.requireConnected;
                 const json = yield* encode(envelope).pipe(Effect.mapError((cause) => new SocketClientError({ details: { cause, stage: 'encode' }, reason: 'transport_failure' })),);
                 yield* writer(json).pipe(Effect.mapError((cause) => new SocketClientError({ details: { cause, stage: 'write' }, reason: 'transport_failure' })),);
-                return yield* Deferred.await(deferred).pipe(Effect.timeoutFail({ duration: Duration.millis(cfg.commandDeadlineMs), onTimeout: () => new SocketClientError({ details: { requestId: envelope.requestId }, reason: 'request_timeout' }) }),);
+                return yield* Deferred.await(deferred).pipe(Effect.timeoutFail({ duration: Duration.millis(config.commandDeadlineMs), onTimeout: () => new SocketClientError({ details: { requestId: envelope.requestId }, reason: 'request_timeout' }) }),);
             }).pipe(Effect.ensuring(Ref.update(pending, HashMap.remove(envelope.requestId)))),
         );
         const _dispatchChunk = (chunk: Uint8Array) =>
@@ -157,17 +156,15 @@ class KargadanSocketClient extends Effect.Service<KargadanSocketClient>()('karga
         const _heartbeatStalenessChecker = Ref.get(lastMessageAt).pipe(
             Effect.flatMap(Option.match({
                 onNone: () => Effect.void,
-                onSome: (t) => pipe(Date.now() - t, (elapsed) => elapsed > cfg.heartbeatTimeoutMs
+                onSome: (t) => pipe(Date.now() - t, (elapsed) => elapsed > config.heartbeatTimeoutMs
                     ? _failAllPending('connection_stale').pipe(Effect.zipRight(Effect.fail(new SocketClientError({ details: { lastMessageAgoMs: elapsed }, reason: 'connection_stale' }))))
                     : Effect.void),
             })),
-            Effect.schedule(Schedule.fixed(Duration.millis(cfg.heartbeatTimeoutMs))));
+            Effect.schedule(Schedule.fixed(Duration.millis(config.heartbeatTimeoutMs))));
         return {
             request:          _request,
             stalenessChecker: _heartbeatStalenessChecker,
-            start:            () => Effect.all([socket.run(_dispatchChunk), _heartbeatStalenessChecker], { discard: true }).pipe(
-                Effect.onError(() => _failAllPending('socket_closed')),
-            ),
+            start:            () => Effect.all([socket.run(_dispatchChunk), _heartbeatStalenessChecker], { discard: true }).pipe(Effect.onError(() => _failAllPending('socket_closed')),),
             takeEvent: () => Queue.take(events),
         } as const;
     }),
@@ -177,8 +174,8 @@ class KargadanSocketClient extends Effect.Service<KargadanSocketClient>()('karga
 
 const KargadanSocketClientLive = Layer.unwrapEffect(
     Effect.all([readPortFile(), HarnessConfig]).pipe(
-        Effect.map(([{ port }, cfg]) => Layer.provide(KargadanSocketClient.Default,
-            Layer.provide(Socket.layerWebSocket(`ws://${cfg.wsHost}:${port}`), Socket.layerWebSocketConstructorGlobal)))));
+        Effect.map(([{ port }, harnessConfig]) => Layer.provide(KargadanSocketClient.Default,
+            Layer.provide(Socket.layerWebSocket(`ws://${harnessConfig.wsHost}:${port}`), Socket.layerWebSocketConstructorGlobal)))));
 
 // --- [EXPORT] ----------------------------------------------------------------
 

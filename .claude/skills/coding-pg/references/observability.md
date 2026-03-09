@@ -27,7 +27,8 @@ Contracts:
 - `pg_stat_statements_reset()` clears all statistics --- snapshot before clearing
 - `pg_stat_statements.max` (default 5000): number of distinct queries tracked --- increase for large applications
 - `pg_stat_statements.track = 'all'` tracks nested function calls --- default `top` only tracks top-level
-- Statistics persist across connections but NOT across server restart (unless `pg_stat_statements.save = on`)
+- Statistics persist across connections. PG 14+: `pg_stat_statements.save = on` (default) persists across restarts; pre-PG 14 requires explicit save
+- Cascading analysis: join `pg_stat_statements` with `pg_stat_user_indexes` via `queryid` correlation to identify queries whose plans shifted from index scan to seq scan between snapshots
 
 
 ## auto_explain
@@ -102,11 +103,12 @@ Taxonomy:
 - `Extension` --- waiting inside extension code
 - `Timeout` --- waiting for timeout expiry (PgSleep, RecoveryApplyDelay, VacuumDelay)
 
-Diagnostic patterns:
-- Sustained `IO:DataFileRead` --- insufficient shared_buffers or working set exceeds RAM
-- Sustained `Lock:transactionid` --- long-running transactions holding row locks
-- Sustained `LWLock:WALInsert` --- WAL write bottleneck --- increase `wal_buffers`, consider `synchronous_commit = off` for non-critical writes
-- Sustained `Client:ClientRead` --- application not consuming results fast enough
+Diagnostic patterns with actionable thresholds:
+- `IO:DataFileRead` sustained >5s across >10% of backends --- insufficient shared_buffers or working set exceeds RAM; verify with `pg_stat_io` read counts
+- `Lock:transactionid` sustained >30s --- long-running transactions holding row locks; identify holder via `pg_blocking_pids()` lock chain query above
+- `LWLock:WALInsert` sustained >2s --- WAL write bottleneck --- increase `wal_buffers`, consider `synchronous_commit = off` for non-critical writes
+- `Client:ClientRead` sustained >10s --- application not consuming results fast enough; connection pool exhaustion likely
+- `LWLock:BufferMapping` --- hash partition contention on buffer table; PG 18 doubled partitions, but sustained occurrence indicates shared_buffers thrashing
 
 
 ## pg_stat_io (PG 16+)
@@ -156,14 +158,14 @@ FROM pg_stat_wal;
 
 Progress monitoring for long-running maintenance operations.
 
-| View                            | Operation             | Key columns                                             |
-| ------------------------------- | --------------------- | ------------------------------------------------------- |
-| `pg_stat_progress_vacuum`       | VACUUM                | `heap_blks_total`, `heap_blks_scanned`, `phase`         |
-| `pg_stat_progress_create_index` | CREATE INDEX          | `blocks_total`, `blocks_done`, `tuples_total`, `phase`  |
-| `pg_stat_progress_analyze`      | ANALYZE               | `sample_blks_total`, `sample_blks_scanned`              |
-| `pg_stat_progress_cluster`      | CLUSTER / VACUUM FULL | `heap_blks_total`, `heap_blks_scanned`                  |
-| `pg_stat_progress_copy`         | COPY                  | `bytes_processed`, `tuples_processed`                   |
-| `pg_stat_progress_basebackup`   | BASE BACKUP           | `backup_total`, `backup_streamed`                       |
+| View                            | Operation             | Key columns                                            |
+| ------------------------------- | --------------------- | ------------------------------------------------------ |
+| `pg_stat_progress_vacuum`       | VACUUM                | `heap_blks_total`, `heap_blks_scanned`, `phase`        |
+| `pg_stat_progress_create_index` | CREATE INDEX          | `blocks_total`, `blocks_done`, `tuples_total`, `phase` |
+| `pg_stat_progress_analyze`      | ANALYZE               | `sample_blks_total`, `sample_blks_scanned`             |
+| `pg_stat_progress_cluster`      | CLUSTER / VACUUM FULL | `heap_blks_total`, `heap_blks_scanned`                 |
+| `pg_stat_progress_copy`         | COPY                  | `bytes_processed`, `tuples_processed`                  |
+| `pg_stat_progress_basebackup`   | BASE BACKUP           | `backup_total`, `backup_streamed`                      |
 
 - `phase` column indicates current operation phase (e.g., vacuum: scanning heap, vacuuming indexes, truncating heap)
 - Progress percentage: `(blocks_done::numeric / NULLIF(blocks_total, 0) * 100)` --- approximate for concurrent modifications

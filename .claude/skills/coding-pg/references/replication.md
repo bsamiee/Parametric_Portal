@@ -69,7 +69,7 @@ ALTER SUBSCRIPTION order_replica ENABLE;
 Subscription contracts:
 - `copy_data = true` (default): initial table snapshot + ongoing replication; `false` for tables already synced
 - `streaming = parallel` (PG 16+): large transactions applied by parallel workers — prevents single-transaction blocking
-- `origin = none`: prevents circular replication in multi-primary setups — changes already replicated once are not re-replicated
+- `origin = none`: prevents circular replication by filtering changes that arrived via replication (origin-tagged). Does NOT prevent write-write conflicts — two nodes writing to the same row with `origin = none` on both sides still produces insert/update conflicts. Conflict-free bidirectional requires partitioned write domains (node A owns rows 1-N, node B owns N+1-M) or application-level last-write-wins
 - Subscription creates a replication slot on publisher — slot retains WAL until subscriber confirms; monitor `pg_replication_slots` for lag
 - `two_phase = true`: prepared transactions (`PREPARE TRANSACTION`) replicated atomically — requires publisher support
 
@@ -176,7 +176,7 @@ Slot contracts:
 - `max_replication_slots` limits total slots (default 10) — increase for many subscribers
 - Each slot tracks a position independently — multiple subscribers at different lag points are normal
 - Slot names are cluster-wide unique — not per-database
-- Failover slots (PG 17+): `failover = true` in subscription — slot state replicated to standby for seamless failover
+- Failover slots (PG 17+): `failover = true` in subscription — slot position replicated to physical standby via WAL. On promotion, the new primary has the slot at the last-confirmed LSN. Does NOT auto-transfer active connections — subscriber must reconnect to new primary. Requires `hot_standby_feedback = on` on standby
 
 
 ## Change Data Capture Patterns
@@ -208,19 +208,19 @@ CDC contracts:
 - Logical decoding requires `wal_level = logical` — set in postgresql.conf, requires restart
 - `pgoutput` is the standard output plugin — used by native logical replication; `wal2json` for JSON-formatted changes
 - Transactional consistency: all changes within a transaction delivered as a unit — consumer sees atomic commits
-- Large transactions: `streaming = on/parallel` prevents blocking — changes streamed before COMMIT
+- Large transactions: `streaming = on` streams changes before COMMIT, subscriber spills to disk until commit/abort arrives. `streaming = parallel` (PG 16+) applies streamed changes via parallel workers — prevents single large transaction from blocking all other apply. Memory: `logical_decoding_work_mem` (default 64MB) controls spill threshold on publisher
 
 
 ## Configuration Requirements
 
-| Parameter | Side | Default | Purpose |
-|-----------|------|---------|---------|
-| `wal_level` | publisher | `replica` | Must be `logical`; requires restart |
-| `max_replication_slots` | publisher | 10 | Per subscriber + CDC consumers |
-| `max_wal_senders` | publisher | 10 | Concurrent replication connections (streaming + logical) |
-| `max_slot_wal_keep_size` | publisher | -1 (unlimited) | Safety limit for inactive slots |
-| `max_logical_replication_workers` | subscriber | 4 | Parallel apply workers across all subscriptions |
-| `max_sync_workers_per_subscription` | subscriber | 2 | Initial sync parallelism |
+| Parameter                           | Side       | Default        | Purpose                                         |
+| ----------------------------------- | ---------- | -------------- | ----------------------------------------------- |
+| `wal_level`                         | publisher  | `replica`      | Must be `logical`; requires restart             |
+| `max_replication_slots`             | publisher  | 10             | Per subscriber + CDC consumers                  |
+| `max_wal_senders`                   | publisher  | 10             | Connections for streaming + logical replication |
+| `max_slot_wal_keep_size`            | publisher  | -1 (unlimited) | Safety limit for inactive slots                 |
+| `max_logical_replication_workers`   | subscriber | 4              | Parallel apply workers across all subscriptions |
+| `max_sync_workers_per_subscription` | subscriber | 2              | Initial sync parallelism                        |
 
 Publisher requires `pg_hba.conf` entries allowing replication connections from subscriber hosts.
 

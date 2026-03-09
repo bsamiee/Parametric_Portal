@@ -55,24 +55,22 @@ PEP 695 `type` aliases evaluate lazily — `Convert[A, B]` and `Rejection` requi
 
 ## Type Family Governance
 
-`Signal[P]` parameterized by sentinel phantom tags eliminates parallel model definitions. `Morph[A, B]` generalizes stage transitions as a composable callable morphism, `Rejection[P]` reuses the failing `Transition` as typed error context.
+`Signal[P]` parameterized by `Literal` phantom tags eliminates parallel model definitions without sentinel class boilerplate. `Morph[A, B]` generalizes stage transitions as a composable callable morphism, `Rejection[P]` reuses the failing `Transition` as typed error context.
 
 ```python
 from collections.abc import Callable
 from dataclasses import dataclass
 from math import fma, sqrt, tau
-from typing import NewType, TypeIs, assert_never
+from typing import Literal, NewType, TypeIs, assert_never
 
 from expression import Ok, Result, pipe
 from expression.collections import Block, block
 
 Hertz, Radian = NewType("Hertz", float), NewType("Radian", float)
-
-class Raw: __slots__ = ()
-class Cal: __slots__ = ()
+type Stage = Literal["raw", "cal"]
 
 @dataclass(frozen=True, slots=True)
-class Signal[P = Raw]:
+class Signal[P: Stage = "raw"]:
     frequency: Hertz; phase: Radian; samples: Block[float]
 
 @dataclass(frozen=True, slots=True)
@@ -84,11 +82,11 @@ class PhaseAlign:
     modulus: float = tau
 
 type Transition = RmsNorm | PhaseAlign
-type Rejection[P] = tuple[Transition, Signal[P]]
-type Morph[A, B] = Callable[[Signal[A]], Result[Signal[B], Rejection[A]]]
-type Transform = Morph[Raw, Cal]
+type Rejection[P: Stage] = tuple[Transition, Signal[P]]
+type Morph[A: Stage, B: Stage] = Callable[[Signal[A]], Result[Signal[B], Rejection[A]]]
+type Transform = Morph["raw", "cal"]
 
-def is_calibrated(sig: Signal) -> TypeIs[Signal[Cal]]:
+def is_calibrated(sig: Signal) -> TypeIs[Signal["cal"]]:
     return 0 <= sig.phase < tau
 
 def project(t: Transition) -> Transform:
@@ -97,27 +95,26 @@ def project(t: Transition) -> Transform:
             return lambda sig: pipe(sig.samples,
                 block.fold(lambda sn, x: (fma(x, x, sn[0]), sn[1] + 1), (0.0, 0)),
                 lambda sn: sqrt(sn[0] / max(sn[1], 1)),
-                lambda rms: Ok(rms).filter_with(lambda r: r > f, lambda _: (t, sig)).map(lambda r: Signal[Cal](
+                lambda rms: Ok(rms).filter_with(lambda r: r > f, lambda _: (t, sig)).map(lambda r: Signal["cal"](
                     sig.frequency, Radian(sig.phase % tau), pipe(sig.samples, block.map(lambda x: x / r)))))
-        case PhaseAlign(modulus=m): return lambda sig: Ok(Signal[Cal](sig.frequency, Radian(sig.phase % m), sig.samples))
+        case PhaseAlign(modulus=m): return lambda sig: Ok(Signal["cal"](sig.frequency, Radian(sig.phase % m), sig.samples))
         case _ as unreachable: assert_never(unreachable)
 ```
 
-- Sentinel classes (`Raw`, `Cal`) serve as phantom tags with zero indirection — no `Enum → Literal` chain for a parameter never dispatched at runtime. `Morph[A, B]` makes the callable algebra composable: `Morph[Cal, Raw]` or `Morph[Raw, Raw]` require no new declarations. PEP 696 default `P = Raw` — calibration is earned, never implicit.
-- `TypeIs` (PEP 742) bridges phantom parameter erasure at boundaries — `isinstance` cannot distinguish `Signal[Raw]` from `Signal[Cal]` at runtime. The predicate re-derives the phantom tag from domain invariants (phase $\in [0, \tau)$ is `PhaseAlign`'s post-condition), narrowing **both** branches (complement narrowing). Domain-internal code uses `Morph[A, B]` for static proof; `TypeIs` is reserved for deserialization, FFI, and dynamic dispatch boundaries.
-- `block.fold` accumulates sum-of-squares via `fma` and count in one pass; `filter_with` gates on the energy floor with `Rejection[P]` carrying the failing configuration. `PhaseAlign` demonstrates total refinement — modular wrapping maps all reals to the valid range without failure witness.
+- `Literal["raw", "cal"]` phantom tags via PEP 695 `type` alias eliminate sentinel class declarations — `Signal["cal"]` reads identically to `Signal[Cal]` with zero class definitions. PEP 696 default `P: Stage = "raw"` bounds the phantom parameter to the vocabulary while defaulting to uncalibrated state.
+- `TypeIs` (PEP 742) bridges phantom parameter erasure at boundaries — `isinstance` cannot distinguish `Signal["raw"]` from `Signal["cal"]` at runtime. The predicate re-derives the phantom tag from domain invariants (phase $\in [0, \tau)$ is `PhaseAlign`'s post-condition), narrowing **both** branches (complement narrowing). Domain-internal code uses `Morph[A, B]` for static proof; `TypeIs` is reserved for deserialization, FFI, and dynamic dispatch boundaries.
+- `Morph[A: Stage, B: Stage]` constrains the callable algebra to valid stage transitions — unbounded phantom parameters accept any type including nonsense tags. `block.fold` accumulates sum-of-squares via `fma` and count in one pass; `filter_with` gates on the energy floor with `Rejection[P]` carrying the failing configuration. `PhaseAlign` demonstrates total refinement — modular wrapping maps all reals to the valid range without failure witness.
 
 ---
 
 ## Refined Scalars and Smart Constructor Rails
 
-`Constraint` union (`Modular | Bounded | BitAligned`) replaces stringly-typed validation — `Violation` carries `Enum`-discriminated field identity and the failing constraint as structured error context, composed through `@effect.result` generator sequencing.
+`Constraint` union replaces stringly-typed validation — `Modular` and `Bounded` carry configuration, `Literal["bit_aligned"]` replaces the zero-field marker class. `Violation` carries `Literal`-discriminated field identity and the failing constraint as structured error context, composed through `@effect.result` generator sequencing.
 
 ```python
 from dataclasses import dataclass
-from enum import Enum, auto
 from math import frexp, isfinite, tau
-from typing import NewType, assert_never
+from typing import Literal, NewType, assert_never
 
 from expression import Ok, Result, effect
 
@@ -131,41 +128,36 @@ class Modular:
 class Bounded:
     lo: float; hi: float
 
-@dataclass(frozen=True, slots=True)
-class BitAligned: ...
-
-type Constraint = Modular | Bounded | BitAligned
+type Constraint = Modular | Bounded | Literal["bit_aligned"]
+type ViolationField = Literal["phase", "amplitude", "rate"]
 
 @dataclass(frozen=True, slots=True)
 class Violation:
-    class Field(Enum):
-        PHASE = auto(); AMPLITUDE = auto(); RATE = auto()
-    field: Field; raw: float; constraint: Constraint
+    field: ViolationField; raw: float; constraint: Constraint
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class Tone:
     phase: PhaseAngle; amplitude: Amplitude; rate: SampleRate
 
-def refine(field: Violation.Field, con: Constraint, v: float) -> Result[float, Violation]:
+def refine(field: ViolationField, con: Constraint, v: float) -> Result[float, Violation]:
     err = lambda _: Violation(field, v, con)
     match con:
         case Modular(period=p): return Ok(v % p)
         case Bounded(lo=lo, hi=hi): return Ok(v).filter_with(lambda x: lo <= x <= hi and isfinite(x) and frexp(x)[1] > -1022, err)
-        case BitAligned(): return Ok(int(v)).filter_with(lambda n: n > 0 and n & (n - 1) == 0, err)
+        case "bit_aligned": return Ok(float(int(v))).filter_with(lambda n: int(n) > 0 and int(n) & (int(n) - 1) == 0, err)
         case _ as u: assert_never(u)
 
 def mk_tone(p: float, a: float, r: float) -> Result[Tone, Violation]:
     @effect.result[Tone, Violation]()
     def _build():
-        F = Violation.Field
-        ph = yield from refine(F.PHASE, Modular(tau), p)
-        am = yield from refine(F.AMPLITUDE, Bounded(0.0, 1.0), a)
-        rt = yield from refine(F.RATE, BitAligned(), r)
+        ph = yield from refine("phase", Modular(tau), p)
+        am = yield from refine("amplitude", Bounded(0.0, 1.0), a)
+        rt = yield from refine("rate", "bit_aligned", r)
         return Tone(phase=PhaseAngle(ph), amplitude=Amplitude(am), rate=SampleRate(int(rt)))
     return _build()
 ```
 
-`Bounded` rejects IEEE 754 specials — `isfinite` gates infinities/NaN, `frexp` exponent $\leq -1022$ rejects subnormals (denormalized representation causes DSP pipeline stalls). `@effect.result` flattens the three-bind chain into `yield from` sequencing. `kw_only=True` on `Tone` prevents silent positional swap of type-compatible `NewType` fields.
+`Literal["bit_aligned"]` replaces the zero-field marker dataclass `BitAligned()` — marker classes with no fields add no information beyond their tag, which `Literal` provides natively with exhaustive `match/case` support via `case "bit_aligned":`. `ViolationField` PEP 695 alias replaces the nested `Enum` class — bounded string vocabularies are `Literal`'s domain per type discipline; `Enum` is reserved for vocabularies needing programmatic iteration or runtime methods. `Bounded` rejects IEEE 754 specials — `isfinite` gates infinities/NaN, `frexp` exponent $\leq -1022$ rejects subnormals (denormalized representation causes DSP pipeline stalls). `@effect.result` flattens the three-bind chain into `yield from` sequencing. `kw_only=True` on `Tone` prevents silent positional swap of type-compatible `NewType` fields.
 
 ---
 

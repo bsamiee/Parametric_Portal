@@ -52,8 +52,8 @@ CREATE POLICY valid_period_access ON versioned_entities
 - `USING` filters visible rows (SELECT, UPDATE, DELETE); `WITH CHECK` validates new/modified rows (INSERT, UPDATE)
 - `FORCE ROW LEVEL SECURITY` applies policies even to table owners --- without it, table owners bypass RLS
 - **Policy combination semantics**: PERMISSIVE policies (the default) OR together. RESTRICTIVE policies (`AS RESTRICTIVE`) AND together. Final access: at least one PERMISSIVE must pass AND every RESTRICTIVE must pass. When no PERMISSIVE policy exists for an operation, access is denied. Policy type --- not role assignment --- determines combination logic.
-- `current_setting('app.current_tenant')` must be set via `SET LOCAL` or `set_config(..., true)` in each transaction --- not session-level
-- Performance: RLS predicates are appended to every query --- ensure indexed columns used in policies
+- `current_setting('app.current_tenant')` must be set via `SET LOCAL` or `set_config(..., true)` in each transaction --- not session-level. **Failure mode**: if the GUC is never set, `current_setting()` returns empty string (not NULL) --- policy evaluates `tenant_id = ''::uuid` which casts to `00000000-0000-0000-0000-000000000000`, silently matching any row with that UUID. Defense: add `CHECK (tenant_id != '00000000-0000-0000-0000-000000000000')` on tenant columns, or use `nullif(current_setting('app.current_tenant', true), '')` with a RESTRICTIVE deny-all policy when NULL
+- Performance: RLS predicates are appended to every query --- ensure indexed columns used in policies. Planner pushes simple RLS predicates (`col = const`) into index scans; complex predicates (subqueries, function calls) force scan-time filtering --- keep policy expressions index-friendly
 - Superusers and roles with BYPASSRLS bypass RLS --- never use superuser for application connections
 - Schema isolation vs RLS tradeoff: schema-per-tenant eliminates RLS overhead but complicates shared infrastructure (migrations, connection routing, monitoring). RLS preferred for shared-schema multi-tenancy; schema isolation for strict compliance boundaries.
 
@@ -140,8 +140,8 @@ $$;
 
 ### Contracts
 
-- SECURITY INVOKER has always been the default for SQL/plpgsql functions in all PG versions --- this was never changed.
-- PG 15 introduced `security_invoker` option for VIEWS via `CREATE VIEW ... WITH (security_invoker = true)`. Prior to PG 15, views always executed as the view owner (definer semantics).
+- SECURITY INVOKER has always been the default for SQL/plpgsql functions in all PG versions --- this was never changed
+- **Views are different from functions**: PG 15 introduced `security_invoker` option for VIEWS via `CREATE VIEW ... WITH (security_invoker = true)`. Prior to PG 15, views always executed as the view owner (definer semantics). For RLS enforcement through views, set `security_invoker = true` on every view --- otherwise RLS policies evaluate against the view owner's privileges, not the querying role
 - SECURITY DEFINER without `SET search_path`: attacker creates malicious function in user-writable schema that shadows a system function --- privilege escalation
 - SECURITY DEFINER functions bypass RLS --- use sparingly and audit carefully
 - Leakproof functions: `LEAKPROOF` attribute declares function cannot leak information through error messages or side channels --- required for some RLS optimizations
@@ -172,10 +172,10 @@ Session audit via `ALTER SYSTEM` (persists across restarts):
 
 ```sql
 ALTER SYSTEM SET pgaudit.log = 'ddl, write';
-ALTER SYSTEM SET pgaudit.log_relation = on;       -- log relation name per statement
-ALTER SYSTEM SET pgaudit.log_catalog = off;        -- exclude pg_catalog (noisy)
-ALTER SYSTEM SET pgaudit.log_parameter = on;       -- include bind parameters
-ALTER SYSTEM SET pgaudit.log_statement_once = on;  -- de-duplicate: statement text on first line only
+ALTER SYSTEM SET pgaudit.log_relation = on;         -- log relation name per statement
+ALTER SYSTEM SET pgaudit.log_catalog = off;         -- exclude pg_catalog (noisy)
+ALTER SYSTEM SET pgaudit.log_parameter = on;        -- include bind parameters
+ALTER SYSTEM SET pgaudit.log_statement_once = on;   -- de-duplicate: statement text on first line only
 ALTER SYSTEM SET pgaudit.role = 'auditor';          -- object audit role
 SELECT pg_reload_conf();
 ```

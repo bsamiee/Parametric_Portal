@@ -152,15 +152,15 @@ ALTER TABLE employment
 
 Range operators:
 
-| Operator | Semantics       | Example                                     |
-|----------|-----------------|---------------------------------------------|
-| `&&`     | Overlap         | `'[2024-01-01,2024-06-01)'::tstzrange && r` |
-| `@>`     | Contains        | `r @> '2024-03-15'::timestamptz`            |
-| `<@`     | Contained by    | `r <@ '[2024-01-01,2025-01-01)'::tstzrange` |
-| `-\|-`   | Adjacent        | `r1 -\|- r2`                                |
-| `*`      | Intersection    | `r1 * r2`                                   |
-| `+`      | Union           | `r1 + r2` (must overlap or be adjacent)     |
-| `-`      | Difference      | `r1 - r2`                                   |
+| Operator | Semantics    | Example                                     |
+| -------- | ------------ | ------------------------------------------- |
+| `&&`     | Overlap      | `'[2024-01-01,2024-06-01)'::tstzrange && r` |
+| `@>`     | Contains     | `r @> '2024-03-15'::timestamptz`            |
+| `<@`     | Contained by | `r <@ '[2024-01-01,2025-01-01)'::tstzrange` |
+| `-\|-`   | Adjacent     | `r1 -\|- r2`                                |
+| `*`      | Intersection | `r1 * r2`                                   |
+| `+`      | Union        | `r1 + r2` (must overlap or be adjacent)     |
+| `-`      | Difference   | `r1 - r2`                                   |
 
 - Always `tstzrange` over `tsrange` — timezone-naive ranges corrupt across DST transitions
 - Canonical bound: `[)` (inclusive-exclusive) — gap-free partitioning, no off-by-one
@@ -224,13 +224,13 @@ ALTER TABLE product ADD COLUMN
     ) VIRTUAL;
 ```
 
-| Restriction                                     | Applies to        |
-|--------------------------------------------------|--------------------|
-| Cannot reference other generated columns          | Virtual + Stored   |
-| Cannot use subqueries, aggregates, window fns     | Virtual + Stored   |
-| Cannot be part of PRIMARY KEY / UNIQUE            | Virtual only       |
-| CAN appear in WHERE (planner pushes expression)   | Virtual only       |
-| Use STORED when column needs indexing              | —                  |
+| Restriction                                     | Applies to       |
+| ----------------------------------------------- | ---------------- |
+| Cannot reference other generated columns        | Virtual + Stored |
+| Cannot use subqueries, aggregates, window fns   | Virtual + Stored |
+| Cannot be part of PRIMARY KEY / UNIQUE          | Virtual only     |
+| CAN appear in WHERE (planner pushes expression) | Virtual only     |
+| Use STORED when column needs indexing           | —                |
 
 
 ## Partitioning
@@ -277,7 +277,7 @@ SELECT partman.create_parent(
 - `enable_partition_pruning = on` (default) — planner eliminates non-matching partitions
 - pg_partman: `partman.create_parent()` + `partman.run_maintenance()` via pg_cron
 - `ALTER TABLE ... DETACH PARTITION ... CONCURRENTLY` for online removal (PG 14+)
-- `ENABLE ROW MOVEMENT` when UPDATE can change partition key
+- `ENABLE ROW MOVEMENT` when UPDATE can change partition key — internally executes `DELETE` + `INSERT` across partitions (acquires locks on both), significantly more expensive than same-partition UPDATE; treat partition key columns as effectively immutable after insert
 - Default partition catches unmatched rows — monitor size as health signal
 
 
@@ -329,15 +329,15 @@ ALTER TABLE documents ADD CONSTRAINT valid_metadata
 
 DDL properties governing `Model.Class` field modifier selection:
 
-| DDL Property                          | Effect-SQL Implication                                        |
-|---------------------------------------|---------------------------------------------------------------|
-| `DEFAULT uuidv7()`                    | Maps to `Model.Generated` — excluded from insert projections  |
-| `GENERATED ALWAYS AS ... VIRTUAL`     | Maps to `Model.Generated` — excluded from insert/update       |
-| `GENERATED ALWAYS AS ... STORED`      | Maps to `Model.Generated` — excluded from insert/update       |
-| `DEFAULT clock_timestamp()`           | Maps to `Model.DateTimeInsertFromDate` or `DateTimeUpdateFromDate` |
-| `NOT NULL`                            | Must NOT use `Model.FieldOption`                              |
-| Nullable column                       | Must use `Model.FieldOption`                                  |
-| RLS-enforced tenant column            | Maps to `Model.FieldExcept("update", "jsonUpdate")` — immutable after insert |
+| DDL Property                      | Effect-SQL Implication                                                       |
+| --------------------------------- | ---------------------------------------------------------------------------- |
+| `DEFAULT uuidv7()`                | Maps to `Model.Generated` — excluded from insert projections                 |
+| `GENERATED ALWAYS AS ... VIRTUAL` | Maps to `Model.Generated` — excluded from insert/update                      |
+| `GENERATED ALWAYS AS ... STORED`  | Maps to `Model.Generated` — excluded from insert/update                      |
+| `DEFAULT clock_timestamp()`       | Maps to `Model.DateTimeInsertFromDate` or `DateTimeUpdateFromDate`           |
+| `NOT NULL`                        | Must NOT use `Model.FieldOption`                                             |
+| Nullable column                   | Must use `Model.FieldOption`                                                 |
+| RLS-enforced tenant column        | Maps to `Model.FieldExcept("update", "jsonUpdate")` — immutable after insert |
 
 Model.Class mapping for the canonical table (branded entity IDs):
 
@@ -345,17 +345,17 @@ Model.Class mapping for the canonical table (branded entity IDs):
 const OrganizationId = S.UUID.pipe(S.brand("OrganizationId"))
 
 class Organization extends Model.Class<Organization>()("Organization", {
-    id: Model.Generated(OrganizationId),
-    slug: S.NonEmptyTrimmedString,
-    displayName: S.NonEmptyTrimmedString,
+    id:           Model.Generated(OrganizationId),
+    slug:         S.NonEmptyTrimmedString,
+    displayName:  S.NonEmptyTrimmedString,
     contactEmail: S.NonEmptyTrimmedString,
-    plan: S.Literal("starter", "business", "enterprise"),
-    metadata: Model.JsonFromString(OrganizationMetadata),
-    revenue: S.BigDecimal,
-    tier: Model.Generated(S.Literal("starter", "business", "enterprise")),
+    plan:         S.Literal("starter", "business", "enterprise"),
+    metadata:     Model.JsonFromString(OrganizationMetadata),
+    revenue:      S.BigDecimal,
+    tier:         Model.Generated(S.Literal("starter", "business", "enterprise")),
     searchVector: Model.Generated(S.String),
-    createdAt: Model.DateTimeInsertFromDate,
-    updatedAt: Model.DateTimeUpdateFromDate,
+    createdAt:    Model.DateTimeInsertFromDate,
+    updatedAt:    Model.DateTimeUpdateFromDate,
 }) {}
 ```
 
@@ -403,11 +403,15 @@ CREATE POLICY tenant_isolation ON chunks
 
 CREATE INDEX ON chunks USING hnsw (embedding vector_cosine_ops) WITH (m = 16, ef_construction = 200);
 CREATE INDEX ON chunks USING gin (search_text);
+CREATE INDEX ON chunks USING gin (content gin_trgm_ops); -- requires: CREATE EXTENSION pg_trgm
 CREATE INDEX ON chunks (document_id);
 CREATE INDEX ON chunks (tenant_id, created_at);
 ```
 
-- `chunks.embedding` + HNSW for semantic search; `chunks.search_text` + GIN for keyword BM25
+- `chunks.embedding` + HNSW for semantic search; `chunks.search_text` + GIN for keyword BM25; `content gin_trgm_ops` for fuzzy/typo-tolerant matching
+- Hybrid retrieval: semantic CTE + BM25 CTE + trigram CTE + RRF join (see `extensions.md` Hybrid Search)
 - Tenant isolation via RLS — vector queries automatically scoped
 - `position` preserves document ordering for context window assembly
-- Hybrid retrieval: semantic CTE + BM25 CTE + RRF join (see `extensions.md` Hybrid Search)
+- pg_trgm completes the retrieval triad: semantic (vector distance) + lexical (BM25 rank) + fuzzy (trigram similarity) — each captures different user intent failure modes
+- **Multi-tenant scale (>1M vectors)**: replace HNSW with DiskANN + `filter_columns = 'tenant_id'` (requires `CREATE EXTENSION vectorscale`) — pushes tenant predicate into the index scan as label-based pre-filtering instead of post-filtering, preventing recall degradation when any single tenant owns <5% of total vectors. HNSW + RLS post-filter visits `ef_search` neighbors first then discards non-matching tenants, which at high selectivity returns fewer than `LIMIT k` results or requires expensive iterative scan expansion
+- **Write amplification**: the three-index strategy (HNSW + GIN tsvector + GIN trgm) means each INSERT touches three indexes — acceptable for moderate ingestion but bottleneck for bulk pipelines. Mitigation: load into unindexed staging table, batch-merge via `MERGE INTO chunks ... USING staging`, then `CREATE INDEX CONCURRENTLY` post-load. For incremental ingestion, maintain indexes but set `gin_pending_list_limit = 64MB` to batch GIN updates and accept slightly stale trigram results during high-write bursts

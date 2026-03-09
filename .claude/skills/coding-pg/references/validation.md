@@ -23,6 +23,8 @@ Compliance checklist for PostgreSQL 18.2+ SQL code. Run after writing or modifyi
 - [ ] Window functions with appropriate framing --- no GROUP BY + self-join for running calculations
 - [ ] Keyset pagination --- no OFFSET pagination
 - [ ] `FILTER (WHERE ...)` for conditional aggregation --- no `CASE WHEN ... THEN value ELSE NULL END` inside aggregate
+- [ ] `NOT EXISTS` for anti-joins --- no `NOT IN` (NULL-unsafe: any NULL in subquery makes entire predicate UNKNOWN)
+- [ ] `EXISTS` for semi-joins --- no `SELECT DISTINCT` on correlated/joined data (forces sort/dedup instead of early-exit)
 - [ ] VALUES-based dispatch in PL/pgSQL --- no IF/THEN/ELSIF chains for operation routing
 - [ ] Composable aggregates in hierarchical CAGGs (avg/count/sum/stddev) --- no PERCENTILE_CONT across tiers
 
@@ -76,18 +78,18 @@ Compliance checklist for PostgreSQL 18.2+ SQL code. Run after writing or modifyi
 
 PG type to Effect Schema mapping:
 
-| PG Type       | Effect Schema                  | Notes                                    |
-| ------------- | ------------------------------ | ---------------------------------------- |
-| `int4`        | `S.Int`                        | 32-bit signed integer                    |
-| `int8`        | `S.BigInt`                     | 64-bit --- JS Number overflows           |
-| `numeric`     | `S.BigDecimal`                 | Arbitrary precision                      |
-| `text`        | `S.String`                     | Unbounded text                           |
-| `boolean`     | `S.Boolean`                    | Boolean                                  |
-| `uuid`        | `S.UUID`                       | UUID string with format validation       |
-| `timestamptz` | `S.DateTimeUtc`                | Timezone-aware timestamp                 |
-| `jsonb`       | `Model.JsonFromString(...)`    | Schema-validated JSON column             |
-| `bytea`       | `S.Uint8ArrayFromBase64`       | Binary data with base64 codec            |
-| `tstzrange`   | `S.Unknown` + custom codec     | No native mapping; hand-roll range parse |
+| PG Type       | Effect Schema               | Notes                                    |
+| ------------- | --------------------------- | ---------------------------------------- |
+| `int4`        | `S.Int`                     | 32-bit signed integer                    |
+| `int8`        | `S.BigInt`                  | 64-bit --- JS Number overflows           |
+| `numeric`     | `S.BigDecimal`              | Arbitrary precision                      |
+| `text`        | `S.String`                  | Unbounded text                           |
+| `boolean`     | `S.Boolean`                 | Boolean                                  |
+| `uuid`        | `S.UUID`                    | UUID string with format validation       |
+| `timestamptz` | `S.DateTimeUtc`             | Timezone-aware timestamp                 |
+| `jsonb`       | `Model.JsonFromString(...)` | Schema-validated JSON column             |
+| `bytea`       | `S.Uint8ArrayFromBase64`    | Binary data with base64 codec            |
+| `tstzrange`   | `S.Unknown` + custom codec  | No native mapping; hand-roll range parse |
 
 PG error codes to Effect tagged errors:
 
@@ -116,18 +118,18 @@ PG error codes to Effect tagged errors:
 
 ### Lock-Level Awareness
 
-| DDL Statement                          | Lock Level               | Online-Safe? |
-| -------------------------------------- | ------------------------ | ------------ |
-| `CREATE INDEX CONCURRENTLY`            | ShareUpdateExclusiveLock | Yes          |
-| `CREATE INDEX` (non-concurrent)        | ShareLock                | Blocks writes|
-| `ALTER TABLE ADD COLUMN` (nullable)    | AccessExclusiveLock      | Brief        |
+| DDL Statement                          | Lock Level               | Online-Safe?                                         |
+| -------------------------------------- | ------------------------ | ---------------------------------------------------- |
+| `CREATE INDEX CONCURRENTLY`            | ShareUpdateExclusiveLock | Yes                                                  |
+| `CREATE INDEX` (non-concurrent)        | ShareLock                | Blocks writes                                        |
+| `ALTER TABLE ADD COLUMN` (nullable)    | AccessExclusiveLock      | Brief                                                |
 | `ALTER TABLE ADD COLUMN DEFAULT`       | AccessExclusiveLock      | Brief (PG 11+: no rewrite for non-volatile defaults) |
-| `ALTER TABLE SET NOT NULL`             | AccessExclusiveLock      | Scans table  |
-| `ALTER TABLE ADD CONSTRAINT`           | AccessExclusiveLock      | Scans table  |
-| `ALTER TABLE ADD CONSTRAINT NOT VALID` | AccessExclusiveLock      | Brief        |
-| `VALIDATE CONSTRAINT`                  | ShareUpdateExclusiveLock | Yes          |
-| `DROP INDEX CONCURRENTLY`              | ShareUpdateExclusiveLock | Yes          |
-| `ALTER TABLE DROP COLUMN`              | AccessExclusiveLock      | Brief        |
+| `ALTER TABLE SET NOT NULL`             | AccessExclusiveLock      | Scans table                                          |
+| `ALTER TABLE ADD CONSTRAINT`           | AccessExclusiveLock      | Scans table                                          |
+| `ALTER TABLE ADD CONSTRAINT NOT VALID` | AccessExclusiveLock      | Brief                                                |
+| `VALIDATE CONSTRAINT`                  | ShareUpdateExclusiveLock | Yes                                                  |
+| `DROP INDEX CONCURRENTLY`              | ShareUpdateExclusiveLock | Yes                                                  |
+| `ALTER TABLE DROP COLUMN`              | AccessExclusiveLock      | Brief                                                |
 
 ### Safe Pattern: Adding NOT NULL Column
 
@@ -150,16 +152,23 @@ PG error codes to Effect tagged errors:
 
 ## Detection Heuristics
 
-| Pattern to Grep                              | Violation                                    |
-| -------------------------------------------- | -------------------------------------------- |
-| `start_date.*end_date` or `_start.*_end`     | DUAL_COLUMN_RANGE --- use range type         |
-| `LIMIT.*OFFSET`                              | OFFSET_PAGINATION --- use keyset             |
-| `FOR UPDATE` without `SKIP LOCKED`           | Missing SKIP LOCKED on queue table           |
-| `SECURITY DEFINER` without `SET`             | SECURITY_DEFINER_LEAK                        |
-| `now()` in DEFAULT                           | Use `clock_timestamp()` for wall time        |
-| `CREATE INDEX` without `CONCURRENTLY`        | Missing CONCURRENTLY in migration            |
-| `LOOP` + `UPDATE` in PL/pgSQL               | IMPERATIVE_BATCH --- use set operation       |
-| `uuid_generate_v4()` or `gen_random_uuid()`  | Use `uuidv7()` (PG 18 built-in)             |
-| `ALTER TABLE.*ADD CONSTRAINT` without `NOT VALID` | Missing two-phase constraint addition   |
-| `ENABLE ROW LEVEL SECURITY` without `FORCE`  | Table owner bypasses RLS                     |
-| `CREATE EXTENSION` without `VERSION`         | Missing version pin in production migration  |
+| Pattern to Grep                                   | Violation                                                  |
+| ------------------------------------------------- | ---------------------------------------------------------- |
+| `start_date.*end_date` or `_start.*_end`          | DUAL_COLUMN_RANGE --- use range type                       |
+| `LIMIT.*OFFSET`                                   | OFFSET_PAGINATION --- use keyset                           |
+| `FOR UPDATE` without `SKIP LOCKED`                | Missing SKIP LOCKED on queue table                         |
+| `SECURITY DEFINER` without `SET`                  | SECURITY_DEFINER_LEAK                                      |
+| `now()` in DEFAULT                                | Use `clock_timestamp()` for wall time                      |
+| `CREATE INDEX` without `CONCURRENTLY`             | Missing CONCURRENTLY in migration                          |
+| `LOOP` + `UPDATE` in PL/pgSQL                     | IMPERATIVE_BATCH --- use set operation                     |
+| `uuid_generate_v4()` or `gen_random_uuid()`       | Use `uuidv7()` (PG 18 built-in)                            |
+| `ALTER TABLE.*ADD CONSTRAINT` without `NOT VALID` | Missing two-phase constraint addition                      |
+| `ENABLE ROW LEVEL SECURITY` without `FORCE`       | Table owner bypasses RLS                                   |
+| `CREATE EXTENSION` without `VERSION`              | Missing version pin in production migration                |
+| `NOT IN` with subquery                            | NULL_UNSAFE_ANTIJOIN --- use NOT EXISTS                    |
+| `SELECT DISTINCT` on joined tables                | DISTINCT_OVER_EXISTS --- use EXISTS semi-join              |
+| `CREATE POLICY` without `current_setting`         | STRINGLY_POLICY --- hardcoded literals in RLS              |
+| `CREATE TRIGGER` in migration                     | TRIGGER_LOGIC --- use MERGE RETURNING or generated columns |
+| `IF.*THEN.*ELSIF` in PL/pgSQL                     | IF_THEN_DISPATCH --- use VALUES-based dynamic SQL          |
+| `EXCLUDE.*&&` on temporal with PG 17+             | EXCLUDE_OVER_WITHOUT_OVERLAPS --- use WITHOUT OVERLAPS     |
+| `S.UUID` without `S.brand` for PK/FK              | RAW_UUID_ID --- brand entity IDs                           |

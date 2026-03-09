@@ -23,6 +23,17 @@ CREATE INDEX ON documents USING ivfflat (embedding vector_l2_ops)
 CREATE INDEX ON documents USING diskann (embedding);
 -- With Statistical Binary Quantization for high-dimensional (>768) embeddings
 CREATE INDEX ON documents USING diskann (embedding) WITH (num_neighbors = 50);
+
+-- Filtered DiskANN search — label-based pre-filtering avoids post-filter recall degradation
+CREATE INDEX ON documents USING diskann (embedding)
+    WITH (num_neighbors = 50, search_list_size = 100,
+          filter_columns = 'tenant_id, category');
+
+-- Query with filter pushdown into index scan
+SELECT id, embedding <=> $1::vector AS distance
+FROM documents
+WHERE tenant_id = $2 AND category = $3
+ORDER BY embedding <=> $1::vector LIMIT 20;
 ```
 
 ### Query Patterns
@@ -43,11 +54,11 @@ ORDER BY embedding <=> $1::vector LIMIT 20;
 
 ### Type Variants
 
-| Type | Bytes/Dim | Max Dims | Index Support | Use When |
-|------|-----------|----------|---------------|----------|
-| `vector(n)` | 4 | 2000 | HNSW, IVFFlat, DiskANN | Default — full precision |
-| `halfvec(n)` | 2 | 4000 | HNSW, IVFFlat | Memory-constrained, acceptable precision loss |
-| `sparsevec(n)` | variable | 16000 non-zero | HNSW | High-dimensional sparse embeddings |
+| Type           | Bytes/Dim | Max Dims       | Index Support          | Use When                                      |
+| -------------- | --------- | -------------- | ---------------------- | --------------------------------------------- |
+| `vector(n)`    | 4         | 2000           | HNSW, IVFFlat, DiskANN | Default — full precision                      |
+| `halfvec(n)`   | 2         | 4000           | HNSW, IVFFlat          | Memory-constrained, acceptable precision loss |
+| `sparsevec(n)` | variable  | 16000 non-zero | HNSW                   | High-dimensional sparse embeddings            |
 
 ### Contracts
 
@@ -59,6 +70,7 @@ ORDER BY embedding <=> $1::vector LIMIT 20;
 - DiskANN for >1M vectors or memory-constrained; HNSW for <1M with RAM budget
 - SBQ compression for dimensions >768 (e.g., text-embedding-3-large at 3072); same distance operators
 - Pre-filter: partial indexes (`WHERE tenant_id = X`) for high-selectivity; iterative scan for low-selectivity
+- DiskANN `filter_columns`: label-based pre-filtering pushes WHERE predicates into the index scan — avoids post-filter recall degradation on high-selectivity filters (28x lower p95 latency vs external vector DBs on filtered workloads)
 
 ## pg_search (BM25 via Tantivy)
 
@@ -75,11 +87,52 @@ WHERE id @@@ paradedb.parse('title:postgres & body:performance')
 ORDER BY relevance DESC LIMIT 20;
 ```
 
+Advanced query syntax — phrase, regex, fuzzy, boost:
+
+```sql
+-- Phrase match (exact sequence)
+SELECT id, paradedb.score(id) FROM documents
+WHERE id @@@ paradedb.phrase('body', 'distributed consensus protocol');
+
+-- Fuzzy match (edit distance)
+SELECT id, paradedb.score(id) FROM documents
+WHERE id @@@ paradedb.fuzzy_term('title', 'postgrs', distance => 2);
+
+-- Boolean combination with field boost
+SELECT id, paradedb.score(id) FROM documents
+WHERE id @@@ paradedb.boolean(
+    should => ARRAY[
+        paradedb.boost(2.0, paradedb.parse('title:postgres')),
+        paradedb.parse('body:performance')
+    ]
+)
+ORDER BY paradedb.score(id) DESC LIMIT 20;
+
+-- Regex match
+SELECT id FROM documents
+WHERE id @@@ paradedb.regex('title', 'post(gres|gre).*');
+```
+
+Tokenizer configuration — per-field control in index definition:
+
+```sql
+CREATE INDEX ON documents USING bm25 (id, title, body)
+    WITH (key_field = 'id',
+          text_fields = '{
+              "title": {"tokenizer": {"type": "default"}, "record": "position"},
+              "body":  {"tokenizer": {"type": "en_stem"}, "record": "position"}
+          }');
+```
+
 ### Contracts
 
 - BM25 replaces `ts_rank_cd` for relevance scoring; retain tsvector for simple boolean matching
 - `@@@` operator with `paradedb.parse()` for query syntax; `paradedb.score(key_field)` for relevance
 - `key_field` must be a unique column (typically PK) — used for score association
+- `record: "position"` enables phrase queries and proximity scoring — without it, phrase matching degrades to term co-occurrence
+- Tokenizer types: `default` (Unicode segmentation), `en_stem` (English stemmer), `raw` (no tokenization), `ngram`, `chinese_compatible`
+- `paradedb.fuzzy_term`: `distance` is Levenshtein edit distance (default 1, max 2); `transpose_cost_one = true` treats transpositions as single edit
+- `paradedb.boost(factor, query)`: field-level relevance weighting — title matches weighted higher than body
 
 ## Hybrid Search: BM25 + pgvector RRF
 
@@ -98,7 +151,7 @@ FROM semantic s FULL OUTER JOIN bm25 b ON s.id = b.id
 ORDER BY rrf_score DESC LIMIT 20;
 ```
 
-RRF constant (60) dampens rank differences — adjust based on corpus. Without pg_search: substitute tsvector + `ts_rank_cd` for BM25 CTE.
+RRF formula: `rrf_score = Σ 1/(k + rank_i)` where k=60 dampens rank differences. RRF operates on **ranks only** — never combine raw BM25 scores with raw vector distances (different scales, incomparable). k=60 means a result must rank in top ~100 to contribute meaningful signal. Weighted variant: `w_s/(k + rank_s) + w_b/(k + rank_b)` for asymmetric retrieval (e.g., 70/30 semantic/keyword). Without pg_search: substitute tsvector + `ts_rank_cd` for BM25 CTE.
 
 ## pg_trgm
 
@@ -149,10 +202,10 @@ SELECT id, ST_AsGeoJSON(geom)::jsonb AS geojson FROM locations WHERE id = $1;
 SELECT id, ST_CoverageClean(geom) OVER (PARTITION BY region) AS cleaned_geom FROM coverage_layers;
 ```
 
-| Aspect | `geometry` | `geography` |
-|--------|-----------|-------------|
-| Units | Coordinate (degrees if 4326) | Meters |
-| Speed | Fast | ~5x slower |
+| Aspect   | `geometry`                          | `geography`                 |
+| -------- | ----------------------------------- | --------------------------- |
+| Units    | Coordinate (degrees if 4326)        | Meters                      |
+| Speed    | Fast                                | ~5x slower                  |
 | Use when | Small areas, computational geometry | Earth-surface distance/area |
 
 ### Contracts
@@ -201,17 +254,19 @@ FROM metrics_hourly GROUP BY day_bucket, device_id WITH NO DATA;
 - Real-time aggregation enabled by default — queries union materialized + recent raw data
 - Hierarchical CAGGs (2.9+, finalized format from 2.7+): child `time_bucket` must be multiple of parent
 - UUIDv7 compression: 30% better ratio; `timescaledb.enable_uuid_compression` GUC (default on 2.23+)
+- Direct Compress (2.23+): incoming inserts write directly to compressed columnar storage — bypasses the uncompressed→compress cycle for append-only hypertables. Enable via `ALTER TABLE metrics SET (timescaledb.compress_direct_write = true)`. Reduces write amplification and compression policy lag
+- Concurrent CAGG refresh: non-overlapping time ranges refresh in parallel workers — `SELECT add_continuous_aggregate_policy(..., schedule_interval => INTERVAL '5 min')` with overlapping windows is safe as long as `start_offset > end_offset` (non-overlapping materialization ranges)
 - **Always pair hypertables with BRIN indexes on the time dimension** — chunk exclusion is coarse-grained (eliminates whole chunks), BRIN provides fine-grained intra-chunk filtering for efficient range scans within individual chunks
 
 ### TimescaleDB vs pg_partman
 
-| Criterion | TimescaleDB | pg_partman |
-|-----------|-------------|------------|
-| Time-series ingestion | Hypertable | Over-engineered |
-| Continuous aggregates | Native CAGG | Manual materialized views |
-| Non-time range partition | Not applicable | Native declarative |
-| Compression | Columnar (90%+ ratio) | None (use pg_duckdb) |
-| Retention policy | Built-in | Built-in |
+| Criterion                | TimescaleDB           | pg_partman                |
+| ------------------------ | --------------------- | ------------------------- |
+| Time-series ingestion    | Hypertable            | Over-engineered           |
+| Continuous aggregates    | Native CAGG           | Manual materialized views |
+| Non-time range partition | Not applicable        | Native declarative        |
+| Compression              | Columnar (90%+ ratio) | None (use pg_duckdb)      |
+| Retention policy         | Built-in              | Built-in                  |
 
 ## pg_cron (1.6+)
 
@@ -305,15 +360,31 @@ JOIN (
     GROUP BY customer_id
 ) lake ON c.id = lake.customer_id
 WHERE lake.total_events > 1000;
+
+-- Iceberg scan with time travel — query historical snapshots
+SET LOCAL duckdb.force_execution = true;
+SELECT product_id, inventory_count, updated_at
+FROM iceberg_scan('s3://warehouse/inventory', version => '2025-01-15T00:00:00Z')
+WHERE product_id IN (SELECT id FROM products WHERE category = 'electronics');
+
+-- Delta Lake read
+SET LOCAL duckdb.force_execution = true;
+SELECT region, sum(amount) AS total_sales
+FROM delta_scan('s3://datalake/sales_delta/')
+WHERE sale_date >= '2025-01-01'
+GROUP BY region;
 ```
 
 ### Contracts
 
 - `SET LOCAL duckdb.force_execution = true` — transaction-scoped, PgBouncer-safe
 - pg_duckdb for analytical queries (GROUP BY, window functions, aggregates over large datasets) — never for OLTP (INSERT/UPDATE/DELETE)
-- `read_parquet` / `read_csv` / `read_iceberg` for direct lake access without ETL pipeline
+- `read_parquet` / `read_csv` / `read_json` for direct lake access without ETL pipeline
+- `iceberg_scan(path, version => timestamp)` for Apache Iceberg with time travel — query historical snapshots by timestamp or snapshot ID
+- `delta_scan(path)` for Delta Lake tables — reads transaction log for consistent snapshot
 - Hybrid joins: DuckDB scans lake tables, PG provides transactional foreign key tables — optimizer handles cross-engine join
 - DuckDB execution inherits PG transaction context — `SET LOCAL` settings, RLS (via query rewrite), advisory locks all apply
+- Parallel table scanning: DuckDB parallelizes across Parquet row groups and PG table pages — scales with `max_parallel_workers`
 
 ## pg_jsonschema
 

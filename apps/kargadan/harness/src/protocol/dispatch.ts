@@ -34,8 +34,8 @@ class CommandDispatchError extends Data.TaggedError('CommandDispatchError')<{
 class CommandDispatch extends Effect.Service<CommandDispatch>()('kargadan/CommandDispatch', {
     effect: Effect.gen(function* () {
         const socket = yield* KargadanSocketClient;
-        const cfg = yield* HarnessConfig;
-        const { commandDeadlineMs, protocolVersion, resolveCapabilities: capabilities, tokenExpiryMinutes } = cfg;
+        const config = yield* HarnessConfig;
+        const { commandDeadlineMs, protocolVersion, resolveCapabilities: capabilities, tokenExpiryMinutes } = config;
         const catalogRef = yield* Ref.make<ReadonlyArray<Envelope.CatalogEntry>>([]);
         const phaseRef = yield* Ref.make<'connecting' | 'active' | 'closed'>('connecting');
         const _request = Effect.fn('CommandDispatch.request')((envelope: Envelope.Outbound) =>
@@ -50,16 +50,19 @@ class CommandDispatch extends Effect.Service<CommandDispatch>()('kargadan/Comman
             ));
         const handshake = Effect.fn('CommandDispatch.handshake')(
             ({ token, ...identity }: Envelope.Identity & { readonly token: string }) =>
-                _request({ _tag: 'handshake.init', ...identity,
-                    auth: { token, tokenExpiresAt: new Date(Date.now() + Duration.toMillis(Duration.minutes(tokenExpiryMinutes))) },
-                    capabilities, protocolVersion,
-                    telemetryContext: { attempt: 1, operationTag: 'handshake.init', spanId: identity.requestId.replaceAll('-', ''), traceId: identity.correlationId },
-                }).pipe(Effect.flatMap((response) => Match.value(response).pipe(
-                    Match.tag('handshake.ack', (ack) => Effect.all([
-                        Ref.set(phaseRef, 'active'), Ref.set(catalogRef, ack.catalog), Effect.log('kargadan.session.authenticated'),
-                    ], { discard: true }).pipe(Effect.as(ack))),
-                    Match.tag('handshake.reject', (r) => Effect.fail(new CommandDispatchError({ details: { code: r.code, message: r.message }, failureClass: r.failureClass, reason: 'rejected' }))),
-                    Match.orElse((reply) => Effect.fail(new CommandDispatchError({ details: { expected: 'handshake.ack|handshake.reject', received: reply._tag }, reason: 'protocol' })))))));
+                Ref.set(phaseRef, 'connecting').pipe(
+                    Effect.zipRight(_request({ _tag: 'handshake.init', ...identity,
+                        auth: { token, tokenExpiresAt: new Date(Date.now() + Duration.toMillis(Duration.minutes(tokenExpiryMinutes))) },
+                        capabilities, protocolVersion,
+                        telemetryContext: { attempt: 1, operationTag: 'handshake.init', spanId: identity.requestId.replaceAll('-', ''), traceId: identity.correlationId },
+                    })),
+                    Effect.flatMap((response) => Match.value(response).pipe(
+                        Match.tag('handshake.ack', (ack) => Effect.all([
+                            Ref.set(phaseRef, 'active'), Ref.set(catalogRef, ack.catalog), Effect.log('kargadan.session.authenticated'),
+                        ], { discard: true }).pipe(Effect.as(ack))),
+                        Match.tag('handshake.reject', (r) => Ref.set(catalogRef, []).pipe(Effect.zipRight(
+                            Effect.fail(new CommandDispatchError({ details: { code: r.code, message: r.message }, failureClass: r.failureClass, reason: 'rejected' }))))),
+                        Match.orElse((reply) => Effect.fail(new CommandDispatchError({ details: { expected: 'handshake.ack|handshake.reject', received: reply._tag }, reason: 'protocol' })))))));
         const execute = Effect.fn('CommandDispatch.execute')((command: Envelope.Command) =>
             _request(command).pipe(Effect.flatMap((response) => Match.value(response).pipe(
                 Match.tag('result', Effect.succeed),
@@ -80,8 +83,8 @@ class CommandDispatch extends Effect.Service<CommandDispatch>()('kargadan/Comman
                 _tag: 'command', ...identityBase, args, commandId, deadlineMs: options?.deadlineMs ?? commandDeadlineMs,
                 idempotency: options?.idempotency, objectRefs: options?.objectRefs, requestId,
                 telemetryContext: { attempt: Math.max(1, options?.attempt ?? 1), operationTag: options?.operationTag ?? commandId,
-                    spanId: requestId.replaceAll('-', ''), traceId: identityBase.correlationId },
-                undoScope:  options?.undoScope,
+                    spanId:  requestId.replaceAll('-', ''), traceId: identityBase.correlationId },
+                undoScope:   options?.undoScope,
             };
         };
         const buildErrorResult = (command: Envelope.Command, error: Envelope.ErrorPayload): Envelope.Result => ({

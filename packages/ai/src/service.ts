@@ -28,7 +28,7 @@ const ManifestEntrySchema = S.Struct({
         type:        S.NonEmptyTrimmedString,
     })),
 });
-const _ManifestSchema = S.parseJson(S.Array(ManifestEntrySchema));
+const ManifestArraySchema = S.parseJson(S.Array(ManifestEntrySchema));
 
 // --- [SERVICES] --------------------------------------------------------------
 
@@ -74,7 +74,7 @@ class AiService extends Effect.Service<AiService>()('ai/Service', {
             readonly namespace?: string | undefined;
             readonly scopeId?:   string | null | undefined;
         }) => Effect.gen(function* () {
-            const entries = typeof input.manifest === 'string' ? yield* S.decodeUnknown(_ManifestSchema)(input.manifest) : input.manifest;
+            const entries = typeof input.manifest === 'string' ? yield* S.decodeUnknown(ManifestArraySchema)(input.manifest) : input.manifest;
             const namespace = input.namespace ?? 'ai';
             const scopeId = input.scopeId ?? null;
             const entityIds = A.map(entries, (e) => {
@@ -189,13 +189,13 @@ class AiService extends Effect.Service<AiService>()('ai/Service', {
                 ContextSuccess,
                 ContextEncoded extends Record<string, unknown>,
             >(input: {
-                readonly catalogSearch: (term: string) => Effect.Effect<CatalogSuccess, never, never>;
+                readonly catalogSearch:  (term: string) => Effect.Effect<CatalogSuccess, never, never>;
                 readonly commandExecute: (payload: { readonly commandId: string; readonly args: Record<string, unknown> }) => Effect.Effect<CommandSuccess, never, never>;
-                readonly readContext: (query: string) => Effect.Effect<ContextSuccess, never, never>;
+                readonly readContext:    (query: string) => Effect.Effect<ContextSuccess, never, never>;
                 readonly schemas: {
-                    readonly catalogSearch: S.Schema<CatalogSuccess, CatalogEncoded, never>;
+                    readonly catalogSearch:  S.Schema<CatalogSuccess, CatalogEncoded, never>;
                     readonly commandExecute: S.Schema<CommandSuccess, CommandEncoded, never>;
-                    readonly readContext: S.Schema<ContextSuccess, ContextEncoded, never>;
+                    readonly readContext:    S.Schema<ContextSuccess, ContextEncoded, never>;
                 };
             }) =>
             Effect.sync(() => {
@@ -218,9 +218,9 @@ class AiService extends Effect.Service<AiService>()('ai/Service', {
                 );
                 return {
                     layer: toolkit.toLayer({
-                        'catalog.search': ({ term }) => input.catalogSearch(term),
+                        'catalog.search':  ({ term }) => input.catalogSearch(term),
                         'command.execute': ({ args, commandId }) => input.commandExecute({ args, commandId }),
-                        'context.read': ({ query }) => input.readContext(query),
+                        'context.read':    ({ query }) => input.readContext(query),
                     }),
                     toolkit,
                 } as const;
@@ -273,4 +273,4 @@ class AiService extends Effect.Service<AiService>()('ai/Service', {
 
 // --- [EXPORT] ----------------------------------------------------------------
 
-export { AiService, ManifestEntrySchema };
+export { AiService, ManifestArraySchema, ManifestEntrySchema };

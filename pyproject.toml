@@ -16,6 +16,7 @@ dependencies = [
     "expression",
     "stamina",
     "structlog",
+    "suitkaise",
     "typing-extensions",
     "httpx",
 ]

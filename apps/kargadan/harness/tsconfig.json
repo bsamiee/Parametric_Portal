@@ -16,8 +16,7 @@
         "tsBuildInfoFile": "../../../.nx/cache/tsbuildinfo/kargadan-harness.tsbuildinfo",
         "types": ["node", "vitest/globals"]
     },
-    "exclude": ["dist", "node_modules"],
+    "exclude": ["node_modules", "dist"],
     "extends": "../../../tsconfig.base.json",
-    "include": ["src/**/*", "tests/**/*"],
-    "references": []
+    "include": ["src/**/*", "tests/**/*"]
 }
