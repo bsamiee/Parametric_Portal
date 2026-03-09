@@ -172,7 +172,7 @@ const _geminiClient = (clientPath: string) =>
         detail instanceof HarnessHostError ? detail : new HarnessHostError({ detail, message: `Gemini OAuth client file is invalid: ${clientPath}`, reason: 'auth' })));
 const _geminiCallback = Effect.tryPromise({
     catch: (detail) => new HarnessHostError({ detail, message: 'Gemini desktop OAuth listener could not start.', reason: 'auth' }),
-    try:   () => new Promise<{ readonly redirectUri: string; readonly wait: Promise<{ readonly code: string; readonly state: string }> }>((resolve, reject) => {
+    try:   () => new Promise<{ readonly close: () => void; readonly redirectUri: string; readonly wait: Promise<{ readonly code: string; readonly state: string }> }>((resolve, reject) => {
         const server = createServer((req, res) => {
             const url = new URL(req.url ?? '/', `http://127.0.0.1:${String(req.socket.localPort ?? 0)}`);
             const code = url.searchParams.get('code');
@@ -185,22 +185,16 @@ const _geminiCallback = Effect.tryPromise({
                 });
             };
             code !== null && state !== null
-                ? finish(200, 'Kargadan authorization complete. You can close this window.',      () => pending.resolve({ code, state }))
-                : finish(400, 'Kargadan authorization failed. Return to Kargadan and try again.', () => pending.reject(new Error('oauth_callback_missing_code_or_state')));
+                ? finish(200, 'Kargadan authorization complete. You can close this window.',      () => deferred.resolve({ code, state }))
+                : finish(400, 'Kargadan authorization failed. Return to Kargadan and try again.', () => deferred.reject(new Error('oauth_callback_missing_code_or_state')));
         });
-        const pending = {
-            reject:  (_detail: unknown): void => undefined,
-            resolve: (_value: { readonly code: string; readonly state: string }): void => undefined,
-        };
-        const wait = new Promise<{ readonly code: string; readonly state: string }>((nextResolve, nextReject) => {
-            pending.resolve = nextResolve;
-            pending.reject  = nextReject;
-        });
+        const deferred = Promise.withResolvers<{ readonly code: string; readonly state: string }>();
+        const wait = deferred.promise;
         server.once('error', reject);
         server.listen(0, '127.0.0.1', () => {
             const address = server.address();
             address !== null && typeof address !== 'string'
-                ? resolve({ redirectUri: `http://127.0.0.1:${String(address.port)}/oauth/callback`, wait })
+                ? resolve({ close: () => server.close(), redirectUri: `http://127.0.0.1:${String(address.port)}/oauth/callback`, wait })
                 : reject(new Error('oauth_listener_address_invalid'));
         });
     }),
@@ -326,6 +320,7 @@ const KargadanHost = {
                                     duration: Duration.minutes(5),
                                     onTimeout: () => new HarnessHostError({ message: 'Gemini OAuth timed out after 5 minutes.', reason: 'auth' }),
                                 }),
+                                Effect.ensuring(Effect.sync(listener.close)),
                             );
                             const session = yield* AiRegistry.exchangeGeminiAuthorizationCode({
                                 client,

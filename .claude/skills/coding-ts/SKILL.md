@@ -9,7 +9,8 @@ description: >-
   Effect, or lint/type-check posture.
 ---
 
-# Coding TypeScript
+# [H1][CODING-TS]
+>**Dictum:** *TypeScript + Effect style, type discipline, and module organization govern all TS work.*
 
 All code follows five governing principles:
 - **Polymorphic** — one entrypoint per concern, generic over specific, extend over duplicate

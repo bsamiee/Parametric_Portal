@@ -13,7 +13,8 @@ description: >-
   and performance investigations all qualify.
 ---
 
-# Coding PostgreSQL
+# [H1][CODING-PG]
+>**Dictum:** *PostgreSQL schema design, query algebra, and security posture govern all SQL work.*
 
 All SQL follows five governing principles:
 - **Polymorphic** — one function/query per concern, generic over specific via parameter dispatch and dynamic SQL

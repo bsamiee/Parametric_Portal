@@ -62,7 +62,16 @@ const _resolveGeminiCredential = Effect.gen(function* () {
                         operation: 'ai.provider.credentials.gemini',
                         reason:    'unknown',
                     })),
-                    onSome: Effect.succeed,
+                    onSome: (token) => Option.match(tokenExpiry, {
+                        onNone: () => Effect.succeed(token),
+                        onSome: (value) => Number.isFinite(Date.parse(value)) && Date.parse(value) <= Date.now() + 60_000
+                            ? Effect.fail(new AiError({
+                                cause:     { clientPath, expired: value, provider: 'gemini', refreshTokenAvailable: false },
+                                operation: 'ai.provider.credentials.gemini.expired',
+                                reason:    'unknown',
+                            }))
+                            : Effect.succeed(token),
+                    }),
                 })),
                 onSome: (token) => AiRegistry.refreshGeminiAccessToken({ client, refreshToken: Redacted.value(token) }).pipe(
                     Effect.map((next) => Redacted.make(next.accessToken)),

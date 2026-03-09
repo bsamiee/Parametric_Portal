@@ -104,7 +104,7 @@ class AgentLoop extends Effect.Service<AgentLoop>()('kargadan/AgentLoop', {
             const h = { onFailure: input.hooks?.onFailure ?? (() => Effect.void), onStage: input.hooks?.onStage ?? (() => Effect.void),
                 onTool: input.hooks?.onTool ?? (() => Effect.void), onWriteApproval: input.hooks?.onWriteApproval ?? (() => Effect.succeed(false)) } as const;
             const catalogByOp = HashMap.fromIterable(A.map(input.catalog, (e) => [e.id, e] as const));
-            const negCaps = HashSet.fromIterable(input.capabilities);
+            const negotiatedCaps = HashSet.fromIterable(input.capabilities);
             const filtered = A.filterMap(input.catalog, (e) => e.dispatch.mode === 'script' ? Option.none() : Option.some(e.id));
             const operations = filtered.length === 0 ? cfg.resolveLoopOperations : filtered;
             const chatRef = yield* Option.match(input.resume, {
@@ -257,7 +257,7 @@ class AgentLoop extends Effect.Service<AgentLoop>()('kargadan/AgentLoop', {
                 yield* Option.match(fc, { onNone: () => Effect.void, onSome: (f) => h.onFailure({ advice: _FailureGuidance[f],
                     commandId: exec.command.commandId, failureClass: f, message: exec.result.error?.message ?? 'Verification detected non-success.' }) });
                 const detStatus = Option.isSome(fc) ? 'error' as const : 'ok' as const;
-                const visual = yield* (HashSet.has(negCaps, _Aux.viewCapture) ? _aux(state, _Aux.viewCapture, cfg.viewCapture, 'verify.view.capture').pipe(
+                const visual = yield* (HashSet.has(negotiatedCaps, _Aux.viewCapture) ? _aux(state, _Aux.viewCapture, cfg.viewCapture, 'verify.view.capture').pipe(
                     Effect.filterOrFail((r): r is Envelope.Result & { readonly result: unknown } => r.status === 'ok' && r.result != null,
                         (r) => r.status === 'ok' ? 'Capture payload missing.' : (r.error?.message ?? 'Capture failed.')),
                     Effect.flatMap((r) => S.decodeUnknown(_Loop.viewCapture)(r.result)),

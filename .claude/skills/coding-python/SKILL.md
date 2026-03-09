@@ -8,7 +8,8 @@ description: >-
   Protocol-driven services, or configuring pyproject.toml, ruff, or mypy.
 ---
 
-# Enforcing Python
+# [H1][CODING-PYTHON]
+>**Dictum:** *Python expression style, type discipline, and module organization govern all Python work.*
 
 All code follows six governing principles:
 - **Polymorphic** — one entrypoint per concern, generic over specific, extend over duplicate

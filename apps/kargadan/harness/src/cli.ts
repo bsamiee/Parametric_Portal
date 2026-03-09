@@ -1,5 +1,4 @@
 import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import * as ProcessCommand from '@effect/platform/Command';
 import * as FileSystem from '@effect/platform/FileSystem';
@@ -16,9 +15,11 @@ import { readPortFile } from './socket';
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
-const _version = (JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf-8')) as { version: string }).version;
+declare const __APP_VERSION__: string;
+const _version = __APP_VERSION__;
 const _Plugin = {
     artifactDir:      join(ConfigFile.dir, 'live'),
+    // why: prepare is dev-only (build step); requires monorepo root cwd — not included in SEA binary
     buildDir:         join(process.cwd(), 'apps/kargadan/plugin/bin/Release/net9.0'),
     fileName:         'ParametricPortal.Kargadan.Plugin.rhp',
     manifestFileName: 'manifest.yml',
@@ -296,7 +297,7 @@ const _sessionsExportCommand = Command.make('export', {
     const trace = yield* Effect.iterate(first, {
         body: (s) => persistence.trace(input.sessionId, { limit: cfg.exportLimit, ...(s.cursor == null ? {} : { cursor: s.cursor }) }).pipe(
             Effect.map((p) => ({ ...p, items: [...s.items, ...p.items] }))),
-        while: (s) => s.hasNext && s.cursor !== null });
+        while: (s) => s.hasNext && s.cursor != null });
     const esc = (v: string) => `"${v.replaceAll('"', '""')}"`;
     const content = input.format === 'ndjson'
         ? `${trace.items.map((i) => JSON.stringify({ ...i, result: Option.getOrUndefined(i.result) })).join('\n')}\n`
@@ -467,8 +468,8 @@ const _initWizard = Effect.gen(function* () {
     );
     yield* ConfigFile.write({
         ...config,
-        ai: { ...(config.ai ?? {}), geminiClientPath: Option.getOrUndefined(geminiClientPath), languageModel: model, languageProvider: provider },
-        database: { ...(config.database ?? {}), url: databaseUrl },
+        ai: { ...config.ai, geminiClientPath: Option.getOrUndefined(geminiClientPath), languageModel: model, languageProvider: provider },
+        database: { ...config.database, url: databaseUrl },
     }).pipe(Effect.mapError(_toCliError));
     yield* _print('Kargadan initialized', [`provider: ${provider}`, `model: ${model}`, `config: ${ConfigFile.path}`,
         `database: ${databaseUrl}`, `auth: enrolled in macOS Keychain`]);
@@ -522,20 +523,22 @@ const _authLoginCommand = Command.make('login', {
 }));
 const _authLogoutCommand = Command.make('logout', {
     provider: Options.text('provider').pipe(Options.withDescription('Provider name (anthropic|gemini|openai); omit to clear all'), Options.optional),
-}, (input) => input.provider.pipe(
-    Option.map((value) => value.trim()),
-    Option.filter((value): value is keyof typeof PROVIDER_VOCABULARY => Object.hasOwn(PROVIDER_VOCABULARY, value)),
-    Option.match({
-        onNone: () => KargadanHost.auth.logout().pipe(
-            Effect.mapError(_toCliError),
-            Effect.zipRight(_print('auth logout', ['providers=all', 'status=cleared'])),
-        ),
-        onSome: (provider) => KargadanHost.auth.logout(provider).pipe(
-            Effect.mapError(_toCliError),
-            Effect.zipRight(_print('auth logout', [`provider=${provider}`, 'status=cleared'])),
-        ),
+}, (input) => Option.match(input.provider, {
+    onNone: () => KargadanHost.auth.logout().pipe(
+        Effect.mapError(_toCliError),
+        Effect.zipRight(_print('auth logout', ['providers=all', 'status=cleared'])),
+    ),
+    onSome: (raw) => Effect.gen(function* () {
+        const trimmed = raw.trim();
+        yield* Effect.filterOrFail(
+            Effect.succeed(trimmed),
+            (value): value is keyof typeof PROVIDER_VOCABULARY => Object.hasOwn(PROVIDER_VOCABULARY, value),
+            () => new CliError({ message: `Unknown provider '${trimmed}'. Valid: ${Object.keys(PROVIDER_VOCABULARY).join(', ')}`, reason: 'validation' }),
+        );
+        yield* KargadanHost.auth.logout(trimmed as keyof typeof PROVIDER_VOCABULARY).pipe(Effect.mapError(_toCliError));
+        yield* _print('auth logout', [`provider=${trimmed}`, 'status=cleared']);
     }),
-));
+}));
 const _authCommand = Command.make('auth', {}, () => Effect.void).pipe(
     Command.withSubcommands([_authLoginCommand, _authStatusCommand, _authLogoutCommand]),
     Command.withDescription('Credential enrollment and status commands.'),

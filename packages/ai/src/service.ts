@@ -122,9 +122,12 @@ class AiService extends Effect.Service<AiService>()('ai/Service', {
                     const { ctx, scopeId, subjectId } = yield* _resolveSearchContext();
                     const settings = yield* model.settings();
                     const { dimensions, model: embeddingModel } = settings.embedding;
-                    const embedding = yield* model.embed(options.term);
+                    const embedding = yield* model.embed(options.term).pipe(
+                        Effect.map((vector) => Option.some({ dimensions, model: embeddingModel, vector })),
+                        Effect.catchAll((cause) => Telemetry.emit('search.embed.degraded', { error: String(cause), term: options.term }).pipe(Effect.as(Option.none()))),
+                    );
                     const result = yield* database.search.search(
-                        { ...options, embedding: { dimensions, model: embeddingModel, vector: embedding }, scopeId },
+                        { ...options, ...Option.match(embedding, { onNone: () => ({}), onSome: (e) => ({ embedding: e }) }), scopeId },
                         pagination,
                     );
                     yield* _track('Search.read', { entityTypes: options.entityTypes, resultCount: result.total, term: options.term }, subjectId, metrics.search.queries, MetricsService.label({ tenant: ctx.tenantId }));
