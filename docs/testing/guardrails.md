@@ -38,7 +38,7 @@ Stryker detects circular tests by injecting code mutants (arithmetic operator sw
 
 If a file scores below 60%, investigate whether the test re-derives source branching logic. The fix is typically replacing hardcoded expected values with algebraic laws or external oracle comparisons.
 
-**Command:** `pnpm test:mutate`. See [tooling.md](tooling.md) for Stryker configuration details.
+**Command:** `npx stryker run`. See [tooling.md](tooling.md) for Stryker configuration details.
 
 ---
 ## [3][HOOK_ENFORCEMENT]

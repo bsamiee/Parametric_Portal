@@ -124,8 +124,8 @@ All code follows six governing principles:
 
 ## Validation gate
 
-- Required during iteration: `pnpm py:check`.
-- Required for final completion: `pnpm ts:check`, `pnpm cs:check`, `pnpm py:check`.
+- Required during iteration: `pnpm python`.
+- Required for final completion: `pnpm quality`, `pnpm dotnet`, `pnpm python`.
 - Reject completion when load order, contracts, or checks are not satisfied.
 
 

@@ -70,6 +70,9 @@ public sealed partial class CommandOperation {
     public static readonly CommandOperation ObjectUpdate = new("write.object.update");
     public static readonly CommandOperation ObjectDelete = new("write.object.delete");
     public static readonly CommandOperation ScriptRun = new("script.run");
+    public static readonly CommandOperation CatalogRhinoCommands = new("catalog.rhinoCommands");
+    public static readonly CommandOperation ObjectList = new("read.object.list");
+    public static readonly CommandOperation SelectionManage = new("write.selection");
     public CommandExecutionMode ExecutionMode =>
         Map(
             sceneSummary: CommandExecutionMode.DirectApi,
@@ -82,7 +85,10 @@ public sealed partial class CommandOperation {
             objectCreate: CommandExecutionMode.DirectApi,
             objectUpdate: CommandExecutionMode.DirectApi,
             objectDelete: CommandExecutionMode.DirectApi,
-            scriptRun: CommandExecutionMode.Script);
+            scriptRun: CommandExecutionMode.Script,
+            catalogRhinoCommands: CommandExecutionMode.DirectApi,
+            objectList: CommandExecutionMode.DirectApi,
+            selectionManage: CommandExecutionMode.DirectApi);
     public CommandCategory Category =>
         Map(
             sceneSummary: CommandCategory.Read,
@@ -95,7 +101,10 @@ public sealed partial class CommandOperation {
             objectCreate: CommandCategory.Write,
             objectUpdate: CommandCategory.Write,
             objectDelete: CommandCategory.Write,
-            scriptRun: CommandCategory.Geometric);
+            scriptRun: CommandCategory.Geometric,
+            catalogRhinoCommands: CommandCategory.Read,
+            objectList: CommandCategory.Read,
+            selectionManage: CommandCategory.Write);
     public static bool SupportsCapability(string capability) =>
         TryGet((capability ?? string.Empty).Trim(), out CommandOperation? _);
 }

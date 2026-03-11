@@ -57,7 +57,7 @@ Arbitraries must produce diverse, representative inputs covering the domain's ed
 
 ### [3.1][MUTATION_ANALYSIS]
 
-**Command:** `pnpm test:mutate`
+**Command:** `npx stryker run`
 
 Run Stryker after semantic gate passes. Analyze surviving mutants to determine if they are equivalent (semantically identical to original) or genuine test gaps.
 

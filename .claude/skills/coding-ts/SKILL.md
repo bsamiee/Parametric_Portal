@@ -164,8 +164,8 @@ One library's types per module boundary. Bridge at layer edges via Schema decode
 
 ## Validation gate
 
-- Required during iteration: `pnpm ts:check`.
-- Required for final completion: `pnpm ts:check`, `pnpm cs:check`, `pnpm py:check`.
+- Required during iteration: `pnpm quality`.
+- Required for final completion: `pnpm quality`, `pnpm dotnet`, `pnpm python`.
 - Reject completion when load order, contracts, or checks are not satisfied.
 
 ## First-class libraries

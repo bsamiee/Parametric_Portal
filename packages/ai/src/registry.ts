@@ -32,20 +32,25 @@ const _GeminiDesktopClientSchema = S.parseJson(S.Struct({
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
-const _ProviderVocabulary = {
+const _ProviderCatalog = {
     anthropic: {
-        credential: { key: 'KARGADAN_AI_ANTHROPIC_API_SECRET', kind: 'api-secret', legacyKey: 'ANTHROPIC_API_KEY' },
+        credential: {
+            configKeys: { secret: 'AI_ANTHROPIC_API_SECRET' },
+            kind:       'api-secret',
+        },
         defaultModel: 'claude-sonnet-4-20250514',
         title:        'Anthropic (Claude)',
     },
     gemini: {
         credential: {
-            accessTokenKey: 'KARGADAN_AI_GEMINI_ACCESS_TOKEN',
-            clientPathKey:  'KARGADAN_AI_GEMINI_CLIENT_PATH',
-            expiryKey:      'KARGADAN_AI_GEMINI_TOKEN_EXPIRY',
-            kind:           'oauth-desktop',
-            refreshTokenKey:'KARGADAN_AI_GEMINI_REFRESH_TOKEN',
-            scopes:         [
+            configKeys: {
+                accessToken:  'AI_GEMINI_ACCESS_TOKEN',
+                clientPath:   'AI_GEMINI_CLIENT_PATH',
+                expiry:       'AI_GEMINI_TOKEN_EXPIRY',
+                refreshToken: 'AI_GEMINI_REFRESH_TOKEN',
+            },
+            kind: 'oauth-desktop',
+            scopes: [
                 'https://www.googleapis.com/auth/cloud-platform',
                 'https://www.googleapis.com/auth/generative-language.retriever',
             ],
@@ -55,7 +60,10 @@ const _ProviderVocabulary = {
         title:        'Google (Gemini)',
     },
     openai: {
-        credential: { key: 'KARGADAN_AI_OPENAI_API_SECRET', kind: 'api-secret', legacyKey: 'OPENAI_API_KEY' },
+        credential: {
+            configKeys: { secret: 'AI_OPENAI_API_SECRET' },
+            kind:       'api-secret',
+        },
         defaultModel: 'gpt-4.1',
         title:        'OpenAI',
     },
@@ -163,13 +171,13 @@ const AiRegistry = {
         ...settings,
         embedding: {
             ...settings.embedding,
-            model:    sessionOverride.embedding?.model ?? settings.embedding.model,
+            model:    sessionOverride.embedding?.model    ?? settings.embedding.model,
             provider: sessionOverride.embedding?.provider ?? settings.embedding.provider,
         },
         language: {
             ...settings.language,
             fallback: sessionOverride.language?.fallback ?? settings.language.fallback,
-            model:    sessionOverride.language?.model ?? settings.language.model,
+            model:    sessionOverride.language?.model    ?? settings.language.model,
             provider: sessionOverride.language?.provider ?? settings.language.provider,
         },
     }),
@@ -186,7 +194,6 @@ const AiRegistry = {
             tokenUri:     installed.token_uri,
         })),
     ),
-    decodeSessionOverride: (raw: unknown) => S.decodeUnknown(_SessionOverrideSchema)(raw),
     decodeSessionOverrideFromInput: (input: { readonly fallback: ReadonlyArray<string>; readonly model: string; readonly provider: string }) =>
         input.model === '' && input.provider === ''
             ? Effect.succeed(Option.none<AiRegistry.SessionOverride>())
@@ -212,7 +219,7 @@ const AiRegistry = {
             access_type: 'offline', client_id: input.client.clientId,
             code_challenge: input.codeChallenge, code_challenge_method: 'S256',
             prompt: 'consent', redirect_uri: input.redirectUri,
-            response_type: 'code', scope: _ProviderVocabulary.gemini.credential.scopes.join(' '),
+            response_type: 'code', scope: _ProviderCatalog.gemini.credential.scopes.join(' '),
             state: input.state,
         })}`),
     layers: (settings: S.Schema.Type<typeof AiSettingsSchema>, credentials: AiRegistry.Credentials) => ({
@@ -221,7 +228,7 @@ const AiRegistry = {
         language:         _providers[settings.language.provider].language(settings.language, credentials),
     }),
     OnTokenRefreshRef:   _OnTokenRefreshRef,
-    providerVocabulary:  _ProviderVocabulary,
+    providers:           _ProviderCatalog,
     refreshGeminiAccessToken: (input: { readonly client: AiRegistry.GeminiDesktopClient; readonly refreshToken: string }) =>
         _tokenRequest(input.client.tokenUri, {
             client_id: input.client.clientId, client_secret: input.client.clientSecret,

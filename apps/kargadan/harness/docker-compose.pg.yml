@@ -1,0 +1,41 @@
+# Kargadan local development — PG 18 + pgvector 0.8.2
+# Usage: docker compose -f docker-compose.pg.yml up -d --wait
+services:
+  kargadan-pg:
+    image: pgvector/pgvector:0.8.2-pg18
+    container_name: kargadan-pg
+    restart: unless-stopped
+    ports:
+      - "5434:5432"
+    environment:
+      POSTGRES_USER: kargadan
+      POSTGRES_PASSWORD: ${KARGADAN_PG_PASSWORD:?KARGADAN_PG_PASSWORD is required}
+      POSTGRES_DB: kargadan
+    volumes:
+      - kargadan-pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kargadan -d kargadan"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    shm_size: 256mb
+    command:
+      - postgres
+      - -c
+      - shared_preload_libraries=vector
+      - -c
+      - max_connections=20
+      - -c
+      - work_mem=64MB
+      - -c
+      - maintenance_work_mem=512MB
+      - -c
+      - effective_cache_size=1GB
+      - -c
+      - random_page_cost=1.1
+      - -c
+      - shared_buffers=256MB
+
+volumes:
+  kargadan-pg-data:
+    driver: local

@@ -4,14 +4,12 @@
     "private": true,
     "type": "module",
     "scripts": {
-        "build": "vite build",
         "check": "biome check .",
         "dev": "tsx watch src/main.ts",
-        "fix": "biome check --write .",
         "hadolint": "hadolint Dockerfile",
         "migrate": "tsx src/migrate.ts",
         "start": "node dist/main.js",
-        "typecheck": "tsc --project tsconfig.json --noEmit"
+        "test": "vitest run --passWithNoTests"
     },
     "dependencies": {
         "@effect/experimental": "catalog:",

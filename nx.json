@@ -249,8 +249,14 @@
             "executor": "nx:run-commands",
             "options": { "command": "tsx watch tools/scripts/generate-pwa-icons.ts", "cwd": "{projectRoot}" }
         },
-        "test": { "inputs": ["testing", "^production"], "outputs": ["{projectRoot}/coverage", "{workspaceRoot}/test-results"] },
-        "test:mutate": { "cache": true, "inputs": ["testing", "^production"], "outputs": ["{workspaceRoot}/test-results/mutation"] },
+        "test": {
+            "inputs": ["testing", "^production"],
+            "outputs": [
+                "{projectRoot}/coverage",
+                "{workspaceRoot}/test-results",
+                "{workspaceRoot}/node_modules/.vitest"
+            ]
+        },
         "test:ui": {
             "cache": false,
             "executor": "nx:run-commands",

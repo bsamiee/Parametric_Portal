@@ -53,7 +53,7 @@ Generate dense, law-driven test suites. Pure transformations tested via algebrai
 8. **Author spec from template** -- Pick `unit-pbt`, `integration`, or `contract` template from `templates/`.
 9. **Verify oracle independence** -- Walk guardrails checklist from [->guardrails.md](./references/guardrails.md). Expected values come from laws, external refs, or standards -- never from re-deriving source logic.
 10. **Verify coverage** -- Predict branch coverage from properties. Add `[EDGE_CASES]` section if <95% predicted. Run `pnpm exec nx test -- --coverage` to confirm.
-11. **Run mutation testing** -- `pnpm test:mutate` to verify tests kill mutants. Stryker TS checker eliminates compile-error mutants; `vitest.related: true` scopes test runs.
+11. **Run mutation testing** -- `npx stryker run` to verify tests kill mutants. Stryker TS checker eliminates compile-error mutants; `vitest.related: true` scopes test runs.
 
 ---
 ## [2][HARD_CONSTRAINTS]
@@ -263,7 +263,7 @@ it.effect.prop('roundtrip', { req: NotificationService.Request }, ({ req }) =>
 - [ ] Stryker runs with TS checker enabled (`checkers: ['typescript']`)
 
 **Stryker Integration:**
-- [ALWAYS] Run `pnpm test:mutate` after semantic gate passes.
+- [ALWAYS] Run `npx stryker run` after semantic gate passes.
 - [ALWAYS] Verify TS checker is enabled in `stryker.config.mjs` (`checkers: ['typescript']`).
 - [ALWAYS] Use `vitest.related: true` for per-mutant test scoping.
 - [ALWAYS] Use dynamic concurrency (remove hardcoded `concurrency` setting).

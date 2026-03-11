@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { AiRegistry } from '@parametric-portal/ai/registry';
-import { AiService, ManifestArraySchema, type ManifestEntrySchema } from '@parametric-portal/ai/service';
+import { AiService, type ManifestEntrySchema } from '@parametric-portal/ai/service';
 import { AgentPersistenceService } from '@parametric-portal/database/agent-persistence';
 import { Client } from '@parametric-portal/database/client';
 import { DatabaseService } from '@parametric-portal/database/repos';
@@ -14,8 +14,10 @@ import { KargadanSocketClientLive, ReconnectionSupervisor } from './socket';
 
 // --- [SCHEMA] ----------------------------------------------------------------
 
-const _MarkerSchema     = S.Struct({ hash: S.String, manifestVersion: S.String });
-const _LiveSceneSummary = S.Struct({ objectCount: S.Int.pipe(S.greaterThanOrEqualTo(0)) });
+const _MarkerSchema          = S.Struct({ hash: S.String, manifestVersion: S.String });
+const _LiveSceneSummary      = S.Struct({ objectCount: S.Int.pipe(S.greaterThanOrEqualTo(0)) });
+const _MANIFEST_ENTITY_TYPE  = 'command' as const;
+const _MANIFEST_NAMESPACE    = 'kargadan' as const;
 
 // --- [FUNCTIONS] -------------------------------------------------------------
 
@@ -52,13 +54,18 @@ const makeInteractiveHooks = (
         return emit('code', `[tool:${e.source}]`, `${e.phase} ${e.command.commandId} (${e.durationMs}ms) ${suffix}`);
     },
 }) satisfies Pick<NonNullable<Parameters<AgentLoop['handle']>[0]['hooks']>, 'onFailure' | 'onStage' | 'onTool'>;
+
+// why: three deterministic resume paths — no auto|off enum
+// 1. --session <id>  -> resume that session
+// 2. --continue      -> resume latest via findResumable
+// 3. positional intent or bare invocation -> fresh (bare falls back to resume latest if available)
 const run = Effect.fn('kargadan.harness.runHarness')((input?: {
     readonly architectFallback?: ReadonlyArray<string>;
     readonly architectModel?:    string;
     readonly architectProvider?: string;
+    readonly continue?:          boolean;
     readonly hooks?:             Parameters<AgentLoop['handle']>[0]['hooks'];
     readonly intent?:            string;
-    readonly resume?:            'auto' | 'off';
     readonly sessionId?:         string;
 }) =>
     Effect.scoped(
@@ -73,23 +80,18 @@ const run = Effect.fn('kargadan.harness.runHarness')((input?: {
             });
             const architectOverride = Option.orElse(architectOverrideInput, () => cfg.resolveArchitectOverride);
             const intent = input?.intent ?? cfg.agentIntent;
-            const resumeMode = input?.resume ?? 'auto';
             const requestedSessionId = Option.fromNullable(input?.sessionId);
+            const wantsContinue = input?.continue === true;
             yield* FiberRef.set(AiRegistry.SessionOverrideRef, cfg.resolveSessionOverride);
             yield* FiberRef.set(AiRegistry.OnTokenRefreshRef, Option.some(KargadanHost.auth.onTokenRefresh));
             const correlationId = crypto.randomUUID().replaceAll('-', '');
-            const resumableSessionId = yield* Match.value(resumeMode).pipe(
-                Match.when('off', () => Effect.succeed(Option.none<string>())),
-                Match.orElse(() =>
-                    Context.Request.withinSync(
-                        cfg.appId,
-                        Option.match(requestedSessionId, {
-                            onNone: () => persistence.findResumable(cfg.appId),
-                            onSome: (id) => Effect.succeed(Option.some(id)),
-                        }),
-                        { requestId: correlationId },
-                    )),
-            );
+            // why: deterministic resume — derive from flag presence, not enum
+            const resumableSessionId = yield* Option.match(requestedSessionId, {
+                onNone: () => wantsContinue || input?.intent === undefined
+                    ? Context.Request.withinSync(cfg.appId, persistence.findResumable(cfg.appId), { requestId: correlationId })
+                    : Effect.succeed(Option.none<string>()),
+                onSome: (id) => Effect.succeed(Option.some(id)),
+            });
             const hydration = yield* Option.match(resumableSessionId, {
                 onNone: () => Effect.succeed(Option.none()),
                 onSome: (sid) => Context.Request.withinSync(cfg.appId, persistence.hydrate(sid).pipe(Effect.map(Option.some)), { requestId: correlationId }),
@@ -116,15 +118,12 @@ const run = Effect.fn('kargadan.harness.runHarness')((input?: {
                         const ack = yield* dispatch.handshake({ ...identityBase, requestId: crypto.randomUUID(), token: cfg.sessionToken });
                         const receivedCatalog = yield* dispatch.receiveCatalog();
                         const handshakeCatalog = receivedCatalog.length === 0 ? ack.catalog : receivedCatalog;
-                        const envManifest = yield* S.decodeUnknown(ManifestArraySchema)(cfg.commandManifestJson).pipe(Effect.option);
-                        const mergedManifest = _mergeManifest(handshakeCatalog, envManifest);
-                        const seedProjection = mergedManifest.length === 0
-                            ? { manifest: cfg.commandManifestJson, source: 'env' as const, version: cfg.commandManifestVersion }
-                            : { manifest: mergedManifest, source: 'handshake' as const,
-                                version: `handshake:${ack.server?.pluginRevision ?? 'unknown'}:${String(mergedManifest.length)}` };
-                        const serializedManifest = typeof seedProjection.manifest === 'string' ? seedProjection.manifest : JSON.stringify(seedProjection.manifest);
-                        const scope = Option.getOrElse(cfg.commandManifestScopeId, () => 'global');
-                        const markerKey = `kargadan:manifest:${cfg.commandManifestNamespace}:${cfg.commandManifestEntityType}:${scope}`;
+                        // why: template catalog entries enable agent planning of structured script commands
+                        const mergedManifest = [..._mergeManifest(handshakeCatalog, Option.none()), ...CommandDispatch.templateCatalog];
+                        const seedProjection = { manifest: mergedManifest, source: 'handshake' as const,
+                            version: `handshake:${ack.server?.pluginRevision ?? 'unknown'}:${String(mergedManifest.length)}` };
+                        const serializedManifest = JSON.stringify(seedProjection.manifest);
+                        const markerKey = `kargadan:manifest:${_MANIFEST_NAMESPACE}:${_MANIFEST_ENTITY_TYPE}:${cfg.appId}`;
                         const markerValue = { hash: createHash('sha256').update(`${seedProjection.version}\n${serializedManifest}`).digest('hex'),
                             manifestVersion: seedProjection.version };
                         yield* Client.tenant.with(cfg.appId, database.kvStore.getJson(markerKey, _MarkerSchema)).pipe(
@@ -133,8 +132,8 @@ const run = Effect.fn('kargadan.harness.runHarness')((input?: {
                                 onSome: (stored) => stored.hash !== markerValue.hash || stored.manifestVersion !== markerValue.manifestVersion,
                             })),
                             Effect.flatMap((needs) => Effect.when(
-                                ai.seedKnowledge({ entityType: cfg.commandManifestEntityType, manifest: seedProjection.manifest,
-                                    namespace: cfg.commandManifestNamespace, scopeId: Option.getOrNull(cfg.commandManifestScopeId) }).pipe(
+                                ai.seedKnowledge({ entityType: _MANIFEST_ENTITY_TYPE, manifest: seedProjection.manifest,
+                                    namespace: _MANIFEST_NAMESPACE, scopeId: null }).pipe(
                                     Effect.zipRight(Client.tenant.with(cfg.appId, database.kvStore.setJson(markerKey, markerValue, _MarkerSchema))),
                                     Effect.zipRight(Effect.log('kargadan.harness.kb.seed.applied', {
                                         manifestHash: markerValue.hash, markerKey, source: seedProjection.source }))),

@@ -46,19 +46,20 @@ If reviewing, refining, editing, creating, or modifying X file type, use skill Y
 
 [CRITICAL]: Use exact commands — [NEVER] invent flags, bare `nx`, or `npx nx`.
 
-| [INDEX] | [TASK]          | [COMMAND]                                                                 |
-| :-----: | :-------------- | :------------------------------------------------------------------------ |
-|   [1]   | typecheck       | `pnpm exec nx run-many -t typecheck`                                      |
-|   [2]   | lint            | `npx @biomejs/biome check <files>` *(no Nx target — direct only)*         |
-|   [3]   | quality gate    | `pnpm quality` *(typecheck + biome + knip + sherif)*                      |
-|   [4]   | test (root)     | `pnpm test` *(clears vitest cache; `tests/` dir only)*                    |
-|   [5]   | test (packages) | `pnpm exec nx run-many -t test`                                           |
-|   [6]   | test (affected) | `pnpm exec nx affected -t test --base=main`                               |
-|   [7]   | test (coverage) | `pnpm test:coverage`                                                      |
-|   [8]   | test (mutation) | `pnpm test:mutate` *(incremental; `pnpm clean` first for fresh baseline)* |
-|   [9]   | cache clear     | `pnpm exec nx reset`                                                      |
-|  [10]   | full reset      | `pnpm reset` *(clean + install + rebuild)*                                |
-|  [11]   | single target   | `pnpm exec nx run <project>:<target>`                                     |
+| [INDEX] | [TASK]            | [COMMAND]                                                        |
+| :-----: | :---------------- | :--------------------------------------------------------------- |
+|   [1]   | typecheck         | `pnpm exec nx run-many -t typecheck`                             |
+|   [2]   | lint              | `npx @biomejs/biome check <files>`                               |
+|   [3]   | quality gate      | `pnpm quality`                                                   |
+|   [4]   | test              | `pnpm test`                                                      |
+|   [5]   | test (all)        | `pnpm exec nx run-many -t test`                                  |
+|   [6]   | test (coverage)   | `pnpm exec nx affected -t test -- --coverage`                    |
+|   [7]   | test (mutation)   | `npx stryker run`                                                |
+|   [8]   | test (single)     | `pnpm exec nx run <project>:test`                                |
+|   [9]   | dotnet check      | `pnpm dotnet`                                                    |
+|  [10]   | python check      | `pnpm python`                                                    |
+|  [11]   | cache clear       | `pnpm exec nx reset`                                             |
+|  [12]   | single target     | `pnpm exec nx run <project>:<target>`                            |
 
 ---
 ## [2][PHILOSOPHY]

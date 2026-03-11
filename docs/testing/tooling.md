@@ -125,7 +125,7 @@ Configured in `nx.json` plugins array. No manual target configuration required.
 |   [3]   | `pnpm exec nx run-many -t test` | Parallel test across projects         |
 |   [4]   | `pnpm vitest --ui`              | Open Vitest UI dashboard              |
 |   [5]   | `pnpm vitest --coverage`        | Generate coverage report              |
-|   [6]   | `pnpm test:mutate`              | Run Stryker mutation testing          |
+|   [6]   | `npx stryker run`               | Run Stryker mutation testing          |
 |   [7]   | `pnpm e2e`                      | Run E2E tests (`-- --ui` for UI mode) |
 |   [8]   | `pnpm e2e:report`               | View Playwright HTML report           |
 

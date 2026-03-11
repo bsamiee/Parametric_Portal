@@ -94,7 +94,7 @@ jobs:
 
       - name: Quality Gates (Lint, Typecheck, Build)
         if: steps.auto-fix.outputs.has-changes != 'true'
-        run: pnpm exec nx affected -t restore,lint,typecheck,build --parallel=4
+        run: pnpm exec nx affected -t restore,check,typecheck,build --parallel=4
 
       - name: C# Helper Naming Guard
         if: steps.auto-fix.outputs.has-changes != 'true'

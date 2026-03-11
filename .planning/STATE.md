@@ -122,7 +122,7 @@ Recent decisions affecting current work:
 
 **Execution Steps**
 1. Run protocol conformance smoke with live gate enabled: `KARGADAN_LIVE_TESTS=1 pnpm exec vitest run tests/integration/kargadan/phase7-live.spec.ts`
-2. Run non-GH validation matrix: plugin restore/build, harness typecheck/check/test, package type/lint checks, global `pnpm ts:check`, `pnpm cs:check`, `pnpm py:check`
+2. Run non-GH validation matrix: plugin restore/build, harness typecheck/check/test, package type/lint checks, global `pnpm quality`, `pnpm dotnet`, `pnpm python`
 3. Execute one manual Rhino session: handshake/catalog ingest -> write command -> Cmd+Z undo -> optional `view.capture` -> reconnect/resume checkpoint
 
 **Expected Artifacts Per Session**

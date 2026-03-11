@@ -61,7 +61,7 @@ Link to language-specific standards; do not inline them. Section contains one H2
 Commands and coverage expectations. Section contains one H2 heading (`## Testing`) followed by two inline code commands and a coverage threshold statement:
 
 - **Run all tests:** `pnpm test`
-- **Run with coverage:** `pnpm test:coverage`
+- **Run with coverage:** `pnpm exec nx run-many -t test -- --coverage`
 - **Coverage threshold:** 80% line coverage; PRs below threshold fail CI.
 
 ---

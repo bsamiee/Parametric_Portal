@@ -39,10 +39,10 @@ const AiSettingsSchema = (() => {
     const embedding = S.Struct({
         cacheCapacity:   S.optionalWith(S.Int, { default: () => 1000 }),
         cacheTtlMinutes: S.optionalWith(S.Int, { default: () => 30   }),
-        dimensions:      S.optionalWith(S.Int, { default: () => 1536 }),
+        dimensions:      S.optionalWith(S.Int, { default: () => 3072 }),
         maxBatchSize:    S.optionalWith(S.Int, { default: () => 256  }),
         mode:            S.optionalWith(S.Literal('batched', 'data-loader'), { default: () => 'batched' as const }),
-        model:           S.optionalWith(S.String, { default: () => 'text-embedding-3-small' }),
+        model:           S.optionalWith(S.String, { default: () => 'text-embedding-3-large' }),
         provider:        S.optionalWith(S.Literal('openai'), { default: () => 'openai' as const }),
         windowMs:        S.optionalWith(S.Int, { default: () => 200 }),
     });

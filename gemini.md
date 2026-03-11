@@ -53,8 +53,8 @@ If reviewing, refining, editing, creating, or modifying X file type, use skill Y
 |   [4]   | test (root)     | `pnpm test` *(clears vitest cache; `tests/` dir only)*                    |
 |   [5]   | test (packages) | `pnpm exec nx run-many -t test`                                           |
 |   [6]   | test (affected) | `pnpm exec nx affected -t test --base=main`                               |
-|   [7]   | test (coverage) | `pnpm test:coverage`                                                      |
-|   [8]   | test (mutation) | `pnpm test:mutate` *(incremental; `pnpm clean` first for fresh baseline)* |
+|   [7]   | test (coverage) | `pnpm exec nx run-many -t test -- --coverage`                              |
+|   [8]   | test (mutation) | `npx stryker run` *(incremental; `pnpm clean` first for fresh baseline)*  |
 |   [9]   | cache clear     | `pnpm exec nx reset`                                                      |
 |  [10]   | full reset      | `pnpm reset` *(clean + install + rebuild)*                                |
 |  [11]   | single target   | `pnpm exec nx run <project>:<target>`                                     |

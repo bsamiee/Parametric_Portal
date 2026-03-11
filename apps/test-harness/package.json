@@ -4,13 +4,10 @@
 	"type": "module",
 	"private": true,
 	"scripts": {
-		"build": "vite build",
 		"check": "biome check .",
 		"dev": "vite dev --host",
-		"fix": "biome check --write .",
 		"preview": "vite preview --host",
-		"test": "vitest run --passWithNoTests",
-		"typecheck": "tsc --project tsconfig.json --noEmit"
+		"test": "vitest run --passWithNoTests"
 	},
 	"dependencies": {
 		"@parametric-portal/components-next": "workspace:*",

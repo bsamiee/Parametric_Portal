@@ -1,10 +1,13 @@
 import { SqlClient } from '@effect/sql';
-import { Effect } from 'effect';
+import { AiSettingsSchema } from '@parametric-portal/database/models';
+import { Effect, Schema as S } from 'effect';
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
 // why: named constants avoid magic numbers in DDL; centralizes tuning for HNSW + embedding dimensions
-const _EMBEDDING_DIMENSIONS   = 3072;
+const _AI_SETTINGS            = S.decodeSync(AiSettingsSchema)({});
+const _DEFAULT_EMBEDDING_MODEL = _AI_SETTINGS.embedding.model;
+const _EMBEDDING_DIMENSIONS   = _AI_SETTINGS.embedding.dimensions;
 const _HNSW_M                 = 24;
 const _HNSW_EF_CONSTRUCTION   = 200;
 const _GIST_SIGLEN            = 64;
@@ -95,6 +98,36 @@ BEGIN
     END IF;
 END $$;
 
+-- embedding_models
+CREATE TABLE IF NOT EXISTS embedding_models (
+    id UUID PRIMARY KEY DEFAULT uuidv7(),
+    provider TEXT NOT NULL,
+    model TEXT NOT NULL,
+    dimensions INTEGER NOT NULL CHECK (dimensions > 0),
+    is_default BOOLEAN NOT NULL DEFAULT false,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT embedding_models_provider_model_unique UNIQUE (provider, model)
+);
+DROP INDEX IF EXISTS idx_embedding_models_default;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_embedding_models_single_default ON embedding_models (is_default) WHERE is_default = true;
+
+CREATE OR REPLACE FUNCTION enforce_single_default_embedding_model() RETURNS TRIGGER
+    LANGUAGE plpgsql SECURITY INVOKER SET search_path = public
+AS $$
+BEGIN
+    IF NEW.is_default = true THEN
+        UPDATE embedding_models SET is_default = false WHERE is_default = true AND id <> NEW.id;
+    END IF;
+    RETURN NEW;
+END $$;
+
+DROP TRIGGER IF EXISTS trg_embedding_models_single_default ON embedding_models;
+CREATE TRIGGER trg_embedding_models_single_default BEFORE INSERT OR UPDATE OF is_default ON embedding_models
+    FOR EACH ROW WHEN (NEW.is_default = true) EXECUTE FUNCTION enforce_single_default_embedding_model();
+DROP TRIGGER IF EXISTS trg_embedding_models_updated ON embedding_models;
+CREATE TRIGGER trg_embedding_models_updated BEFORE UPDATE ON embedding_models FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
 -- apps
 CREATE TABLE IF NOT EXISTS apps (
     id UUID PRIMARY KEY DEFAULT uuidv7(),
@@ -176,10 +209,15 @@ CREATE INDEX IF NOT EXISTS idx_search_chunks_scope_entity_trgm ON search_chunks
 CREATE INDEX IF NOT EXISTS idx_search_chunks_trgm_knn ON search_chunks USING GIST (normalized_text gist_trgm_ops(siglen=${_GIST_SIGLEN}));
 CREATE INDEX IF NOT EXISTS idx_search_chunks_phonetic ON search_chunks (phonetic_code) WHERE phonetic_code <> '';
 CREATE INDEX IF NOT EXISTS idx_search_chunks_phonetic_daitch ON search_chunks USING GIN (phonetic_daitch);
-ALTER TABLE search_chunks ADD COLUMN IF NOT EXISTS embedding HALFVEC(${_EMBEDDING_DIMENSIONS});
 CREATE INDEX IF NOT EXISTS idx_search_chunks_embedding ON search_chunks USING hnsw (embedding halfvec_cosine_ops) WITH (m = ${_HNSW_M}, ef_construction = ${_HNSW_EF_CONSTRUCTION});
 CREATE INDEX IF NOT EXISTS idx_search_chunks_scope_embedding ON search_chunks (scope_id, entity_type, model, dimensions);
 CREATE INDEX IF NOT EXISTS idx_search_chunks_model_dim ON search_chunks (model, dimensions) INCLUDE (entity_type, entity_id);
+
+UPDATE search_chunks
+SET model = COALESCE(model, '${_DEFAULT_EMBEDDING_MODEL}'),
+    dimensions = COALESCE(dimensions, ${_EMBEDDING_DIMENSIONS})
+WHERE embedding IS NOT NULL
+  AND (model IS NULL OR dimensions IS NULL);
 
 CREATE OR REPLACE FUNCTION sync_search_terms() RETURNS TRIGGER
     LANGUAGE plpgsql SECURITY INVOKER SET search_path = public
@@ -247,18 +285,12 @@ CREATE STATISTICS IF NOT EXISTS stat_search_chunks_scope_entity (ndistinct, depe
 CREATE STATISTICS IF NOT EXISTS stat_search_terms_scope_term (ndistinct, dependencies) ON scope_id, term FROM search_terms;
 `;
 
-// --- [FUNCTIONS] -------------------------------------------------------------
-
-const run = Effect.fn('kargadan.migration.run')(
-    () => SqlClient.SqlClient.pipe(
-        Effect.flatMap((sql) => sql.unsafe(_SQL).pipe(Effect.zipRight(Effect.forEach([
-            `VACUUM (ANALYZE, BUFFER_USAGE_LIMIT '256MB') agent_journal`, `VACUUM (ANALYZE, BUFFER_USAGE_LIMIT '256MB') search_chunks`,
-            `VACUUM (ANALYZE, BUFFER_USAGE_LIMIT '256MB') search_terms`, `VACUUM (ANALYZE) kv_store`,
-        ], (statement) => sql.unsafe(statement), { discard: true })))),
-        Effect.tap(() => Effect.logInfo('kargadan.migration.completed')),
-    ),
-);
-
 // --- [EXPORT] ----------------------------------------------------------------
 
-export { run };
+// why: PgMigrator expects default export of Effect<void, MigrationError, SqlClient>
+// biome-ignore lint/style/noDefaultExport: PgMigrator contract
+export default SqlClient.SqlClient.pipe(
+    Effect.flatMap((sql) => sql.unsafe(_SQL)),
+    Effect.tap(() => Effect.logInfo('kargadan.migration.0001.completed')),
+    Effect.asVoid,
+);

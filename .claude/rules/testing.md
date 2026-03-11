@@ -38,4 +38,4 @@ Expected values must be external to implementation. Known-answer vectors (NIST/R
 
 ## Coverage
 
-95% per-file threshold enforced via V8 provider. Run: `pnpm test:coverage`. Coverage gates are per-file, not aggregate — every source file must meet the threshold independently.
+95% per-file threshold enforced via V8 provider. Run: `pnpm exec nx run-many -t test -- --coverage`. Coverage gates are per-file, not aggregate — every source file must meet the threshold independently.

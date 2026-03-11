@@ -152,16 +152,50 @@ public sealed record CommandCatalogEntry(
 // --- [EXECUTION_MODELS] ------------------------------------------------------
 
 [StructLayout(LayoutKind.Auto)]
+public readonly record struct CreatedObject(Guid ObjectId, string ObjectType);
+[StructLayout(LayoutKind.Auto)]
+public readonly record struct SceneObjectDelta {
+    public int Before { get; }
+    public int After { get; }
+    private SceneObjectDelta(int before, int after) {
+        Before = before;
+        After = after;
+    }
+    public static Validation<Error, SceneObjectDelta> Create(int before, int after) =>
+        (Require.NonNegative(value: before, field: "Before"),
+         Require.NonNegative(value: after, field: "After"))
+            .Apply(static (int validBefore, int validAfter) =>
+                new SceneObjectDelta(before: validBefore, after: validAfter));
+}
+[StructLayout(LayoutKind.Auto)]
 public readonly record struct ScriptResult {
     public string CommandName { get; }
     public int CommandResult { get; }
     public int ObjectsCreatedCount { get; }
-    private ScriptResult(string commandName, int commandResult, int objectsCreatedCount) {
+    public Seq<CreatedObject> ObjectsCreated { get; }
+    public SceneObjectDelta SceneObjectDelta { get; }
+    public bool SelectionChanged { get; }
+    private ScriptResult(
+        string commandName,
+        int commandResult,
+        int objectsCreatedCount,
+        Seq<CreatedObject> objectsCreated,
+        SceneObjectDelta sceneObjectDelta,
+        bool selectionChanged) {
         CommandName = commandName;
         CommandResult = commandResult;
         ObjectsCreatedCount = objectsCreatedCount;
+        ObjectsCreated = objectsCreated;
+        SceneObjectDelta = sceneObjectDelta;
+        SelectionChanged = selectionChanged;
     }
-    public static Validation<Error, ScriptResult> Create(string commandName, int commandResult, int objectsCreatedCount) =>
+    public static Validation<Error, ScriptResult> Create(
+        string commandName,
+        int commandResult,
+        int objectsCreatedCount,
+        Seq<CreatedObject> objectsCreated,
+        SceneObjectDelta sceneObjectDelta,
+        bool selectionChanged) =>
         (string.IsNullOrWhiteSpace(commandName) switch {
             true => Fail<Error, string>(Error.New(message: "CommandName must not be empty.")),
             _ => Success<Error, string>(commandName),
@@ -173,12 +207,24 @@ public readonly record struct ScriptResult {
          (objectsCreatedCount < 0) switch {
              true => Fail<Error, int>(Error.New(message: "ObjectsCreatedCount must be non-negative.")),
              _ => Success<Error, int>(objectsCreatedCount),
-         })
-            .Apply(static (string validName, int validResult, int validCount) =>
+         },
+         Success<Error, Seq<CreatedObject>>(objectsCreated),
+         Success<Error, SceneObjectDelta>(sceneObjectDelta),
+         Success<Error, bool>(selectionChanged))
+            .Apply(static (
+                string validName,
+                int validResult,
+                int validCount,
+                Seq<CreatedObject> validObjects,
+                SceneObjectDelta validDelta,
+                bool validSelection) =>
                 new ScriptResult(
                     commandName: validName,
                     commandResult: validResult,
-                    objectsCreatedCount: validCount));
+                    objectsCreatedCount: validCount,
+                    objectsCreated: validObjects,
+                    sceneObjectDelta: validDelta,
+                    selectionChanged: validSelection));
 }
 [StructLayout(LayoutKind.Auto)]
 public readonly record struct RawDocEvent(

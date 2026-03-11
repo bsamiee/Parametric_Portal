@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { Toolkit, Tool } from '@effect/ai';
+import type { Tool, Toolkit } from '@effect/ai';
 import { DatabaseService } from '@parametric-portal/database/repos';
 import { Context } from '@parametric-portal/server/context';
 import { ClusterService } from '@parametric-portal/server/infra/cluster';
@@ -180,52 +180,9 @@ class AiService extends Effect.Service<AiService>()('ai/Service', {
                 return result;
             }).pipe(Telemetry.span('search.suggest', { 'search.prefix': options.prefix })),
         );
-        const buildAgentToolkit = Effect.fn('AiService.buildAgentToolkit')(
-            <
-                CatalogSuccess,
-                CatalogEncoded extends Record<string, unknown>,
-                CommandSuccess,
-                CommandEncoded extends Record<string, unknown>,
-                ContextSuccess,
-                ContextEncoded extends Record<string, unknown>,
-            >(input: {
-                readonly catalogSearch:  (term: string) => Effect.Effect<CatalogSuccess, never, never>;
-                readonly commandExecute: (payload: { readonly commandId: string; readonly args: Record<string, unknown> }) => Effect.Effect<CommandSuccess, never, never>;
-                readonly readContext:    (query: string) => Effect.Effect<ContextSuccess, never, never>;
-                readonly schemas: {
-                    readonly catalogSearch:  S.Schema<CatalogSuccess, CatalogEncoded, never>;
-                    readonly commandExecute: S.Schema<CommandSuccess, CommandEncoded, never>;
-                    readonly readContext:    S.Schema<ContextSuccess, ContextEncoded, never>;
-                };
-            }) =>
-            Effect.sync(() => {
-                const toolkit = Toolkit.make(
-                    Tool.make('catalog.search', {
-                        description: 'Searches command catalog entries by semantic query.',
-                        parameters:  { term: S.NonEmptyTrimmedString },
-                        success:     input.schemas.catalogSearch,
-                    }),
-                    Tool.make('command.execute', {
-                        description: 'Executes a plugin command using catalog commandId plus structured args.',
-                        parameters:  { args: S.Record({ key: S.String, value: S.Unknown }), commandId: S.NonEmptyTrimmedString },
-                        success:     input.schemas.commandExecute,
-                    }),
-                    Tool.make('context.read', {
-                        description: 'Reads scoped context artifacts required by the current step.',
-                        parameters:  { query: S.NonEmptyTrimmedString },
-                        success:     input.schemas.readContext,
-                    }),
-                );
-                return {
-                    layer: toolkit.toLayer({
-                        'catalog.search':  ({ term }) => input.catalogSearch(term),
-                        'command.execute': ({ args, commandId }) => input.commandExecute({ args, commandId }),
-                        'context.read':    ({ query }) => input.readContext(query),
-                    }),
-                    toolkit,
-                } as const;
-            }),
-        );
+        // why: generic toolkit factory — consumers define their own tools, AiService orchestrates
+        const buildAgentToolkit = <T extends Record<string, Tool.Any>>(toolkit: Toolkit.Toolkit<T>, handlers: Toolkit.HandlersFrom<T>) =>
+            ({ layer: toolkit.toLayer(handlers), toolkit }) as const;
         const runAgentCore = Effect.fn('AiService.runAgentCore')(<
             State,       Plan,         Execution,   Verification,   PlanError,     ExecuteError,  VerifyError,
             DecideError, PersistError, PlanContext, ExecuteContext, VerifyContext, DecideContext, PersistContext,
@@ -267,7 +224,6 @@ class AiService extends Effect.Service<AiService>()('ai/Service', {
         Layer.provideMerge(AiRuntime.Default.pipe(Layer.provideMerge(AiRuntimeProvider.Default))),
         Layer.provideMerge(DatabaseService.Default),
     );
-    static readonly KnowledgeLive =    AiService.Default.pipe(Layer.provideMerge(AiRuntime.Live), Layer.provideMerge(DatabaseService.Default));
     static readonly Live =             AiService.Default.pipe(Layer.provideMerge(AiRuntime.Live));
 }
 

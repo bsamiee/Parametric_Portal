@@ -23,10 +23,10 @@ The init wizard prompts for AI provider, model, and credentials. OpenAI and Anth
 **3. Prepare and probe the Rhino side**
 
 ```bash
-pnpm exec nx run @parametric-portal/kargadan-harness:cli -- diagnostics live --prepare --launch
+pnpm exec nx run @parametric-portal/kargadan-harness:cli -- dev prepare
 ```
 
-This is the preferred local loop. It builds `ParametricPortal.Kargadan.Plugin`, packages it with Yak, installs it into Rhino, launches Rhino, waits for `~/.kargadan/port`, performs a real handshake plus `read.scene.summary`, and writes a probe artifact under `~/.kargadan/live/`.
+This builds `ParametricPortal.Kargadan.Plugin`, packages it with Yak, and installs it into Rhino. Use `dev probe` to perform a real handshake plus `read.scene.summary` (writes a JSON artifact under `~/.kargadan/live/`), and `dev launch` to start Rhino and wait for `~/.kargadan/port`.
 
 Manual plugin iteration is still available when needed:
 
@@ -41,10 +41,10 @@ pnpm exec nx run ParametricPortal.Kargadan.Plugin:build:release
 pnpm exec nx run @parametric-portal/kargadan-harness:cli
 
 # With explicit intent
-pnpm exec nx run @parametric-portal/kargadan-harness:cli -- run -i "Create a 10x10 box"
+pnpm exec nx run @parametric-portal/kargadan-harness:cli -- "Create a 10x10 box"
 
 # Resume latest session
-pnpm exec nx run @parametric-portal/kargadan-harness:cli -- run --resume auto
+pnpm exec nx run @parametric-portal/kargadan-harness:cli -- --continue
 
 # List past sessions
 pnpm exec nx run @parametric-portal/kargadan-harness:cli -- sessions list
@@ -53,7 +53,7 @@ pnpm exec nx run @parametric-portal/kargadan-harness:cli -- sessions list
 pnpm exec nx run @parametric-portal/kargadan-harness:cli -- sessions export --session-id <uuid> --format ndjson --output /tmp/trace.ndjson
 ```
 
-**PostgreSQL requirement**: Kargadan uses one PostgreSQL 18 + `pgvector` deployment. The default product path is the app-owned Postgres.app cluster; `KARGADAN_CHECKPOINT_DATABASE_URL` remains available as a test/CI override.
+**PostgreSQL requirement**: Kargadan uses one PostgreSQL 18 + `pgvector` deployment. The default product path is the app-owned Postgres.app cluster; `KARGADAN_DATABASE_URL` remains available as a test/CI override.
 
 **Standalone binary**: Build a self-contained executable (no Node.js required on target):
 
@@ -159,7 +159,7 @@ The TypeScript harness is the out-of-process agent runtime. It connects to the R
 | `status`   | Show which providers are enrolled without revealing secrets                   |
 | `logout`   | Remove one provider or all provider credentials from the macOS Keychain       |
 
-**`kargadan run`** -- Interactive agent execution.
+**`kargadan "intent"`** -- Interactive agent execution. The root command accepts a natural language intent directly.
 
 | Option             | Flag                       | Description                                                  |
 | ------------------ | -------------------------- | ------------------------------------------------------------ |
@@ -182,17 +182,22 @@ The TypeScript harness is the out-of-process agent runtime. It connects to the R
 
 **`kargadan config`** -- Configuration management.
 
-| Invocation                                               | Description                                                       |
-| -------------------------------------------------------- | ----------------------------------------------------------------- |
-| `kargadan config`                                        | List flattened dotted-path entries from `~/.kargadan/config.json` |
-| `kargadan config --key ai.languageModel`                 | Read a dotted key                                                 |
-| `kargadan config --key ai.languageModel --value gpt-4.1` | Write a supported dotted key                                      |
+| Subcommand                                | Description                                                       |
+| ----------------------------------------- | ----------------------------------------------------------------- |
+| `kargadan config list`                    | List flattened dotted-path entries from `~/.kargadan/config.json` |
+| `kargadan config get <key>`               | Read a dotted key (e.g. `ai.languageModel`)                       |
+| `kargadan config set <key> <value>`       | Write a supported dotted key                                      |
+| `kargadan config reset`                   | Reset configuration to defaults                                   |
 
 `config` is intentionally limited to the documented non-secret keys. Provider secrets and Gemini OAuth tokens never live in `config.json`.
 
-**`kargadan diagnostics live`** -- Optional Rhino package install plus launch, then real handshake and `read.scene.summary` probe. Writes a JSON artifact to `~/.kargadan/live/`. This is the primary Rhino integration check and does not require the PostgreSQL path. Flags: `--prepare`, `--launch`, `--rhino-app` (Rhino.app path override), `--yak-path` (yak executable override).
+**`kargadan dev probe`** -- Real handshake and `read.scene.summary` probe against a running Rhino instance. Writes a JSON artifact to `~/.kargadan/live/`. This is the primary Rhino integration check and does not require the PostgreSQL path. Flags: `--rhino-app` (Rhino.app path override), `--yak-path` (yak executable override).
 
-**`kargadan diagnostics check`** -- Validate environment, DB connectivity, transport, config integrity (SHA256 hash), and data directory accessibility.
+**`kargadan dev re-embed`** -- Clear all stored embeddings (`search_chunks.embedding`, `model`, `dimensions` set to NULL). The next `seedKnowledge` or `EmbeddingCron` run re-embeds with the current model. Use after switching embedding models.
+
+**`kargadan dev reset-pg`** -- Delete Docker PG Keychain credential. Next bootstrap generates a fresh password.
+
+**`kargadan doctor`** -- Validate environment, DB connectivity, transport, config integrity (SHA256 hash), and data directory accessibility.
 
 ### Connection Flow
 
@@ -201,8 +206,8 @@ The TypeScript harness is the out-of-process agent runtime. It connects to the R
 3. `ReconnectionSupervisor` retries with jittered exponential backoff (500ms base, 30s max, 50 attempts)
 4. `CommandDispatch.handshake()` sends `handshake.init` with capabilities and protocol version
 5. Receives `handshake.ack` with accepted capabilities and command catalog
-6. Merges handshake catalog (base) with environment manifest override (enrichment by entry ID; server catalog is authoritative, env supplies supplemental fields)
-7. Seeds knowledge base via `AiService.seedKnowledge(catalog)` -- SHA256 hash of manifest + version persisted as kvStore marker (`kargadan:manifest:{namespace}:{entityType}:{scopeId}`); seeding skipped entirely when hash matches
+6. Uses handshake catalog directly (manifest entity type `command`, namespace `kargadan`, scope derived from appId)
+7. Seeds knowledge base via `AiService.seedKnowledge(catalog)` -- SHA256 hash of manifest + version persisted as kvStore marker (`kargadan:manifest:kargadan:command:{appId}`); seeding skipped entirely when hash matches
 
 ### Layer Composition
 
@@ -217,14 +222,9 @@ _RuntimeLayer
        └─ ReconnectionSupervisor.Default
 ```
 
-**Provider mode split**: `AiService` exposes two layer variants that differ in how budget, rate limits, and credentials are persisted. The choice determines infrastructure requirements.
+**Provider mode**: `AiService` exposes `KnowledgeDefault` which uses `AiRuntimeProvider.Default` with in-memory `Ref` per fiber (budget lost on restart) and credentials sourced from Effect `Config` (env vars / ConfigProvider). Redis is not required.
 
-| Layer Variant                | Provider                    | Budget Storage                                              | Credential Source                                         | Redis Required |
-| ---------------------------- | --------------------------- | ----------------------------------------------------------- | --------------------------------------------------------- | -------------- |
-| `AiService.KnowledgeDefault` | `AiRuntimeProvider.Default` | In-memory `Ref` per fiber (lost on restart)                 | Effect `Config` (env vars / ConfigProvider)               | No             |
-| `AiService.KnowledgeLive`    | `AiRuntimeProvider.Server`  | Redis via `CacheService` (24h daily bucket, 1m rate bucket) | Database `apps` table + Keychain + FiberRef token refresh | Yes            |
-
-Kargadan harness uses `KnowledgeDefault` — budget enforcement is session-scoped and Redis is not required. Production deployments serving multiple tenants with persistent budget tracking across restarts should substitute `KnowledgeLive`, which requires `CacheService` (Redis) and `DatabaseService` in the layer graph.
+Kargadan harness uses `KnowledgeDefault` — budget enforcement is session-scoped and Redis is not required.
 
 ---
 
@@ -475,54 +475,36 @@ Multi-provider language model abstraction (Anthropic, OpenAI, Gemini) with four 
 
 ## Configuration Reference
 
-All environment variables are decoded in `harness/src/config.ts` via Effect Config.
+All environment variables are decoded in `harness/src/config.ts` via Effect Config. Transport, protocol, agent loop, capabilities, write-object references, and manifest fields are internalized as `_INTERNALS`, `_CAPABILITIES`, and `_DEFAULT_WRITE_REF` constants -- no env-var override path.
 
 ### Core
 
-| Variable                           | Default                                                      | Description                                       |
-| ---------------------------------- | ------------------------------------------------------------ | ------------------------------------------------- |
-| `KARGADAN_CHECKPOINT_DATABASE_URL` | app-owned URL or test override                               | Canonical PostgreSQL 18 + pgvector connection URL |
-| `KARGADAN_AGENT_INTENT`            | "Summarize the active scene and apply the requested change." | Default natural language goal                     |
-| `KARGADAN_APP_ID`                  | System UUID                                                  | Tenant ID for multi-tenancy                       |
-| `KARGADAN_POSTGRES_APP_PATH`       | `/Applications/Postgres.app`                                 | Postgres.app installation root override           |
-| `KARGADAN_PROTOCOL_VERSION`        | "1.0"                                                        | Handshake protocol version                        |
-| `KARGADAN_TOKEN_EXPIRY_MINUTES`    | 15                                                           | Handshake token validity window (minutes)         |
-| `KARGADAN_SESSION_EXPORT_LIMIT`    | 10000                                                        | Max trace rows per export pagination batch        |
+| Variable                     | Default                                                      | Description                                     |
+| ---------------------------- | ------------------------------------------------------------ | ----------------------------------------------- |
+| `KARGADAN_DATABASE_URL`      | app-owned URL or test override                               | Canonical PostgreSQL 18 + pgvector connection URL |
+| `KARGADAN_AGENT_INTENT`      | "Summarize the active scene and apply the requested change." | Default natural language goal                   |
+| `KARGADAN_APP_ID`            | System UUID                                                  | Tenant ID for multi-tenancy                     |
+| `KARGADAN_POSTGRES_APP_PATH` | `/Applications/Postgres.app`                                 | Postgres.app installation root override         |
+| `KARGADAN_PROTOCOL_VERSION`  | "1.0"                                                        | Handshake protocol version                      |
 
-### Transport
+### Rhino
 
-| Variable                             | Default     | Description                  |
-| ------------------------------------ | ----------- | ---------------------------- |
-| `KARGADAN_WS_HOST`                   | "127.0.0.1" | WebSocket bind host          |
-| `KARGADAN_COMMAND_DEADLINE_MS`       | 5000        | Timeout per command (ms)     |
-| `KARGADAN_HEARTBEAT_INTERVAL_MS`     | 5000        | Heartbeat frequency (ms)     |
-| `KARGADAN_HEARTBEAT_TIMEOUT_MS`      | 15000       | Staleness threshold (ms)     |
-| `KARGADAN_RECONNECT_MAX_ATTEMPTS`    | 50          | Port discovery retries       |
-| `KARGADAN_RECONNECT_BACKOFF_BASE_MS` | 500         | Exponential backoff base     |
-| `KARGADAN_RECONNECT_BACKOFF_MAX_MS`  | 30000       | Max backoff duration         |
-| `KARGADAN_RHINO_LAUNCH_TIMEOUT_MS`   | 45000       | Rhino launch wait limit (ms) |
-| `KARGADAN_RHINO_APP_PATH`            | (none)      | Rhino.app path override      |
-| `KARGADAN_YAK_PATH`                  | (none)      | Yak executable path override |
-
-### Agent Loop
-
-| Variable                                      | Default | Description                          |
-| --------------------------------------------- | ------- | ------------------------------------ |
-| `KARGADAN_RETRY_MAX_ATTEMPTS`                 | 5       | Retryable fault max attempts         |
-| `KARGADAN_CORRECTION_MAX_CYCLES`              | 1       | Correctable fault max cycles         |
-| `KARGADAN_CONTEXT_COMPACTION_TRIGGER_PERCENT` | 75      | Trigger compaction at % of maxTokens |
-| `KARGADAN_CONTEXT_COMPACTION_TARGET_PERCENT`  | 40      | Target compaction to % of maxTokens  |
+| Variable                       | Default | Description                  |
+| ------------------------------ | ------- | ---------------------------- |
+| `KARGADAN_RHINO_LAUNCH_TIMEOUT_MS` | 45000   | Rhino launch wait limit (ms) |
+| `KARGADAN_RHINO_APP_PATH`     | (none)  | Rhino.app path override      |
+| `KARGADAN_YAK_PATH`           | (none)  | Yak executable path override |
 
 ### AI Provider
 
 | Variable                           | Default                                      | Description                                                      |
 | ---------------------------------- | -------------------------------------------- | ---------------------------------------------------------------- |
-| `KARGADAN_AI_LANGUAGE_MODEL`       | (inherit)                                    | Language model override                                          |
-| `KARGADAN_AI_LANGUAGE_PROVIDER`    | (inherit)                                    | Language provider override                                       |
-| `KARGADAN_AI_LANGUAGE_FALLBACK`    | (empty)                                      | Comma-separated fallback providers                               |
-| `KARGADAN_AI_ARCHITECT_MODEL`      | (inherit)                                    | Architect planning model override                                |
-| `KARGADAN_AI_ARCHITECT_PROVIDER`   | (inherit)                                    | Architect provider override                                      |
-| `KARGADAN_AI_ARCHITECT_FALLBACK`   | (empty)                                      | Comma-separated architect fallback providers                     |
+| `KARGADAN_MODEL`                   | (inherit)                                    | Language model override                                          |
+| `KARGADAN_PROVIDER`                | (inherit)                                    | Language provider override                                       |
+| `KARGADAN_LANGUAGE_FALLBACK`       | (empty)                                      | Comma-separated fallback providers                               |
+| `KARGADAN_ARCHITECT_MODEL`         | (inherit)                                    | Architect planning model override                                |
+| `KARGADAN_ARCHITECT_PROVIDER`      | (inherit)                                    | Architect provider override                                      |
+| `KARGADAN_ARCHITECT_FALLBACK`      | (empty)                                      | Comma-separated architect fallback providers                     |
 | `KARGADAN_AI_ANTHROPIC_API_SECRET` | Keychain-managed after `init` / `auth login` | Anthropic API secret (legacy `ANTHROPIC_API_KEY` still accepted) |
 | `KARGADAN_AI_OPENAI_API_SECRET`    | Keychain-managed after `init` / `auth login` | OpenAI API secret (legacy `OPENAI_API_KEY` still accepted)       |
 | `KARGADAN_AI_GEMINI_CLIENT_PATH`   | (set by init/auth for Gemini)                | Google desktop OAuth client JSON path                            |
@@ -530,19 +512,9 @@ All environment variables are decoded in `harness/src/config.ts` via Effect Conf
 | `KARGADAN_AI_GEMINI_REFRESH_TOKEN` | Keychain-managed runtime state               | Gemini OAuth refresh token                                       |
 | `KARGADAN_AI_GEMINI_TOKEN_EXPIRY`  | Keychain-managed runtime state               | Gemini OAuth access token expiry                                 |
 
-### Knowledge Base
-
-| Variable                                | Default    | Description                          |
-| --------------------------------------- | ---------- | ------------------------------------ |
-| `KARGADAN_COMMAND_MANIFEST_JSON`        | (empty)    | JSON override for command catalog    |
-| `KARGADAN_COMMAND_MANIFEST_VERSION`     | (empty)    | Manifest version string              |
-| `KARGADAN_COMMAND_MANIFEST_NAMESPACE`   | "kargadan" | Knowledge base namespace             |
-| `KARGADAN_COMMAND_MANIFEST_ENTITY_TYPE` | "command"  | Knowledge base entity type           |
-| `KARGADAN_COMMAND_MANIFEST_SCOPE_ID`    | (empty)    | Knowledge base scope UUID (optional) |
-
 ### Search Tuning (PostgreSQL session-level)
 
-`SearchRepo` sets `pg_trgm.*` session variables before each search query. These thresholds act as activation gates for 6 of the 10 RRF signals — rows below the threshold for a given trigram operator produce zero contribution from that signal, shifting weight toward the remaining signals (FTS, semantic, fuzzy, phonetic). Lowering thresholds increases recall at the cost of precision; raising them narrows the candidate set and amplifies the relative influence of vector similarity and full-text search.
+`SearchRepo` sets `pg_trgm.*` session variables before each search query. These thresholds act as activation gates for 6 of the 10 RRF signals -- rows below the threshold for a given trigram operator produce zero contribution from that signal, shifting weight toward the remaining signals (FTS, semantic, fuzzy, phonetic). Lowering thresholds increases recall at the cost of precision; raising them narrows the candidate set and amplifies the relative influence of vector similarity and full-text search.
 
 | Variable                                         | Default | RRF Signals Affected                                                             | Effect of Raising                            |
 | ------------------------------------------------ | ------- | -------------------------------------------------------------------------------- | -------------------------------------------- |
@@ -550,23 +522,7 @@ All environment variables are decoded in `harness/src/config.ts` via Effect Conf
 | `POSTGRES_TRGM_WORD_SIMILARITY_THRESHOLD`        | 0.6     | trigram word similarity (0.10), trigram KNN word similarity (0.03)               | Stricter partial-word matching               |
 | `POSTGRES_TRGM_STRICT_WORD_SIMILARITY_THRESHOLD` | 0.5     | trigram strict word similarity (0.05), trigram KNN strict word similarity (0.02) | Eliminates loose substring matches           |
 
-These are not Kargadan-namespaced — they map directly to PostgreSQL `pg_trgm` extension GUC settings and affect any consumer of `SearchRepo`, not only Kargadan.
-
-### Capabilities
-
-| Variable                   | Default                                    | Description                            |
-| -------------------------- | ------------------------------------------ | -------------------------------------- |
-| `KARGADAN_CAP_REQUIRED`    | "read.scene.summary,write.object.create"   | Required capability negotiation        |
-| `KARGADAN_CAP_OPTIONAL`    | "view.capture"                             | Optional capabilities                  |
-| `KARGADAN_LOOP_OPERATIONS` | "read.object.metadata,write.object.update" | Comma-separated fallback operation IDs |
-
-### Write Object Reference
-
-| Variable                                | Default                                | Description                                                    |
-| --------------------------------------- | -------------------------------------- | -------------------------------------------------------------- |
-| `KARGADAN_WRITE_OBJECT_ID`              | "00000000-0000-0000-0000-000000000100" | UUID for write commands                                        |
-| `KARGADAN_WRITE_OBJECT_SOURCE_REVISION` | 0                                      | Revision for OCC                                               |
-| `KARGADAN_WRITE_OBJECT_TYPE_TAG`        | "Brep"                                 | Brep, Mesh, Curve, Surface, Annotation, Instance, LayoutDetail |
+These are not Kargadan-namespaced -- they map directly to PostgreSQL `pg_trgm` extension GUC settings and affect any consumer of `SearchRepo`, not only Kargadan.
 
 ### Database Connection
 
@@ -576,15 +532,37 @@ These are not Kargadan-namespaced — they map directly to PostgreSQL `pg_trgm` 
 | `KARGADAN_PG_IDLE_TIMEOUT`    | 30s     | Idle timeout         |
 | `KARGADAN_PG_MAX_CONNECTIONS` | 5       | Connection pool size |
 
-### Static Constants (HarnessConfig)
+### Internalized Constants (`_INTERNALS`)
 
-| Constant          | Value                       | Description                                          |
-| ----------------- | --------------------------- | ---------------------------------------------------- |
-| `initialSequence` | 1,000,000                   | Starting sequence number for agent loop iterations   |
-| `sessionToken`    | random 24-byte hex          | Per-session auth token for handshake                 |
-| `maskedKeys`      | geometry-related field set  | Keys excluded from LLM context (brep, mesh, etc.)    |
-| `truncation`      | see Observation Masking     | Array depth, item limits, string/object depth bounds |
-| `viewCapture`     | 1600x900, 144 DPI, 2 passes | Viewport capture defaults for verification artifacts |
+These values are hardcoded in `config.ts` with no env-var override path.
+
+| Constant                     | Value  | Description                          |
+| ---------------------------- | ------ | ------------------------------------ |
+| `commandDeadlineMs`          | 5000   | Timeout per command (ms)             |
+| `compactionTargetPercent`    | 40     | Target compaction to % of maxTokens  |
+| `compactionTriggerPercent`   | 75     | Trigger compaction at % of maxTokens |
+| `correctionCycles`           | 1      | Correctable fault max cycles         |
+| `exportLimit`                | 10000  | Max trace rows per export batch      |
+| `heartbeatIntervalMs`        | 5000   | Heartbeat frequency (ms)             |
+| `heartbeatTimeoutMs`         | 15000  | Staleness threshold (ms)             |
+| `reconnectBackoffBaseMs`     | 500    | Exponential backoff base             |
+| `reconnectBackoffMaxMs`      | 30000  | Max backoff duration                 |
+| `reconnectMaxAttempts`       | 50     | Port discovery retries               |
+| `retryMaxAttempts`           | 5      | Retryable fault max attempts         |
+| `tokenExpiryMinutes`         | 15     | Handshake token validity (minutes)   |
+
+### Other Static Constants
+
+| Constant             | Value                                           | Description                                        |
+| -------------------- | ----------------------------------------------- | -------------------------------------------------- |
+| `_CAPABILITIES`      | required: scene+write, optional: view.capture   | Hardcoded capability negotiation                   |
+| `_DEFAULT_WRITE_REF` | Brep, revision 0, sentinel UUID                 | Default write-object reference                     |
+| `initialSequence`    | 1,000,000                                       | Starting sequence number for agent loop iterations |
+| `sessionToken`       | random 24-byte hex                              | Per-session auth token for handshake               |
+| `maskedKeys`         | geometry-related field set                      | Keys excluded from LLM context                     |
+| `truncation`         | see Observation Masking                         | Array depth, item limits, string/object depth      |
+| `viewCapture`        | 1600x900, 144 DPI, 2 passes                    | Viewport capture defaults                          |
+| Embedding model      | `text-embedding-3-large` (3072 dimensions)      | Derived from `AiSettingsSchema` defaults           |
 
 ---
 
