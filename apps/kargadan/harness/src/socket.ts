@@ -180,4 +180,4 @@ const KargadanSocketClientLive = Layer.unwrapEffect(
 
 // --- [EXPORT] ----------------------------------------------------------------
 
-export { KargadanSocketClient, KargadanSocketClientLive, readPortFile, ReconnectionSupervisor, SocketClientError };
+export { KargadanSocketClient, KargadanSocketClientLive, readPortFile, ReconnectionSupervisor };

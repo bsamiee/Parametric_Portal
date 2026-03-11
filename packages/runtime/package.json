@@ -74,15 +74,12 @@
     },
     "devDependencies": {
         "@effect/vitest": "catalog:",
-        "@testing-library/react": "catalog:",
         "@types/react": "catalog:",
         "@vitest/browser-playwright": "catalog:",
-        "fake-indexeddb": "catalog:",
         "fast-check": "catalog:",
         "ts-essentials": "catalog:",
         "typescript": "catalog:",
         "vite": "catalog:",
-        "vitest": "catalog:",
-        "vitest-browser-react": "catalog:"
+        "vitest": "catalog:"
     }
 }

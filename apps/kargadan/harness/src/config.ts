@@ -328,4 +328,4 @@ class HarnessConfig extends Effect.Service<HarnessConfig>()('kargadan/HarnessCon
 
 // --- [EXPORT] ----------------------------------------------------------------
 
-export { ConfigFile, HarnessConfig, HarnessHostError, KargadanConfigSchema, KargadanHost, KeychainDecodeFailures, loadConfigProvider, PORT_FILE_PATH };
+export { ConfigFile, HarnessConfig, HarnessHostError, KargadanConfigSchema, KargadanHost, loadConfigProvider, PORT_FILE_PATH };

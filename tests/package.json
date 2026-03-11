@@ -9,16 +9,13 @@
         "typecheck": "tsc --project tsconfig.json --noEmit"
     },
     "devDependencies": {
-        "@dopplerhq/node-sdk": "catalog:",
         "@effect-aws/client-s3": "catalog:",
         "@effect/platform": "catalog:",
-        "@parametric-portal/infrastructure": "workspace:*",
         "@effect/sql": "catalog:",
         "@effect/sql-pg": "catalog:",
         "@effect/vitest": "catalog:",
         "@parametric-portal/database": "workspace:*",
         "@parametric-portal/server": "workspace:*",
-        "@parametric-portal/types": "workspace:*",
         "@playwright/test": "catalog:",
         "@types/node": "catalog:",
         "effect": "catalog:",

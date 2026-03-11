@@ -137,7 +137,6 @@ export {
     assertNoFakeFlags,
     decodeCreateObjectResult,
     decodeSceneSummary,
-    dispatchLayer,
     execute,
     liveDbIt,
     liveIt,

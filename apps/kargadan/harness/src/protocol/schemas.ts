@@ -138,7 +138,7 @@ const Envelope = S.Union(
         result: S.optional(S.Unknown),
         status: ResultStatus })),
 );
-const ScriptResultSchema = S.Struct({
+const _ScriptResultSchema = S.Struct({
     commandName:         S.String,
     commandResult:       S.Int.pipe(S.between(0, 6)),
     objectsCreated:      S.optionalWith(S.Array(S.Struct({ objectId: S.UUID, objectType: S.String })), { default: () => [] }),
@@ -218,5 +218,5 @@ const kargadanToolCallProjector = (payload: { readonly params: unknown; readonly
 
 // --- [EXPORT] ----------------------------------------------------------------
 
-export { CatalogEntrySchema, DedupeDecision, DEFAULT_LOOP_OPERATIONS, Envelope, ErrorPayload, FailureClass, kargadanToolCallProjector, Loop, NonNegInt, ObjectTypeTag, Operation, ResultStatus, ScriptResultSchema, WorkflowExecutionId };
+export { DEFAULT_LOOP_OPERATIONS, Envelope, ErrorPayload, FailureClass, kargadanToolCallProjector, Loop, NonNegInt, ObjectTypeTag, Operation };
 export type { LoopState };

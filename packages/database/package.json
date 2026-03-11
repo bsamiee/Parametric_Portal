@@ -58,14 +58,10 @@
         "@effect/platform-node": "catalog:",
         "@effect/sql": "catalog:",
         "@effect/sql-pg": "catalog:",
-        "@parametric-portal/types": "workspace:*",
         "effect": "catalog:"
     },
     "devDependencies": {
         "@types/node": "catalog:",
-        "ts-essentials": "catalog:",
-        "ts-toolbelt": "catalog:",
-        "type-fest": "catalog:",
         "typescript": "catalog:",
         "vite": "catalog:",
         "vitest": "catalog:"

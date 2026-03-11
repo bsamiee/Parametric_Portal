@@ -7,8 +7,8 @@
         "kargadan": "./dist/main.js"
     },
     "scripts": {
-        "build:binary": "node --experimental-sea-config sea-config.json && cp $(which node) dist/kargadan && npx postject dist/kargadan NODE_SEA_BLOB dist/kargadan-sea.blob --sentinel-fuse NODE_SEA_FUSE_fce680ab2cc467b6e072b8b5df1996b2",
-        "build:sea": "pnpm build && pnpm build:binary",
+        "build:binary": "node --experimental-sea-config sea-config.json && cp $(command -v node) dist/kargadan && npx postject dist/kargadan NODE_SEA_BLOB dist/kargadan-sea.blob --sentinel-fuse NODE_SEA_FUSE_fce680ab2cc467b6e072b8b5df1996b2",
+        "build:sea": "pnpm run build && pnpm run build:binary",
         "check": "biome check .",
         "cli": "tsx src/cli.ts",
         "cli:run": "tsx src/cli.ts run",
@@ -25,7 +25,6 @@
         "@parametric-portal/ai": "workspace:*",
         "@parametric-portal/database": "workspace:*",
         "@parametric-portal/server": "workspace:*",
-        "@parametric-portal/types": "workspace:*",
         "effect": "catalog:"
     },
     "devDependencies": {

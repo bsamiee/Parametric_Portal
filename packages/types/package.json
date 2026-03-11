@@ -39,18 +39,14 @@
         "test": "vitest run --passWithNoTests"
     },
     "dependencies": {
-        "@gltf-transform/core": "catalog:",
-        "@xmldom/xmldom": "catalog:",
         "effect": "catalog:",
         "happy-dom": "catalog:",
         "isomorphic-dompurify": "catalog:",
-        "sax": "catalog:",
         "uuid": "catalog:"
     },
     "devDependencies": {
         "@types/node": "catalog:",
         "fast-check": "catalog:",
-        "ts-essentials": "catalog:",
         "ts-toolbelt": "catalog:",
         "type-fest": "catalog:",
         "typescript": "catalog:",

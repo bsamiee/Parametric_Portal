@@ -24,7 +24,7 @@ it.effect('P8-CFG-AI-01: api-secret providers resolve through the shared credent
                     expect(Redacted.value(credential.secret)).toBe(`${provider}-secret`);
                 }),
             ),
-            { [AiRegistry.providerVocabulary[provider].credential.key]: `${provider}-secret` },
+            { [AiRegistry.providers[provider].credential.configKeys.secret]: `${provider}-secret` },
         ), { discard: true }),
 );
 

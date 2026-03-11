@@ -17,11 +17,9 @@
     },
     "devDependencies": {
         "@anthropic-ai/tokenizer": "catalog:",
-        "@ast-grep/cli": "catalog:",
         "@berenddeboer/nx-biome": "catalog:",
         "@biomejs/biome": "catalog:",
         "@effect/experimental": "catalog:",
-        "@effect/platform": "catalog:",
         "@effect/platform-browser": "catalog:",
         "@effect/vitest": "catalog:",
         "@mermaid-js/mermaid-cli": "catalog:",
@@ -41,7 +39,6 @@
         "@radix-ui/react-separator": "catalog:",
         "@radix-ui/react-slot": "catalog:",
         "@rollup/plugin-typescript": "catalog:",
-        "@sonar/scan": "catalog:",
         "@stryker-mutator/core": "catalog:",
         "@stryker-mutator/typescript-checker": "catalog:",
         "@stryker-mutator/vitest-runner": "catalog:",
@@ -111,11 +108,19 @@
     "knip": {
         "ignoreBinaries": [
             "hadolint",
-            "jq"
+            "postject"
         ],
-        "ignore": [
-            ".nx/**"
+        "ignoreFiles": [
+            "apps/kargadan/harness/migrations/*.ts"
         ],
+        "ignoreIssues": {
+            "apps/kargadan/harness/src/protocol/schemas.ts": [
+                "types"
+            ],
+            "packages/devtools/src/client.ts": [
+                "types"
+            ]
+        },
         "workspaces": {
             ".": {
                 "entry": [

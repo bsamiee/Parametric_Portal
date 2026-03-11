@@ -142,4 +142,4 @@ const KargadanPostgres = {
     reindexEmbeddings: _reindexEmbeddings, resolveUrl: _resolveUrl, vacuumSearchChunks: _vacuumSearchChunks,
 } as const;
 
-export { KargadanPostgres, PostgresProviderError, shellExec };
+export { KargadanPostgres, shellExec };
