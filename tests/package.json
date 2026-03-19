@@ -11,6 +11,7 @@
     "devDependencies": {
         "@effect-aws/client-s3": "catalog:",
         "@effect/platform": "catalog:",
+        "@effect/platform-node": "catalog:",
         "@effect/sql": "catalog:",
         "@effect/sql-pg": "catalog:",
         "@effect/vitest": "catalog:",

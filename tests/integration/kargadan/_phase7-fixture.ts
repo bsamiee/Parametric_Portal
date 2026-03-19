@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { it } from '@effect/vitest';
 import { HarnessConfig } from '../../../apps/kargadan/harness/src/config.ts';
 import { CommandDispatch } from '../../../apps/kargadan/harness/src/protocol/dispatch.ts';
+import type { CorrelationId, SpanId, TraceId } from '../../../apps/kargadan/harness/src/protocol/schemas.ts';
 import type { Envelope, ObjectTypeTag } from '../../../apps/kargadan/harness/src/protocol/schemas.ts';
 import { KargadanSocketClientLive, ReconnectionSupervisor } from '../../../apps/kargadan/harness/src/socket.ts';
 import { Effect, Layer, Match, Option, Schema as S } from 'effect';
@@ -19,6 +20,10 @@ const _ForbiddenFakeFlags = [
     'KARGADAN_FAKE_RHINO_TRANSPORT',
     'KARGADAN_FAKE_SOCKET_CLIENT',
 ] as const;
+const _hexId = () => crypto.randomUUID().replaceAll('-', '');
+const _correlationId = () => _hexId() as typeof CorrelationId.Type;
+const _traceId = () => _hexId() as typeof TraceId.Type;
+const _spanId = () => _hexId() as typeof SpanId.Type;
 const _SceneSummaryCodec = S.Struct({ objectCount: S.Int.pipe(S.greaterThanOrEqualTo(0)) });
 const _CreateResultCodec = S.Struct({ objectId: S.UUID });
 const _HandshakeAckCodec = S.Struct({
@@ -69,8 +74,8 @@ const makeCommand = (input: {
         telemetryContext: {
             attempt: 1,
             operationTag: input.operationTag,
-            spanId: requestId.replaceAll('-', ''),
-            traceId: input.identityBase.correlationId,
+            spanId: _spanId(),
+            traceId: _traceId(),
         },
         ...(input.undoScope === undefined ? {} : { undoScope: input.undoScope }),
     } satisfies Envelope.Command;
@@ -117,7 +122,7 @@ const withLiveDispatch = <A, E>(
             yield* Effect.forkScoped(dispatch.start()).pipe(Effect.asVoid);
             const identityBase = {
                 appId: cfg.appId,
-                correlationId: crypto.randomUUID().replaceAll('-', ''),
+                correlationId: _correlationId(),
                 sessionId: crypto.randomUUID(),
             } satisfies Envelope.IdentityBase;
             const ack = yield* dispatch.handshake({

@@ -14,14 +14,23 @@ const DedupeDecision      = S.Literal('executed', 'duplicate', 'rejected');
 const ErrorPayload        = S.Struct({ code: S.NonEmptyTrimmedString, details: S.optional(S.Unknown), failureClass: FailureClass, message: S.NonEmptyTrimmedString });
 const _EventSubtype       = S.Literal('added', 'deleted', 'replaced', 'modified', 'undeleted', 'selected', 'deselected', 'deselect_all', 'properties_changed');
 const _ObservationType    = S.Literal('objects.changed', 'layers.changed', 'view.changed', 'selection.changed', 'material.changed', 'properties.changed', 'tables.changed');
-const _Identity           = S.Struct({ appId:   S.UUID, correlationId: S.String.pipe(S.pattern(/^[A-Fa-f0-9]{8,64}$/)), requestId: S.UUID, sessionId: S.UUID });
+const _HexId              = S.String.pipe(S.pattern(/^[A-Fa-f0-9]{8,64}$/));
+const CorrelationId       = _HexId.pipe(S.brand('CorrelationId'));
+const SpanId              = _HexId.pipe(S.brand('SpanId'));
+const TraceId             = _HexId.pipe(S.brand('TraceId'));
+const _Identity           = S.Struct({ appId:   S.UUID, correlationId: CorrelationId, requestId: S.UUID, sessionId: S.UUID });
 const _EventBase          = S.extend(_Identity, S.Struct({ _tag: S.Literal('event'), causationRequestId: S.optional(S.UUID), eventId: S.UUID, sourceRevision: NonNegInt }));
 const WorkflowExecutionId = S.NonEmptyTrimmedString.annotations({ identifier:'WorkflowExecutionId' });
+const _WorkflowFields = S.Struct({
+    approved:    S.optional(S.Boolean),
+    commandId:   S.optional(S.String),
+    executionId: S.optional(S.String),
+});
 const _TracedBase = S.extend(_Identity, S.Struct({ telemetryContext: S.Struct({
     attempt:      S.Int.pipe(S.greaterThanOrEqualTo(1)),
     operationTag: S.NonEmptyTrimmedString,
-    spanId:       S.String.pipe(S.pattern(/^[A-Fa-f0-9]{8,64}$/)),
-    traceId:      S.String.pipe(S.pattern(/^[A-Fa-f0-9]{8,64}$/)),
+    spanId:       SpanId,
+    traceId:      TraceId,
 }) }));
 const CatalogEntrySchema = S.Struct({
     ...ManifestEntrySchema.fields,
@@ -39,18 +48,22 @@ const CatalogEntrySchema = S.Struct({
 const ObjectTypeTag     = S.Literal('Brep', 'Mesh', 'Curve', 'Surface', 'Annotation', 'Instance', 'LayoutDetail');
 const Operation         = S.NonEmptyTrimmedString;
 const _CompactionSchema = S.Struct({ estimatedTokensAfter: NonNegInt, estimatedTokensBefore: NonNegInt, mode: S.Literal('history_reset'), sequence: NonNegInt, targetTokens: NonNegInt, triggerTokens: NonNegInt });
-const _EvidenceSchema   = S.Struct({ deterministicFailureClass: S.NullOr(FailureClass), deterministicStatus: ResultStatus, visualStatus: S.Literal('captured', 'capture_failed', 'capability_missing') });
+const _EvidenceSchema          = S.Struct({ deterministicFailureClass: S.NullOr(FailureClass), deterministicStatus: ResultStatus,
+    semanticDiscrepancy: S.optional(S.NullOr(S.String)), visualStatus: S.Literal('captured', 'capture_failed', 'capability_missing') });
+const _ExecutionHistoryEntry   = S.Struct({ args: S.Record({ key: S.String, value: S.Unknown }), commandId: S.String, resultSummary: S.optional(S.Unknown) });
 const _SceneSchema      = S.Struct({ activeLayer: S.Struct({ index: S.Int, name: S.String }), activeView: S.String, layerCount: NonNegInt, objectCount: NonNegInt,
     objectCountsByType: S.Record({ key: S.String, value: NonNegInt }),
     tolerances:         S.Struct({ absoluteTolerance: S.Number, angleToleranceRadians: S.Number, unitSystem: S.String }),
     worldBoundingBox:   S.Struct({ max: S.Tuple(S.Number, S.Number, S.Number), min: S.Tuple(S.Number, S.Number, S.Number) }) });
 const Loop = {
-    compaction:   _CompactionSchema,
-    evidence:     _EvidenceSchema,
+    compaction:            _CompactionSchema,
+    evidence:              _EvidenceSchema,
+    executionHistoryEntry: _ExecutionHistoryEntry,
     scene:        _SceneSchema,
     searchResult: S.Struct({ items: S.Array(S.Struct({ metadata: S.NullOr(S.Record({ key: S.String, value: S.Unknown })) })) }),
-    state: S.Struct({ attempt: S.Int.pipe(S.greaterThanOrEqualTo(1)), correctionCycles: NonNegInt, identityBase: S.optional(S.Unknown),
-        lastCompaction:       S.optional(_CompactionSchema), operations: S.Array(Operation), recentObservation: S.optional(S.Unknown),
+    state: S.Struct({ attempt: S.Int.pipe(S.greaterThanOrEqualTo(1)), correctionCycles: NonNegInt,
+        currentStepIndex:     S.optional(NonNegInt), executionHistory: S.optional(S.Array(_ExecutionHistoryEntry)), identityBase: S.optional(S.Unknown),
+        lastCompaction:       S.optional(_CompactionSchema), operations: S.Array(Operation), pendingSteps: S.optional(S.Array(S.String)), recentObservation: S.optional(S.Unknown),
         sceneSummary:         S.optional(_SceneSchema), sequence: NonNegInt, status: S.Literal('Planning', 'Completed', 'Failed'),
         verificationEvidence: S.optional(_EvidenceSchema),
         workflowExecution:    S.optional(S.Struct({ approved: S.Boolean, commandId: S.NonEmptyTrimmedString, executionId: WorkflowExecutionId })) }),
@@ -138,20 +151,41 @@ const Envelope = S.Union(
         result: S.optional(S.Unknown),
         status: ResultStatus })),
 );
-const _ScriptResultSchema = S.Struct({
-    commandName:         S.String,
-    commandResult:       S.Int.pipe(S.between(0, 6)),
-    objectsCreated:      S.optionalWith(S.Array(S.Struct({ objectId: S.UUID, objectType: S.String })), { default: () => [] }),
-    objectsCreatedCount: NonNegInt,
-    sceneObjectDelta:    S.optionalWith(S.Struct({ after: NonNegInt, before: NonNegInt }), { default: () => ({ after: 0, before: 0 }) }),
-    selectionChanged:    S.optionalWith(S.Boolean, { default: () => false }),
-});
+
+// --- [FUNCTIONS] -------------------------------------------------------------
+
+const kargadanToolCallProjector = (payload: { readonly params: unknown; readonly result: unknown }) => {
+    const _projectionSchema = S.Union(S.Struct({ workflowExecution: _WorkflowFields }), S.Struct({ workflow: _WorkflowFields }));
+    const decoded = S.decodeUnknownOption(_projectionSchema)(payload.params).pipe(
+        Option.orElse(() => S.decodeUnknownOption(_projectionSchema)(payload.result)),
+    );
+    const wf = Option.map(decoded, (d) => 'workflowExecution' in d ? d.workflowExecution : d.workflow);
+    const failureClass = Option.flatMap(
+        S.decodeUnknownOption(S.Struct({ failureClass: FailureClass }))(payload.params).pipe(
+            Option.orElse(() => S.decodeUnknownOption(S.Struct({ verificationEvidence: S.Struct({ deterministicFailureClass: FailureClass }) }))(payload.params).pipe(
+                Option.map((v) => ({ failureClass: v.verificationEvidence.deterministicFailureClass })))),
+            Option.orElse(() => S.decodeUnknownOption(S.Struct({ delta: S.Struct({ failureClass: FailureClass }) }))(payload.params).pipe(
+                Option.map((v) => ({ failureClass: v.delta.failureClass })))),
+        ),
+        (r) => Option.some(r.failureClass),
+    );
+    return {
+        failureClass:        Option.getOrUndefined(failureClass),
+        hasWorkflow:         Option.isSome(wf),
+        workflowApproved:    Option.flatMap(wf, (w) => Option.fromNullable(w.approved)).pipe(Option.getOrUndefined),
+        workflowCommandId:   Option.flatMap(wf, (w) => Option.fromNullable(w.commandId)).pipe(Option.filter((v) => v.length > 0), Option.getOrUndefined),
+        workflowExecutionId: Option.flatMap(wf, (w) => Option.fromNullable(w.executionId)).pipe(Option.filter((v) => v.length > 0), Option.getOrUndefined),
+    };
+};
 
 // --- [TYPES] -----------------------------------------------------------------
 
 type LoopState = {
-    readonly attempt:              number; readonly correctionCycles: number; readonly identityBase: Envelope.IdentityBase;
+    readonly attempt:              number; readonly correctionCycles: number; readonly currentStepIndex: number;
+    readonly executionHistory:     ReadonlyArray<typeof _ExecutionHistoryEntry.Type>;
+    readonly identityBase: Envelope.IdentityBase;
     readonly lastCompaction:       Option.Option<typeof Loop.compaction.Type>; readonly operations: ReadonlyArray<string>;
+    readonly pendingSteps:         Option.Option<ReadonlyArray<string>>;
     readonly recentObservation:    Option.Option<unknown>; readonly sceneSummary: Option.Option<unknown>;
     readonly sequence:             number; readonly status: 'Planning' | 'Completed' | 'Failed';
     readonly verificationEvidence: Option.Option<typeof Loop.evidence.Type>;
@@ -174,49 +208,7 @@ namespace Envelope {
         | (Extract<typeof Envelope.Type, { readonly _tag: 'heartbeat' }> & { readonly mode: 'pong' });
 }
 
-// --- [FUNCTIONS] -------------------------------------------------------------
-
-const _nonEmptyString = (value: unknown): value is string => typeof value === 'string' && value.length > 0;
-const _path = (value: unknown, keys: ReadonlyArray<string>) =>
-    keys.reduce<Option.Option<unknown>>(
-        (acc, key) =>
-            Option.flatMap(acc, (current) =>
-                current !== null && typeof current === 'object'
-                    ? Option.fromNullable((current as Record<string, unknown>)[key])
-                    : Option.none()),
-        Option.some(value),
-    );
-const kargadanToolCallProjector = (payload: { readonly params: unknown; readonly result: unknown }): Record<string, unknown> => {
-    const workflowExecutionId = _path(payload.params, ['workflowExecution', 'executionId']).pipe(
-        Option.orElse(() => _path(payload.params, ['workflow', 'executionId'])),
-        Option.orElse(() => _path(payload.result, ['workflow', 'executionId'])),
-        Option.filter(_nonEmptyString),
-    );
-    const failureClass = _path(payload.params, ['verificationEvidence', 'deterministicFailureClass']).pipe(
-        Option.orElse(() => _path(payload.params, ['failureClass'])),
-        Option.orElse(() => _path(payload.params, ['delta', 'failureClass'])),
-        Option.filter(S.is(FailureClass)),
-    );
-    const workflowApproved = _path(payload.params, ['workflowExecution', 'approved']).pipe(
-        Option.orElse(() => _path(payload.params, ['workflow', 'approved'])),
-        Option.orElse(() => _path(payload.result, ['workflow', 'approved'])),
-        Option.filter((value): value is boolean => typeof value === 'boolean'),
-    );
-    const workflowCommandId = _path(payload.params, ['workflowExecution', 'commandId']).pipe(
-        Option.orElse(() => _path(payload.params, ['workflow', 'commandId'])),
-        Option.orElse(() => _path(payload.result, ['workflow', 'commandId'])),
-        Option.filter(_nonEmptyString),
-    );
-    return {
-        failureClass:        Option.getOrUndefined(failureClass),
-        hasWorkflow:         Option.isSome(workflowExecutionId),
-        workflowApproved:    Option.getOrUndefined(workflowApproved),
-        workflowCommandId:   Option.getOrUndefined(workflowCommandId),
-        workflowExecutionId: Option.getOrUndefined(workflowExecutionId),
-    };
-};
-
 // --- [EXPORT] ----------------------------------------------------------------
 
-export { DEFAULT_LOOP_OPERATIONS, Envelope, ErrorPayload, FailureClass, kargadanToolCallProjector, Loop, NonNegInt, ObjectTypeTag, Operation };
+export { CorrelationId, DEFAULT_LOOP_OPERATIONS, Envelope, ErrorPayload, FailureClass, kargadanToolCallProjector, Loop, NonNegInt, ObjectTypeTag, Operation, SpanId, TraceId };
 export type { LoopState };

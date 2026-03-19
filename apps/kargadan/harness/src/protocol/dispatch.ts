@@ -1,36 +1,62 @@
 import { Data, Duration, Effect, HashMap, Match, Option, Ref } from 'effect';
 import { HarnessConfig } from '../config';
 import { KargadanSocketClient } from '../socket';
-import type { Envelope } from './schemas';
+import type { Envelope, SpanId, TraceId } from './schemas';
+
+// --- [TYPES] -----------------------------------------------------------------
+
+const _param = (name: string, type: string, description: string, required = false) => ({ description, name, required, type });
+type _TemplateSpec = {
+    readonly category:      string;
+    readonly description:   string;
+    readonly isDestructive: boolean;
+    readonly name:          string;
+    readonly params:        ReadonlyArray<ReturnType<typeof _param>>;
+    readonly script?:       ReadonlyArray<_Seg>;
+};
+type _Seg =
+    | { readonly k: 'clear' }
+    | { readonly k: 'enter' }
+    | { readonly k: 'op';  readonly c: string }
+    | { readonly k: 'ids'; readonly p: string }
+    | { readonly k: 'id';  readonly p: string }
+    | { readonly k: 'vec'; readonly p: string }
+    | { readonly k: 'arg'; readonly p: string }
+    | { readonly k: 'lit'; readonly v: string };
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
+const _V3 = 'number[3]';
 const _DispatchPolicy = {
     disconnected: { code: 'DISPATCH_DISCONNECTED',  failureClass: 'retryable' },
     protocol:     { code: 'DISPATCH_PROTOCOL',      failureClass: 'fatal'     },
     rejected:     { code: 'DISPATCH_REJECTED',      failureClass: 'fatal'     },
     transport:    { code: 'DISPATCH_TRANSPORT',     failureClass: 'retryable' },
 } as const satisfies Record<string, { code: string; failureClass: Envelope.FailureClass }>;
-const _fmtVec  = (value: ReadonlyArray<number>) => value.join(',');
-const _selById = (ids: ReadonlyArray<string>)   => ids.map((id) => `_SelId ${id}`).join(' ');
-const _V3 = 'number[3]';
-const _param = (name: string, type: string, description: string, required = false) => ({ description, name, required, type });
-
-// why: each template command defines its catalog metadata AND its script expander in a single record
-type _TemplateSpec = {
-    readonly category:      string;
-    readonly description:   string;
-    readonly expand?:       (args: Record<string, unknown>) => string;
-    readonly isDestructive: boolean;
-    readonly name:          string;
-    readonly params:        ReadonlyArray<ReturnType<typeof _param>>;
-};
+const _S = {
+    clear: '_SelNone',
+    enter: '_Enter',
+    id:    (id: string) => `_SelId ${id}`,
+    ids:   (ids: ReadonlyArray<string>) => ids.map((v) => `_SelId ${v}`).join(' '),
+    op:    (name: string) => `_${name}`,
+    vec:   (v: ReadonlyArray<number>) => v.join(','),
+} as const;
+const _compile = (segs: ReadonlyArray<_Seg>, args: Record<string, unknown>): string =>
+    segs.map((s) => Match.value(s.k).pipe(
+        Match.when('clear', () => _S.clear),
+        Match.when('enter', () => _S.enter),
+        Match.when('op',    () => _S.op((s as { c: string }).c)),
+        Match.when('ids',   () => _S.ids(args[(s as { p: string }).p] as ReadonlyArray<string>)),
+        Match.when('id',    () => _S.id(String(args[(s as { p: string }).p]))),
+        Match.when('vec',   () => _S.vec(args[(s as { p: string }).p] as ReadonlyArray<number>)),
+        Match.when('arg',   () => String(args[(s as { p: string }).p])),
+        Match.when('lit',   () => (s as { v: string }).v),
+        Match.exhaustive,
+    )).join(' ');
 const _toCatalogEntry = (id: string, spec: _TemplateSpec): Envelope.CatalogEntry =>
     ({ aliases: [], category: spec.category, description: spec.description, dispatch: { mode: 'script' as const },
         examples: [{ description: spec.description, input: '{}' }], id, isDestructive: spec.isDestructive, name: spec.name, params: spec.params,
         requirements: { minimumObjectRefCount: 0, requiresObjectRefs: false, requiresTelemetryContext: true } });
-
-// why: unified vocabulary — catalog metadata and script expanders colocated per command ID
 const _TEMPLATE_VOCABULARY = {
     'analysis.curvature':  { category: 'analysis', description: 'Displays curvature analysis color mapping on surfaces.', isDestructive: false, name: 'Curvature Analysis',
         params: [_param('objectIds', 'UUID[]', 'Surface IDs to analyze', true)] },
@@ -44,24 +70,45 @@ const _TEMPLATE_VOCABULARY = {
         params: [_param('objectIds', 'UUID[]', 'Object IDs to array', true), _param('direction', _V3, 'Array direction [x,y,z]', true), _param('count', 'number', 'Number of copies', true), _param('distance', 'number', 'Spacing distance', true)] },
     'array.polar':         { category: 'array', description: 'Creates a polar array of objects around a center.', isDestructive: false, name: 'Array Polar',
         params: [_param('objectIds', 'UUID[]', 'Object IDs to array', true), _param('center', _V3, 'Center of rotation [x,y,z]', true), _param('count', 'number', 'Number of copies', true), _param('angle', 'number', 'Total angle in degrees', false)] },
-    'boolean.difference':  { category: 'boolean', description: 'Subtracts solids from a target solid.', 
-        expand: (a) => `_SelNone _SelId ${String(a['target'])} ${_selById(a['subtractors'] as ReadonlyArray<string>)} _BooleanDifference _Enter _SelNone`,isDestructive: true, name: 'Boolean Difference',
-        params: [_param('target', 'UUID', 'Target solid object ID', true), _param('subtractors', 'UUID[]', 'Solid IDs to subtract', true)] },
+    'boolean.difference':  { category: 'boolean', description: 'Subtracts solids from a target solid.', isDestructive: true, name: 'Boolean Difference',
+        params: [_param('target', 'UUID', 'Target solid object ID', true), _param('subtractors', 'UUID[]', 'Solid IDs to subtract', true)],
+        script: [{ k: 'clear' }, { k: 'id', p: 'target' }, { k: 'ids', p: 'subtractors' }, { c: 'BooleanDifference', k: 'op' }, { k: 'enter' }, { k: 'clear' }] },
     'boolean.intersection': { category: 'boolean', description: 'Creates the overlapping volume of two or more solids.', isDestructive: true, name: 'Boolean Intersection',
         params: [_param('operands', 'UUID[]', 'Object IDs to intersect', true)] },
     'boolean.split':       { category: 'boolean', description: 'Splits solids at their intersections.', isDestructive: true, name: 'Boolean Split',
         params: [_param('operands', 'UUID[]', 'Object IDs to split', true)] },
     'boolean.twoObjects':  { category: 'boolean', description: 'Performs all boolean operations between two solids interactively.', isDestructive: true, name: 'Boolean 2 Objects',
         params: [_param('objectA', 'UUID', 'First solid ID', true), _param('objectB', 'UUID', 'Second solid ID', true)] },
-    'boolean.union':       { category: 'boolean', description: 'Combines overlapping solids into a single solid.', 
-        expand: (a) => `_SelNone ${_selById(a['operands'] as ReadonlyArray<string>)} _BooleanUnion _Enter _SelNone`,isDestructive: true, name: 'Boolean Union',
-        params: [_param('operands', 'UUID[]', 'Object IDs to union', true)] },
+    'boolean.union':       { category: 'boolean', description: 'Combines overlapping solids into a single solid.', isDestructive: true, name: 'Boolean Union',
+        params: [_param('operands', 'UUID[]', 'Object IDs to union', true)],
+        script: [{ k: 'clear' }, { k: 'ids', p: 'operands' }, { c: 'BooleanUnion', k: 'op' }, { k: 'enter' }, { k: 'clear' }] },
     'control.insertPoint': { category: 'control', description: 'Inserts a new control point into a curve or surface.', isDestructive: true, name: 'Insert Control Point',
         params: [_param('objectId', 'UUID', 'Curve or surface ID', true)] },
     'control.pointsOn':    { category: 'control', description: 'Enables control point display for selected objects.', isDestructive: false, name: 'Points On',
         params: [_param('objectIds', 'UUID[]', 'Object IDs to show points', true)] },
     'control.removePoint': { category: 'control', description: 'Removes a control point from a curve or surface.', isDestructive: true, name: 'Remove Control Point',
         params: [_param('objectId', 'UUID', 'Curve or surface ID', true)] },
+    'curve.arc':           { category: 'curve', description: 'Creates an arc from center, radius, and angle.', isDestructive: false, name: 'Create Arc',
+        params: [_param('center', _V3, 'Arc center [x,y,z]', true), _param('radius', 'number', 'Arc radius', true), _param('angle', 'number', 'Arc angle in degrees', true)],
+        script: [{ c: 'Arc', k: 'op' }, { k: 'vec', p: 'center' }, { k: 'arg', p: 'radius' }, { k: 'arg', p: 'angle' }, { k: 'enter' }] },
+    'curve.circle':        { category: 'curve', description: 'Creates a circle from center and radius.', isDestructive: false, name: 'Create Circle',
+        params: [_param('center', _V3, 'Circle center [x,y,z]', true), _param('radius', 'number', 'Circle radius', true)],
+        script: [{ c: 'Circle', k: 'op' }, { k: 'vec', p: 'center' }, { k: 'arg', p: 'radius' }, { k: 'enter' }] },
+    'curve.ellipse':       { category: 'curve', description: 'Creates an ellipse from center and two radii.', isDestructive: false, name: 'Create Ellipse',
+        params: [_param('center', _V3, 'Ellipse center [x,y,z]', true), _param('radiusX', 'number', 'First radius', true), _param('radiusY', 'number', 'Second radius', true)],
+        script: [{ c: 'Ellipse', k: 'op' }, { k: 'vec', p: 'center' }, { k: 'arg', p: 'radiusX' }, { k: 'arg', p: 'radiusY' }, { k: 'enter' }] },
+    'curve.interpCrv':     { category: 'curve', description: 'Creates an interpolated curve through points.', isDestructive: false, name: 'Interpolated Curve',
+        params: [_param('points', 'point3d[]', 'Points to interpolate through', true)],
+        script: [{ c: 'InterpCrv', k: 'op' }, { k: 'lit', v: '_Enter' }] },
+    'curve.line':          { category: 'curve', description: 'Creates a line between two points.', isDestructive: false, name: 'Create Line',
+        params: [_param('from', _V3, 'Start point [x,y,z]', true), _param('to', _V3, 'End point [x,y,z]', true)],
+        script: [{ c: 'Line', k: 'op' }, { k: 'vec', p: 'from' }, { k: 'vec', p: 'to' }, { k: 'enter' }] },
+    'curve.polyline':      { category: 'curve', description: 'Creates a polyline through a sequence of points.', isDestructive: false, name: 'Create Polyline',
+        params: [_param('points', 'point3d[]', 'Sequence of points', true)],
+        script: [{ c: 'Polyline', k: 'op' }, { k: 'lit', v: '_Enter' }] },
+    'curve.rectangle':     { category: 'curve', description: 'Creates a rectangle from corner and dimensions.', isDestructive: false, name: 'Create Rectangle',
+        params: [_param('corner', _V3, 'First corner [x,y,z]', true), _param('width', 'number', 'Rectangle width', true), _param('height', 'number', 'Rectangle height', true)],
+        script: [{ c: 'Rectangle', k: 'op' }, { k: 'vec', p: 'corner' }, { k: 'arg', p: 'width' }, { k: 'arg', p: 'height' }, { k: 'enter' }] },
     'edge.chamfer':        { category: 'edge', description: 'Creates a chamfer line between two curves.', isDestructive: false, name: 'Chamfer Curves',
         params: [_param('curve1Id', 'UUID', 'First curve ID', true), _param('curve2Id', 'UUID', 'Second curve ID', true), _param('distance', 'number', 'Chamfer distance', true)] },
     'edge.chamferEdge':    { category: 'edge', description: 'Bevels edges of a solid with a specified distance.', isDestructive: true, name: 'Chamfer Edge',
@@ -84,18 +131,30 @@ const _TEMPLATE_VOCABULARY = {
         params: [_param('objectIds', 'UUID[]', 'Objects to split', true), _param('cutterIds', 'UUID[]', 'Cutting object IDs', true)] },
     'edit.trim':           { category: 'edit', description: 'Trims curves or surfaces using cutting objects.', isDestructive: true, name: 'Trim',
         params: [_param('objectIds', 'UUID[]', 'Objects to trim', true), _param('cutterIds', 'UUID[]', 'Cutting object IDs', true)] },
-    'geometry.box':        { category: 'geometry', description: 'Creates a box from two opposite corner points.', 
-        expand: (a) => `_Box ${_fmtVec(a['corner1'] as ReadonlyArray<number>)} ${_fmtVec(a['corner2'] as ReadonlyArray<number>)} _Enter`,isDestructive: false, name: 'Create Box',
-        params: [_param('corner1', _V3, 'First corner [x,y,z]', true), _param('corner2', _V3, 'Opposite corner [x,y,z]', true)] },
-    'geometry.cylinder':   { category: 'geometry', description: 'Creates a cylinder from center, radius, and height.', 
-        expand: (a) => `_Cylinder ${_fmtVec(a['center'] as ReadonlyArray<number>)} ${String(a['radius'])} ${String(a['height'])} _Enter`,isDestructive: false, name: 'Create Cylinder',
-        params: [_param('center', _V3, 'Base center [x,y,z]', true), _param('radius', 'number', 'Cylinder radius', true), _param('height', 'number', 'Cylinder height', true)] },
-    'geometry.extrude':    { category: 'geometry', description: 'Extrudes a curve along a direction vector.', 
-        expand: (a) => `_SelNone _SelId ${String(a['curveId'])} _ExtrudeCrv _Direction ${_fmtVec(a['direction'] as ReadonlyArray<number>)} ${String(a['distance'])} _Enter _SelNone`,isDestructive: false, name: 'Extrude Curve',
-        params: [_param('curveId', 'UUID', 'Source curve object ID', true), _param('direction', _V3, 'Extrusion direction [x,y,z]', true), _param('distance', 'number', 'Extrusion distance', true)] },
-    'geometry.sphere':     { category: 'geometry', description: 'Creates a sphere from center point and radius.', 
-        expand: (a) => `_Sphere ${_fmtVec(a['center'] as ReadonlyArray<number>)} ${String(a['radius'])} _Enter`,isDestructive: false, name: 'Create Sphere',
-        params: [_param('center', _V3, 'Center point [x,y,z]', true), _param('radius', 'number', 'Sphere radius', true)] },
+    'geometry.box':        { category: 'geometry', description: 'Creates a box from two opposite corner points.', isDestructive: false, name: 'Create Box',
+        params: [_param('corner1', _V3, 'First corner [x,y,z]', true), _param('corner2', _V3, 'Opposite corner [x,y,z]', true)],
+        script: [{ c: 'Box', k: 'op' }, { k: 'vec', p: 'corner1' }, { k: 'vec', p: 'corner2' }, { k: 'enter' }] },
+    'geometry.cone':       { category: 'geometry', description: 'Creates a cone from base center, radius, and height.', isDestructive: false, name: 'Create Cone',
+        params: [_param('center', _V3, 'Base center [x,y,z]', true), _param('radius', 'number', 'Base radius', true), _param('height', 'number', 'Cone height', true)],
+        script: [{ c: 'Cone', k: 'op' }, { k: 'vec', p: 'center' }, { k: 'arg', p: 'radius' }, { k: 'arg', p: 'height' }, { k: 'enter' }] },
+    'geometry.cylinder':   { category: 'geometry', description: 'Creates a cylinder from center, radius, and height.', isDestructive: false, name: 'Create Cylinder',
+        params: [_param('center', _V3, 'Base center [x,y,z]', true), _param('radius', 'number', 'Cylinder radius', true), _param('height', 'number', 'Cylinder height', true)],
+        script: [{ c: 'Cylinder', k: 'op' }, { k: 'vec', p: 'center' }, { k: 'arg', p: 'radius' }, { k: 'arg', p: 'height' }, { k: 'enter' }] },
+    'geometry.extrude':    { category: 'geometry', description: 'Extrudes a curve along a direction vector.', isDestructive: false, name: 'Extrude Curve',
+        params: [_param('curveId', 'UUID', 'Source curve object ID', true), _param('direction', _V3, 'Extrusion direction [x,y,z]', true), _param('distance', 'number', 'Extrusion distance', true)],
+        script: [{ k: 'clear' }, { k: 'id', p: 'curveId' }, { c: 'ExtrudeCrv', k: 'op' }, { k: 'lit', v: '_Direction' }, { k: 'vec', p: 'direction' }, { k: 'arg', p: 'distance' }, { k: 'enter' }, { k: 'clear' }] },
+    'geometry.sphere':     { category: 'geometry', description: 'Creates a sphere from center point and radius.', isDestructive: false, name: 'Create Sphere',
+        params: [_param('center', _V3, 'Center point [x,y,z]', true), _param('radius', 'number', 'Sphere radius', true)],
+        script: [{ c: 'Sphere', k: 'op' }, { k: 'vec', p: 'center' }, { k: 'arg', p: 'radius' }, { k: 'enter' }] },
+    'geometry.torus':      { category: 'geometry', description: 'Creates a torus from center, major and minor radii.', isDestructive: false, name: 'Create Torus',
+        params: [_param('center', _V3, 'Torus center [x,y,z]', true), _param('majorRadius', 'number', 'Major radius', true), _param('minorRadius', 'number', 'Minor radius', true)],
+        script: [{ c: 'Torus', k: 'op' }, { k: 'vec', p: 'center' }, { k: 'arg', p: 'majorRadius' }, { k: 'arg', p: 'minorRadius' }, { k: 'enter' }] },
+    'layer.change':        { category: 'layer', description: 'Changes objects to a specified layer.', isDestructive: false, name: 'Change Layer',
+        params: [_param('objectIds', 'UUID[]', 'Object IDs to move', true), _param('layerName', 'string', 'Target layer name', true)],
+        script: [{ k: 'clear' }, { k: 'ids', p: 'objectIds' }, { c: 'ChangeLayer', k: 'op' }, { k: 'arg', p: 'layerName' }, { k: 'enter' }, { k: 'clear' }] },
+    'layer.new':           { category: 'layer', description: 'Creates a new layer with a specified name.', isDestructive: false, name: 'New Layer',
+        params: [_param('name', 'string', 'Layer name', true)],
+        script: [{ c: 'Layer', k: 'op' }, { k: 'lit', v: '_New' }, { k: 'arg', p: 'name' }, { k: 'enter' }] },
     'mesh.create':         { category: 'mesh', description: 'Creates a mesh from NURBS geometry.', isDestructive: false, name: 'Mesh from NURBS',
         params: [_param('objectIds', 'UUID[]', 'NURBS object IDs to mesh', true)] },
     'mesh.reduce':         { category: 'mesh', description: 'Reduces mesh polygon count while preserving shape.', isDestructive: true, name: 'Reduce Mesh',
@@ -130,26 +189,41 @@ const _TEMPLATE_VOCABULARY = {
         params: [_param('railId', 'UUID', 'Rail curve ID', true), _param('profileIds', 'UUID[]', 'Cross-section profile IDs', true)] },
     'surface.sweep2':      { category: 'surface', description: 'Sweeps a profile curve along two rail curves.', isDestructive: false, name: 'Sweep 2 Rails',
         params: [_param('rail1Id', 'UUID', 'First rail curve ID', true), _param('rail2Id', 'UUID', 'Second rail curve ID', true), _param('profileIds', 'UUID[]', 'Cross-section profile IDs', true)] },
-    'transform.mirror':    { category: 'transform', description: 'Mirrors selected objects across a plane.', 
-        expand: (a) => `_SelNone ${_selById(a['objectIds'] as ReadonlyArray<string>)} _Mirror ${_fmtVec(a['planeOrigin'] as ReadonlyArray<number>)} ${_fmtVec(a['planeNormal'] as ReadonlyArray<number>)} _Enter _SelNone`,isDestructive: true, name: 'Mirror Objects',
-        params: [_param('objectIds', 'UUID[]', 'Object IDs to mirror', true), _param('planeOrigin', _V3, 'Mirror plane origin [x,y,z]', true), _param('planeNormal', _V3, 'Mirror plane normal [x,y,z]', true)] },
-    'transform.rotate':    { category: 'transform', description: 'Rotates selected objects around a center point.', 
-        expand: (a) => `_SelNone ${_selById(a['objectIds'] as ReadonlyArray<string>)} _Rotate ${_fmtVec(a['center'] as ReadonlyArray<number>)} ${String(a['angle'])} _Enter _SelNone`,isDestructive: true, name: 'Rotate Objects',
-        params: [_param('objectIds', 'UUID[]', 'Object IDs to rotate', true), _param('center', _V3, 'Rotation center [x,y,z]', true), _param('angle', 'number', 'Rotation angle in degrees', true)] },
-    'transform.scale':     { category: 'transform', description: 'Scales selected objects from an origin point.', 
-        expand: (a) => `_SelNone ${_selById(a['objectIds'] as ReadonlyArray<string>)} _Scale ${_fmtVec(a['origin'] as ReadonlyArray<number>)} ${String(a['factor'])} _Enter _SelNone`,isDestructive: true, name: 'Scale Objects',
-        params: [_param('objectIds', 'UUID[]', 'Object IDs to scale', true), _param('origin', _V3, 'Scale origin [x,y,z]', true), _param('factor', 'number', 'Scale factor', true)] },
+    'transform.copy':      { category: 'transform', description: 'Copies objects from one point to another.', isDestructive: false, name: 'Copy Objects',
+        params: [_param('targets', 'UUID[]', 'Object IDs to copy', true), _param('from', _V3, 'Base point [x,y,z]', true), _param('to', _V3, 'Destination point [x,y,z]', true)],
+        script: [{ k: 'clear' }, { k: 'ids', p: 'targets' }, { c: 'Copy', k: 'op' }, { k: 'vec', p: 'from' }, { k: 'vec', p: 'to' }, { k: 'enter' }, { k: 'clear' }] },
+    'transform.mirror':    { category: 'transform', description: 'Mirrors selected objects across a plane.', isDestructive: true, name: 'Mirror Objects',
+        params: [_param('objectIds', 'UUID[]', 'Object IDs to mirror', true), _param('planeOrigin', _V3, 'Mirror plane origin [x,y,z]', true), _param('planeNormal', _V3, 'Mirror plane normal [x,y,z]', true)],
+        script: [{ k: 'clear' }, { k: 'ids', p: 'objectIds' }, { c: 'Mirror', k: 'op' }, { k: 'vec', p: 'planeOrigin' }, { k: 'vec', p: 'planeNormal' }, { k: 'enter' }, { k: 'clear' }] },
+    'transform.move':      { category: 'transform', description: 'Moves objects by displacement vector.', isDestructive: true, name: 'Move Objects',
+        params: [_param('targets', 'UUID[]', 'Object IDs to move', true), _param('from', _V3, 'Base point [x,y,z]', true), _param('to', _V3, 'Destination point [x,y,z]', true)],
+        script: [{ k: 'clear' }, { k: 'ids', p: 'targets' }, { c: 'Move', k: 'op' }, { k: 'vec', p: 'from' }, { k: 'vec', p: 'to' }, { k: 'enter' }, { k: 'clear' }] },
+    'transform.rotate':    { category: 'transform', description: 'Rotates selected objects around a center point.', isDestructive: true, name: 'Rotate Objects',
+        params: [_param('objectIds', 'UUID[]', 'Object IDs to rotate', true), _param('center', _V3, 'Rotation center [x,y,z]', true), _param('angle', 'number', 'Rotation angle in degrees', true)],
+        script: [{ k: 'clear' }, { k: 'ids', p: 'objectIds' }, { c: 'Rotate', k: 'op' }, { k: 'vec', p: 'center' }, { k: 'arg', p: 'angle' }, { k: 'enter' }, { k: 'clear' }] },
+    'transform.scale':     { category: 'transform', description: 'Scales selected objects from an origin point.', isDestructive: true, name: 'Scale Objects',
+        params: [_param('objectIds', 'UUID[]', 'Object IDs to scale', true), _param('origin', _V3, 'Scale origin [x,y,z]', true), _param('factor', 'number', 'Scale factor', true)],
+        script: [{ k: 'clear' }, { k: 'ids', p: 'objectIds' }, { c: 'Scale', k: 'op' }, { k: 'vec', p: 'origin' }, { k: 'arg', p: 'factor' }, { k: 'enter' }, { k: 'clear' }] },
+    'transform.scale2d':   { category: 'transform', description: 'Scales objects in 2D from an origin point.', isDestructive: true, name: 'Scale 2D',
+        params: [_param('objectIds', 'UUID[]', 'Object IDs to scale', true), _param('origin', _V3, 'Scale origin [x,y,z]', true), _param('factor', 'number', 'Scale factor', true)],
+        script: [{ k: 'clear' }, { k: 'ids', p: 'objectIds' }, { c: 'Scale2D', k: 'op' }, { k: 'vec', p: 'origin' }, { k: 'arg', p: 'factor' }, { k: 'enter' }, { k: 'clear' }] },
+    'viewport.namedView':  { category: 'viewport', description: 'Restores a saved named view.', isDestructive: false, name: 'Named View',
+        params: [_param('viewName', 'string', 'Name of the saved view', true)],
+        script: [{ c: 'NamedView', k: 'op' }, { k: 'lit', v: '_Restore' }, { k: 'arg', p: 'viewName' }, { k: 'enter' }] },
+    'viewport.setView':    { category: 'viewport', description: 'Sets the active viewport to a standard view.', isDestructive: false, name: 'Set View',
+        params: [_param('view', 'string', 'Standard view name (Top, Front, Right, Perspective, etc.)', true)],
+        script: [{ c: 'SetView', k: 'op' }, { k: 'lit', v: '_World' }, { k: 'arg', p: 'view' }, { k: 'enter' }] },
 } as const satisfies Record<string, _TemplateSpec>;
-// why: HashMap for structural equality and immutable lookup; derived once from vocabulary
 const _ExpanderMap = HashMap.fromIterable(
     (Object.entries(_TEMPLATE_VOCABULARY) as ReadonlyArray<readonly [string, _TemplateSpec]>)
-        .filter((entry): entry is readonly [string, _TemplateSpec & { readonly expand: (args: Record<string, unknown>) => string }] => entry[1].expand !== undefined)
-        .map(([id, spec]) => [id, spec.expand] as const));
+        .filter((entry): entry is readonly [string, _TemplateSpec & { readonly script: ReadonlyArray<_Seg> }] => entry[1].script !== undefined)
+        .map(([id, spec]) => [id, (args: Record<string, unknown>) => _compile(spec.script, args)] as const));
 
 // --- [ERRORS] ----------------------------------------------------------------
 
 class CommandDispatchError extends Data.TaggedError('CommandDispatchError')<{
     readonly reason:        keyof typeof _DispatchPolicy;
+    readonly cause?:        unknown;
     readonly details?:      unknown;
     readonly failureClass?: Envelope.FailureClass;
 }> {
@@ -176,6 +250,7 @@ class CommandDispatch extends Effect.Service<CommandDispatch>()('kargadan/Comman
             socket.request(envelope).pipe(
                 Effect.catchTag('SocketClientError', (error) => Ref.set(phaseRef, 'closed').pipe(
                     Effect.andThen(Effect.fail(new CommandDispatchError({
+                        cause: error,
                         details: { socketDetail: error.detail, socketReason: error.reason },
                         reason: Match.value(error.reason).pipe(
                             Match.when('protocol', () => 'protocol' as const),
@@ -188,7 +263,7 @@ class CommandDispatch extends Effect.Service<CommandDispatch>()('kargadan/Comman
                     Effect.zipRight(_request({ _tag: 'handshake.init', ...identity,
                         auth: { token, tokenExpiresAt: new Date(Date.now() + Duration.toMillis(Duration.minutes(tokenExpiryMinutes))) },
                         capabilities, protocolVersion,
-                        telemetryContext: { attempt: 1, operationTag: 'handshake.init', spanId: identity.requestId.replaceAll('-', ''), traceId: identity.correlationId },
+                        telemetryContext: { attempt: 1, operationTag: 'handshake.init', spanId: identity.requestId.replaceAll('-', '') as typeof SpanId.Type, traceId: String(identity.correlationId) as typeof TraceId.Type },
                     })),
                     Effect.flatMap((response) => Match.value(response).pipe(
                         Match.tag('handshake.ack', (ack) => Effect.all([
@@ -197,7 +272,6 @@ class CommandDispatch extends Effect.Service<CommandDispatch>()('kargadan/Comman
                         Match.tag('handshake.reject', (r) => Ref.set(catalogRef, []).pipe(Effect.zipRight(
                             Effect.fail(new CommandDispatchError({ details: { code: r.code, message: r.message }, failureClass: r.failureClass, reason: 'rejected' }))))),
                         Match.orElse((reply) => Effect.fail(new CommandDispatchError({ details: { expected: 'handshake.ack|handshake.reject', received: reply._tag }, reason: 'protocol' })))))));
-        // why: template commands rewrite to script.run with expanded Rhino command strings
         const execute = Effect.fn('CommandDispatch.execute')((command: Envelope.Command) => {
             const expanded = HashMap.get(_ExpanderMap, command.commandId).pipe(
                 Option.map((expand) => ({ ...command, args: { script: expand(command.args) }, commandId: 'script.run' }) as Envelope.Command),
@@ -222,7 +296,7 @@ class CommandDispatch extends Effect.Service<CommandDispatch>()('kargadan/Comman
                 _tag: 'command', ...identityBase, args, commandId, deadlineMs: options?.deadlineMs ?? commandDeadlineMs,
                 idempotency: options?.idempotency, objectRefs: options?.objectRefs, requestId,
                 telemetryContext: { attempt: Math.max(1, options?.attempt ?? 1), operationTag: options?.operationTag ?? commandId,
-                    spanId:  requestId.replaceAll('-', ''), traceId: identityBase.correlationId },
+                    spanId:  requestId.replaceAll('-', '') as typeof SpanId.Type, traceId: String(identityBase.correlationId) as typeof TraceId.Type },
                 undoScope:   options?.undoScope,
             };
         };

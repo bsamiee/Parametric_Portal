@@ -70,7 +70,7 @@ public sealed partial class CommandOperation {
     public static readonly CommandOperation ObjectUpdate = new("write.object.update");
     public static readonly CommandOperation ObjectDelete = new("write.object.delete");
     public static readonly CommandOperation ScriptRun = new("script.run");
-    public static readonly CommandOperation CatalogRhinoCommands = new("catalog.rhinoCommands");
+    public static readonly CommandOperation CatalogRhinoCommands = new("catalog.rhino.commands");
     public static readonly CommandOperation ObjectList = new("read.object.list");
     public static readonly CommandOperation SelectionManage = new("write.selection");
     public CommandExecutionMode ExecutionMode =>

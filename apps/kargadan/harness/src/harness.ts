@@ -1,45 +1,24 @@
-import { createHash } from 'node:crypto';
 import { AiRegistry } from '@parametric-portal/ai/registry';
-import { AiService, type ManifestEntrySchema } from '@parametric-portal/ai/service';
+import { SessionOverride } from '@parametric-portal/ai/runtime-provider';
+import { AiService } from '@parametric-portal/ai/service';
 import { AgentPersistenceService } from '@parametric-portal/database/agent-persistence';
 import { Client } from '@parametric-portal/database/client';
-import { DatabaseService } from '@parametric-portal/database/repos';
-import { Context } from '@parametric-portal/server/context';
-import { Array as A, Effect, FiberRef, HashMap, Layer, Match, Option, Schema as S } from 'effect';
+import { Effect, FiberRef, Layer, Match, Option, Schema as S } from 'effect';
 import { HarnessConfig, KargadanHost } from './config';
 import { CommandDispatch } from './protocol/dispatch';
-import type { Envelope } from './protocol/schemas';
+import type { CorrelationId, Envelope } from './protocol/schemas';
 import { AgentLoop } from './runtime/agent-loop';
 import { KargadanSocketClientLive, ReconnectionSupervisor } from './socket';
 
 // --- [SCHEMA] ----------------------------------------------------------------
 
-const _MarkerSchema          = S.Struct({ hash: S.String, manifestVersion: S.String });
 const _LiveSceneSummary      = S.Struct({ objectCount: S.Int.pipe(S.greaterThanOrEqualTo(0)) });
+const _ResumedOpsCompat      = S.Struct({ operations: S.Array(S.String), workflowExecution: S.optional(S.Struct({ commandId: S.String })) });
 const _MANIFEST_ENTITY_TYPE  = 'command' as const;
 const _MANIFEST_NAMESPACE    = 'kargadan' as const;
 
 // --- [FUNCTIONS] -------------------------------------------------------------
 
-const _mergeManifest = (
-    base:      ReadonlyArray<Envelope.CatalogEntry>,
-    overrides: Option.Option<ReadonlyArray<S.Schema.Type<typeof ManifestEntrySchema>>>,
-) =>
-    Option.match(overrides, {
-        onNone: () => base,
-        onSome: (entries) => {
-            const byId = HashMap.fromIterable(A.map(entries, (entry) => [entry.id, entry] as const));
-            return A.map(base, (entry) => Option.match(HashMap.get(byId, entry.id), {
-                onNone: () => entry,
-                onSome: (enriched) => ({ ...entry,
-                    aliases:       A.dedupe(A.appendAll(entry.aliases, enriched.aliases)), category: enriched.category ?? entry.category,
-                    description:   enriched.description, examples: enriched.examples.length === 0 ? entry.examples : enriched.examples,
-                    isDestructive: enriched.isDestructive ?? entry.isDestructive, name: enriched.name,
-                    params:        enriched.params.length === 0 ? entry.params : enriched.params, requirements: entry.requirements,
-                }) as typeof entry,
-            }));
-        },
-    });
 const makeInteractiveHooks = (
     emit:    (kind: 'error' | 'code', tag: string, content: string) => Effect.Effect<void>,
     compact: (value: unknown) => string,
@@ -54,29 +33,23 @@ const makeInteractiveHooks = (
         return emit('code', `[tool:${e.source}]`, `${e.phase} ${e.command.commandId} (${e.durationMs}ms) ${suffix}`);
     },
 }) satisfies Pick<NonNullable<Parameters<AgentLoop['handle']>[0]['hooks']>, 'onFailure' | 'onStage' | 'onTool'>;
-
-// why: three deterministic resume paths — no auto|off enum
-// 1. --session <id>  -> resume that session
-// 2. --continue      -> resume latest via findResumable
-// 3. positional intent or bare invocation -> fresh (bare falls back to resume latest if available)
 const run = Effect.fn('kargadan.harness.runHarness')((input?: {
     readonly architectFallback?: ReadonlyArray<string>;
-    readonly architectModel?:    string;
-    readonly architectProvider?: string;
+    readonly architectPrimary?:  string;
     readonly continue?:          boolean;
     readonly hooks?:             Parameters<AgentLoop['handle']>[0]['hooks'];
     readonly intent?:            string;
     readonly sessionId?:         string;
 }) =>
-    Effect.scoped(
+        Effect.scoped(
         Effect.gen(function* () {
-            const [dispatch, loop, persistence, reconnect, cfg, ai, database] = yield* Effect.all([
-                CommandDispatch, AgentLoop, AgentPersistenceService, ReconnectionSupervisor, HarnessConfig, AiService, DatabaseService,
+            const [dispatch, loop, reconnect, cfg, ai] = yield* Effect.all([
+                CommandDispatch, AgentLoop, ReconnectionSupervisor, HarnessConfig, AiService,
             ]);
-            const architectOverrideInput = yield* AiRegistry.decodeSessionOverrideFromInput({
+            const agentPersistence = yield* AgentPersistenceService;
+            const architectOverrideInput = yield* SessionOverride.decodeFromInput({
                 fallback: (input?.architectFallback ?? []).map((entry) => entry.trim()).filter((entry) => entry.length > 0),
-                model:    input?.architectModel?.trim() ?? '',
-                provider: input?.architectProvider?.trim() ?? '',
+                primary:  input?.architectPrimary?.trim() ?? '',
             });
             const architectOverride = Option.orElse(architectOverrideInput, () => cfg.resolveArchitectOverride);
             const intent = input?.intent ?? cfg.agentIntent;
@@ -84,17 +57,16 @@ const run = Effect.fn('kargadan.harness.runHarness')((input?: {
             const wantsContinue = input?.continue === true;
             yield* FiberRef.set(AiRegistry.SessionOverrideRef, cfg.resolveSessionOverride);
             yield* FiberRef.set(AiRegistry.OnTokenRefreshRef, Option.some(KargadanHost.auth.onTokenRefresh));
-            const correlationId = crypto.randomUUID().replaceAll('-', '');
-            // why: deterministic resume — derive from flag presence, not enum
+            const correlationId = crypto.randomUUID().replaceAll('-', '') as typeof CorrelationId.Type;
             const resumableSessionId = yield* Option.match(requestedSessionId, {
                 onNone: () => wantsContinue || input?.intent === undefined
-                    ? Context.Request.withinSync(cfg.appId, persistence.findResumable(cfg.appId), { requestId: correlationId })
+                    ? Client.tenant.with(cfg.appId, agentPersistence.findResumable(cfg.appId))
                     : Effect.succeed(Option.none<string>()),
                 onSome: (id) => Effect.succeed(Option.some(id)),
             });
             const hydration = yield* Option.match(resumableSessionId, {
                 onNone: () => Effect.succeed(Option.none()),
-                onSome: (sid) => Context.Request.withinSync(cfg.appId, persistence.hydrate(sid).pipe(Effect.map(Option.some)), { requestId: correlationId }),
+                onSome: (sid) => Client.tenant.with(cfg.appId, agentPersistence.hydrate(sid).pipe(Effect.map(Option.some))),
             });
             const resume = Option.flatMap(hydration, (r) => r.fresh ? Option.none() : Option.some({ chatJson: r.chatJson, sequence: r.sequence, state: r.state }));
             const sessionId = Option.isSome(resume) ? resumableSessionId.pipe(Option.getOrElse(() => crypto.randomUUID()))
@@ -106,10 +78,10 @@ const run = Effect.fn('kargadan.harness.runHarness')((input?: {
                     : Effect.log('kargadan.harness: resuming session', { diverged: r.diverged, sequence: r.sequence, sessionId }),
             });
             yield* Effect.when(
-                Context.Request.withinSync(cfg.appId, persistence.startSession({ appId: cfg.appId, correlationId, sessionId }), { requestId: correlationId }),
+                Client.tenant.with(cfg.appId, agentPersistence.startSession({ appId: cfg.appId, correlationId, sessionId })),
                 () => Option.isNone(resume));
             const identityBase = { appId: cfg.appId, correlationId, sessionId };
-            const outcome = yield* Context.Request.withinSync(
+            const outcome = yield* Client.tenant.with(
                 cfg.appId,
                 reconnect.supervise((port) =>
                     Effect.gen(function* () {
@@ -118,50 +90,54 @@ const run = Effect.fn('kargadan.harness.runHarness')((input?: {
                         const ack = yield* dispatch.handshake({ ...identityBase, requestId: crypto.randomUUID(), token: cfg.sessionToken });
                         const receivedCatalog = yield* dispatch.receiveCatalog();
                         const handshakeCatalog = receivedCatalog.length === 0 ? ack.catalog : receivedCatalog;
-                        // why: template catalog entries enable agent planning of structured script commands
-                        const mergedManifest = [..._mergeManifest(handshakeCatalog, Option.none()), ...CommandDispatch.templateCatalog];
+                        const mergedManifest = [...handshakeCatalog, ...CommandDispatch.templateCatalog];
                         const seedProjection = { manifest: mergedManifest, source: 'handshake' as const,
                             version: `handshake:${ack.server?.pluginRevision ?? 'unknown'}:${String(mergedManifest.length)}` };
-                        const serializedManifest = JSON.stringify(seedProjection.manifest);
-                        const markerKey = `kargadan:manifest:${_MANIFEST_NAMESPACE}:${_MANIFEST_ENTITY_TYPE}:${cfg.appId}`;
-                        const markerValue = { hash: createHash('sha256').update(`${seedProjection.version}\n${serializedManifest}`).digest('hex'),
-                            manifestVersion: seedProjection.version };
-                        yield* Client.tenant.with(cfg.appId, database.kvStore.getJson(markerKey, _MarkerSchema)).pipe(
-                            Effect.map(Option.match({
-                                onNone: () => true,
-                                onSome: (stored) => stored.hash !== markerValue.hash || stored.manifestVersion !== markerValue.manifestVersion,
-                            })),
-                            Effect.flatMap((needs) => Effect.when(
-                                ai.seedKnowledge({ entityType: _MANIFEST_ENTITY_TYPE, manifest: seedProjection.manifest,
-                                    namespace: _MANIFEST_NAMESPACE, scopeId: null }).pipe(
-                                    Effect.zipRight(Client.tenant.with(cfg.appId, database.kvStore.setJson(markerKey, markerValue, _MarkerSchema))),
-                                    Effect.zipRight(Effect.log('kargadan.harness.kb.seed.applied', {
-                                        manifestHash: markerValue.hash, markerKey, source: seedProjection.source }))),
-                                () => needs)),
-                            Effect.when(() => serializedManifest.trim().length > 0));
+                        const prepared = yield* Client.tenant.with(cfg.appId, ai.prepareKnowledge({
+                            entityType: _MANIFEST_ENTITY_TYPE,
+                            manifest:   seedProjection.manifest,
+                            namespace:  _MANIFEST_NAMESPACE,
+                            version:    seedProjection.version,
+                        }));
+                        yield* Effect.log('kargadan.harness.kb.prepare', {
+                            knowledgeHash: prepared.state.hash,
+                            knowledgeKey:  prepared.key,
+                            prepared:      prepared.prepared,
+                            source:        seedProjection.source,
+                        });
+                        const catalogIds = new Set(mergedManifest.map((e) => e.id));
+                        const validatedResume = yield* Option.match(resume, {
+                            onNone: () => Effect.succeed(resume),
+                            onSome: (r) => S.decodeUnknown(_ResumedOpsCompat)(r.state).pipe(
+                                Effect.map((decoded) => decoded.operations.some((op) => !catalogIds.has(op))
+                                    || (decoded.workflowExecution?.commandId !== undefined && !catalogIds.has(decoded.workflowExecution.commandId))),
+                                Effect.flatMap((incompatible) => incompatible
+                                    ? Effect.log('kargadan.harness: catalog incompatible with resumed state, forcing fresh session').pipe(Effect.as(Option.none()))
+                                    : Effect.succeed(resume)),
+                                Effect.catchAll(() => Effect.succeed(resume))),
+                        });
                         const runtimeIdentityBase = { appId: ack.appId, correlationId: ack.correlationId, sessionId: ack.sessionId };
                         return yield* loop.handle({
                             architectOverride, capabilities: ack.acceptedCapabilities, catalog: mergedManifest,
-                            identityBase: runtimeIdentityBase, intent, resume,
+                            identityBase: runtimeIdentityBase, intent, resume: validatedResume,
                             ...(input?.hooks == null ? {} : { hooks: input.hooks }),
                         }).pipe(Effect.tap((result) =>
                             Effect.log('Harness loop complete', { correlationId: runtimeIdentityBase.correlationId, outcome: result })));
                     }),
                 ),
-                { requestId: correlationId },
             );
             const completionError = Match.value(outcome.state.status).pipe(
                 Match.when('Completed', () => Option.none<string>()),
                 Match.when('Planning', () => Option.some('Loop terminated unexpectedly in Planning state')),
                 Match.orElse(() => Option.some('Loop terminated with Failed status')));
-            yield* Context.Request.withinSync(cfg.appId,
-                persistence.completeSession({
+            yield* Client.tenant.with(cfg.appId,
+                agentPersistence.completeSession({
                     appId:         cfg.appId, correlationId,
                     error:         Option.getOrNull(completionError),
                     sequence:      outcome.state.sequence, sessionId,
                     status:        outcome.state.status === 'Completed' ? 'completed' as const : 'failed' as const,
                     toolCallCount: outcome.state.sequence,
-                }), { requestId: correlationId });
+                }));
             return outcome;
         }).pipe(
             Effect.withSpan('kargadan.harness.main'),
@@ -183,7 +159,7 @@ const _RuntimeLayer = AgentLoop.Default.pipe(
 const probeLive = Effect.scoped(
     Effect.gen(function* () {
         const [dispatch, cfg, reconnect] = yield* Effect.all([CommandDispatch, HarnessConfig, ReconnectionSupervisor]);
-        const identityBase = { appId: cfg.appId, correlationId: crypto.randomUUID().replaceAll('-', ''), sessionId: crypto.randomUUID() };
+        const identityBase = { appId: cfg.appId, correlationId: crypto.randomUUID().replaceAll('-', '') as typeof CorrelationId.Type, sessionId: crypto.randomUUID() };
         return yield* reconnect.supervise(() => Effect.gen(function* () {
             yield* Effect.forkScoped(dispatch.start()).pipe(Effect.asVoid);
             const handshake = yield* dispatch.handshake({ ...identityBase, requestId: crypto.randomUUID(), token: cfg.sessionToken });

@@ -170,8 +170,7 @@
         }
     },
     "scripts": {
-        "check": "biome check .",
-        "test": "vitest run --passWithNoTests"
+        "check": "biome check ."
     },
     "dependencies": {
         "@aws-sdk/client-s3": "catalog:",
@@ -187,6 +186,7 @@
         "@effect/rpc": "catalog:",
         "@effect/sql": "catalog:",
         "@effect/workflow": "catalog:",
+        "@parametric-portal/ai": "workspace:*",
         "@parametric-portal/database": "workspace:*",
         "@parametric-portal/types": "workspace:*",
         "@simplewebauthn/server": "catalog:",

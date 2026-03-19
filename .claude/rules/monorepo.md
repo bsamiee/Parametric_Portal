@@ -2,9 +2,7 @@
 
 ## Nx Execution
 
-Always `pnpm exec nx <command>` from repo root — never bare `nx`, `npx nx`, or `cd` into a package. Bare invocation breaks caching and risks wrong binary resolution.
-
-`pnpm exec nx affected -t <target> --base=main` for incremental CI. `pnpm exec nx reset` to clear cache. Never bypass Nx for build, test, or typecheck.
+Always `pnpm exec nx <command>` from repo root — never bare `nx`, `npx nx`, or `cd` into a package.
 
 ## Package Topology
 

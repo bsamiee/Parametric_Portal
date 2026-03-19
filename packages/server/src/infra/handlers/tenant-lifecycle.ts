@@ -4,6 +4,7 @@
  * Guarantees compensation on permission seed failure during provisioning.
  */
 import { SqlClient } from '@effect/sql';
+import { AiSettingsSchema } from '@parametric-portal/ai/registry';
 import { type App, AppSettingsSchema } from '@parametric-portal/database/models';
 import { DatabaseService } from '@parametric-portal/database/repos';
 import { Effect, Layer, Match, Option, Schema as S } from 'effect';
@@ -19,7 +20,10 @@ import { JobService } from '../jobs.ts';
 const _ProvisionPayload = S.Struct({
     name:      S.NonEmptyTrimmedString,
     namespace: S.NonEmptyTrimmedString.pipe(S.pattern(/^[a-z0-9][a-z0-9-]{1,62}[a-z0-9]$/)),
-    settings:  S.optional(AppSettingsSchema),
+    settings:  S.optional(S.Struct({
+        ...AppSettingsSchema.fields,
+        ai: S.optionalWith(AiSettingsSchema, { default: () => S.decodeSync(AiSettingsSchema)({}) }),
+    })),
 });
 const _TransitionCommand = S.Union(
     S.Struct({ _tag: S.Literal('provision'), name: _ProvisionPayload.fields.name, namespace: _ProvisionPayload.fields.namespace, settings: _ProvisionPayload.fields.settings }),

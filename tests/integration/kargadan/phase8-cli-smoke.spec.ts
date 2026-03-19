@@ -13,7 +13,7 @@ const _runCli = (args: ReadonlyArray<string>) =>
     );
 
 it('P8-CLI-NTTY-01: non-TTY invocation fails with typed tty_required rail', () => {
-    const result = _runCli(['phase8 smoke']);
+    const result = _runCli(['run', '--intent', 'test']);
     expect(result.status).toBe(1);
     const output = `${result.stdout}\n${result.stderr}`;
     expect(output).toContain('kargadan tty_required');
@@ -28,8 +28,7 @@ it('P8-CLI-HELP-01: --help output contains the main top-level commands', () => {
     expect(output).toContain('init');
     expect(output).toContain('sessions');
     expect(output).toContain('config');
-    expect(output).toContain('doctor');
-    expect(output).toContain('dev');
+    expect(output).toContain('diagnostics');
 });
 
 it('P8-CLI-HELP-02: sessions list --help shows options', () => {
@@ -40,19 +39,18 @@ it('P8-CLI-HELP-02: sessions list --help shows options', () => {
     expect(output).toContain('--cursor');
 });
 
-it('P8-CLI-HELP-03: doctor --help shows description', () => {
-    const result = _runCli(['doctor', '--help']);
+it('P8-CLI-HELP-03: diagnostics --help shows description', () => {
+    const result = _runCli(['diagnostics', '--help']);
     const output = `${result.stdout}\n${result.stderr}`;
-    expect(output).toContain('Validate environment');
+    expect(output).toContain('Diagnostics commands');
 });
 
-it('P8-CLI-HELP-04: dev --help shows prepare and launch subcommands', () => {
-    const result = _runCli(['dev', '--help']);
+it('P8-CLI-HELP-04: diagnostics live --help shows prepare and launch options', () => {
+    const result = _runCli(['diagnostics', 'live', '--help']);
     const output = `${result.stdout}\n${result.stderr}`;
-    expect(output).toContain('prepare');
-    expect(output).toContain('launch');
-    expect(output).toContain('probe');
-    expect(output).toContain('reindex');
+    expect(output).toContain('--prepare');
+    expect(output).toContain('--launch');
+    expect(output).toContain('--rhino-app');
 });
 
 it('P8-CLI-VAL-01: invalid --format=xml produces validation error', () => {

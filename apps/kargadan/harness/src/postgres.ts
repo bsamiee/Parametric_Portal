@@ -76,7 +76,6 @@ const _bootstrapDocker = (kargadanDir: string, keychain: _KeychainOps) => Effect
     yield* fs.exists(composePath).pipe(Effect.filterOrFail((exists) => exists, () =>
         new PostgresProviderError({ message: `Docker Compose file not found at ${composePath}. Run from the harness project root.` })));
     yield* fs.makeDirectory(join(kargadanDir, 'postgres', 'docker'), { recursive: true });
-    // why: password persisted in macOS Keychain — generated once, reused on subsequent boots
     const existing = yield* keychain.readSecret(_DOCKER_KEYCHAIN_ACCOUNT).pipe(Effect.catchAll(() => Effect.succeed(Option.none<string>())));
     const password = yield* Option.match(existing, {
         onNone: () => Effect.gen(function* () {
@@ -116,18 +115,12 @@ const _connectionUrl = (rootDir: string) =>
 
 // --- [MAINTENANCE] -----------------------------------------------------------
 
-const _clearEmbeddings = SqlClient.SqlClient.pipe(Effect.flatMap((sql) =>
-    sql.unsafe('UPDATE search_chunks SET embedding = NULL, model = NULL, dimensions = NULL').pipe(
-        Effect.tap(() => Effect.logInfo('postgres.clearEmbeddings.completed')))));
-const _reindexEmbeddings = SqlClient.SqlClient.pipe(Effect.flatMap((sql) =>
-    sql.unsafe('REINDEX INDEX CONCURRENTLY idx_search_chunks_embedding').pipe(
-        Effect.tap(() => Effect.logInfo('postgres.reindexEmbeddings.completed')))));
-const _vacuumSearchChunks = SqlClient.SqlClient.pipe(Effect.flatMap((sql) =>
-    sql.unsafe(`VACUUM (ANALYZE, BUFFER_USAGE_LIMIT '256MB') search_chunks`).pipe(
-        Effect.tap(() => Effect.logInfo('postgres.vacuumSearchChunks.completed')))));
+const _vacuumPersistence = SqlClient.SqlClient.pipe(Effect.flatMap((sql) =>
+    sql.unsafe(`VACUUM (ANALYZE, BUFFER_USAGE_LIMIT '256MB') agent_journal, kv_store, effect_event_journal`).pipe(
+        Effect.tap(() => Effect.logInfo('postgres.vacuumPersistence.completed')))));
 const _indexHealth = SqlClient.SqlClient.pipe(Effect.flatMap((sql) =>
     sql.unsafe(`SELECT schemaname, relname, indexrelname, idx_scan, idx_tup_read, idx_tup_fetch, pg_size_pretty(pg_relation_size(indexrelid)) AS size
-        FROM pg_stat_user_indexes WHERE relname IN ('search_chunks', 'agent_journal', 'kv_store', 'search_terms')
+        FROM pg_stat_user_indexes WHERE relname IN ('agent_journal', 'apps', 'effect_event_journal', 'effect_event_remotes', 'kv_store')
         ORDER BY idx_scan DESC`).pipe(
         Effect.map((rows) => rows as ReadonlyArray<{
             readonly idx_scan:     string; readonly idx_tup_fetch: string; readonly idx_tup_read: string;
@@ -138,8 +131,10 @@ const _indexHealth = SqlClient.SqlClient.pipe(Effect.flatMap((sql) =>
 
 const shellExec = (command: string, args: ReadonlyArray<string>) => _exec(command, args);
 const KargadanPostgres = {
-    clearEmbeddings: _clearEmbeddings, connectionUrl: _connectionUrl, indexHealth: _indexHealth,
-    reindexEmbeddings: _reindexEmbeddings, resolveUrl: _resolveUrl, vacuumSearchChunks: _vacuumSearchChunks,
+    connectionUrl:     _connectionUrl,
+    indexHealth:       _indexHealth,
+    resolveUrl:        _resolveUrl,
+    vacuumPersistence: _vacuumPersistence,
 } as const;
 
 export { KargadanPostgres, shellExec };

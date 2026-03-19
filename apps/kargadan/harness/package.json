@@ -7,15 +7,19 @@
         "kargadan": "./dist/main.js"
     },
     "scripts": {
-        "build:binary": "node --experimental-sea-config sea-config.json && cp $(command -v node) dist/kargadan && npx postject dist/kargadan NODE_SEA_BLOB dist/kargadan-sea.blob --sentinel-fuse NODE_SEA_FUSE_fce680ab2cc467b6e072b8b5df1996b2",
+        "build": "vite build",
+        "build:binary": "node -e \"require('node:fs').writeFileSync('dist/sea-entry.cjs', [\\\"const { join, dirname } = require('node:path');\\\", \\\"const { pathToFileURL } = require('node:url');\\\", '', \\\"import(pathToFileURL(join(dirname(process.execPath), 'main.js')).href).catch((error) => {\\\", \\\"    console.error(error);\\\", \\\"    process.exitCode = 1;\\\", \\\"});\\\", ''].join('\\\\n'))\" && node --experimental-sea-config sea-config.json && cp $(command -v node) dist/kargadan && npx postject dist/kargadan NODE_SEA_BLOB dist/kargadan-sea.blob --sentinel-fuse NODE_SEA_FUSE_fce680ab2cc467b6e072b8b5df1996b2",
         "build:sea": "pnpm run build && pnpm run build:binary",
         "check": "biome check .",
         "cli": "tsx src/cli.ts",
         "cli:run": "tsx src/cli.ts run",
-        "dev": "tsx watch src/cli.ts",
-        "test": "vitest run --passWithNoTests"
+        "dev": "tsx watch src/cli.ts"
     },
     "dependencies": {
+        "@effect/ai": "catalog:",
+        "@effect/ai-anthropic": "catalog:",
+        "@effect/ai-google": "catalog:",
+        "@effect/ai-openai": "catalog:",
         "@effect/cli": "catalog:",
         "@effect/platform": "catalog:",
         "@effect/platform-node": "catalog:",
@@ -24,7 +28,6 @@
         "@effect/workflow": "catalog:",
         "@parametric-portal/ai": "workspace:*",
         "@parametric-portal/database": "workspace:*",
-        "@parametric-portal/server": "workspace:*",
         "effect": "catalog:"
     },
     "devDependencies": {

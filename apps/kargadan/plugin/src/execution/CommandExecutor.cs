@@ -123,7 +123,7 @@ internal static class CommandExecutor {
             requiresObjectRefs: false,
             @params: Params(
                 Parameter(JsonFields.Action, ParameterTypes.String, true, "Selection action: set|add|clear."),
-                Parameter(JsonFields.ObjectIds, "string[]", false, "Array of object GUIDs (required for set/add).")),
+                Parameter(JsonFields.ObjectIds, ParameterTypes.StringArray, false, "Array of object GUIDs (required for set/add).")),
             examples: Seq(
                 new CommandCatalogExample("""{"action":"clear"}""", "Clear all selection."),
                 new CommandCatalogExample("""{"action":"set","objectIds":["<guid>"]}""", "Select specific objects.")),
@@ -185,7 +185,7 @@ internal static class CommandExecutor {
             .ToFin(CommandParsers.CommandError(code: ErrorCode.PayloadMalformed, message: $"Object {objectId} not found."));
     internal static Fin<Guid> GetPrimaryObjectId(CommandEnvelope envelope) =>
         envelope.ObjectRefs.HeadOrNone()
-            .ToFin(Error.New(message: $"Operation '{envelope.Operation.Key}' requires at least one object reference."))
+            .ToFin(CommandParsers.CommandError(code: ErrorCode.PayloadMalformed, message: $"Operation '{envelope.Operation.Key}' requires at least one object reference."))
             .Map(static (SceneObjectRef sceneObjectRef) => (Guid)sceneObjectRef.ObjectId);
     private static CommandRoute Route(
         CommandOperation operation,

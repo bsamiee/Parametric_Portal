@@ -50,8 +50,7 @@
         }
     },
     "scripts": {
-        "check": "biome check .",
-        "test": "vitest run --passWithNoTests"
+        "check": "biome check ."
     },
     "dependencies": {
         "@effect/experimental": "catalog:",

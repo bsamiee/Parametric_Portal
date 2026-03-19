@@ -3,7 +3,7 @@ import { SqlClient } from '@effect/sql';
 import { PgClient } from '@effect/sql-pg';
 import { Chunk, Config, Context, Effect, HashMap, HashSet, Layer, Match, Option, Schema as S, String as Str } from 'effect';
 import type { AgentJournal } from './models.ts';
-import { DatabaseService } from './repos.ts';
+import { PersistenceService } from './repos.ts';
 
 // --- [TYPES] -----------------------------------------------------------------
 
@@ -38,16 +38,21 @@ const _stateHash = (state: unknown) => createHash('sha256').update(JSON.stringif
 
 // --- [SERVICES] --------------------------------------------------------------
 
-// why: injectable projector decouples app-specific tool call metadata from shared persistence infrastructure
 class _ToolCallProjectorTag extends Context.Tag('database/_ToolCallProjector')<_ToolCallProjectorTag, ToolCallProjector>() {}
-
 class AgentPersistenceService extends Effect.Service<AgentPersistenceService>()('database/AgentPersistenceService', {
-    dependencies: [DatabaseService.Default],
+    dependencies: [PersistenceService.Default],
     effect: Effect.gen(function* () {
-        const { agentJournal: repo } = yield* DatabaseService;
+        const { journal: repo } = yield* PersistenceService;
         const sql = yield* SqlClient.SqlClient;
         const projector = yield* _ToolCallProjectorTag;
-    const write = Effect.fn('database.agentPersistence.write')((entries: readonly S.Schema.Type<typeof AgentJournal.insert>[]) => repo.put([...entries]));
+    const write = Effect.fn('database.agentPersistence.write')((entries: readonly S.Schema.Type<typeof AgentJournal.insert>[]) =>
+        repo.put([...entries]).pipe(
+            Effect.catchIf(
+                (e) => (e as { cause?: { code?: unknown; constraint?: unknown } }).cause?.code === '23505'
+                    && (e as { cause?: { code?: unknown; constraint?: unknown } }).cause?.constraint === 'idx_agent_journal_session_sequence_kind',
+                () => Effect.void,
+            ),
+        ));
     const decodeStart = (json: unknown) =>
         S.decodeUnknown(StartPayload)(json).pipe(Effect.orElseSucceed(() => ({ userId: null }) as typeof StartPayload.Type));
     const decodeComplete = (json: unknown) =>
@@ -65,7 +70,7 @@ class AgentPersistenceService extends Effect.Service<AgentPersistenceService>()(
         );
     const mapToolCall = (entry: typeof AgentJournal.Type) =>
         decodeToolCall(entry.payloadJson).pipe(
-            Effect.map((payload) => ({
+            Effect.map((payload) => Object.assign({
                 appId:         entry.appId,
                 correlationId: entry.runId,
                 createdAt:     entry.createdAt,
@@ -76,8 +81,7 @@ class AgentPersistenceService extends Effect.Service<AgentPersistenceService>()(
                 sequence:      entry.sequence,
                 sessionId:     entry.sessionId,
                 success:       Option.exists(entry.status, (status) => status === 'ok'),
-                ...projector({ params: payload.params, result: payload.result }),
-            })),
+            }, projector({ params: payload.params, result: payload.result }))),
         );
     const mapStart = (completionBySession: HashMap.HashMap<string, typeof AgentJournal.Type>) => (start: typeof AgentJournal.Type) => {
         const complete = HashMap.get(completionBySession, start.sessionId);

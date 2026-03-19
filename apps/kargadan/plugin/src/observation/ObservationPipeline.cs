@@ -109,8 +109,7 @@ internal sealed class ObservationPipeline : IDisposable {
         RhinoSubscriptions.Iter(subscription => subscription.Attach(this));
     private void Unsubscribe() =>
         RhinoSubscriptions.Iter(subscription => subscription.Detach(this));
-    private static bool IsUndoRedoActive() =>
-        IsUndoRedoActive(RhinoDoc.ActiveDoc);
+    private static bool IsUndoRedoActive() => false;
     private static bool IsUndoRedoActive(RhinoDoc? doc) =>
         doc is { } current && (current.UndoActive || current.RedoActive);
     private void Emit(

@@ -85,7 +85,6 @@ const ServiceCronsLayer = Layer.mergeAll(
     PollingService.Crons,
     PurgeService.Crons,
     PurgeService.SweepCron,
-    AiService.EmbeddingCron,
 );
 const ServiceInfraLayer = Layer.mergeAll(
     DatabaseService.Default,

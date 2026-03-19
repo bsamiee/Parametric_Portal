@@ -8,15 +8,15 @@
             "import": "./src/service.ts",
             "default": "./src/service.ts"
         },
-        "./mcp": {
-            "types": "./src/mcp.ts",
-            "import": "./src/mcp.ts",
-            "default": "./src/mcp.ts"
-        },
         "./registry": {
             "types": "./src/registry.ts",
             "import": "./src/registry.ts",
             "default": "./src/registry.ts"
+        },
+        "./runtime-provider": {
+            "types": "./src/runtime-provider.ts",
+            "import": "./src/runtime-provider.ts",
+            "default": "./src/runtime-provider.ts"
         },
         "./service": {
             "types": "./src/service.ts",
@@ -25,8 +25,7 @@
         }
     },
     "scripts": {
-        "check": "biome check .",
-        "test": "vitest run --passWithNoTests"
+        "check": "biome check ."
     },
     "dependencies": {
         "@effect/ai": "catalog:",
@@ -35,7 +34,6 @@
         "@effect/ai-openai": "catalog:",
         "@effect/platform": "catalog:",
         "@parametric-portal/database": "workspace:*",
-        "@parametric-portal/server": "workspace:*",
         "effect": "catalog:"
     },
     "devDependencies": {

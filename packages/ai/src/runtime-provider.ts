@@ -1,10 +1,11 @@
-import { AiError as AiSdkError, Telemetry as AiTelemetry, type Response } from '@effect/ai';
-import { readFileSync } from 'node:fs';
-import { DatabaseService } from '@parametric-portal/database/repos';
-import { Context } from '@parametric-portal/server/context';
-import { MetricsService } from '@parametric-portal/server/observe/metrics';
-import { CacheService } from '@parametric-portal/server/platform/cache';
-import { Config, Data, Duration, Effect, FiberRef, Layer, Match, Option, PrimaryKey, Ref, Redacted, Schema as S, Stream } from 'effect';
+import { AiError as AiSdkError, type Telemetry as AiTelemetry, type Response } from '@effect/ai';
+import { FetchHttpClient } from '@effect/platform';
+import * as HttpClient from '@effect/platform/HttpClient';
+import * as HttpClientRequest from '@effect/platform/HttpClientRequest';
+import * as FileSystem from '@effect/platform/FileSystem';
+import { Client } from '@parametric-portal/database/client';
+import { DatabaseService, PersistenceService } from '@parametric-portal/database/repos';
+import { Config, Data, Effect, FiberRef, Match, Option, Ref, Redacted, Schema as S, type Stream } from 'effect';
 import { identity } from 'effect/Function';
 import { AiRegistry } from './registry.ts';
 
@@ -28,11 +29,70 @@ class AiError extends Data.TaggedError('AiError')<{
 
 type _Budget = { readonly dailyTokens: number; readonly rateCount: number };
 
-// --- [CONSTANTS] -------------------------------------------------------------
-const _BudgetCacheKey = {
-    daily: (tenantId: string) => `ai:budget:daily:${tenantId}`,
-    rate:  (tenantId: string) => `ai:rate:${tenantId}`,
-} as const;
+// --- [SCHEMA] ----------------------------------------------------------------
+
+const _GeminiDesktopClientSchema = S.parseJson(S.Struct({
+    installed: S.Struct({
+        auth_uri:      S.String,
+        client_id:     S.NonEmptyTrimmedString,
+        client_secret: S.NonEmptyTrimmedString,
+        project_id:    S.NonEmptyTrimmedString,
+        token_uri:     S.String,
+    }),
+}));
+const _GeminiTokenResponse = S.Struct({
+    access_token:  S.NonEmptyTrimmedString,
+    expires_in:    S.Int.pipe(S.greaterThan(0)),
+    refresh_token: S.optional(S.NonEmptyTrimmedString),
+});
+const _BudgetSchema = S.Struct({ dailyTokens: S.Number, rateCount: S.Number });
+const _EMPTY_BUDGET = { dailyTokens: 0, rateCount: 0 } as const satisfies _Budget;
+const _budgetDate = () => new Date().toISOString().slice(0, 10);
+
+// --- [FUNCTIONS] -------------------------------------------------------------
+
+const _tokenRequest = (tokenUri: string, params: Record<string, string>) =>
+    HttpClientRequest.post(tokenUri).pipe(
+        HttpClientRequest.bodyUrlParams(params),
+        HttpClientRequest.setHeader('content-type', 'application/x-www-form-urlencoded'),
+        HttpClient.execute,
+        Effect.flatMap((response) => response.json),
+        Effect.scoped,
+        Effect.provide(FetchHttpClient.layer),
+        Effect.flatMap(S.decodeUnknown(_GeminiTokenResponse)),
+        Effect.map((decoded) => ({
+            accessToken:  decoded.access_token,
+            expiresAt:    new Date(Date.now() + decoded.expires_in * 1_000).toISOString(),
+            refreshToken: decoded.refresh_token,
+        })),
+    );
+const _decodeGeminiClient = (raw: unknown) => S.decodeUnknown(_GeminiDesktopClientSchema)(raw).pipe(
+    Effect.map(({ installed }) => ({
+        authUri:      installed.auth_uri,
+        clientId:     installed.client_id,
+        clientSecret: installed.client_secret,
+        projectId:    installed.project_id,
+        tokenUri:     installed.token_uri,
+    })),
+);
+type _GeminiDesktopClient = Effect.Effect.Success<ReturnType<typeof _decodeGeminiClient>>;
+const _refreshGeminiAccessToken = (input: { readonly client: _GeminiDesktopClient; readonly refreshToken: string }) =>
+    _tokenRequest(input.client.tokenUri, {
+        client_id: input.client.clientId, client_secret: input.client.clientSecret,
+        grant_type: 'refresh_token', refresh_token: input.refreshToken,
+    });
+const _applySessionOverride = (settings: AiRegistry.Settings, sessionOverride: AiRegistry.SessionOverride): AiRegistry.Settings =>
+    Option.fromNullable(sessionOverride.language).pipe(Option.match({
+        onNone: () => settings,
+        onSome: (language) => ({
+            ...settings,
+            language: {
+                ...settings.language,
+                fallback: [...language.fallback],
+                primary:  { ...language.primary },
+            },
+        }),
+    }));
 const _resolveApiSecret = (provider: 'anthropic' | 'openai') =>
     Config.redacted(AiRegistry.providers[provider].credential.configKeys.secret).pipe(
         Effect.map((secret) => ({ kind: 'api-secret' as const, secret })),
@@ -45,10 +105,11 @@ const _resolveGeminiCredential = Effect.gen(function* () {
         Config.redacted(metadata.configKeys.refreshToken).pipe(Config.option),
         Config.string(metadata.configKeys.expiry).pipe(Config.option),
     ]);
-    const client = yield* Effect.try({
-        catch: (cause) => new AiError({ cause, operation: 'ai.provider.credentials.gemini.client', reason: 'unknown' }),
-        try:   () => readFileSync(clientPath, 'utf8'),
-    }).pipe(Effect.flatMap(AiRegistry.decodeGeminiClient), Effect.mapError(AiError.from('ai.provider.credentials.gemini.client')));
+    const client = yield* FileSystem.FileSystem.pipe(
+        Effect.flatMap((fs) => fs.readFileString(clientPath)),
+        Effect.mapError((cause) => new AiError({ cause, operation: 'ai.provider.credentials.gemini.client', reason: 'unknown' })),
+        Effect.flatMap(_decodeGeminiClient),
+        Effect.mapError(AiError.from('ai.provider.credentials.gemini.client')));
     const reusableAccessToken = Option.flatMap(accessToken, (token) =>
         tokenExpiry.pipe(Option.filter((value) => {
             const expiresAt = Date.parse(value);
@@ -63,7 +124,7 @@ const _resolveGeminiCredential = Effect.gen(function* () {
     const resolvedAccessToken = yield* Option.isSome(reusableAccessToken)
         ? Effect.succeed(reusableAccessToken.value)
         : Option.isSome(refreshToken)
-            ? AiRegistry.refreshGeminiAccessToken({ client, refreshToken: Redacted.value(refreshToken.value) }).pipe(
+            ? _refreshGeminiAccessToken({ client, refreshToken: Redacted.value(refreshToken.value) }).pipe(
                 Effect.tap((next) => _persistRefresh(next, Redacted.value(refreshToken.value))),
                 Effect.map((next) => Redacted.make(next.accessToken)),
                 Effect.mapError(AiError.from('ai.provider.credentials.gemini.refresh')))
@@ -77,27 +138,20 @@ const _resolveGeminiCredential = Effect.gen(function* () {
                 : Effect.fail(new AiError({ cause: { clientPath, provider: 'gemini' }, operation: 'ai.provider.credentials.gemini', reason: 'unknown' }));
     return { accessToken: resolvedAccessToken, kind: 'oauth-desktop' as const, projectId: client.projectId } satisfies AiRegistry.Credential<'gemini'>;
 });
-const _resolveCredential = (provider: AiRegistry.Provider) =>
-    Match.value(provider).pipe(
-        Match.when('anthropic', () => _resolveApiSecret('anthropic')),
-        Match.when('gemini',    () => _resolveGeminiCredential),
-        Match.orElse(           () => _resolveApiSecret('openai')),
-    );
-
-// --- [SCHEMA] ----------------------------------------------------------------
-
-class SettingsKey extends S.TaggedRequest<SettingsKey>()('SettingsKey', {
-    failure: S.Unknown,
-    payload: { tenantId: S.String },
-    success: AiRegistry.schema,
-}) { [PrimaryKey.symbol]() { return `ai:settings:${this.tenantId}`; } }
+const _credentialResolvers = {
+    anthropic: _resolveApiSecret('anthropic'),
+    gemini:    _resolveGeminiCredential,
+    openai:    _resolveApiSecret('openai'),
+} as const;
 
 // --- [SERVICES] --------------------------------------------------------------
 
 class AiRuntimeProvider extends Effect.Service<AiRuntimeProvider>()('ai/RuntimeProvider', {
     effect: Effect.gen(function* () {
-        const budgets = yield* Ref.make(new Map<string, _Budget>());
-        const resolveAppSettings = (tenantId: string) =>
+        const budgetFallback = yield* Ref.make(new Map<string, _Budget>());
+        const settingsCache = yield* Ref.make(new Map<string, { cachedAt: number; settings: AiRegistry.Settings }>());
+        const _SETTINGS_TTL_MS = 30_000;
+        const _resolveAppSettingsUncached = (tenantId: string): Effect.Effect<AiRegistry.Settings, unknown> =>
             Effect.serviceOption(DatabaseService).pipe(
                 Effect.flatMap(Option.match({
                     onNone: () => AiRegistry.decodeAppSettings({}),
@@ -110,83 +164,82 @@ class AiRuntimeProvider extends Effect.Service<AiRuntimeProvider>()('ai/RuntimeP
                         ),
                 })),
             );
+        const resolveAppSettings = (tenantId: string): Effect.Effect<AiRegistry.Settings, unknown> =>
+            Ref.get(settingsCache).pipe(Effect.flatMap((cache) => {
+                const entry = cache.get(tenantId);
+                return entry !== undefined && Date.now() - entry.cachedAt < _SETTINGS_TTL_MS
+                    ? Effect.succeed(entry.settings)
+                    : _resolveAppSettingsUncached(tenantId).pipe(Effect.tap((settings) =>
+                        Ref.update(settingsCache, (m) => new Map(m).set(tenantId, { cachedAt: Date.now(), settings }))));
+            }));
         return {
-            annotate:            (_: AiTelemetry.GenAITelemetryAttributeOptions) => Effect.void,
-            observeEmbedding:    (_labels: Record<string, string>, _count: number) => Effect.void,
-            observeError:        (_op: string, _labels: Record<string, string>, _err: unknown) => Effect.void,
-            observeFallback:     (_op: string, _provider: string, _tenantId: string) => Effect.void,
-            observePolicyDenied: (_op: string, _tenantId: string) => Effect.void,
-            observeRequest:      (_op: string, _labels: Record<string, string>) => Effect.void,
-            observeTokens:       (_labels: Record<string, string>, _usage: Response.Usage) => Effect.void,
-            readBudget:          (tenantId: string) => Ref.get(budgets).pipe(Effect.map((m) => m.get(tenantId) ?? { dailyTokens: 0, rateCount: 0 })),
-            resolveCredential:   (provider: AiRegistry.Provider) => _resolveCredential(provider).pipe(Effect.mapError(AiError.from(`ai.provider.credentials.${provider}`))),
-            resolveSettings:     (tenantId: string) =>
+            annotate:            (attrs: AiTelemetry.GenAITelemetryAttributeOptions) => Effect.annotateCurrentSpan(attrs as Record<string, unknown>),
+            observeEmbedding:    (labels: Record<string, string>, count: number) => Effect.logInfo('ai.embedding').pipe(Effect.annotateLogs({ ...labels, count })),
+            observeError:        (op: string, labels: Record<string, string>, err: unknown) => Effect.logError('ai.error').pipe(Effect.annotateLogs({ ...labels, error: String(err), operation: op })),
+            observeFallback:     (op: string, provider: string, tenantId: string) => Effect.logWarning('ai.fallback').pipe(Effect.annotateLogs({ operation: op, provider, tenantId })),
+            observePolicyDenied: (op: string, tenantId: string) => Effect.logWarning('ai.policy.denied').pipe(Effect.annotateLogs({ operation: op, tenantId })),
+            observeRequest:      (op: string, labels: Record<string, string>) => Effect.logInfo('ai.request').pipe(Effect.annotateLogs({ ...labels, operation: op })),
+            observeTokens:       (labels: Record<string, string>, usage: Response.Usage) => Effect.logInfo('ai.tokens').pipe(Effect.annotateLogs({ ...labels, inputTokens: usage.inputTokens, outputTokens: usage.outputTokens, totalTokens: usage.totalTokens })),
+            readBudget:          (tenantId: string) => Effect.serviceOption(PersistenceService).pipe(
+                Effect.flatMap(Option.match({
+                    onNone: () => Ref.get(budgetFallback).pipe(Effect.map((m) => m.get(tenantId) ?? _EMPTY_BUDGET)),
+                    onSome: (p) => p.kv.getJson(`ai:budget:${tenantId}:${_budgetDate()}`, _BudgetSchema).pipe(
+                        Effect.map(Option.getOrElse(() => _EMPTY_BUDGET)),
+                        Effect.catchAll(() => Effect.succeed(_EMPTY_BUDGET))),
+                }))),
+            resolveCredential:   (provider: AiRegistry.Provider) =>
+                (_credentialResolvers[provider] as Effect.Effect<AiRegistry.Credential, unknown>).pipe(Effect.mapError(AiError.from(`ai.provider.credentials.${provider}`))),
+            resolveSettings:     (tenantId: string): Effect.Effect<AiRegistry.Settings, unknown> =>
                 Effect.all([resolveAppSettings(tenantId), FiberRef.get(AiRegistry.SessionOverrideRef)]).pipe(
-                    Effect.map(([settings, override]) => Option.match(override, { onNone: () => settings, onSome: (o) => AiRegistry.applySessionOverride(settings, o) })),
+                    Effect.map(([settings, override]) => Option.match(override, { onNone: () => structuredClone(settings), onSome: (o) => _applySessionOverride(settings, o) })),
                     Effect.mapError(AiError.from('ai.provider.settings')),
                 ),
-            resolveTenantId:     Context.Request.currentTenantId.pipe(Effect.catchAll(() => Effect.succeed('system'))),
+            resolveTenantId:     Client.tenant.current,
             trackEffect:         <A, E, R>(_op: string, _labels: Record<string, string>, e: Effect.Effect<A, E, R>) => e,
             trackStream:         <A, E, R>(_op: string, _labels: Record<string, string>, s: Stream.Stream<A, E, R>) => s,
-            writeBudget:         (tenantId: string, budget: _Budget) => Ref.update(budgets, (m) => new Map(m).set(tenantId, budget)),
+            writeBudget:         (tenantId: string, budget: _Budget) => Effect.serviceOption(PersistenceService).pipe(
+                Effect.flatMap(Option.match({
+                    onNone: () => Ref.update(budgetFallback, (m) => new Map(m).set(tenantId, budget)),
+                    onSome: (p) => p.kv.setJson(`ai:budget:${tenantId}:${_budgetDate()}`, budget, _BudgetSchema).pipe(
+                        Effect.catchAll(() => Ref.update(budgetFallback, (m) => new Map(m).set(tenantId, budget)))),
+                }))),
         };
     }),
-}) {
-    static readonly Server = Effect.gen(function* () {
-        const [cache, database, metrics] = yield* Effect.all([CacheService, DatabaseService, MetricsService]);
-        const settingsCache = yield* CacheService.cache({
-            inMemoryCapacity: 256,
-            lookup:           (key: SettingsKey) =>
-                database.apps.one([{ field: 'id', value: key.tenantId }]).pipe(
-                    Effect.filterOrFail(Option.isSome, () => new AiError({ cause: { tenantId: key.tenantId }, operation: 'ai.provider.settings', reason: 'unknown' })),
-                    Effect.flatMap((o) => AiRegistry.decodeAppSettings(o.value.settings ?? {})),
-                    Effect.mapError(AiError.from('ai.provider.settings')),
-                ),
-            storeId:    'ai:settings',
-            timeToLive: Duration.minutes(5),
-        });
-        return Layer.succeed(AiRuntimeProvider, AiRuntimeProvider.make({
-            annotate:            (attrs) => Effect.currentSpan.pipe(Effect.tap((span) => Effect.sync(() => AiTelemetry.addGenAIAnnotations(span, attrs))), Effect.ignore),
-            observeEmbedding:    (labels, count) =>                 MetricsService.inc(metrics.ai.embeddings,    MetricsService.label(labels), count                            ),
-            observeError:        (operation, labels, error) =>      MetricsService.trackError(metrics.ai.errors, MetricsService.label({ ...labels, operation }), error          ),
-            observeFallback:     (operation, provider, tenantId) => MetricsService.inc(metrics.ai.fallbacks,     MetricsService.label({ operation, provider, tenant: tenantId })),
-            observePolicyDenied: (operation, tenantId) =>           MetricsService.inc(metrics.ai.policyDenials, MetricsService.label({ operation, tenant: tenantId           })),
-            observeRequest:      (_operation, labels) =>            MetricsService.inc(metrics.ai.requests,      MetricsService.label(labels), 1                                ),
-            observeTokens:       (labels, usage) => {
-                const entries = Object.entries({ cached: usage.cachedInputTokens, input: usage.inputTokens, output: usage.outputTokens, reasoning: usage.reasoningTokens, total: usage.totalTokens });
-                const valid = entries.filter((e): e is [string, number] => e[1] != null);
-                return Effect.forEach(valid, ([kind, tokens]) => MetricsService.inc(metrics.ai.tokens, MetricsService.label({ ...labels, kind }), tokens), { discard: true });
-            },
-            readBudget: (tenantId) =>
-                Effect.all([cache.kv.get(_BudgetCacheKey.daily(tenantId), S.Number), cache.kv.get(_BudgetCacheKey.rate(tenantId), S.Number)]).pipe(
-                    Effect.map(([d, r]) => ({ dailyTokens: Option.getOrElse(d, () => 0), rateCount: Option.getOrElse(r, () => 0) })),
-                    Effect.catchAll(() => Effect.succeed({ dailyTokens: 0, rateCount: 0 })),
-                ),
-            resolveCredential: (provider) => _resolveCredential(provider).pipe(Effect.mapError(AiError.from(`ai.provider.credentials.${provider}`))),
-            resolveSettings:   (tenantId) =>
-                Effect.all([settingsCache.get(new SettingsKey({ tenantId })), FiberRef.get(AiRegistry.SessionOverrideRef)]).pipe(
-                    Effect.map(([settings, override]) => Option.match(override, {
-                        onNone: () => settings,
-                        onSome: (o) => AiRegistry.applySessionOverride(settings, o),
-                    })),
-                ),
-            resolveTenantId: Context.Request.currentTenantId.pipe(Effect.catchAll(() => Effect.succeed('system'))),
-            trackEffect: (operation, labels, effect) =>
-                Effect.withSpan(MetricsService.trackEffect(effect, { duration: metrics.ai.duration, errors: metrics.ai.errors, labels: MetricsService.label(labels) }), operation, { kind: 'client' }),
-            trackStream: (operation, labels, stream) =>
-                stream.pipe(
-                    Stream.tapError((e) => MetricsService.trackError(metrics.ai.errors, MetricsService.label(labels), e)),
-                    (s) => MetricsService.trackStream(s, metrics.stream.elements, labels),
-                    Stream.withSpan(operation, { kind: 'client' }),
-                ),
-            writeBudget: (tenantId, budget) =>
-                Effect.all([cache.kv.set(_BudgetCacheKey.daily(tenantId), budget.dailyTokens, Duration.hours(24)), cache.kv.set(_BudgetCacheKey.rate(tenantId), budget.rateCount, Duration.minutes(1))], { discard: true }).pipe(
-                    Effect.catchAll((error) => Effect.logWarning('ai.budget.write.cache_error', { error, tenantId })),
-                ),
-        }));
-    }).pipe(Layer.unwrapEffect);
-}
+}) {}
+
+// --- [OBJECTS] ---------------------------------------------------------------
+
+const GeminiOAuth = {
+    decodeGeminiClient:              _decodeGeminiClient,
+    exchangeGeminiAuthorizationCode: (input: { readonly client: _GeminiDesktopClient; readonly code: string; readonly codeVerifier: string; readonly redirectUri: string }) =>
+        _tokenRequest(input.client.tokenUri, {
+            client_id: input.client.clientId, client_secret: input.client.clientSecret,
+            code: input.code, code_verifier: input.codeVerifier,
+            grant_type: 'authorization_code', redirect_uri: input.redirectUri,
+        }),
+    geminiAuthorizationUrl: (input: { readonly client: _GeminiDesktopClient; readonly codeChallenge: string; readonly redirectUri: string; readonly state: string }) =>
+        new URL(`${input.client.authUri}?${new URLSearchParams({
+            access_type: 'offline', client_id: input.client.clientId,
+            code_challenge: input.codeChallenge, code_challenge_method: 'S256',
+            prompt: 'consent', redirect_uri: input.redirectUri,
+            response_type: 'code', scope: AiRegistry.providers.gemini.credential.scopes.join(' '),
+            state: input.state,
+        })}`),
+    refreshGeminiAccessToken: _refreshGeminiAccessToken,
+} as const;
+const SessionOverride = {
+    apply: _applySessionOverride,
+    decodeFromInput: (input: { readonly fallback: ReadonlyArray<string>; readonly primary: string }) =>
+        Match.value(input.primary.trim() === '' && input.fallback.length === 0).pipe(
+            Match.when(true, () => Effect.succeed(Option.none<AiRegistry.SessionOverride>())),
+            Match.orElse(() => Effect.gen(function* () {
+                const primary = yield* AiRegistry.decodeLanguageRefText(input.primary);
+                const fallback = yield* Effect.forEach(input.fallback, (value) => AiRegistry.decodeLanguageRefText(value));
+                return Option.some({ language: { fallback, primary } } satisfies AiRegistry.SessionOverride);
+            })),
+        ),
+} as const;
 
 // --- [EXPORT] ----------------------------------------------------------------
 
-export { AiError, AiRuntimeProvider };
+export { AiError, AiRuntimeProvider, GeminiOAuth, SessionOverride };

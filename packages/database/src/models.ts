@@ -34,42 +34,7 @@ const FeatureFlagsSchema = S.Struct({
     enableRealtime:        S.optionalWith(S.Int.pipe(S.between(0, 100)), { default: () => 100 }),
     enableWebhooks:        S.optionalWith(S.Int.pipe(S.between(0, 100)), { default: () => 0   }),
 });
-const AiProviderSchema = S.Literal('anthropic', 'gemini', 'openai');
-const AiSettingsSchema = (() => {
-    const embedding = S.Struct({
-        cacheCapacity:   S.optionalWith(S.Int, { default: () => 1000 }),
-        cacheTtlMinutes: S.optionalWith(S.Int, { default: () => 30   }),
-        dimensions:      S.optionalWith(S.Int, { default: () => 3072 }),
-        maxBatchSize:    S.optionalWith(S.Int, { default: () => 256  }),
-        mode:            S.optionalWith(S.Literal('batched', 'data-loader'), { default: () => 'batched' as const }),
-        model:           S.optionalWith(S.String, { default: () => 'text-embedding-3-large' }),
-        provider:        S.optionalWith(S.Literal('openai'), { default: () => 'openai' as const }),
-        windowMs:        S.optionalWith(S.Int, { default: () => 200 }),
-    });
-    const language = S.Struct({
-        fallback:    S.optionalWith(S.Array(AiProviderSchema), { default: () => [] }),
-        maxTokens:   S.optionalWith(S.Int,    { default: () => 4096 }),
-        model:       S.optionalWith(S.String, { default: () => 'gpt-4o' }),
-        provider:    S.optionalWith(AiProviderSchema, { default: () => 'openai' as const }),
-        temperature: S.optionalWith(S.Number, { default: () => 1  }),
-        topK:        S.optionalWith(S.Number, { default: () => 40 }),
-        topP:        S.optionalWith(S.Number, { default: () => 1  }),
-    });
-    const policy = S.Struct({
-        maxRequestsPerMinute: S.optionalWith(S.Int, { default: () => 60 }),
-        maxTokensPerDay:      S.optionalWith(S.Int, { default: () => 1_000_000 }),
-        maxTokensPerRequest:  S.optionalWith(S.Int, { default: () => 16_384 }),
-        tools:                S.optionalWith(S.Struct({
-            mode:  S.Literal('allow', 'deny'),
-            names: S.Array(S.String),
-        }), { default: () => ({ mode: 'allow' as const, names: [] as Array<string> }) }),
-    });
-    return S.Struct({
-        embedding: S.optionalWith(embedding, { default: () => S.decodeSync(embedding)({}) }),
-        language:  S.optionalWith(language,  { default: () => S.decodeSync(language)({})  }),
-        policy:    S.optionalWith(policy,    { default: () => S.decodeSync(policy)({})    }),
-    });
-})();
+const JsonObjectSchema = S.Record({ key: S.String, value: S.Unknown });
 const WebhookUrlSchema = S.String.pipe(
     S.filter((value) => {
         const parsed = URL.canParse(value) ? new URL(value) : null;
@@ -83,7 +48,7 @@ const WebhookUrlSchema = S.String.pipe(
     S.brand('WebhookUrl'),
 );
 const AppSettingsSchema = S.Struct({
-    ai:             S.optionalWith(AiSettingsSchema,   { default: () => S.decodeSync(AiSettingsSchema)({})   }),
+    ai:             S.optionalWith(JsonObjectSchema,   { default: () => ({})                                   }),
     featureFlags:   S.optionalWith(FeatureFlagsSchema, { default: () => S.decodeSync(FeatureFlagsSchema)({}) }),
     oauthProviders: S.optionalWith(S.Array(
         S.Struct({
@@ -318,7 +283,7 @@ class KvStore extends Model.Class<KvStore>('KvStore')({
 // --- [EXPORT] ----------------------------------------------------------------
 
 export {
-    AgentJournal, AiProviderSchema, AiSettingsSchema, ApiKey, App, Asset, AuditLog, Job, JobDlq, JobStatusSchema, KvStore, MfaSecret, Notification,
+    AgentJournal, ApiKey, App, Asset, AuditLog, Job, JobDlq, JobStatusSchema, KvStore, MfaSecret, Notification,
     AppSettingsDefaults, AppSettingsSchema, FeatureFlagsSchema,
     AuditOperationSchema, PreferencesSchema, OAuthProviderSchema, OauthAccount,
     Permission, RoleSchema, Session, User, WebauthnCredential, WebhookUrlSchema,

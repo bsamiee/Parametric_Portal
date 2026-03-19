@@ -52,14 +52,13 @@ If reviewing, refining, editing, creating, or modifying X file type, use skill Y
 |   [2]   | lint              | `npx @biomejs/biome check <files>`                               |
 |   [3]   | quality gate      | `pnpm quality`                                                   |
 |   [4]   | test              | `pnpm test`                                                      |
-|   [5]   | test (all)        | `pnpm exec nx run-many -t test`                                  |
-|   [6]   | test (coverage)   | `pnpm exec nx affected -t test -- --coverage`                    |
+|   [5]   | test (project)    | `vitest run --project <name>`                                    |
+|   [6]   | test (coverage)   | `vitest run --coverage`                                          |
 |   [7]   | test (mutation)   | `npx stryker run`                                                |
-|   [8]   | test (single)     | `pnpm exec nx run <project>:test`                                |
-|   [9]   | dotnet check      | `pnpm dotnet`                                                    |
-|  [10]   | python check      | `pnpm python`                                                    |
-|  [11]   | cache clear       | `pnpm exec nx reset`                                             |
-|  [12]   | single target     | `pnpm exec nx run <project>:<target>`                            |
+|   [8]   | dotnet check      | `pnpm dotnet`                                                    |
+|   [9]   | python check      | `pnpm python`                                                    |
+|  [10]   | cache clear       | `pnpm exec nx reset`                                             |
+|  [11]   | single target     | `pnpm exec nx run <project>:<target>`                            |
 
 ---
 ## [2][PHILOSOPHY]

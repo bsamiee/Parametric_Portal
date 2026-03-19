@@ -96,7 +96,6 @@ const _REGISTRY = {
     role:             { col: 'role',               field: 'role',             sql: 'TEXT'                          },
     runId:            { col: 'run_id',             field: 'runId',            sql: 'UUID'                          },
     scheduledAt:      { col: 'scheduled_at',       field: 'scheduledAt',      sql: 'TIMESTAMPTZ'                   },
-    sceneSummary:     { col: 'scene_summary',      field: 'sceneSummary',     sql: 'JSONB'                         },
     scopeId:          { col: 'scope_id',           field: 'scopeId',          sql: 'UUID'                          },
     sequence:         { col: 'sequence',           field: 'sequence',         sql: 'INTEGER'                       },
     searchVector:     { col: 'search_vector',      field: 'searchVector',     gen: 'stored',    sql: 'TSVECTOR'    },

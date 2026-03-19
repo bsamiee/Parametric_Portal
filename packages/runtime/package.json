@@ -50,8 +50,7 @@
         }
     },
     "scripts": {
-        "check": "biome check .",
-        "test": "vitest run --config ../../vitest.config.ts --project runtime-browser"
+        "check": "biome check ."
     },
     "dependencies": {
         "@effect/opentelemetry": "catalog:",

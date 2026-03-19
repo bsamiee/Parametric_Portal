@@ -1,6 +1,6 @@
 import * as FileSystem from '@effect/platform/FileSystem';
 import { it } from '@effect/vitest';
-import { AiRegistry } from '../../../packages/ai/src/registry';
+import { SessionOverride } from '../../../packages/ai/src/runtime-provider';
 import { ConfigProvider, Effect, Layer, Match, Option, Schema as S } from 'effect';
 import { ConfigFile, HarnessConfig, HarnessHostError, KargadanConfigSchema, KargadanHost } from '../../../apps/kargadan/harness/src/config';
 import { expect } from 'vitest';
@@ -64,8 +64,8 @@ it.effect('P8-CFG-INT-02: internalized constants ignore env overrides', () =>
     ), { KARGADAN_COMMAND_DEADLINE_MS: '10000', KARGADAN_CONTEXT_COMPACTION_TRIGGER_PERCENT: '99' }),
 );
 
-it.effect('P8-CFG-DO-01: decodeOverride with empty model+provider returns Option.none', () =>
-    AiRegistry.decodeSessionOverrideFromInput({ fallback: [], model: '', provider: '' }).pipe(
+it.effect('P8-CFG-DO-01: decodeOverride with empty primary returns Option.none', () =>
+    SessionOverride.decodeFromInput({ fallback: [], primary: '' }).pipe(
         Effect.tap((result) => { expect(Option.isNone(result)).toBe(true); }),
     ),
 );
@@ -78,22 +78,12 @@ it.effect('P8-CFG-RH-01: rhinoLaunchTimeoutMs respects env override', () =>
 );
 
 it.effect('P8-CFG-WR-01: schema-normalized config strips unknown keys', () =>
-    S.decodeUnknown(KargadanConfigSchema)(
-        ConfigFile.set(
-            ConfigFile.set(
-                ConfigFile.set({ model: 'gpt-4.1', provider: 'openai' }, 'geminiAccessToken', 'token'),
-                'geminiRefreshToken',
-                'refresh',
-            ),
-            'openaiApiKey',
-            'secret',
-        ),
-    ).pipe(Effect.tap((config) => {
-        expect(config.provider).toBe('openai');
-        expect(config.model).toBe('gpt-4.1');
-        expect((config as Record<string, unknown>)['geminiAccessToken']).toBeUndefined();
-        expect((config as Record<string, unknown>)['geminiRefreshToken']).toBeUndefined();
-        expect((config as Record<string, unknown>)['openaiApiKey']).toBeUndefined();
+    S.decodeUnknown(KargadanConfigSchema)({
+        ai: { language: { primary: { model: 'gpt-5.4', provider: 'openai' } } },
+        unknownKey: 'should-be-stripped',
+    }).pipe(Effect.tap((config) => {
+        expect(config.ai?.language?.primary.model).toBe('gpt-5.4');
+        expect((config as Record<string, unknown>)['unknownKey']).toBeUndefined();
     })),
 );
 
@@ -113,11 +103,11 @@ it.effect('P8-CFG-PG-01: Postgres bootstrap fails with typed actionable error wh
     ),
 );
 
-it.effect('P8-CFG-SET-01: ConfigFile.set patches nested architect.model', () =>
-    Effect.sync(() => {
-        const config = ConfigFile.set({} as typeof KargadanConfigSchema.Type, 'architect.model', 'claude-sonnet-4-5-20250514');
-        expect(ConfigFile.get(config, 'architect.model')).toBe('claude-sonnet-4-5-20250514');
-    }),
+it.effect('P8-CFG-SET-01: ConfigFile.set patches nested ai.language.primary', () =>
+    ConfigFile.set({} as typeof KargadanConfigSchema.Type, 'ai.language.primary', 'openai:gpt-5.4').pipe(
+        Effect.map((config) => ConfigFile.get(config, 'ai.language.primary')),
+        Effect.tap((value) => { expect(value).toBe('openai:gpt-5.4'); }),
+    ),
 );
 
 it.effect('P8-CFG-DEF-01: HarnessConfig falls back to defaults when no env vars set', () =>

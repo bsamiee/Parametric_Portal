@@ -32,8 +32,8 @@ const makePermissionRepo = Effect.gen(function* () {
         scoped:   'appId',
     });
     return { ...repository,
-        grant:      (payload: { appId: string; role: S.Schema.Type<typeof Permission.fields.role>; resource: string; action: string }) => repository.upsert({action: payload.action, appId: payload.appId, deletedAt: Option.none(), resource: payload.resource, role: payload.role, updatedAt: undefined,}),
-        revoke:     (role: string, resource: string, action: string) => repository.drop([{ field: 'role', value: role },{ field: 'resource', value: resource },{ field: 'action', value: action },]),
+        grant:  (payload: { appId: string; role: S.Schema.Type<typeof Permission.fields.role>; resource: string; action: string }) => repository.upsert({action: payload.action, appId: payload.appId, deletedAt: Option.none(), resource: payload.resource, role: payload.role, updatedAt: undefined,}),
+        revoke: (role: string, resource: string, action: string) => repository.drop([{ field: 'role', value: role },{ field: 'resource', value: resource },{ field: 'action', value: action },]),
     };
 });
 const makeAppRepo = Effect.gen(function* () {
@@ -113,7 +113,7 @@ const makeJobRepo = Effect.gen(function* () {
         scoped:  'appId',
     });
     return { ...repository,
-        byActiveDedupe: _byActiveDedupe(repository.one)(['queued', 'processing']),
+        byActiveDedupe:  _byActiveDedupe(repository.one)(['queued', 'processing']),
         countByStatuses: (...statuses: readonly string[]) => repository.count([{ field: 'status', op: 'in', values: [...statuses] }]),
     };
 });
@@ -155,6 +155,20 @@ const makeKvStoreRepo = Effect.gen(function* () {
         setJson: <A, I, R>(key: string, jsonValue: A, schema: S.Schema<A, I, R>, expiresAt?: Date) => repository.json.encode(schema)(jsonValue).pipe(Effect.flatMap((encoded) => repository.upsert({ expiresAt, key, value: encoded }))),
     };
 });
+const makeAgentJournalRepo = Effect.gen(function* () {
+    const repository = yield* repo(AgentJournal, 'agent_journal', {
+        resolve: { byRunId: { field: 'runId', many: true }, bySession: { field: 'sessionId', many: true } },
+        scoped:  'appId',
+    });
+    return {
+        ...repository,
+        latestCheckpoint: (sessionId: string) =>
+            repository.page(
+                [{ field: 'entryKind', value: 'checkpoint' }, { field: 'sessionId', value: sessionId }],
+                { asc: false, limit: 1 },
+            ).pipe(Effect.map((page) => Option.fromNullable(page.items[0]))),
+    };
+});
 const makeSystemRepo = Effect.gen(function* () {
     const repository = yield* routine('database/system', {
         functions: {
@@ -169,8 +183,8 @@ const makeSystemRepo = Effect.gen(function* () {
             purge_journal: { args: ['days'],  params: S.Struct({ days:  S.Number }) },
             purge_tenant:  { args: ['appId'], params: S.Struct({ appId: S.UUID   }) },
             query_db_observability: {
-                args: [{ cast: 'jsonb', field: 'sections' }, 'limit'],
-                mode: 'typed',
+                args:   [{ cast: 'jsonb', field: 'sections' }, 'limit'],
+                mode:   'typed',
                 params: S.Struct({ limit: S.Number, sections: S.parseJson(S.Array(S.Struct({ name: S.String, options: S.optional(S.Record({ key: S.String, value: S.Unknown })) }))) }),
                 schema: S.Record({ key:   S.String, value:    S.Unknown                                 }),
             },
@@ -201,32 +215,30 @@ const makeSystemRepo = Effect.gen(function* () {
 
 // --- [SERVICES] --------------------------------------------------------------
 
-class DatabaseService extends Effect.Service<DatabaseService>()('database/DatabaseService', {
-    dependencies: [SearchRepo.Default],
+class PersistenceService extends Effect.Service<PersistenceService>()('database/PersistenceService', {
     effect: Effect.gen(function* () {
-        const [searchRepo, sqlClient] = yield* Effect.all([SearchRepo, SqlClient.SqlClient]);
-        const [users, permissions, apps, sessions, apiKeys, oauthAccounts, assets, audit, mfaSecrets, webauthnCredentials, jobs, jobDlq, notifications, kvStore, system] = yield* Effect.all([
+        const [journal, kv, sqlClient] = yield* Effect.all([makeAgentJournalRepo, makeKvStoreRepo, SqlClient.SqlClient]);
+        return {
+            journal,
+            kv,
+            withTransaction: sqlClient.withTransaction,
+        } as const;
+    }),
+}) {}
+class DatabaseService extends Effect.Service<DatabaseService>()('database/DatabaseService', {
+    dependencies: [PersistenceService.Default, SearchRepo.Default],
+    effect: Effect.gen(function* () {
+        const [searchRepo, persistence] = yield* Effect.all([SearchRepo, PersistenceService]);
+        const [users, permissions, apps, sessions, apiKeys, oauthAccounts, assets, audit, mfaSecrets, webauthnCredentials, jobs, jobDlq, notifications, system] = yield* Effect.all([
             makeUserRepo, makePermissionRepo, makeAppRepo, makeSessionRepo, makeApiKeyRepo,
             makeOauthAccountRepo, makeAssetRepo, makeAuditRepo, makeMfaSecretRepo, makeWebauthnCredentialRepo,
             makeJobRepo, makeJobDlqRepo, makeNotificationRepo,
-            makeKvStoreRepo, makeSystemRepo,
+            makeSystemRepo,
         ]);
-        const agentJournalRepository = yield* repo(AgentJournal, 'agent_journal', {
-            resolve: { byRunId: { field: 'runId', many: true }, bySession: { field: 'sessionId', many: true }, bySessionKind: ['sessionId', 'entryKind'] },
-            scoped: 'appId',
-        });
-        const agentJournal = {
-            ...agentJournalRepository,
-            latestCheckpoint: (sessionId: string) =>
-                agentJournalRepository.page(
-                    [{ field: 'entryKind', value: 'checkpoint' }, { field: 'sessionId', value: sessionId }],
-                    { asc: false, limit: 1 },
-                ).pipe(Effect.map((page) => Option.fromNullable(page.items[0]))),
-        };
         return {
-            agentJournal,
-            apiKeys, apps, assets, audit, jobDlq, jobs, kvStore, mfaSecrets, notifications, oauthAccounts, observability: system, permissions, search: searchRepo, sessions,
-            users, webauthnCredentials, withTransaction: sqlClient.withTransaction,
+            agentJournal: persistence.journal,
+            apiKeys, apps, assets, audit, jobDlq, jobs, kvStore: persistence.kv, mfaSecrets, notifications, oauthAccounts, observability: system, permissions, search: searchRepo, sessions,
+            users, webauthnCredentials, withTransaction: persistence.withTransaction,
         };
     }),
 }) {}
@@ -239,4 +251,4 @@ namespace DatabaseService {
 
 // --- [EXPORT] ----------------------------------------------------------------
 
-export { DatabaseService };
+export { DatabaseService, PersistenceService };

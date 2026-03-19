@@ -8,8 +8,7 @@
         "dev": "tsx watch src/main.ts",
         "hadolint": "hadolint Dockerfile",
         "migrate": "tsx src/migrate.ts",
-        "start": "node dist/main.js",
-        "test": "vitest run --passWithNoTests"
+        "start": "node dist/main.js"
     },
     "dependencies": {
         "@effect/experimental": "catalog:",

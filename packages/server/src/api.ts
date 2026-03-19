@@ -6,6 +6,7 @@
  * Per-endpoint addError() only for endpoint-specific errors (NotFound, Conflict, Validation).
  */
 import { HttpApi, HttpApiEndpoint, HttpApiGroup, HttpApiSchema, Multipart, OpenApi } from '@effect/platform';
+import { AiSettingsSchema } from '@parametric-portal/ai/registry';
 import {ApiKey, App, AppSettingsSchema, Asset, AuditOperationSchema, AuditLog, Job, JobDlq, Notification, OAuthProviderSchema, Permission, PreferencesSchema, RoleSchema, Session, User, WebhookUrlSchema} from '@parametric-portal/database/models';
 import { Url } from '@parametric-portal/types/types';
 import { Schema as S } from 'effect';
@@ -75,6 +76,10 @@ const _DbObservabilityPayload = S.Struct({
     })).pipe(S.minItems(1)),
 });
 const _DbObservabilityResponse = S.Struct({ sections: S.Record({ key: S.String, value: S.Unknown }) });
+const _TenantAppSettingsSchema = S.Struct({
+    ...AppSettingsSchema.fields,
+    ai: S.optionalWith(AiSettingsSchema, { default: () => S.decodeSync(AiSettingsSchema)({}) }),
+});
 const AuthResponse = S.Struct({
     accessToken: S.String.annotations({ description: 'Opaque access token for API authentication' }),
     expiresAt: S.DateTimeUtc.annotations({ description: 'Token expiration timestamp (UTC)' }),
@@ -773,7 +778,7 @@ const _AdminGroup = HttpApiGroup.make('admin')
             .setPayload(S.Struct({
                 name: S.NonEmptyTrimmedString,
                 namespace: S.NonEmptyTrimmedString.pipe(S.pattern(/^[a-z0-9][a-z0-9-]{1,62}[a-z0-9]$/)),
-                settings: S.optional(AppSettingsSchema),
+                settings: S.optional(_TenantAppSettingsSchema),
             }))
             .addSuccess(App.json)
             .addError(HttpError.Conflict)
@@ -789,7 +794,7 @@ const _AdminGroup = HttpApiGroup.make('admin')
     )
     .add(HttpApiEndpoint.patch('updateTenant', '/tenants/:id')
             .setPath(S.Struct({ id: S.UUID }))
-            .setPayload(S.Struct({name: S.optional(S.NonEmptyTrimmedString), settings: S.optional(AppSettingsSchema),}))
+            .setPayload(S.Struct({name: S.optional(S.NonEmptyTrimmedString), settings: S.optional(_TenantAppSettingsSchema),}))
             .addSuccess(App.json)
             .addError(HttpError.NotFound)
             .annotate(OpenApi.Summary, 'Update tenant'),

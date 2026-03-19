@@ -55,7 +55,11 @@ class ReconnectionSupervisor extends Effect.Service<ReconnectionSupervisor>()('k
         const config = yield* HarnessConfig;
         const _retrySchedule = Schedule.exponential(Duration.millis(config.reconnectBackoffBaseMs), 2).pipe(
             Schedule.jittered, Schedule.upTo(Duration.millis(config.reconnectBackoffMaxMs)), Schedule.intersect(Schedule.recurs(config.reconnectMaxAttempts)),
-            Schedule.tapInput (() => Effect.log('kargadan.reconnect: retrying')),
+            Schedule.tapInput(() => readPortFile().pipe(
+                Effect.flatMap(({ pid }) => Effect.try(() => process.kill(pid, 0)).pipe(
+                    Effect.catchAll(() => Effect.logWarning('kargadan.reconnect: Rhino process dead. Restart Rhino.')))),
+                Effect.catchAll(() => Effect.logWarning('kargadan.reconnect: port file unavailable')),
+                Effect.zipRight(Effect.log('kargadan.reconnect: retrying')))),
             Schedule.tapOutput(() => Ref.set(connectionState, 'connected')));
         const _requireConnected = Ref.get(connectionState).pipe(
             Effect.filterOrFail((s) => s === 'connected', (s) => new SocketClientError({ detail: { state: s }, reason: 'disconnected' })),

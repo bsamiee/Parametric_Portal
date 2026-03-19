@@ -72,6 +72,7 @@ internal static class ParameterTypes {
     internal const string Number = "number";
     internal const string Number3 = "number[3]";
     internal const string String = "string";
+    internal const string StringArray = "string[]";
 }
 internal static class TextValues {
     internal const string AgentAction = "Agent Action";

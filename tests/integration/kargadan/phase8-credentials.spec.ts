@@ -2,17 +2,19 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { it } from '@effect/vitest';
+import { NodeFileSystem } from '@effect/platform-node';
 import { AiRegistry } from '../../../packages/ai/src/registry';
 import { AiRuntimeProvider } from '../../../packages/ai/src/runtime-provider';
 import { ConfigProvider, Effect, Layer, Redacted } from 'effect';
 import { expect } from 'vitest';
 
 const _EXPIRED_ISO = '2020-01-01T00:00:00.000Z' as const;
+const _geminiKeys = AiRegistry.providers.gemini.credential.configKeys;
 
 const _configLayer = (entries: Record<string, string>) =>
     Layer.setConfigProvider(ConfigProvider.fromMap(new Map(Object.entries(entries))));
 const _withRuntimeProvider = <A, E, R>(effect: Effect.Effect<A, E, R>, entries: Record<string, string>) =>
-    effect.pipe(Effect.provide(AiRuntimeProvider.Default.pipe(Layer.provide(_configLayer(entries)))));
+    effect.pipe(Effect.provide(AiRuntimeProvider.Default), Effect.provide(_configLayer(entries)), Effect.provide(NodeFileSystem.layer));
 
 it.effect('P8-CFG-AI-01: api-secret providers resolve through the shared credential rail', () =>
     Effect.forEach(['anthropic', 'openai'] as const, (provider) =>
@@ -59,10 +61,10 @@ it.effect('P8-CFG-AI-02: gemini credential refresh resolves bearer auth from des
                 }),
             ),
             {
-                KARGADAN_AI_GEMINI_ACCESS_TOKEN: 'expired-access-token',
-                KARGADAN_AI_GEMINI_CLIENT_PATH:  clientPath,
-                KARGADAN_AI_GEMINI_REFRESH_TOKEN:'refresh-token',
-                KARGADAN_AI_GEMINI_TOKEN_EXPIRY: _EXPIRED_ISO,
+                [_geminiKeys.accessToken]:  'expired-access-token',
+                [_geminiKeys.clientPath]:   clientPath,
+                [_geminiKeys.refreshToken]: 'refresh-token',
+                [_geminiKeys.expiry]:       _EXPIRED_ISO,
             },
         ).pipe(Effect.ensuring(Effect.sync(() => {
             globalThis.fetch = originalFetch;
@@ -72,7 +74,10 @@ it.effect('P8-CFG-AI-02: gemini credential refresh resolves bearer auth from des
 );
 
 it.effect('P8-CFG-AI-03: registry provider vocabulary builds one credential graph per required provider', () =>
-    AiRegistry.decodeAppSettings({ ai: { language: { fallback: ['anthropic'], model: 'gpt-4.1', provider: 'openai' } } }).pipe(
+    AiRegistry.decodeAppSettings({ ai: { language: {
+        fallback: [{ modality: 'language', model: 'claude-sonnet-4-6', provider: 'anthropic' }],
+        primary:  { modality: 'language', model: 'gpt-4.1', provider: 'openai' },
+    } } }).pipe(
         Effect.tap((settings) => {
             expect(AiRegistry.requiredProviders(settings)).toEqual(['openai', 'anthropic']);
             expect(AiRegistry.layers(settings, {

@@ -10,7 +10,7 @@
     ],
     "scripts": {
         "prepare": "lefthook install",
-        "test": "pnpm exec nx affected -t test --base=origin/main",
+        "test": "vitest run",
         "quality": "pnpm exec nx run-many -t typecheck,check --parallel=4 && npx knip && npx sherif",
         "dotnet": "bash tools/scripts/dotnet-check.sh",
         "python": "bash tools/scripts/python-check.sh"
@@ -31,7 +31,6 @@
         "@nx/playwright": "catalog:",
         "@nx/react": "catalog:",
         "@nx/vite": "catalog:",
-        "@nx/vitest": "catalog:",
         "@nxlv/python": "catalog:",
         "@octokit/rest": "catalog:",
         "@playwright/test": "catalog:",
@@ -60,6 +59,7 @@
         "class-variance-authority": "catalog:",
         "clsx": "catalog:",
         "cmdk": "catalog:",
+        "@dopplerhq/node-sdk": "catalog:",
         "date-fns": "catalog:",
         "effect": "catalog:",
         "fast-check": "catalog:",
@@ -144,6 +144,14 @@
             "packages/database": {
                 "entry": [
                     "migrations/*.ts"
+                ]
+            },
+            "apps/kargadan/harness": {
+                "ignoreDependencies": [
+                    "@effect/ai",
+                    "@effect/ai-anthropic",
+                    "@effect/ai-google",
+                    "@effect/ai-openai"
                 ]
             }
         }

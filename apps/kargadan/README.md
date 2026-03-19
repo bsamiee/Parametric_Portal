@@ -18,15 +18,15 @@ pnpm install
 pnpm exec nx run @parametric-portal/kargadan-harness:cli -- init
 ```
 
-The init wizard prompts for AI provider, model, and credentials. OpenAI and Anthropic use API secrets; Gemini uses a Google desktop OAuth client JSON and browser consent. Secrets and OAuth tokens are stored in the macOS Keychain, while `~/.kargadan/config.json` keeps only non-secret metadata plus the app-owned PostgreSQL URL. Kargadan bootstraps its own Postgres.app cluster under `~/.kargadan/postgres/18/` and persists `database.url` automatically.
+The init wizard prompts only for the missing pieces: AI provider, model, credentials, and local PostgreSQL bootstrap when needed. OpenAI and Anthropic use API secrets; Gemini uses a Google desktop OAuth client JSON and browser consent. Secrets and OAuth tokens stay in the macOS Keychain, while `~/.kargadan/config.json` stores only non-secret settings. Bare `kargadan` now auto-runs bootstrap and repair when the config file is missing, invalid, or incomplete.
 
 **3. Prepare and probe the Rhino side**
 
 ```bash
-pnpm exec nx run @parametric-portal/kargadan-harness:cli -- dev prepare
+pnpm exec nx run @parametric-portal/kargadan-harness:cli -- diagnostics live --prepare
 ```
 
-This builds `ParametricPortal.Kargadan.Plugin`, packages it with Yak, and installs it into Rhino. Use `dev probe` to perform a real handshake plus `read.scene.summary` (writes a JSON artifact under `~/.kargadan/live/`), and `dev launch` to start Rhino and wait for `~/.kargadan/port`.
+This builds `ParametricPortal.Kargadan.Plugin`, packages it with Yak, installs it into Rhino, optionally launches Rhino, and performs a real handshake plus `read.scene.summary`. Live probe artifacts are written under `~/.kargadan/live/`.
 
 Manual plugin iteration is still available when needed:
 
@@ -41,10 +41,10 @@ pnpm exec nx run ParametricPortal.Kargadan.Plugin:build:release
 pnpm exec nx run @parametric-portal/kargadan-harness:cli
 
 # With explicit intent
-pnpm exec nx run @parametric-portal/kargadan-harness:cli -- "Create a 10x10 box"
+pnpm exec nx run @parametric-portal/kargadan-harness:cli -- run --intent "Create a 10x10 box"
 
 # Resume latest session
-pnpm exec nx run @parametric-portal/kargadan-harness:cli -- --continue
+pnpm exec nx run @parametric-portal/kargadan-harness:cli -- run --resume auto
 
 # List past sessions
 pnpm exec nx run @parametric-portal/kargadan-harness:cli -- sessions list
@@ -99,7 +99,7 @@ flowchart LR
     direction TB
     WS["WebSocket Host\nTCP listener + HTTP upgrade"]
     RT["Router\nJSON decode + validation"]
-    EX["Command Executor\n11 operations"]
+    EX["Command Executor\n14 operations"]
     OB["Observation Pipeline\n15 event subscriptions"]
     WS --> RT --> EX
     WS -.-> OB
@@ -108,13 +108,13 @@ flowchart LR
   subgraph Deps ["Workspace Packages"]
     AI["packages/ai\nmulti-provider LLM\nsemantic search"]
     DB["packages/database\nagent persistence\npgvector"]
-    SV["packages/server\ncontext + telemetry"]
+    KH["kargadan harness runtime\ncontext + telemetry"]
   end
 
   WC ---|"WebSocket\nlocalhost"| WS
   AL --> AI
   AL --> DB
-  AL --> SV
+  AL --> KH
   EX --> Rhino9["Rhino 9\nRhinoCommon API"]
   DB --> PG[("PostgreSQL 18 + pgvector")]
 ```
@@ -125,7 +125,7 @@ flowchart LR
 | Plugin (`plugin/`)   | WebSocket server inside Rhino, command execution (RunScript + direct API), event observation pipeline, undo integration, protocol contracts                             |
 | packages/ai          | Multi-provider LLM abstraction (Anthropic/OpenAI/Gemini), embedding, toolkit composition (3 canonical tools), budget/rate/tool-policy enforcement, MCP server transport |
 | packages/database    | Polymorphic repo factory, pgvector hybrid search (10-signal RRF), Schema-derived models, tenant scoping, keyset pagination, agent persistence service                   |
-| packages/server      | Context propagation (FiberRef-backed), telemetry (OTLP), metrics, cache (Redis), resilience patterns                                                                    |
+| harness runtime      | Local-first tenant context + lightweight telemetry used by the standalone CLI without inheriting server/web build dependencies                                           |
 
 ---
 
@@ -137,8 +137,9 @@ The TypeScript harness is the out-of-process agent runtime. It connects to the R
 
 | Module                  | Purpose                                                                                                                                 | Key Exports                                                                                                                                                                                     |
 | ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `cli.ts`                | `@effect/cli` command graph: init wizard, run, sessions (list/trace/export/prune), option-based config access, diagnostics (check/live) | Entry point via `NodeRuntime.runMain()`                                                                                                                                                         |
+| `cli.ts`                | `@effect/cli` command graph: bootstrap/repair-aware root launcher, run, sessions (list/trace/export/prune), config access, diagnostics (check/live) | Entry point via `NodeRuntime.runMain()`                                                                                                                                                         |
 | `config.ts`             | JSON config file schema, ConfigProvider composition, config-file access, keychain integration, and strict PostgreSQL persistence wiring | `ConfigFile`, `HarnessConfig`, `HarnessHostError`, `KargadanConfigSchema`, `KargadanHost`, `loadConfigProvider`, `PORT_FILE_PATH`                                                               |
+| `context.ts`            | Harness-local tenant context for local-first runtime execution                                                             | `Context`                                                                                                                                                                                       |
 | `harness.ts`            | Session lifecycle: connect, handshake, seed knowledge base, run agent loop, persist, and perform live Rhino probes                      | `HarnessRuntime`                                                                                                                                                                                |
 | `socket.ts`             | WebSocket transport with pending-request tracking and staleness detection                                                               | `KargadanSocketClient`, `KargadanSocketClientLive`, `ReconnectionSupervisor`, `readPortFile`, `SocketClientError`                                                                               |
 | `protocol/schemas.ts`   | Envelope union schema (9 variants), catalog entry schema, failure classification                                                        | `Envelope`, `CatalogEntrySchema`, `DedupeDecision`, `DEFAULT_LOOP_OPERATIONS`, `ErrorPayload`, `FailureClass`, `NonNegInt`, `ObjectTypeTag`, `Operation`, `ResultStatus`, `WorkflowExecutionId` |
@@ -147,9 +148,9 @@ The TypeScript harness is the out-of-process agent runtime. It connects to the R
 
 ### CLI Commands
 
-**`kargadan`** (bare) -- First-run detection triggers init wizard, then enters interactive agent mode.
+**`kargadan`** (bare) -- The professional launcher path. It checks `~/.kargadan/config.json`, repairs or initializes when needed, verifies the selected provider enrollment, prompts for intent, then enters the interactive run flow.
 
-**`kargadan init`** -- Interactive bootstrap. Validates Postgres.app, initializes the app-owned cluster/database/`pgvector`, prompts for AI provider credentials, stores secrets in the macOS Keychain, and writes only non-secret settings to `~/.kargadan/config.json`.
+**`kargadan init`** -- Interactive bootstrap/repair. Validates Postgres.app or Docker fallback, initializes the runtime database and `pgvector`, prompts for AI provider credentials, stores secrets in the macOS Keychain, and writes only non-secret settings to `~/.kargadan/config.json`.
 
 **`kargadan auth`** -- Credential enrollment and status commands.
 
@@ -159,17 +160,16 @@ The TypeScript harness is the out-of-process agent runtime. It connects to the R
 | `status`   | Show which providers are enrolled without revealing secrets                   |
 | `logout`   | Remove one provider or all provider credentials from the macOS Keychain       |
 
-**`kargadan "intent"`** -- Interactive agent execution. The root command accepts a natural language intent directly.
+**`kargadan run`** -- Interactive agent execution.
 
 | Option             | Flag                       | Description                                                  |
 | ------------------ | -------------------------- | ------------------------------------------------------------ |
 | Intent             | `-i, --intent`             | Natural language goal                                        |
 | Session ID         | `-s, --session-id`         | Explicit session UUID                                        |
 | Resume             | `-r, --resume`             | `auto` (find latest resumable, default) or `off`             |
-| Config override    | `-c, --config`             | Key-value config overrides (e.g. `ai.languageModel=gpt-4.1`) |
-| Architect model    | `-m, --architect-model`    | Override planning model                                      |
-| Architect provider | `-p, --architect-provider` | Override planning provider                                   |
-| Architect fallback | `--architect-fallback`     | Repeatable fallback providers                                |
+| Config override    | `-c, --config`             | Key-value config overrides (e.g. `ai.language.primary=openai:gpt-5.4`) |
+| Architect primary  | `-m, --architect`          | Override planning model ref (`provider:model`)               |
+| Architect fallback | `--architect-fallback`     | Repeatable fallback model refs (`provider:model`)            |
 
 **`kargadan sessions`** -- Session management.
 
@@ -182,22 +182,17 @@ The TypeScript harness is the out-of-process agent runtime. It connects to the R
 
 **`kargadan config`** -- Configuration management.
 
-| Subcommand                                | Description                                                       |
+| Form                                      | Description                                                       |
 | ----------------------------------------- | ----------------------------------------------------------------- |
-| `kargadan config list`                    | List flattened dotted-path entries from `~/.kargadan/config.json` |
-| `kargadan config get <key>`               | Read a dotted key (e.g. `ai.languageModel`)                       |
-| `kargadan config set <key> <value>`       | Write a supported dotted key                                      |
-| `kargadan config reset`                   | Reset configuration to defaults                                   |
+| `kargadan config`                         | List flattened dotted-path entries from `~/.kargadan/config.json` |
+| `kargadan config --key <key>`             | Read a dotted key (for example `ai.language.primary`)             |
+| `kargadan config --key <key> --value <v>` | Write a supported dotted key                                      |
 
 `config` is intentionally limited to the documented non-secret keys. Provider secrets and Gemini OAuth tokens never live in `config.json`.
 
-**`kargadan dev probe`** -- Real handshake and `read.scene.summary` probe against a running Rhino instance. Writes a JSON artifact to `~/.kargadan/live/`. This is the primary Rhino integration check and does not require the PostgreSQL path. Flags: `--rhino-app` (Rhino.app path override), `--yak-path` (yak executable override).
+**`kargadan diagnostics live`** -- Real handshake and `read.scene.summary` probe against a running Rhino instance. Writes a JSON artifact to `~/.kargadan/live/`. `--prepare` builds, Yak-packages, installs, and optionally launches Rhino first. Flags: `--rhino-app` and `--yak-path` override discovery.
 
-**`kargadan dev re-embed`** -- Clear all stored embeddings (`search_chunks.embedding`, `model`, `dimensions` set to NULL). The next `seedKnowledge` or `EmbeddingCron` run re-embeds with the current model. Use after switching embedding models.
-
-**`kargadan dev reset-pg`** -- Delete Docker PG Keychain credential. Next bootstrap generates a fresh password.
-
-**`kargadan doctor`** -- Validate environment, DB connectivity, transport, config integrity (SHA256 hash), and data directory accessibility.
+**`kargadan diagnostics check`** -- Validate environment, DB connectivity, transport, config integrity (SHA256 hash), and data directory accessibility.
 
 ### Connection Flow
 
@@ -207,7 +202,7 @@ The TypeScript harness is the out-of-process agent runtime. It connects to the R
 4. `CommandDispatch.handshake()` sends `handshake.init` with capabilities and protocol version
 5. Receives `handshake.ack` with accepted capabilities and command catalog
 6. Uses handshake catalog directly (manifest entity type `command`, namespace `kargadan`, scope derived from appId)
-7. Seeds knowledge base via `AiService.seedKnowledge(catalog)` -- SHA256 hash of manifest + version persisted as kvStore marker (`kargadan:manifest:kargadan:command:{appId}`); seeding skipped entirely when hash matches
+7. Prepares knowledge base via `AiService.prepareKnowledge(catalog)` -- manifest entries are normalized into `search_documents`, embedding projections are stored in `search_embeddings`, and the SHA256 hash + version are persisted as the kvStore marker (`kargadan:manifest:kargadan:command:{appId}`); writes are skipped when the prepared hash already matches
 
 ### Layer Composition
 
@@ -238,14 +233,14 @@ The C# plugin runs inside Rhino 9 as a `.rhp` assembly targeting `net9.0`. It ho
 | -------------- | ----------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `boundary/`    | `KargadanPlugin`, `EventPublisher`, `SessionEventPublisher`             | Plugin lifecycle, message dispatch, UI thread marshaling via `RhinoApp.InvokeOnUiThread`, lock-free event queue via `Atom<Seq<T>>`                                                       |
 | `contracts/`   | 13 smart enums, 14 value objects, 7 envelope types, `Require` validator | Protocol type system: `ErrorCode` with computed `FailureClass`, `CommandOperation` with `ExecutionMode`/`Category`, Thinktecture `[ValueObject<T>]` with `SearchValues<char>` validation |
-| `execution/`   | `CommandExecutor` (static, 11 routes)                                   | Command handlers (7 read, 3 write, 1 script) with undo wrapping via `BeginUndoRecord`/`EndUndoRecord`                                                                                    |
+| `execution/`   | `CommandExecutor` (static, 14 routes)                                   | Command handlers for scene reads, object reads, Rhino command cataloging, selection management, writes, and script execution with undo wrapping where applicable                        |
 | `observation/` | `ObservationPipeline`                                                   | 15 RhinoDoc event subscriptions, bounded channel (256, DropOldest), 200ms debounce timer, batch aggregation                                                                              |
 | `protocol/`    | `CommandRouter`, `FailureMapping`                                       | Monadic JSON decoding via LanguageExt `from...select`, exception-to-`ErrorCode` mapping                                                                                                  |
 | `transport/`   | `WebSocketHost`, `SessionHost`, `WebSocketPortFile`                     | TCP listener, HTTP upgrade, `Lock`-gated session state machine, semaphore-gated sends, atomic port file I/O                                                                              |
 
 ### Command Catalog
 
-11 operations exported via handshake acknowledgment:
+14 operations exported via handshake acknowledgment:
 
 | Operation              | Category  | Mode       | Undo |
 | ---------------------- | --------- | ---------- | ---- |
@@ -260,6 +255,9 @@ The C# plugin runs inside Rhino 9 as a `.rhp` assembly targeting `net9.0`. It ho
 | `write.object.update`  | Write     | Direct API | Yes  |
 | `write.object.delete`  | Write     | Direct API | Yes  |
 | `script.run`           | Geometric | Script     | No   |
+| `catalog.rhino.commands`| Read      | Direct API | No   |
+| `read.object.list`     | Read      | Direct API | No   |
+| `write.selection`      | Write     | Direct API | No   |
 
 Write operations wrap in `BeginUndoRecord`/`EndUndoRecord` with `AddCustomUndoEvent` for agent state tracking. Pressing Cmd+Z undoes the entire AI action atomically. Failure auto-reverts via `doc.Undo()`.
 
@@ -437,18 +435,18 @@ Kargadan imports from three workspace packages. Each section lists the specific 
 
 | Import Path                      | Consumed By                          | Provides                                                                                                                                                                                                |
 | -------------------------------- | ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `@parametric-portal/ai/service`  | agent-loop.ts, harness.ts            | `AiService` (seedKnowledge, searchQuery, searchRefresh, searchRefreshEmbeddings, searchSuggest, buildAgentToolkit, runAgentCore), `ManifestEntrySchema`, `ManifestArraySchema`                          |
+| `@parametric-portal/ai/service`  | agent-loop.ts, harness.ts            | `AiService` (prepareKnowledge, searchQuery, searchRefresh, searchRefreshEmbeddings, searchSuggest, buildAgentToolkit, runAgentCore), `ManifestEntrySchema`, `ManifestArraySchema`                       |
 | `@parametric-portal/ai/registry` | config.ts, agent-loop.ts, harness.ts | `AiRegistry` (provider/model session override via FiberRef, Gemini OAuth flows, `layers()` factory, `requiredProviders()`, `providerVocabulary`, `decodeAppSettings`, `decodeSessionOverrideFromInput`) |
-| `@parametric-portal/ai/mcp`      | (available for interop)              | `Mcp` (MCP server transport layer: Stdio, HTTP, HttpRouter with toolkit attachment)                                                                                                                     |
+| `@parametric-portal/ai/mcp`      | (internal, not exported)             | `Mcp` (MCP server transport layer: Stdio, HTTP, HttpRouter with toolkit attachment; source retained in `src/mcp.ts`, re-exportable when a consumer arrives)                                             |
 
-Multi-provider language model abstraction (Anthropic, OpenAI, Gemini) with four enforcement layers: per-request token limits, daily token budgets, rate limiting, and tool policy gating (allow/deny mode with tool choice constraints). Provider fallback chains attempt each configured fallback on `AiSdkError`. Catalog seeding and query retrieval both require the configured embedding model; `AiService` delegates hybrid search to `packages/database` `SearchRepo` which implements 10-signal reciprocal rank fusion inside PostgreSQL. Tool definitions via `Tool.make` with typed success/failure schemas composing three canonical tools: `catalog.search`, `command.execute`, `context.read`. Generic agent core (`runAgentCore`) accepts caller-defined stage functions and iterates until terminal state. Chat lifecycle via `AiRuntime.chat`/`serializeChat`/`deserializeChat`/`compactChat` (token-aware compaction with configurable trigger/target thresholds).
+Multi-provider language model abstraction (Anthropic, OpenAI, Gemini) with four enforcement layers: per-request token limits, daily token budgets, rate limiting, and tool policy gating (allow/deny mode with tool choice constraints). Provider fallback chains attempt each configured fallback on `AiSdkError`. Knowledge preparation and query retrieval both use the canonical embedding profile from `AiSettings`; `AiService` delegates hybrid search to `packages/database` `SearchRepo`, which stores lexical records in `search_documents`, stores provider/model/dimension-specific vectors in `search_embeddings`, and executes hybrid ranking inside PostgreSQL. Tool definitions via `Tool.make` with typed success/failure schemas composing three canonical tools: `catalog.search`, `command.execute`, `context.read`. Generic agent core (`runAgentCore`) accepts caller-defined stage functions and iterates until terminal state. Chat lifecycle via `AiRuntime.chat`/`serializeChat`/`deserializeChat`/`compactChat` (token-aware compaction with configurable trigger/target thresholds).
 
 **Internal services** (not directly imported by harness but architecturally significant):
 
 | Service             | Tag                  | Purpose                                                                                                             |
 | ------------------- | -------------------- | ------------------------------------------------------------------------------------------------------------------- |
 | `AiRuntime`         | `ai/Runtime`         | LLM orchestration: embed, generateText, generateObject, streamText, countTokens, chat, compactChat, settings        |
-| `AiRuntimeProvider` | `ai/RuntimeProvider` | Budget persistence (Redis-backed in Server mode, in-memory in Default), credential resolution, observability hooks  |
+| `AiRuntimeProvider` | `ai/RuntimeProvider` | In-memory budget tracking, tenant settings lookup via shared database repos, credential resolution, observability hooks |
 | `AiError`           | `AiError`            | Typed error with reasons: `budget_exceeded`, `policy_denied`, `rate_exceeded`, `request_tokens_exceeded`, `unknown` |
 
 ### packages/database
@@ -460,16 +458,16 @@ Multi-provider language model abstraction (Anthropic, OpenAI, Gemini) with four 
 | `repos`             | harness.ts                                   | `DatabaseService` (polymorphic repo composition root, 15 domain repos including `agentJournal`, `kvStore`)                                        |
 | `search`            | (consumed transitively via AiService)        | `SearchRepo` (10-signal RRF hybrid search, suggest, embeddingSources, upsertDocument, upsertEmbedding, refresh)                                   |
 
-`AgentPersistenceService` manages the `agent_journal` table with entry kinds: `session_start`, `tool_call`, `checkpoint`, `session_complete`. Session resumption uses `hydrate(sessionId)` to restore `chatJson`, `loopState`, and `sequence` (with hash-based divergence detection), and `findResumable(appId)` to locate incomplete sessions. The polymorphic repo factory provides `find`, `one`, `by`, `put`, `set`, `upsert`, `merge`, `drop`, `lift`, `purge`, `page`, `pageOffset`, `count`, `exists`, `agg`, `stream`, `fn`, `preds`, `wildcard` with tenant scoping, OCC, soft-delete, and keyset pagination. `SearchRepo` implements reciprocal rank fusion across 10 weighted signals (FTS 0.30, semantic 0.20, trigram similarity 0.15, trigram word similarity 0.10, fuzzy 0.08, trigram KNN similarity 0.05, trigram strict word similarity 0.05, trigram KNN word similarity 0.03, phonetic 0.02, trigram KNN strict word similarity 0.02; K=60) with pgvector `HALFVEC(3072)` HNSW indexing (`efSearch` 120, relaxed-order scan) and tunable trigram thresholds via `POSTGRES_TRGM_*` environment variables.
+`AgentPersistenceService` manages the `agent_journal` table with entry kinds: `session_start`, `tool_call`, `checkpoint`, `session_complete`. Session resumption uses `hydrate(sessionId)` to restore `chatJson`, `loopState`, and `sequence` (with hash-based divergence detection), and `findResumable(appId)` to locate incomplete sessions. The polymorphic repo factory provides `find`, `one`, `by`, `put`, `set`, `upsert`, `merge`, `drop`, `lift`, `purge`, `page`, `pageOffset`, `count`, `exists`, `agg`, `stream`, `fn`, `preds`, `wildcard` with tenant scoping, OCC, soft-delete, and keyset pagination. `SearchRepo` now separates lexical records in `search_documents` from vector projections in `search_embeddings`, stores exact-dimension pgvector `vector` values, and uses profile-specific HNSW expression indexes (`vector(dim)` or `halfvec(dim)` casts per embedding profile) for hybrid retrieval.
 
-### packages/server
+### Harness-local runtime support
 
-| Module              | Files              | Exports                                                               |
-| ------------------- | ------------------ | --------------------------------------------------------------------- |
-| `context`           | cli.ts, harness.ts | `Context.Request` (FiberRef tenant/session scoping)                   |
-| `observe/telemetry` | agent-loop.ts      | `Telemetry` (OTLP span wrapping with auto SpanKind, diagnostics emit) |
+| Module      | Files                  | Exports                                          |
+| ----------- | ---------------------- | ------------------------------------------------ |
+| `context`   | cli.ts, harness.ts     | `Context.Request` tenant scoping for local flows |
+| `telemetry` | runtime/agent-loop.ts  | `Telemetry.emit` lightweight structured logging  |
 
-`Context.Request` provides tenant isolation via FiberRef. Telemetry auto-injects request context attributes into OTLP spans with SpanKind inference from prefix (`kargadan.*` -> INTERNAL). CacheService (Redis) provides rate limiting and budget persistence consumed transitively by `AiRuntimeProvider.Server`; the Default provider uses in-memory Refs instead, making Redis optional for local development.
+Kargadan no longer depends on `packages/server` for local CLI execution. The standalone harness now runs entirely on the shared AI/database packages plus local keychain-backed credentials, which removes unrelated web/server build failures from the deployment path.
 
 ---
 
@@ -499,14 +497,12 @@ All environment variables are decoded in `harness/src/config.ts` via Effect Conf
 
 | Variable                           | Default                                      | Description                                                      |
 | ---------------------------------- | -------------------------------------------- | ---------------------------------------------------------------- |
-| `KARGADAN_MODEL`                   | (inherit)                                    | Language model override                                          |
-| `KARGADAN_PROVIDER`                | (inherit)                                    | Language provider override                                       |
-| `KARGADAN_LANGUAGE_FALLBACK`       | (empty)                                      | Comma-separated fallback providers                               |
-| `KARGADAN_ARCHITECT_MODEL`         | (inherit)                                    | Architect planning model override                                |
-| `KARGADAN_ARCHITECT_PROVIDER`      | (inherit)                                    | Architect provider override                                      |
-| `KARGADAN_ARCHITECT_FALLBACK`      | (empty)                                      | Comma-separated architect fallback providers                     |
-| `KARGADAN_AI_ANTHROPIC_API_SECRET` | Keychain-managed after `init` / `auth login` | Anthropic API secret (legacy `ANTHROPIC_API_KEY` still accepted) |
-| `KARGADAN_AI_OPENAI_API_SECRET`    | Keychain-managed after `init` / `auth login` | OpenAI API secret (legacy `OPENAI_API_KEY` still accepted)       |
+| `KARGADAN_AI_LANGUAGE_PRIMARY`     | (inherit)                                    | Language primary model ref (`provider:model`)                    |
+| `KARGADAN_AI_LANGUAGE_FALLBACK`    | (empty)                                      | Comma-separated fallback model refs (`provider:model`)           |
+| `KARGADAN_AI_ARCHITECT_PRIMARY`    | (inherit)                                    | Architect planning primary model ref (`provider:model`)          |
+| `KARGADAN_AI_ARCHITECT_FALLBACK`   | (empty)                                      | Comma-separated architect fallback refs (`provider:model`)       |
+| `KARGADAN_AI_ANTHROPIC_API_SECRET` | Keychain-managed after `init` / `auth login` | Anthropic API secret                                              |
+| `KARGADAN_AI_OPENAI_API_SECRET`    | Keychain-managed after `init` / `auth login` | OpenAI API secret                                                 |
 | `KARGADAN_AI_GEMINI_CLIENT_PATH`   | (set by init/auth for Gemini)                | Google desktop OAuth client JSON path                            |
 | `KARGADAN_AI_GEMINI_ACCESS_TOKEN`  | Keychain-managed runtime state               | Gemini OAuth access token                                        |
 | `KARGADAN_AI_GEMINI_REFRESH_TOKEN` | Keychain-managed runtime state               | Gemini OAuth refresh token                                       |
@@ -562,7 +558,7 @@ These values are hardcoded in `config.ts` with no env-var override path.
 | `maskedKeys`         | geometry-related field set                      | Keys excluded from LLM context                     |
 | `truncation`         | see Observation Masking                         | Array depth, item limits, string/object depth      |
 | `viewCapture`        | 1600x900, 144 DPI, 2 passes                    | Viewport capture defaults                          |
-| Embedding model      | `text-embedding-3-large` (3072 dimensions)      | Derived from `AiSettingsSchema` defaults           |
+| Embedding profile    | OpenAI `text-embedding-3-large` (3072 dimensions) | Derived from `packages/ai` canonical defaults      |
 
 ---
 
@@ -588,7 +584,7 @@ These values are hardcoded in `config.ts` with no env-var override path.
 - **macOS Apple Silicon target** -- the current Rhino deployment and validation loop is wired for Rhino 9 on macOS; the plugin targets `net9.0`
 - **Single document per session** -- Multi-document requires event ordering research specific to macOS
 - **Grasshopper deferred** -- GH2 API unstable; GH1 integration remains out of scope for current phase
-- **No MCP for core execution** -- MCP kept in packages/ai for interop (Claude Desktop/Cursor) but native typed tool calls are the reliability substrate
+- **No MCP for core execution** -- MCP source retained in `packages/ai/src/mcp.ts` but not exported from the package; re-exportable when an external consumer (Claude Desktop/Cursor) materializes. Native typed tool calls are the reliability substrate
 - **Thread marshaling mandatory** -- Every RhinoDoc mutation from WebSocket handler must route through `RhinoApp.InvokeOnUiThread`
 
 ## License

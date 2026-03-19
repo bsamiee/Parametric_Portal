@@ -1,10 +1,10 @@
 import { createHash, randomBytes } from 'node:crypto';
-import { readFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import * as FileSystem from '@effect/platform/FileSystem';
 import { AiRegistry } from '@parametric-portal/ai/registry';
+import { GeminiOAuth, SessionOverride } from '@parametric-portal/ai/runtime-provider';
 import { AgentPersistenceLayer } from '@parametric-portal/database/agent-persistence';
 import { Client } from '@parametric-portal/database/client';
 import { Config, ConfigProvider, Context as Ctx, Data, Duration, Effect, HashMap, Layer, Match, Option, Redacted, Ref, Schema as S, pipe } from 'effect';
@@ -14,11 +14,20 @@ import { DEFAULT_LOOP_OPERATIONS, kargadanToolCallProjector, NonNegInt, ObjectTy
 
 // --- [SCHEMA] ----------------------------------------------------------------
 
+const _ConfigLanguageRefSchema = AiRegistry.LanguageModelRefSchema.pipe(S.pick('model', 'provider'));
+const _ConfigOverrideSchema = S.Struct({
+    fallback: S.optionalWith(S.Array(_ConfigLanguageRefSchema), { default: () => [] as Array<typeof _ConfigLanguageRefSchema.Type> }),
+    primary:  _ConfigLanguageRefSchema,
+});
 const KargadanConfigSchema = S.Struct({
-    architect:        S.optional(S.partial(S.Struct({ fallback: S.String, model: S.String, provider: S.String }))),
-    geminiClientPath: S.optional(S.String),
-    model:            S.optional(S.String),
-    provider:         S.optional(S.String),
+    ai: S.optional(S.Struct({
+        architect:        S.optional(_ConfigOverrideSchema),
+        geminiClientPath: S.optional(S.String),
+        language:         S.optional(_ConfigOverrideSchema),
+    })),
+    postgres: S.optional(S.Struct({
+        url: S.optional(S.String),
+    })),
 });
 const _GeminiSessionSchema = S.parseJson(S.Struct({
     accessToken:  S.NonEmptyTrimmedString,
@@ -27,7 +36,7 @@ const _GeminiSessionSchema = S.parseJson(S.Struct({
 }));
 
 type _DecodeFailure = { readonly error: string; readonly provider: AiRegistry.Provider };
-class KeychainDecodeFailures extends Ctx.Tag('kargadan/KeychainDecodeFailures')<KeychainDecodeFailures, Ref.Ref<ReadonlyArray<_DecodeFailure>>>() {}
+type _Cfg = typeof KargadanConfigSchema.Type;
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
@@ -36,18 +45,10 @@ const [_CONFIG_PATH, PORT_FILE_PATH] = [join(_KARGADAN_DIR, 'config.json'), join
 const _KEYCHAIN = { accounts: { anthropic: 'ai.anthropic', dockerPg: 'db.docker', gemini: 'ai.gemini', openai: 'ai.openai' }, service: 'com.parametricportal.kargadan' } as const;
 const _POSTGRES_ROOT = join(_KARGADAN_DIR, 'postgres', '18');
 const _INTERNALS = {
-    commandDeadlineMs:         5_000,
-    compactionTargetPercent:   40,
-    compactionTriggerPercent:  75,
-    correctionCycles:          1,
-    exportLimit:               10_000,
-    heartbeatIntervalMs:       5_000,
-    heartbeatTimeoutMs:        15_000,
-    reconnectBackoffBaseMs:    500,
-    reconnectBackoffMaxMs:     30_000,
-    reconnectMaxAttempts:      50,
-    retryMaxAttempts:          5,
-    tokenExpiryMinutes:        15,
+    commandDeadlineMs:     5_000,  compactionTargetPercent: 40,    compactionTriggerPercent: 75,     correctionCycles:       1,
+    exportLimit:           10_000, heartbeatIntervalMs:     5_000, heartbeatTimeoutMs:       15_000, reconnectBackoffBaseMs: 500,
+    reconnectBackoffMaxMs: 30_000, reconnectMaxAttempts:    50,    retryMaxAttempts:         5,      tokenExpiryMinutes:     15,
+    writeApprovalTimeoutMs: 300_000,
 } as const;
 const _CAPABILITIES = {
     optional: ['view.capture'],
@@ -69,18 +70,22 @@ const _AI_RUNTIME_ENV = {
     openai: { secret: 'KARGADAN_AI_OPENAI_API_SECRET' },
 } as const;
 const _CONFIG_TREE = {
-    model:    { architectFallback: 'KARGADAN_ARCHITECT_FALLBACK',   architectModel:  'KARGADAN_ARCHITECT_MODEL',
-                architectProvider: 'KARGADAN_ARCHITECT_PROVIDER',   geminiClientPath: _AI_RUNTIME_ENV.gemini.clientPath,
-                languageFallback:  'KARGADAN_LANGUAGE_FALLBACK',    languageModel:    'KARGADAN_MODEL',
-                languageProvider:  'KARGADAN_PROVIDER' },
-    postgres: { connectTimeout:    'KARGADAN_PG_CONNECT_TIMEOUT',   idleTimeout:     'KARGADAN_PG_IDLE_TIMEOUT',
-                maxConnections:    'KARGADAN_PG_MAX_CONNECTIONS',   url:             'KARGADAN_DATABASE_URL' },
-    rhino:    { appPath:           'KARGADAN_RHINO_APP_PATH',       launchTimeoutMs: 'KARGADAN_RHINO_LAUNCH_TIMEOUT_MS',
+    ai:       { architectFallback: 'KARGADAN_AI_ARCHITECT_FALLBACK',  architectPrimary: 'KARGADAN_AI_ARCHITECT_PRIMARY',
+                geminiClientPath:  _AI_RUNTIME_ENV.gemini.clientPath, languageFallback: 'KARGADAN_AI_LANGUAGE_FALLBACK',
+                languagePrimary:   'KARGADAN_AI_LANGUAGE_PRIMARY' },
+    postgres: { connectTimeout:    'KARGADAN_PG_CONNECT_TIMEOUT',     idleTimeout:     'KARGADAN_PG_IDLE_TIMEOUT',
+                maxConnections:    'KARGADAN_PG_MAX_CONNECTIONS',     url:             'KARGADAN_DATABASE_URL' },
+    rhino:    { appPath:           'KARGADAN_RHINO_APP_PATH',         launchTimeoutMs: 'KARGADAN_RHINO_LAUNCH_TIMEOUT_MS',
                 yakPath:           'KARGADAN_YAK_PATH' },
 } as const satisfies Record<string, Record<string, string>>;
+const _supportedKeys = Object.fromEntries(
+    Object.entries(_CONFIG_TREE).flatMap(([group, fields]) =>
+        Object.entries(fields).map(([field, envKey]) => [`${group}.${field}`, envKey] as const)
+    )) as Record<string, string>;
 
 // --- [ERRORS] ----------------------------------------------------------------
 
+class KeychainDecodeFailures extends Ctx.Tag('kargadan/KeychainDecodeFailures')<KeychainDecodeFailures, Ref.Ref<ReadonlyArray<_DecodeFailure>>>() {}
 class HarnessHostError extends Data.TaggedError('HarnessHostError')<{
     readonly detail?: unknown;
     readonly message: string;
@@ -89,15 +94,27 @@ class HarnessHostError extends Data.TaggedError('HarnessHostError')<{
 
 // --- [FUNCTIONS] -------------------------------------------------------------
 
-const _csvConfig = (config: Config.Config<string>, fallback = '') =>
-    config.pipe(Config.withDefault(fallback), Config.map((v) => v.split(',').map((e) => e.trim()).filter(Boolean)));
+const _csvConfig = (config: Config.Config<string>, fallback = '') => config.pipe(Config.withDefault(fallback), Config.map((v) => v.split(',').map((e) => e.trim()).filter(Boolean)));
 const _trimmed = (key: string, fallback = '') => Config.string(key).pipe(Config.withDefault(fallback), Config.map((v) => v.trim()));
+const _serializeLanguageRef = (ref: typeof _ConfigLanguageRefSchema.Type) => `${ref.provider}:${ref.model}`;
+const _decodeLanguageRef = (value: string) =>
+    Effect.gen(function* () {
+        const match = yield* Option.fromNullable(/^([a-z]+):(.+)$/.exec(value.trim())).pipe(
+            Option.match({
+                onNone: () => Effect.fail(new HarnessHostError({ message: `Invalid model ref '${value}'. Expected 'provider:model'.`, reason: 'config' })),
+                onSome: Effect.succeed,
+            }),
+        );
+        return yield* S.decodeUnknown(_ConfigLanguageRefSchema)({ model: match[2] ?? '', provider: match[1] ?? '' }).pipe(
+            Effect.mapError((detail) => new HarnessHostError({ detail, message: `Invalid model ref '${value}'. Expected 'provider:model'.`, reason: 'config' })),
+        );
+    });
+const _decodeLanguageRefs = (value: string) => Effect.forEach(value.split(',').map((entry) => entry.trim()).filter((entry) => entry.length > 0), (entry) => _decodeLanguageRef(entry));
 const _knownConfigKeys = new Set(Object.keys(KargadanConfigSchema.fields));
 const _readConfigFile = pipe(
     FileSystem.FileSystem,
     Effect.flatMap((fs) => fs.makeDirectory(_KARGADAN_DIR, { recursive: true }).pipe(Effect.zipRight(fs.readFileString(_CONFIG_PATH)))),
     Effect.flatMap(S.decode(S.parseJson(S.Record({ key: S.String, value: S.Unknown })))),
-    // why: surface unrecognized top-level keys BEFORE schema decode strips them
     Effect.tap((raw) => {
         const unknown = Object.keys(raw).filter((k) => !_knownConfigKeys.has(k));
         return unknown.length > 0
@@ -127,9 +144,12 @@ const _keychainPairs = (decodeFailures: Ref.Ref<ReadonlyArray<_DecodeFailure>>) 
         }))), { concurrency: 'unbounded' }).pipe(Effect.map((entries) => entries.flat()));
 const _configFilePairs = (config: typeof KargadanConfigSchema.Type): ReadonlyArray<readonly [string, string]> =>
     ([
-        [_CONFIG_TREE.model.languageProvider,  config.provider],         [_CONFIG_TREE.model.languageModel,     config.model],
-        [AiRegistry.providers.gemini.credential.configKeys.clientPath, config.geminiClientPath], [_CONFIG_TREE.model.architectModel,    config.architect?.model],
-        [_CONFIG_TREE.model.architectProvider, config.architect?.provider], [_CONFIG_TREE.model.architectFallback, config.architect?.fallback],
+        [_CONFIG_TREE.ai.languagePrimary,   config.ai?.language?.primary === undefined  ? undefined : _serializeLanguageRef(config.ai.language.primary)],
+        [_CONFIG_TREE.ai.languageFallback,  config.ai?.language?.fallback.length === 0  ? undefined : config.ai?.language?.fallback.map(_serializeLanguageRef).join(',')],
+        [_CONFIG_TREE.ai.architectPrimary,  config.ai?.architect?.primary === undefined ? undefined : _serializeLanguageRef(config.ai.architect.primary)],
+        [_CONFIG_TREE.ai.architectFallback, config.ai?.architect?.fallback.length === 0 ? undefined : config.ai?.architect?.fallback.map(_serializeLanguageRef).join(',')],
+        [AiRegistry.providers.gemini.credential.configKeys.clientPath, config.ai?.geminiClientPath],
+        [_CONFIG_TREE.postgres.url, config.postgres?.url],
     ] as ReadonlyArray<readonly [string, string | undefined]>).filter((pair): pair is readonly [string, string] => pair[1] !== undefined);
 const _runtimeAliasPairs = (): ReadonlyArray<readonly [string, string]> =>
     ([
@@ -152,7 +172,11 @@ const loadConfigProvider = Effect.gen(function* () {
         provider:            ConfigProvider.orElse(ConfigProvider.fromEnv(), () => ConfigProvider.fromMap(new Map([...runtimeAliasPairs, ...filePairs, ...keychainPairs]))),
     } as const;
 });
-const _readConfig = _readConfigFile.pipe(Effect.option, Effect.map(Option.getOrElse(() => ({} as typeof KargadanConfigSchema.Type))));
+const _readConfig = FileSystem.FileSystem.pipe(
+    Effect.flatMap((fs) => fs.exists(_CONFIG_PATH).pipe(
+        Effect.flatMap((exists) => exists ? _readConfigFile : Effect.succeed({} as typeof KargadanConfigSchema.Type)),
+    )),
+);
 const _writeConfig = (config: typeof KargadanConfigSchema.Type) =>
     Effect.all([FileSystem.FileSystem, S.decodeUnknown(KargadanConfigSchema)(config).pipe(
         Effect.mapError((detail) => new HarnessHostError({ detail, message: 'Config write rejected invalid or secret fields.', reason: 'config' })))]).pipe(
@@ -166,12 +190,13 @@ const _configEntries = (node: unknown, prefix = ''): ReadonlyArray<string> => no
 const _configPatch = (target: Record<string, unknown>, path: ReadonlyArray<string>, value: unknown): Record<string, unknown> =>
     ((key: string) => path.length === 1 ? { ...target, [key]: value } : { ...target, [key]: _configPatch(
         typeof target[key] === 'object' && target[key] !== null ? target[key] as Record<string, unknown> : {}, path.slice(1), value) })(path[0] as string);
+const _isModelRefKey = (key: string) => key.endsWith('.primary') || key.endsWith('.fallback');
 const _authErr = (message: string) => (detail: unknown) => new HarnessHostError({ detail, message, reason: 'auth' as const });
 const _geminiClient = (clientPath: string) =>
-    Effect.try({
-        catch: _authErr(`Gemini OAuth client file is unreadable: ${clientPath}`),
-        try:   () => readFileSync(clientPath, 'utf8'),
-    }).pipe(Effect.flatMap(AiRegistry.decodeGeminiClient), Effect.mapError((detail) =>
+    FileSystem.FileSystem.pipe(
+        Effect.flatMap((fs) => fs.readFileString(clientPath)),
+        Effect.mapError(_authErr(`Gemini OAuth client file is unreadable: ${clientPath}`)),
+    ).pipe(Effect.flatMap(GeminiOAuth.decodeGeminiClient), Effect.mapError((detail) =>
         detail instanceof HarnessHostError ? detail : _authErr(`Gemini OAuth client file is invalid: ${clientPath}`)(detail)));
 const _geminiCallback = Effect.acquireRelease(
     Effect.tryPromise({
@@ -195,16 +220,39 @@ const _geminiCallback = Effect.acquireRelease(
             });
         }),
     }), (listener) => Effect.sync(listener.close));
-type _Cfg = typeof KargadanConfigSchema.Type;
-const _essentialKeys = ['provider', 'model', 'architect.model', 'architect.provider', 'architect.fallback', 'geminiClientPath'] as const;
 const ConfigFile = {
     dir:     _KARGADAN_DIR,
     flatten: (config: _Cfg) => ((entries: ReadonlyArray<string>) => entries.length === 0 ? ['(empty)'] : entries)(_configEntries(config)),
-    get:     (config: _Cfg, key: string) => Option.getOrUndefined(_configAt(config, key)),
-    keys:    [..._essentialKeys] as ReadonlyArray<string>,
+    get:     (config: _Cfg, key: string) => Match.value(_isModelRefKey(key)).pipe(
+        Match.when(true, () => {
+            const segments = key.split('.');
+            const group = segments[0] as 'ai';
+            const field = segments.slice(1).join('.');
+            const node = _configAt(config, `${group}.${field}`);
+            return Option.flatMap(node, (value) =>
+                Array.isArray(value) ? Option.some((value as ReadonlyArray<typeof _ConfigLanguageRefSchema.Type>).map(_serializeLanguageRef).join(','))
+                : typeof value === 'object' && value !== null && 'model' in (value as Record<string, unknown>)
+                    ? Option.some(_serializeLanguageRef(value as typeof _ConfigLanguageRefSchema.Type))
+                    : Option.none()).pipe(Option.getOrUndefined);
+        }),
+        Match.when(false, () => Match.value(key).pipe(
+            Match.when('ai.geminiClientPath', () => config.ai?.geminiClientPath),
+            Match.orElse(() => Option.getOrUndefined(_configAt(config, key))),
+        )),
+        Match.exhaustive,
+    ),
+    keys:    Object.keys(_supportedKeys),
     path:    _CONFIG_PATH,
     read:    _readConfig,
-    set:     (config: _Cfg, key: string, value: unknown) => _configPatch(config as Record<string, unknown>, key.split('.'), value) as _Cfg,
+    runtimeKey: (key: string) => _supportedKeys[key] ?? key,
+    set:     (config: _Cfg, key: string, value: string) => Match.value(_isModelRefKey(key)).pipe(
+        Match.when(true, () =>
+            (key.endsWith('.fallback')
+                ? _decodeLanguageRefs(value).pipe(Effect.map((decoded) => _configPatch(config as Record<string, unknown>, key.split('.'), decoded) as _Cfg))
+                : _decodeLanguageRef(value).pipe(Effect.map((decoded) => _configPatch(config as Record<string, unknown>, key.split('.'), decoded) as _Cfg)))),
+        Match.when(false, () => Effect.succeed(_configPatch(config as Record<string, unknown>, key.split('.'), value) as _Cfg)),
+        Match.exhaustive,
+    ),
     write: _writeConfig,
 } as const;
 const KargadanHost = {
@@ -222,7 +270,7 @@ const KargadanHost = {
                         onSome: (clientPath) => Effect.scoped(Effect.all([_geminiClient(clientPath), _geminiCallback]).pipe(
                             Effect.flatMap(([client, listener]) => {
                                 const [state, verifier] = [randomBytes(24).toString('hex'), randomBytes(32).toString('base64url')];
-                                const authUrl = AiRegistry.geminiAuthorizationUrl({
+                                const authUrl = GeminiOAuth.geminiAuthorizationUrl({
                                     client, codeChallenge: createHash('sha256').update(verifier).digest('base64url'), redirectUri: listener.redirectUri, state });
                                 return shellExec('open', [authUrl.toString()]).pipe(
                                     Effect.mapError(_authErr('Browser launch failed for Gemini OAuth.')),
@@ -231,7 +279,7 @@ const KargadanHost = {
                                             () => new HarnessHostError({ message: 'Gemini OAuth state mismatch.', reason: 'auth' })),
                                         Effect.timeoutFail({ duration: Duration.minutes(5),
                                             onTimeout: () => new HarnessHostError({ message: 'Gemini OAuth timed out after 5 minutes.', reason: 'auth' }) }))),
-                                    Effect.flatMap((callback) => AiRegistry.exchangeGeminiAuthorizationCode({
+                                    Effect.flatMap((callback) => GeminiOAuth.exchangeGeminiAuthorizationCode({
                                         client, code: callback.code, codeVerifier: verifier, redirectUri: listener.redirectUri }).pipe(
                                         Effect.filterOrFail(
                                             (value): value is typeof value & { readonly refreshToken: string } => value.refreshToken !== undefined && value.refreshToken.trim().length > 0,
@@ -249,7 +297,6 @@ const KargadanHost = {
             const aiCleanup = Effect.forEach(
                 provider === undefined ? Object.keys(AiRegistry.providers) as ReadonlyArray<AiRegistry.Provider> : [provider],
                 (name) => _deleteAccount(_KEYCHAIN.accounts[name]), { discard: true });
-            // why: full logout (no provider) also purges Docker PG keychain secret to support clean reinstall
             return provider === undefined
                 ? aiCleanup.pipe(Effect.zipRight(_deleteAccount(_KEYCHAIN.accounts.dockerPg)))
                 : aiCleanup;
@@ -273,12 +320,15 @@ const KargadanHost = {
             })),
     },
     postgres: {
-        bootstrap:     KargadanPostgres.resolveUrl(_KARGADAN_DIR, _POSTGRES_ROOT, { readSecret: _readKeychainSecret, writeSecret: _writeKeychainSecret }),
+        bootstrap:     KargadanPostgres.resolveUrl(_KARGADAN_DIR, _POSTGRES_ROOT, { readSecret: _readKeychainSecret, writeSecret: _writeKeychainSecret }).pipe(
+            Effect.mapError((detail) => new HarnessHostError({ detail, message: detail instanceof Error ? detail.message : String(detail), reason: 'postgres' })),
+        ),
         connectionUrl: KargadanPostgres.connectionUrl(_POSTGRES_ROOT),
-        // why: deletes Docker PG password from Keychain — next bootstrap generates a fresh credential
         reset:         shellExec('security', ['delete-generic-password', '-a', _KEYCHAIN.accounts.dockerPg, '-s', _KEYCHAIN.service]).pipe(Effect.catchAll(() => Effect.void)),
     },
 } as const;
+
+// --- [SERVICE] ---------------------------------------------------------------
 
 class HarnessConfig extends Effect.Service<HarnessConfig>()('kargadan/HarnessConfig', {
     scoped: Effect.gen(function* () {
@@ -293,13 +343,18 @@ class HarnessConfig extends Effect.Service<HarnessConfig>()('kargadan/HarnessCon
             Effect.filterOrFail((parts): parts is [string, string] => parts.length === 2 && parts.every((p) => /^\d+$/.test(p)),
                 (parts) => new Error(`HarnessConfig/invalid_protocol_version: '${parts.join('.')}'`)),
             Effect.map(([major, minor]) => ({ major: Number.parseInt(major, 10), minor: Number.parseInt(minor, 10) })));
-        const _overrideInput = (fb: string, mod: string, prov: string) => Effect.all({
-            fallback: _csvConfig(Config.string(fb)), model: _trimmed(mod), provider: _trimmed(prov),
-        }).pipe(Effect.flatMap(AiRegistry.decodeSessionOverrideFromInput));
-        const resolveArchitectOverride = yield* _overrideInput(_CONFIG_TREE.model.architectFallback, _CONFIG_TREE.model.architectModel, _CONFIG_TREE.model.architectProvider);
+        const _overrideInput = (fallbackKey: string, primaryKey: string) => Effect.all({
+            fallback: _csvConfig(Config.string(fallbackKey)),
+            primary:  _trimmed(primaryKey),
+        }).pipe(Effect.flatMap(SessionOverride.decodeFromInput));
+        const resolveArchitectOverride = yield* _overrideInput(_CONFIG_TREE.ai.architectFallback, _CONFIG_TREE.ai.architectPrimary);
         const resolveLoopOperations = yield* S.decodeUnknown(S.Array(Operation))(DEFAULT_LOOP_OPERATIONS);
-        const resolveSessionOverride = yield* _overrideInput(_CONFIG_TREE.model.languageFallback, _CONFIG_TREE.model.languageModel, _CONFIG_TREE.model.languageProvider);
+        const resolveSessionOverride = yield* _overrideInput(_CONFIG_TREE.ai.languageFallback, _CONFIG_TREE.ai.languagePrimary);
         const resolveWriteObjectRef = yield* S.decodeUnknown(S.Struct({ objectId: S.UUID, sourceRevision: NonNegInt, typeTag: ObjectTypeTag }))(_DEFAULT_WRITE_REF);
+        yield* Effect.filterOrFail(
+            Effect.succeed({ target: _INTERNALS.compactionTargetPercent, trigger: _INTERNALS.compactionTriggerPercent }),
+            ({ target, trigger }) => trigger > target,
+            ({ target, trigger }) => new Error(`HarnessConfig/invalid_compaction: trigger=${String(trigger)} must exceed target=${String(target)}`));
         return { ..._INTERNALS, agentIntent, appId, initialSequence: 1_000_000,
             maskedKeys: new Set(['brep', 'breps', 'edges', 'faces', 'geometry', 'mesh', 'meshes', 'nurbs', 'points', 'vertices']),
             protocolVersion, resolveArchitectOverride, resolveCapabilities: _CAPABILITIES,

@@ -147,7 +147,7 @@ export default defineConfig({
         isolate: true,
         onConsoleLog: (log, type) => !log.includes('Download the React DevTools') && type !== 'stderr',
         outputFile: { ..._CONFIG.output.outputFile },
-        passWithNoTests: false,
+        passWithNoTests: true,
         pool: 'threads',
         printConsoleTrace: false,
         projects: [
