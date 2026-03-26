@@ -8,7 +8,6 @@ using LanguageExt;
 using LanguageExt.Common;
 using ParametricPortal.Kargadan.Plugin.src.contracts;
 using Rhino;
-using Rhino.Commands;
 using Rhino.DocObjects;
 using Rhino.Geometry;
 using static LanguageExt.Prelude;
@@ -29,6 +28,7 @@ internal static class SceneQueryCommands {
             layerCount = doc.Layers.Count,
             objectCount = doc.Objects.Count,
             objectCountsByType = new Dictionary<string, int>(StringComparer.Ordinal) {
+                [SceneObjectType.Point.Key] = doc.Objects.GetObjectList(ObjectType.Point).Count(),
                 [SceneObjectType.Brep.Key] = doc.Objects.GetObjectList(ObjectType.Brep).Count(),
                 [SceneObjectType.Mesh.Key] = doc.Objects.GetObjectList(ObjectType.Mesh).Count(),
                 [SceneObjectType.Curve.Key] = doc.Objects.GetObjectList(ObjectType.Curve).Count(),
@@ -55,7 +55,7 @@ internal static class SceneQueryCommands {
     internal static Fin<JsonElement> ReadLayerState(
         RhinoDoc doc,
         CommandEnvelope envelope) =>
-        CommandParsers.ParseListReadOptions(payload: envelope.Payload).Map((ListReadOptions options) =>
+        CommandParsers.ParseListReadOptions(payload: envelope.Args).Map((ListReadOptions options) =>
             JsonSerializer.SerializeToElement(new {
                 layers = doc.Layers
                     .Where(layer => options.IncludeHidden || layer.IsVisible)
@@ -70,7 +70,7 @@ internal static class SceneQueryCommands {
     internal static Fin<JsonElement> ReadViewState(
         RhinoDoc doc,
         CommandEnvelope envelope) =>
-        CommandParsers.ParseListReadOptions(payload: envelope.Payload).Map((ListReadOptions options) =>
+        CommandParsers.ParseListReadOptions(payload: envelope.Args).Map((ListReadOptions options) =>
             JsonSerializer.SerializeToElement(new {
                 activeView = doc.Views.ActiveView?.ActiveViewport.Name ?? string.Empty,
                 viewports = doc.Views
@@ -90,16 +90,10 @@ internal static class SceneQueryCommands {
             angleToleranceRadians = doc.ModelAngleToleranceRadians,
             unitSystem = doc.ModelUnitSystem.ToString(),
         }));
-    internal static Fin<JsonElement> ReadRhinoCommands(
-        RhinoDoc _,
-        CommandEnvelope __) =>
-        FinSucc(JsonSerializer.SerializeToElement(new {
-            commands = Command.GetCommandNames(english: true, loaded: true),
-        }));
     internal static Fin<JsonElement> ReadViewCapture(
         RhinoDoc doc,
         CommandEnvelope envelope) =>
-        CommandParsers.ParseViewCaptureOptions(payload: envelope.Payload).Bind((ViewCaptureOptions options) =>
+        CommandParsers.ParseViewCaptureOptions(payload: envelope.Args).Bind((ViewCaptureOptions options) =>
             Optional(doc.Views.ActiveView)
                 .ToFin(Error.New(message: "No active view available for capture."))
                 .Bind((Rhino.Display.RhinoView activeView) => {

@@ -1,7 +1,8 @@
-/** migrator.ts tests: MigratorLive returns a valid Layer composed from PgMigrator, NodeContext, Client. */
+/** migrator.ts tests: MigratorRun returns a valid Effect composed from PgMigrator, NodeContext, Client. */
 import { it } from '@effect/vitest';
-import { MigratorLive } from '@parametric-portal/database/migrator';
-import { Effect, Layer, Option, Redacted } from 'effect';
+import { MigratorRun } from '@parametric-portal/database/migrator';
+import { MigrationCatalog } from '../../../packages/database/src/migration-catalog.ts';
+import { Effect, Option, Redacted } from 'effect';
 import { expect } from 'vitest';
 
 // --- [CONSTANTS] -------------------------------------------------------------
@@ -25,8 +26,13 @@ const _CONFIG = {
 
 // --- [EDGE_CASES] ------------------------------------------------------------
 
-it.effect('E1: MigratorLive returns a Layer', () =>
+it.effect('E1: MigratorRun returns an Effect', () =>
     Effect.sync(() => {
-        expect(Layer.isLayer(MigratorLive(_CONFIG))).toBe(true);
+        expect(Effect.isEffect(MigratorRun(_CONFIG))).toBe(true);
+    }),
+);
+it.effect('E2: migration catalog contains single initial migration', () =>
+    Effect.sync(() => {
+        expect(Object.keys(MigrationCatalog)).toStrictEqual(['0001_initial']);
     }),
 );

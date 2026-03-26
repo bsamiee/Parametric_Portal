@@ -2,6 +2,7 @@
 // Mutability is confined here — all transitions return Fin<SessionSnapshot> and are serialized under _gate; no state escapes the lock.
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using LanguageExt;
 using LanguageExt.Common;
 using NodaTime;
@@ -36,7 +37,7 @@ internal abstract partial record SessionPhase {
 internal readonly record struct IdempotencyCompositeKey(
     string TokenKey,
     string PayloadHash,
-    string OperationKey);
+    string CommandId);
 
 internal readonly record struct NegotiationContext(
     HandshakeEnvelope.Init Init,
@@ -44,8 +45,7 @@ internal readonly record struct NegotiationContext(
     int SupportedMinor,
     ServerInfo Server,
     Seq<string> SupportedCapabilities,
-    Seq<CommandCatalogEntry> Catalog,
-    Instant Now);
+    Seq<CommandCatalogEntry> Catalog);
 
 // --- [ADAPTER] ---------------------------------------------------------------
 
@@ -56,11 +56,13 @@ internal sealed class SessionHost {
     private const int IdempotencyCapacity = 1024;
     // --- [STATE] -------------------------------------------------------------
     private readonly Lock _gate = new();
+    private readonly TokenValue _transportToken;
     private Option<SessionSnapshot> _current = None;
     private readonly Dictionary<IdempotencyCompositeKey, RequestId> _idempotency =
         new(capacity: IdempotencyCapacity);
     private readonly Queue<IdempotencyCompositeKey> _idempotencyOrder =
         new(capacity: IdempotencyCapacity);
+    internal SessionHost(TokenValue transportToken) => _transportToken = transportToken;
     // --- [INTERFACE] ---------------------------------------------------------
     internal Fin<SessionSnapshot> Activate(HandshakeEnvelope.Ack ack, Instant now) {
         using Lock.Scope _ = _gate.EnterScope();
@@ -91,25 +93,47 @@ internal sealed class SessionHost {
     }
     internal Fin<SessionSnapshot> Open(
         EnvelopeIdentity identity,
+        TokenValue token,
         Duration heartbeatInterval,
         Duration heartbeatTimeout,
         Instant now) {
         using Lock.Scope _ = _gate.EnterScope();
         _idempotency.Clear();
         _idempotencyOrder.Clear();
-        return (heartbeatInterval > Duration.Zero, heartbeatTimeout > Duration.Zero) switch {
-            (true, true) => ApplyState(snapshot: new SessionSnapshot(
-                Identity: identity,
-                Phase: new SessionPhase.Connected(),
-                OpenedAt: now,
-                LastHeartbeatAt: now,
-                HeartbeatInterval: heartbeatInterval,
-                HeartbeatTimeout: heartbeatTimeout,
-                TerminatedAt: None)),
-            _ => FinFail<SessionSnapshot>(
-                Error.New(
-                    message: "Heartbeat interval/timeout must be positive.")),
-        };
+        bool durationsValid = heartbeatInterval > Duration.Zero && heartbeatTimeout > Duration.Zero;
+        return _current.Match(
+            Some: snapshot => durationsValid switch {
+                true => (_transportToken == token) switch {
+                    true => ApplyState(snapshot with {
+                        Identity = identity,
+                        Phase = new SessionPhase.Connected(),
+                        LastHeartbeatAt = now,
+                        HeartbeatInterval = heartbeatInterval,
+                        HeartbeatTimeout = heartbeatTimeout,
+                        TerminatedAt = None,
+                    }),
+                    false => FinFail<SessionSnapshot>(FailureMapping.ToError(FailureMapping.FromCode(
+                        code: ErrorCode.TokenInvalid,
+                        message: "Handshake token does not match the active session token."))),
+                },
+                false => FinFail<SessionSnapshot>(Error.New(message: "Heartbeat interval/timeout must be positive.")),
+            },
+            None: () => durationsValid switch {
+                true => (_transportToken == token) switch {
+                    true => ApplyState(snapshot: new SessionSnapshot(
+                    Identity: identity,
+                    Phase: new SessionPhase.Connected(),
+                    OpenedAt: now,
+                    LastHeartbeatAt: now,
+                    HeartbeatInterval: heartbeatInterval,
+                    HeartbeatTimeout: heartbeatTimeout,
+                    TerminatedAt: None)),
+                    false => FinFail<SessionSnapshot>(FailureMapping.ToError(FailureMapping.FromCode(
+                        code: ErrorCode.TokenInvalid,
+                        message: "Handshake token does not match the active transport token."))),
+                },
+                false => FinFail<SessionSnapshot>(Error.New(message: "Heartbeat interval/timeout must be positive.")),
+            });
     }
     internal Fin<Option<RequestId>> RegisterIdempotency(CommandEnvelope envelope) {
         using Lock.Scope _ = _gate.EnterScope();
@@ -118,7 +142,7 @@ internal sealed class SessionHost {
                 IdempotencyCompositeKey key = new(
                     TokenKey: (string)token.Key,
                     PayloadHash: (string)token.PayloadHash,
-                    OperationKey: envelope.Operation.Key);
+                    CommandId: envelope.CommandId.Key);
                 return _idempotency.TryGetValue(key, out RequestId originalRequestId) switch {
                     true => FinSucc<Option<RequestId>>(Some(originalRequestId)),
                     _ => FinSucc<Option<RequestId>>(RememberIdempotency(
@@ -126,10 +150,10 @@ internal sealed class SessionHost {
                         requestId: envelope.Identity.RequestId)),
                 };
             },
-            None: () => envelope.Operation.Category.Equals(CommandCategory.Write) switch {
+            None: () => envelope.CommandId.Category.Equals(CommandCategory.Write) switch {
                 true => FinFail<Option<RequestId>>(FailureMapping.ToError(FailureMapping.FromCode(
                     code: ErrorCode.IdempotencyInvalid,
-                    message: $"Operation '{envelope.Operation.Key}' requires idempotency token."))),
+                    message: $"CommandId '{envelope.CommandId.Key}' requires idempotency token."))),
                 _ => FinSucc<Option<RequestId>>(None),
             });
     }
@@ -156,53 +180,54 @@ internal sealed class SessionHost {
     }
     internal Fin<SessionSnapshot> Snapshot() {
         using Lock.Scope _ = _gate.EnterScope();
-        return _current.ToFin(SessionNotOpen);
+        return _current.ToFin(SessionNotOpen).Bind(snapshot =>
+            snapshot.Phase switch {
+                SessionPhase.Terminal terminal => FinFail<SessionSnapshot>(
+                    Error.New(message: $"Session is terminal in state '{terminal.StateTag.Key}'.")),
+                _ => FinSucc(snapshot),
+            });
     }
 
     // --- [HANDSHAKE] ---------------------------------------------------------
     internal static HandshakeEnvelope Negotiate(NegotiationContext ctx) {
-        bool tokenExpired = ctx.Init.Auth.ExpiresAt <= ctx.Now;
         bool majorCompatible = ctx.Init.Identity.ProtocolVersion.Major == ctx.SupportedMajor;
         bool minorCompatible = ctx.Init.Identity.ProtocolVersion.Minor <= ctx.SupportedMinor;
         Seq<string> requiredCapabilities = ctx.Init.Capabilities.Required;
-        Seq<string> optionalCapabilities = ctx.Init.Capabilities.Optional;
+        Seq<string> requestedCapabilities =
+            ctx.Init.Capabilities.Required
+                .Concat(ctx.Init.Capabilities.Optional)
+                .ToSeq()
+                .Distinct();
         Seq<string> missingCapabilities =
             requiredCapabilities.Filter(
                 required =>
                     !ctx.SupportedCapabilities.Contains(required));
         Seq<string> acceptedCapabilities =
-            requiredCapabilities
-                .Append(optionalCapabilities)
-                .Distinct()
-                .Filter(capability => ctx.SupportedCapabilities.Contains(capability));
+            requestedCapabilities
+                .Filter(capability => ctx.SupportedCapabilities.Contains(capability))
+                .Distinct();
         Seq<CommandCatalogEntry> acceptedCatalog =
             ctx.Catalog.Filter(entry => acceptedCapabilities.Contains(entry.Id));
-        return (tokenExpired, majorCompatible, minorCompatible, missingCapabilities.IsEmpty) switch {
-            (true, _, _, _) => new HandshakeEnvelope.Reject(
-                Identity: ctx.Init.Identity,
-                Reason: FailureMapping.FromCode(
-                    code: ErrorCode.TokenExpired,
-                    message: "Handshake token is expired."),
-                TelemetryContext: ctx.Init.TelemetryContext),
-            (false, false, _, _) => new HandshakeEnvelope.Reject(
+        return (majorCompatible, minorCompatible, missingCapabilities.IsEmpty) switch {
+            (false, _, _) => new HandshakeEnvelope.Reject(
                 Identity: ctx.Init.Identity,
                 Reason: FailureMapping.FromCode(
                     code: ErrorCode.ProtocolIncompatible,
                     message: "Protocol major version mismatch."),
                 TelemetryContext: ctx.Init.TelemetryContext),
-            (false, true, false, _) => new HandshakeEnvelope.Reject(
+            (true, false, _) => new HandshakeEnvelope.Reject(
                 Identity: ctx.Init.Identity,
                 Reason: FailureMapping.FromCode(
                     code: ErrorCode.ProtocolIncompatible,
                     message: $"Protocol minor version {ctx.Init.Identity.ProtocolVersion.Minor} exceeds supported {ctx.SupportedMinor}."),
                 TelemetryContext: ctx.Init.TelemetryContext),
-            (false, true, true, false) => new HandshakeEnvelope.Reject(
+            (true, true, false) => new HandshakeEnvelope.Reject(
                 Identity: ctx.Init.Identity,
                 Reason: FailureMapping.FromCode(
                     code: ErrorCode.CapabilityUnsupported,
                     message: $"Missing required capabilities: {string.Join(',', missingCapabilities)}"),
                 TelemetryContext: ctx.Init.TelemetryContext),
-            (false, true, true, true) => new HandshakeEnvelope.Ack(
+            (true, true, true) => new HandshakeEnvelope.Ack(
                 Identity: ctx.Init.Identity,
                 AcceptedCapabilities: acceptedCapabilities,
                 Server: ctx.Server,

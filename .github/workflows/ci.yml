@@ -149,6 +149,10 @@ jobs:
         if: steps.auto-fix.outputs.has-changes != 'true'
         run: pnpm exec nx affected -t test -- --coverage
 
+      - name: Kargadan Source Smoke
+        if: steps.auto-fix.outputs.has-changes != 'true'
+        run: pnpm exec nx run @parametric-portal/kargadan-harness:smoke:source
+
       - name: .NET Release Sanity Tests
         if: steps.auto-fix.outputs.has-changes != 'true'
         run: |

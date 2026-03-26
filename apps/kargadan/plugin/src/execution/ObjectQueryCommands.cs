@@ -16,9 +16,14 @@ namespace ParametricPortal.Kargadan.Plugin.src.execution;
 // --- [TYPES] -----------------------------------------------------------------
 
 [StructLayout(LayoutKind.Auto)]
+internal readonly record struct SceneObjectRefProjection(
+    Guid ObjectId,
+    string TypeTag);
+[StructLayout(LayoutKind.Auto)]
 internal readonly record struct ObjectProjection(
     Guid Id,
     string ObjectType,
+    Option<SceneObjectRefProjection> ObjectRef,
     Option<int> LayerIndex,
     Option<string> LayerName,
     Option<string> Name,
@@ -52,6 +57,7 @@ internal static class ObjectQueryCommands {
                 ObjectProjection compact = new(
                     Id: found.Id,
                     ObjectType: found.ObjectType.ToString(),
+                    ObjectRef: ProjectSceneObjectRef(found),
                     LayerIndex: None, LayerName: None, Name: None,
                     Min: None, Max: None, BoxIsValid: None,
                     IsDeleted: None, IsHidden: None, IsLocked: None,
@@ -61,7 +67,7 @@ internal static class ObjectQueryCommands {
                 ObjectProjection standard = compact with {
                     LayerIndex = Some(found.Attributes.LayerIndex),
                     LayerName = Some(layerName),
-                    Name = Some(found.Attributes.Name),
+                    Name = Optional(found.Attributes.Name),
                 };
                 ObjectProjection full = standard with {
                     IsDeleted = Some(found.IsDeleted),
@@ -90,6 +96,7 @@ internal static class ObjectQueryCommands {
                 ObjectProjection compact = new(
                     Id: found.Id,
                     ObjectType: found.ObjectType.ToString(),
+                    ObjectRef: ProjectSceneObjectRef(found),
                     LayerIndex: None, LayerName: None, Name: None,
                     Min: None, Max: None, BoxIsValid: None,
                     IsDeleted: None, IsHidden: None, IsLocked: None,
@@ -116,10 +123,10 @@ internal static class ObjectQueryCommands {
     internal static Fin<JsonElement> ReadObjectList(
         RhinoDoc doc,
         CommandEnvelope envelope) =>
-        CommandParsers.ParseLimit(envelope.Payload).Map((Option<int> limit) => {
-            ObjectType typeFilter = CommandParsers.ParseObjectTypeFilter(envelope.Payload);
-            Option<int> layerFilter = CommandParsers.ParseOptional(envelope.Payload, JsonFields.LayerIndex, CommandParsers.TryParseOptionalInt);
-            Option<string> nameFilter = CommandParsers.ParseOptional(envelope.Payload, JsonFields.NamePattern, CommandParsers.TryParseOptionalString);
+        CommandParsers.ParseLimit(envelope.Args).Map((Option<int> limit) => {
+            ObjectType typeFilter = CommandParsers.ParseObjectTypeFilter(envelope.Args);
+            Option<int> layerFilter = CommandParsers.ParseOptional(envelope.Args, JsonFields.LayerIndex, CommandParsers.TryParseOptionalInt);
+            Option<string> nameFilter = CommandParsers.ParseOptional(envelope.Args, JsonFields.NamePattern, CommandParsers.TryParseOptionalString);
             return JsonSerializer.SerializeToElement(new {
                 objects = doc.Objects
                     .GetObjectList(typeFilter)
@@ -131,12 +138,7 @@ internal static class ObjectQueryCommands {
                             Some: (string pattern) => (rhinoObject.Attributes.Name ?? string.Empty).Contains(pattern, StringComparison.OrdinalIgnoreCase),
                             None: () => true))
                     .Take(limit.IfNone(CaptureDefaults.MaxReadListLimit))
-                    .Select(static (RhinoObject rhinoObject) => new {
-                        id = rhinoObject.Id,
-                        objectType = rhinoObject.ObjectType.ToString(),
-                        layerIndex = rhinoObject.Attributes.LayerIndex,
-                        name = rhinoObject.Attributes.Name ?? string.Empty,
-                    })
+                    .Select(SerializeListProjection)
                     .ToArray(),
             });
         });
@@ -144,8 +146,8 @@ internal static class ObjectQueryCommands {
         RhinoDoc doc,
         CommandEnvelope envelope,
         Func<RhinoObject, RhinoDoc, ReadDetailLevel, JsonElement> project) =>
-        from detail in CommandParsers.ParseDetailLevel(envelope.Payload)
-        from objectId in CommandExecutor.GetPrimaryObjectId(envelope)
+        from detail in CommandParsers.ParseDetailLevel(envelope.Args)
+        from objectId in CommandExecutor.GetPrimaryObjectId(doc: doc, envelope: envelope)
         from found in CommandExecutor.FindById(doc, objectId)
         select project(found, doc, detail);
     private static JsonElement SerializeProjection(ObjectProjection projection) {
@@ -153,6 +155,10 @@ internal static class ObjectQueryCommands {
             ["id"] = projection.Id,
             ["objectType"] = projection.ObjectType,
         };
+        _ = projection.ObjectRef.IfSome((SceneObjectRefProjection v) => props["objectRef"] = new {
+            objectId = v.ObjectId,
+            typeTag = v.TypeTag,
+        });
         _ = projection.LayerIndex.IfSome((int v) => props["layerIndex"] = v);
         _ = projection.LayerName.IfSome((string v) => props["layerName"] = v);
         _ = projection.Name.IfSome((string v) => props["name"] = v);
@@ -172,5 +178,56 @@ internal static class ObjectQueryCommands {
         _ = projection.Area.IfSome((double v) => props["area"] = v);
         _ = projection.Volume.IfSome((double v) => props["volume"] = v);
         return JsonSerializer.SerializeToElement(props);
+    }
+    private static Dictionary<string, object> SerializeListProjection(RhinoObject rhinoObject) {
+        Dictionary<string, object> projection = new(StringComparer.Ordinal) {
+            ["id"] = rhinoObject.Id,
+            ["objectType"] = rhinoObject.ObjectType.ToString(),
+            ["layerIndex"] = rhinoObject.Attributes.LayerIndex,
+            ["name"] = rhinoObject.Attributes.Name ?? string.Empty,
+        };
+        _ = ProjectSceneObjectRef(rhinoObject).IfSome((SceneObjectRefProjection objectRef) =>
+            projection["objectRef"] = new {
+                objectId = objectRef.ObjectId,
+                typeTag = objectRef.TypeTag,
+            });
+        return projection;
+    }
+    private static Option<SceneObjectRefProjection> ProjectSceneObjectRef(RhinoObject rhinoObject) =>
+        ResolveSceneObjectType(rhinoObject.ObjectType).Map((SceneObjectType typeTag) =>
+            new SceneObjectRefProjection(
+                ObjectId: rhinoObject.Id,
+                TypeTag: typeTag.Key));
+    internal static Option<SceneObjectType> ResolveSceneObjectType(ObjectType objectType) {
+        (
+            bool isPoint,
+            bool isBrep,
+            bool isMesh,
+            bool isCurve,
+            bool isSurface,
+            bool isAnnotation,
+            bool isInstance,
+            bool isLayoutDetail
+        ) = (
+            (objectType & ObjectType.Point) == ObjectType.Point,
+            (objectType & ObjectType.Brep) == ObjectType.Brep || (objectType & ObjectType.Extrusion) == ObjectType.Extrusion,
+            (objectType & ObjectType.Mesh) == ObjectType.Mesh || (objectType & ObjectType.SubD) == ObjectType.SubD,
+            (objectType & ObjectType.Curve) == ObjectType.Curve,
+            (objectType & ObjectType.Surface) == ObjectType.Surface,
+            (objectType & ObjectType.Annotation) == ObjectType.Annotation || (objectType & ObjectType.TextDot) == ObjectType.TextDot,
+            (objectType & ObjectType.InstanceReference) == ObjectType.InstanceReference,
+            (objectType & ObjectType.Detail) == ObjectType.Detail
+        );
+        return (isPoint, isBrep, isMesh, isCurve, isSurface, isAnnotation, isInstance, isLayoutDetail) switch {
+            (true, _, _, _, _, _, _, _) => Some(SceneObjectType.Point),
+            (_, true, _, _, _, _, _, _) => Some(SceneObjectType.Brep),
+            (_, _, true, _, _, _, _, _) => Some(SceneObjectType.Mesh),
+            (_, _, _, true, _, _, _, _) => Some(SceneObjectType.Curve),
+            (_, _, _, _, true, _, _, _) => Some(SceneObjectType.Surface),
+            (_, _, _, _, _, true, _, _) => Some(SceneObjectType.Annotation),
+            (_, _, _, _, _, _, true, _) => Some(SceneObjectType.Instance),
+            (_, _, _, _, _, _, _, true) => Some(SceneObjectType.LayoutDetail),
+            _ => None,
+        };
     }
 }

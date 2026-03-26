@@ -11,6 +11,22 @@ using static LanguageExt.Prelude;
 namespace ParametricPortal.Kargadan.Plugin.src.execution;
 
 internal static class ObjectMutationCommands {
+    private static Seq<AgentUndoState> _pendingAgentUndoStates = Empty;
+    internal static Unit RememberUndoState(AgentUndoState undoState) {
+        _pendingAgentUndoStates = Seq1(undoState).Append(
+            _pendingAgentUndoStates.Filter((AgentUndoState state) => !state.RequestId.Equals(undoState.RequestId)));
+        return unit;
+    }
+    internal static Unit TrackUndoTransition(
+        AgentUndoState undoState,
+        bool isUndo) {
+        _pendingAgentUndoStates = isUndo switch {
+            true => _pendingAgentUndoStates.Filter((AgentUndoState state) => !state.RequestId.Equals(undoState.RequestId)),
+            _ => Seq1(undoState).Append(
+                _pendingAgentUndoStates.Filter((AgentUndoState state) => !state.RequestId.Equals(undoState.RequestId))),
+        };
+        return unit;
+    }
     internal static Fin<JsonElement> HandleObjectCreate(
         RhinoDoc doc,
         CommandEnvelope envelope) {
@@ -18,16 +34,16 @@ internal static class ObjectMutationCommands {
         return ApplyAttributesFromPayload(
             doc: doc,
             attributes: attributes,
-            payload: envelope.Payload)
-        .Bind((_) => envelope.Payload.TryGetProperty(JsonFields.Point, out JsonElement pointElement) switch {
+            payload: envelope.Args)
+        .Bind((_) => envelope.Args.TryGetProperty(JsonFields.Point, out JsonElement pointElement) switch {
             true => CommandParsers.ParseTriple(
                 element: pointElement,
                 label: JsonFields.Point).Map(static (Triple point) =>
                 (GeometryBase)new Point(new Point3d(point.X, point.Y, point.Z))),
-            _ => envelope.Payload.TryGetProperty(JsonFields.Line, out JsonElement lineElement) switch {
+            _ => envelope.Args.TryGetProperty(JsonFields.Line, out JsonElement lineElement) switch {
                 true => CommandParsers.ParseLine(lineElement).Map(static (Line line) => (GeometryBase)new LineCurve(line)),
                 _ => FinFail<GeometryBase>(
-                    Error.New(message: $"write.object.create requires payload.{JsonFields.Point} or payload.{JsonFields.Line}.")),
+                    Error.New(message: $"write.object.create requires args.{JsonFields.Point} or args.{JsonFields.Line}.")),
             },
         })
         .Bind((GeometryBase geometry) => {
@@ -43,7 +59,7 @@ internal static class ObjectMutationCommands {
     internal static Fin<JsonElement> HandleObjectDelete(
         RhinoDoc doc,
         CommandEnvelope envelope) =>
-        CommandExecutor.GetPrimaryObjectId(envelope: envelope).Bind((Guid objectId) =>
+        CommandExecutor.GetPrimaryObjectId(doc: doc, envelope: envelope).Bind((Guid objectId) =>
             MapObjectStatus(
                 operation: doc.Objects.Delete(objectId: objectId, quiet: true) switch {
                     true => FinSucc(unit),
@@ -54,26 +70,48 @@ internal static class ObjectMutationCommands {
     internal static Fin<JsonElement> HandleObjectUpdate(
         RhinoDoc doc,
         CommandEnvelope envelope) =>
-        CommandExecutor.GetPrimaryObjectId(envelope: envelope).Bind((Guid objectId) =>
-            CommandParsers.ResolveTransform(envelope.Payload).Match(
+        CommandExecutor.GetPrimaryObjectId(doc: doc, envelope: envelope).Bind((Guid objectId) =>
+            CommandParsers.ResolveTransform(envelope.Args).Match(
                 Some: (Fin<TransformSpec> specFin) => specFin.Bind((TransformSpec spec) =>
                     ApplyTransform(doc: doc, objectId: objectId, xform: spec.Xform, status: spec.Status)),
-                None: () => ApplyAttributeUpdate(doc: doc, objectId: objectId, payload: envelope.Payload)));
+                None: () => ApplyAttributeUpdate(doc: doc, objectId: objectId, payload: envelope.Args)));
+    internal static Fin<JsonElement> HandleUndoExecution(
+        RhinoDoc doc,
+        CommandEnvelope envelope) =>
+        CommandParsers.ParseGuid(envelope.Args, JsonFields.RequestId).Bind((Guid requestId) =>
+            _pendingAgentUndoStates.HeadOrNone().Match(
+                Some: (AgentUndoState undoState) => ((Guid)undoState.RequestId == requestId) switch {
+                    true => doc.Undo() switch {
+                        true => FinSucc(JsonSerializer.SerializeToElement(new {
+                            requestId,
+                            status = "undone",
+                        })),
+                        false => FinFail<JsonElement>(CommandParsers.CommandError(code: ErrorCode.UnexpectedRuntime, message: "Rhino undo failed.")),
+                    },
+                    false => _pendingAgentUndoStates.Exists((AgentUndoState state) => ((Guid)state.RequestId) == requestId) switch {
+                        true => FinFail<JsonElement>(CommandParsers.CommandError(
+                            code: ErrorCode.PayloadMalformed,
+                            message: $"RequestId '{requestId}' is not the latest pending agent-owned mutation. Latest pending requestId is '{(Guid)undoState.RequestId}'.")),
+                        _ => FinFail<JsonElement>(CommandParsers.CommandError(code: ErrorCode.PayloadMalformed, message: $"No pending agent-owned mutation matches requestId '{requestId}'.")),
+                    },
+                },
+                None: () => FinFail<JsonElement>(CommandParsers.CommandError(code: ErrorCode.PayloadMalformed, message: "No agent-owned mutation is available for rollback."))));
     private static Fin<JsonElement> ApplyTransform(
         RhinoDoc doc,
         Guid objectId,
         Transform xform,
-        string status) =>
-        MapObjectStatus(
-            operation: (doc.Objects.Transform(
-                objectId: objectId,
-                xform: xform,
-                deleteOriginal: true) == Guid.Empty) switch {
-                    true => FinFail<Unit>(CommandParsers.CommandError(code: ErrorCode.PayloadMalformed, message: $"Object {objectId} not found.")),
-                    false => FinSucc(unit),
-                },
+        string status) {
+        Guid transformedObjectId = doc.Objects.Transform(
             objectId: objectId,
+            xform: xform,
+            deleteOriginal: true);
+        return MapObjectStatus(
+            operation: transformedObjectId == Guid.Empty
+                ? FinFail<Unit>(CommandParsers.CommandError(code: ErrorCode.PayloadMalformed, message: $"Object {objectId} not found."))
+                : FinSucc(unit),
+            objectId: transformedObjectId,
             status: status);
+    }
     private static Fin<JsonElement> ApplyAttributeUpdate(
         RhinoDoc doc,
         Guid objectId,

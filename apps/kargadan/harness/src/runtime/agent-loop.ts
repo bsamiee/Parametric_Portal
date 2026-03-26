@@ -1,4 +1,3 @@
-import { AiRegistry } from '@parametric-portal/ai/registry';
 import { AiService } from '@parametric-portal/ai/service';
 import { Activity, DurableDeferred, Workflow, WorkflowEngine } from '@effect/workflow';
 import type { FileSystem } from '@effect/platform/FileSystem';
@@ -8,11 +7,11 @@ import { AgentPersistenceService } from '@parametric-portal/database/agent-persi
 import { Array as A, Context, Duration, Effect, Exit, Fiber, HashMap, HashSet, Match, Option, Ref, Schema as S } from 'effect';
 import { HarnessConfig } from '../config';
 import { CommandDispatch, CommandDispatchError } from '../protocol/dispatch';
-import { Envelope, Loop } from '../protocol/schemas';
+import { Envelope, Loop, ObjectTypeTag } from '../protocol/schemas';
 import type { LoopState } from '../protocol/schemas';
 
 // --- [CONSTANTS] -------------------------------------------------------------
-const _K = { aux: { objectMetadata: 'read.object.metadata', sceneSummary: 'read.scene.summary', scriptRun: 'script.run', undoScript: '_Undo _Enter', viewCapture: 'view.capture' },
+const _K = { aux: { objectList: 'read.object.list', objectMetadata: 'read.object.metadata', sceneSummary: 'read.scene.summary', undoExecution: 'internal.undo.execution', viewCapture: 'view.capture' },
     limits: {
         executionHistoryCap: 5,
         maxCandidates: 8,
@@ -25,6 +24,9 @@ const _SCENE_TYPE_BOOSTS: Readonly<Record<string, string>> = { curve: 'Curve', m
 const _SemanticVerifySchema = S.Struct({ confidence: S.Number.pipe(S.between(0, 1)), discrepancy: S.optional(S.String), intentSatisfied: S.Boolean });
 const _DecomposeSchema = S.Struct({ steps: S.Array(S.Struct({ dependsOnPrevious: S.Boolean, step: S.String })) });
 const _DECOMPOSITION_SIGNALS = /\b(then|after that|next|finally)\b/i;
+const _ObjectRefSchema = S.Struct({ objectId: S.UUID, typeTag: ObjectTypeTag, });
+const _ObjectRefArgsSchema = S.Struct({ objectRefs: S.Array(_ObjectRefSchema) });
+const _ObjectListResultSchema = S.Struct({objects: S.Array(S.Struct({ objectRef: S.optional(_ObjectRefSchema) })), });
 const _ParamNormSchema = S.transform(S.Struct({ detail: S.optional(S.Union(S.Literal('compact', 'standard', 'full'), S.Undefined)),
     includeHidden: S.optional(S.Union(S.Boolean, S.Undefined)), limit: S.optional(S.Union(S.Number.pipe(S.finite()), S.Undefined)) }),
     S.Struct({ detail: S.Literal('compact', 'standard', 'full'), includeHidden: S.Boolean, limit: S.Int }),
@@ -34,8 +36,10 @@ const _ApprovalRejected = S.parseJson(S.Struct({ _tag: S.Literal('APPROVAL_REJEC
 const _WorkflowPolicy = { approval_rejected: { code: 'WORKFLOW_APPROVAL_REJECTED', failureClass: 'fatal' as const, message: 'Write rejected by operator.' },
     decode_failed: { code: 'WORKFLOW_RESULT_DECODE_FAILED', failureClass: 'retryable' as const, message: 'Workflow result decode failed.' },
     execution_failed: { code: 'WORKFLOW_EXECUTION_FAILED', failureClass: 'compensatable' as const, message: 'Workflow execution failed.' } } as const;
-// --- [FUNCTIONS] -------------------------------------------------------------
-const _maskDeep = (value: unknown, masked: ReadonlySet<string>, t: HarnessConfig['truncation'], depth = 0): unknown =>
+
+    // --- [FUNCTIONS] -------------------------------------------------------------
+
+    const _maskDeep = (value: unknown, masked: ReadonlySet<string>, t: HarnessConfig['truncation'], depth = 0): unknown =>
     Array.isArray(value) ? (depth >= t.arrayDepth ? [`<truncated:${String(value.length)}>`] : value.slice(0, t.arrayItems).map((i) => _maskDeep(i, masked, t, depth + 1)))
     : typeof value === 'string' ? (value.length <= t.maxLength ? value : `${value.slice(0, t.maxLength)}...`)
     : value !== null && typeof value === 'object' ? (depth >= t.objectDepth ? { _tag: 'truncated.object', keys: Object.keys(value as Record<string, unknown>).length }
@@ -47,6 +51,35 @@ const _sceneAffinity = (e: Envelope.CatalogEntry, s: typeof Loop.scene.Type): nu
     * (e.requirements.requiresObjectRefs && s.objectCount < e.requirements.minimumObjectRefCount ? 0.5 : 1))); };
 const _rerank = (cs: ReadonlyArray<Envelope.CatalogEntry>, scene: Option.Option<typeof Loop.scene.Type>): ReadonlyArray<Envelope.CatalogEntry> =>
     Option.match(scene, { onNone: () => cs, onSome: (s) => cs.map((e, i) => ({ e, s: (1 / (i + 1)) * _sceneAffinity(e, s) })).sort((a, b) => b.s - a.s).map(({ e }) => e) });
+const _compactionPrompt = (input: {
+    readonly before: number;
+    readonly goal: string;
+    readonly recentObservation: Option.Option<unknown>;
+    readonly sceneSummary: Option.Option<unknown>;
+    readonly sequence: number;
+    readonly serialized: string;
+    readonly state: LoopState['status'];
+    readonly target: number;
+    readonly trigger: number;
+    readonly attempt: number;
+}) => {
+    const width = Math.max(input.target * 4, 1_200);
+    return JSON.stringify({
+        compaction: { estimatedTokensBefore: input.before, targetTokens: input.target, triggerTokens: input.trigger },
+        context: {
+            failureState: input.state === 'Failed' ? 'failed' : input.attempt > 1 ? 'retrying' : 'steady',
+            goal: input.goal,
+            latestSceneSummary: Option.getOrNull(input.sceneSummary),
+            recentObservation: Option.getOrNull(input.recentObservation),
+            sequence: input.sequence,
+        },
+        history: {
+            olderTurnsSummarized: input.serialized.length > width,
+            recentTurns: input.serialized.slice(Math.max(0, input.serialized.length - width)),
+        },
+        kind: 'kargadan.context.compaction',
+    });
+};
 
 // --- [SERVICES] --------------------------------------------------------------
 
@@ -62,7 +95,6 @@ class AgentLoop extends Effect.Service<AgentLoop>()('kargadan/AgentLoop', {
             Effect.catchAll((e) => _emit('kargadan.harness.chat.serialize.failed', { error: String(e) }).pipe(Effect.zipRight(Ref.get(lastGoodChatRef)))),
             Effect.flatMap((chatJson) => persistence.persistCall(identity, loopState, { ...call, chatJson })));
         const run = Effect.fn('AgentLoop.handle')((input: {
-            readonly architectOverride: Option.Option<AiRegistry.SessionOverride>;
             readonly capabilities: ReadonlyArray<string>; readonly catalog: ReadonlyArray<Envelope.CatalogEntry>;
             readonly hooks?: {
                 readonly onFailure?: (i: { readonly advice: string; readonly commandId: string; readonly failureClass: Envelope.FailureClass; readonly message: string }) => Effect.Effect<void>;
@@ -70,6 +102,7 @@ class AgentLoop extends Effect.Service<AgentLoop>()('kargadan/AgentLoop', {
                 readonly onTool?: (i: { readonly command: Envelope.Command; readonly durationMs: number; readonly phase: 'start' | 'end'; readonly result: Option.Option<Envelope.Result>; readonly source: 'direct' | 'workflow' | 'compensation' }) => Effect.Effect<void>;
                 readonly onWriteApproval?: (i: { readonly command: Envelope.Command; readonly sequence: number; readonly workflowExecutionId: string }) => Effect.Effect<boolean, never, FileSystem | Path | Terminal>; };
             readonly identityBase: Envelope.IdentityBase; readonly intent: string;
+            readonly knowledge: { readonly entityType: string; readonly namespace: string };
             readonly resume: Option.Option<{ readonly chatJson: string; readonly sequence: number; readonly state: unknown }>;
         }) => Effect.gen(function* () {
             const hooks = { onFailure: input.hooks?.onFailure ?? (() => Effect.void), onStage: input.hooks?.onStage ?? (() => Effect.void),
@@ -119,14 +152,33 @@ class AgentLoop extends Effect.Service<AgentLoop>()('kargadan/AgentLoop', {
                         operationTag: _K.op.workflowExecute(command.commandId) }), 'workflow').pipe(
                         Effect.mapError((error) => `write_workflow.dispatch: ${String(error)}`),
                         Effect.flatMap((r) => r.status === 'ok' ? Effect.succeed(r) : Effect.fail(`write_workflow.result: ${r.error?.message ?? 'unknown'}`))), name: `kargadan.write.execution.${command.commandId}`, success: S.Unknown,
-                }).pipe(Activity.retry({ times: 2 }), _wf.withCompensation((_v, cause) =>
-                    _dispatch(dispatch.buildCommand({ appId: command.appId, correlationId: command.correlationId, sessionId: command.sessionId },
-                        _K.aux.scriptRun, { script: _K.aux.undoScript }, { attempt: command.telemetryContext.attempt, deadlineMs: command.deadlineMs,
-                            operationTag: _K.op.compensate(command.commandId) }), 'compensation').pipe(
-                        Effect.tap((r) => _emit('kargadan.workflow.compensation.executed', { cause: String(cause), commandId: command.commandId,
-                            compensationStatus: r.status, workflowExecutionId: payload.workflowExecutionId })),
-                        Effect.catchAll((e) => _emit('kargadan.workflow.compensation.failed', { commandId: command.commandId,
-                            error: String(e), workflowExecutionId: payload.workflowExecutionId })), Effect.asVoid)));
+                }).pipe(Activity.retry({ times: 2 }), _wf.withCompensation((resultEnvelope, cause) =>
+                    S.decodeUnknown(Envelope)(resultEnvelope).pipe(
+                        Effect.mapError((error) => `write_workflow.compensation.decode: ${String(error)}`),
+                        Effect.filterOrFail((decoded): decoded is Envelope.Result => decoded._tag === 'result', (decoded) => `Expected envelope 'result' but received '${decoded._tag}'`),
+                        Effect.flatMap((decoded) => Option.fromNullable(decoded.execution).pipe(Option.match({
+                            onNone: () => Effect.fail('write_workflow.compensation.execution_missing'),
+                            onSome: (_execution) => _dispatch(dispatch.buildCommand(
+                                { appId: command.appId, correlationId: command.correlationId, sessionId: command.sessionId },
+                                _K.aux.undoExecution,
+                                { requestId: command.requestId },
+                                { attempt: command.telemetryContext.attempt, deadlineMs: command.deadlineMs, operationTag: _K.op.compensate(command.commandId) },
+                            ), 'compensation').pipe(
+                                Effect.mapError(String),
+                                Effect.tap((response) => _emit('kargadan.workflow.compensation.executed', {
+                                    cause: String(cause),
+                                    commandId: command.commandId,
+                                    compensationStatus: response.status,
+                                    workflowExecutionId: payload.workflowExecutionId,
+                                })),
+                                Effect.asVoid),
+                        }))),
+                        Effect.catchAll((error) => _emit('kargadan.workflow.compensation.failed', {
+                            commandId: command.commandId,
+                            error: String(error),
+                            workflowExecutionId: payload.workflowExecutionId,
+                        })),
+                    )));
                 return { approved, result, workflowExecutionId: payload.workflowExecutionId };
             }));
             const _execWrite = (cmd: Envelope.Command, seq: number) =>
@@ -146,17 +198,66 @@ class AgentLoop extends Effect.Service<AgentLoop>()('kargadan/AgentLoop', {
                 onSome: () => _aux(state, _K.aux.sceneSummary, {}, operationTag).pipe(Effect.flatMap((probe) =>
                     (probe.status === 'ok' ? S.decodeUnknown(Loop.scene)(probe.result).pipe(Effect.option) : Effect.succeed(Option.none()))
                         .pipe(Effect.map((decoded) => ({ decoded, probe: Option.some(probe) }))))) }));
+            const _knowledgeCandidates = (_state: LoopState, term: string) =>
+                ai.queryKnowledge({
+                    entityType: input.knowledge.entityType,
+                    limit: Math.max(1, Math.min(_K.limits.maxCandidates, input.catalog.length)),
+                    namespace: input.knowledge.namespace,
+                    term,
+                }).pipe(
+                    Effect.map((result) => A.dedupe(result.items.map((item) => item.id).filter((id) => HashMap.has(catalogByOp, id)))),
+                    Effect.tapError((error) => _emit('kargadan.harness.plan.knowledge.failed', { error: String(error), term })),
+                    Effect.flatMap((ids) => Option.match(A.head(ids), {
+                        onNone: () => Effect.fail(new CommandDispatchError({
+                            details: { message: 'No operation candidate matched plan intent.', term },
+                            failureClass: 'correctable',
+                            reason: 'protocol',
+                        })),
+                        onSome: (firstId) => Effect.succeed({ candidates: A.filterMap(ids, (id) => HashMap.get(catalogByOp, id)), fallbackId: firstId }),
+                    })),
+                );
+            const _generatePlan = (prompt: string, fallbackId: string) => {
+                const generation = Ref.get(chatRef).pipe(Effect.flatMap((chat) => chat.generateObject({
+                    prompt,
+                    schema: S.Struct({ args: S.Record({ key: S.String, value: S.Unknown }), commandId: S.NonEmptyTrimmedString }),
+                })), Effect.map((r) => r.value));
+                return generation.pipe(
+                    Effect.tapError((error) => _emit('kargadan.harness.plan.generate.failed', { error: String(error), fallbackId })),
+                    Effect.mapError((cause) => new CommandDispatchError({
+                        cause,
+                        details: { fallbackId, message: 'Plan generation failed.' },
+                        failureClass: 'correctable',
+                        reason: 'protocol',
+                    })),
+                );
+            };
+            const _observedObjectRefs = (observation: Option.Option<unknown>) =>
+                Option.flatMap(observation, (value) =>
+                    S.decodeUnknownOption(_ObjectListResultSchema)(value).pipe(
+                        Option.map((decoded) => A.filterMap(decoded.objects, (entry) => Option.fromNullable(entry.objectRef))),
+                        Option.filter((objectRefs) => objectRefs.length > 0),
+                    ));
             const plan = (state: LoopState) => Effect.gen(function* () {
-                const maxTok = yield* ai.model.settings().pipe(Effect.map((s) => Math.max(1, s.language.maxTokens)), Effect.catchAll(() => Effect.succeed(8_192)));
+                const maxTok = yield* ai.model.settings().pipe(Effect.map((s) => Math.max(1, s.maxOutputTokens ?? 8_192)), Effect.catchAll(() => Effect.succeed(8_192)));
                 const trigger = Math.max(1, Math.floor((maxTok * config.compactionTriggerPercent) / 100));
                 const target = Math.max(1, Math.floor((maxTok * Math.min(config.compactionTriggerPercent - 1, config.compactionTargetPercent)) / 100));
-                const _buildPrompt = ({ before, serialized }: { readonly before: number; readonly serialized: string }) => { const w = Math.max(target * 4, 1_200);
-                    return JSON.stringify({ compaction: { estimatedTokensBefore: before, targetTokens: target, triggerTokens: trigger },
-                        context: { failureState: state.status === 'Failed' ? 'failed' : state.attempt > 1 ? 'retrying' : 'steady', goal: input.intent,
-                            latestSceneSummary: Option.getOrNull(state.sceneSummary), recentObservation: Option.getOrNull(state.recentObservation), sequence: state.sequence },
-                        history: { olderTurnsSummarized: serialized.length > w, recentTurns: serialized.slice(Math.max(0, serialized.length - w)) }, kind: 'kargadan.context.compaction' }); };
                 const compaction = yield* Ref.get(chatRef).pipe(
-                    Effect.flatMap((currentChat) => ai.model.compactChat(currentChat, { buildPrompt: _buildPrompt, target, trigger })),
+                    Effect.flatMap((currentChat) => ai.model.compactChat(currentChat, {
+                        buildPrompt: ({ before, serialized }) => _compactionPrompt({
+                            attempt: state.attempt,
+                            before,
+                            goal: input.intent,
+                            recentObservation: state.recentObservation,
+                            sceneSummary: state.sceneSummary,
+                            sequence: state.sequence,
+                            serialized,
+                            state: state.status,
+                            target,
+                            trigger,
+                        }),
+                        target,
+                        trigger,
+                    })),
                     Effect.flatMap(Option.match({
                         onNone: () => Effect.succeed(Option.none<typeof Loop.compaction.Type>()),
                         onSome: (r) => Ref.set(chatRef, r.compacted).pipe(Effect.as(Option.some({ estimatedTokensAfter: r.after, estimatedTokensBefore: r.before,
@@ -166,25 +267,24 @@ class AgentLoop extends Effect.Service<AgentLoop>()('kargadan/AgentLoop', {
                     onNone: () => Effect.void, onSome: (p) => _emit('kargadan.harness.plan.scene.summary.failed', { error: p.error?.message ?? 'probe failed' }) }));
                 const sceneSummary = Option.match(sceneProbe.decoded, { onNone: () => state.sceneSummary, onSome: (d) => Option.some(_maskDeep(d, config.maskedKeys, config.truncation)) });
                 const effectiveIntent = Option.flatMap(state.pendingSteps, (steps) => Option.fromNullable(steps[state.currentStepIndex])).pipe(Option.getOrElse(() => input.intent));
-                const { candidates, fallbackId } = yield* ai.queryKnowledge({
-                    limit: Math.max(1, Math.min(_K.limits.maxCandidates, input.catalog.length)), manifest: input.catalog, term: effectiveIntent,
-                }).pipe(Effect.map((result) => A.dedupe(result.items.map((item) => item.id).filter((id) => HashMap.has(catalogByOp, id)))),
-                    Effect.catchAll((e) => _emit('kargadan.harness.plan.knowledge.failed', { error: String(e) }).pipe(Effect.as([] as ReadonlyArray<string>))),
-                    Effect.map((ranked) => ranked.length === 0 ? state.operations : ranked),
-                    Effect.flatMap((ids) => Option.match(A.head(ids), {
-                        onNone: () => Effect.fail(new CommandDispatchError({ details: { message: 'No operation available for PLAN' }, reason: 'protocol' })),
-                        onSome: (firstId) => Effect.succeed({ candidates: A.filterMap(ids, (id) => HashMap.get(catalogByOp, id)), fallbackId: firstId }) })));
+                const { candidates, fallbackId } = yield* _knowledgeCandidates(state, effectiveIntent);
+                const currentStepIndex = Option.flatMap(state.pendingSteps, () => Option.some(state.currentStepIndex)).pipe(Option.getOrUndefined);
                 const prompt = JSON.stringify({ attempt: state.attempt, candidates: _rerank(candidates, sceneProbe.decoded).map((e) => ({ commandId: e.id, description: e.description,
-                    params: e.params, requiresObjectRefs: e.requirements.requiresObjectRefs })), compaction: Option.getOrUndefined(compaction), currentStepIndex: Option.isSome(state.pendingSteps) ? state.currentStepIndex : undefined,
+                    minimumObjectRefCount: e.requirements.minimumObjectRefCount, params: e.params, requiresObjectRefs: e.requirements.requiresObjectRefs })), compaction: Option.getOrUndefined(compaction), currentStepIndex,
                     executionHistory: state.executionHistory.length > 0 ? state.executionHistory : undefined, intent: effectiveIntent,
+                    objectRefPolicy: 'When requiresObjectRefs is true, never invent objectId or typeTag. First use read.object.list, then copy exact objectRefs from that result into args.objectRefs.',
                     originalIntent: Option.isSome(state.pendingSteps) ? input.intent : undefined, pendingSteps: Option.getOrUndefined(state.pendingSteps),
                     recentObservation: Option.getOrUndefined(state.recentObservation), sceneSummary: Option.getOrUndefined(sceneSummary), sequence: state.sequence });
-                const generation = Ref.get(chatRef).pipe(Effect.flatMap((chat) => chat.generateObject({ prompt,
-                    schema: S.Struct({ args: S.Record({ key: S.String, value: S.Unknown }), commandId: S.NonEmptyTrimmedString }) })), Effect.map((r) => r.value));
-                const planned = yield* Option.match(input.architectOverride, { onNone: () => generation,
-                    onSome: (override) => Effect.locally(generation, AiRegistry.SessionOverrideRef, Option.some(override)),
-                }).pipe(Effect.catchAll((e) => _emit('kargadan.harness.plan.generate.failed', { error: String(e) }).pipe(
-                    Effect.as({ args: {} as Record<string, unknown>, commandId: fallbackId }))));
+                const planned = yield* _generatePlan(prompt, fallbackId);
+                yield* Effect.filterOrFail(
+                    Effect.succeed(candidates.some((candidate) => candidate.id === planned.commandId)),
+                    (isCandidate) => isCandidate,
+                    () => new CommandDispatchError({
+                        details: { candidateIds: candidates.map((candidate) => candidate.id), commandId: planned.commandId, message: 'Planner selected a command outside the ranked candidate set.' },
+                        failureClass: 'correctable',
+                        reason: 'protocol',
+                    }),
+                );
                 const entry = yield* HashMap.get(catalogByOp, planned.commandId).pipe(Option.match({
                     onNone: () => Effect.fail(new CommandDispatchError({ details: { commandId: planned.commandId, message: 'Operation missing from session catalog' }, reason: 'protocol' })),
                     onSome: Effect.succeed }));
@@ -193,15 +293,55 @@ class AgentLoop extends Effect.Service<AgentLoop>()('kargadan/AgentLoop', {
                     (['detail', 'includeHidden', 'limit'] as const).filter((n) => HashSet.has(paramSet, n)).map((n) => [n, planned.args[n]])))) };
                 yield* Effect.filterOrFail(Effect.succeed(entry.params.filter((p) => p.required && !Object.hasOwn(args, p.name))), (m) => m.length === 0,
                     (m) => new CommandDispatchError({ details: { commandId: planned.commandId, message: `Missing required: ${m.map((p) => p.name).join(', ')}` }, reason: 'protocol' }));
-                const kind = Match.value(entry.dispatch.mode).pipe(Match.when('script', () => 'script' as const),
-                    Match.orElse(() => entry.isDestructive ? 'write' as const : 'read' as const));
-                const objectRefs = entry.requirements.requiresObjectRefs ? A.replicate(config.resolveWriteObjectRef, Math.max(1, entry.requirements.minimumObjectRefCount)) : undefined;
-                yield* Effect.filterOrFail(Effect.succeed(objectRefs?.length ?? 0), (c) => c >= entry.requirements.minimumObjectRefCount,
-                    () => new CommandDispatchError({ details: { commandId: planned.commandId, message: `Requires ${String(entry.requirements.minimumObjectRefCount)}+ objectRefs` }, reason: 'protocol' }));
-                const command = dispatch.buildCommand(state.identityBase, planned.commandId, args, { attempt: state.attempt, deadlineMs: config.commandDeadlineMs,
-                    objectRefs, operationTag: _K.op.planExecute(planned.commandId),
-                    ...(kind === 'write' ? { idempotency: persistence.idempotency(state.identityBase.correlationId, args, state.sequence), undoScope: 'kargadan.phase7' } : {}) });
-                return { command, compaction, operationKind: kind, sceneSummary, startedAt: yield* Effect.clockWith((clock) => clock.currentTimeMillis) } as const;
+                const kind = entry.isDestructive ? 'write' as const : 'read' as const;
+                const explicitObjectRefs = S.decodeUnknownOption(_ObjectRefArgsSchema)(args).pipe(
+                    Option.map((value) => value.objectRefs),
+                    Option.filter((objectRefs) => objectRefs.length >= entry.requirements.minimumObjectRefCount),
+                );
+                const observedObjectRefs = _observedObjectRefs(state.recentObservation).pipe(
+                    Option.filter((objectRefs) => objectRefs.length === entry.requirements.minimumObjectRefCount),
+                );
+                const resolvedObjectRefs = Match.value(entry.requirements.requiresObjectRefs).pipe(
+                    Match.when(true, () => Option.orElse(explicitObjectRefs, () => observedObjectRefs)),
+                    Match.orElse(() => Option.none<ReadonlyArray<typeof _ObjectRefSchema.Type>>()),
+                );
+                const commandArgs = Object.fromEntries(Object.entries(args).filter(([name]) => name !== 'objectRefs'));
+                const commandSpec = yield* Match.value(entry.requirements.requiresObjectRefs && Option.isNone(resolvedObjectRefs)).pipe(
+                    Match.when(true, () => HashMap.get(catalogByOp, _K.aux.objectList).pipe(Option.match({
+                        onNone: () => Effect.fail(new CommandDispatchError({
+                            details: { commandId: planned.commandId, message: 'read.object.list is unavailable for object-ref grounding.' },
+                            reason: 'protocol',
+                        })),
+                        onSome: () => Effect.succeed({
+                            args: { limit: _K.limits.maxCandidates },
+                            commandId: _K.aux.objectList,
+                            continuation: 'ground-object-refs' as const,
+                            kind: 'read' as const,
+                            objectRefs: undefined,
+                        }),
+                    }))),
+                    Match.orElse(() => Effect.succeed({
+                        args: commandArgs,
+                        commandId: planned.commandId,
+                        continuation: 'execute' as const,
+                        kind,
+                        objectRefs: Option.getOrUndefined(resolvedObjectRefs),
+                    })),
+                );
+                const commandMetadata = Match.value(commandSpec.kind).pipe(
+                    Match.when('write', () => ({ idempotency: persistence.idempotency(state.identityBase.correlationId, args, state.sequence), undoScope: planned.commandId })),
+                    Match.orElse(() => ({})),
+                );
+                const command = dispatch.buildCommand(state.identityBase, commandSpec.commandId, commandSpec.args, { attempt: state.attempt, deadlineMs: config.commandDeadlineMs,
+                    objectRefs: commandSpec.objectRefs, operationTag: _K.op.planExecute(commandSpec.commandId), ...commandMetadata });
+                return {
+                    command,
+                    compaction,
+                    continuation: commandSpec.continuation,
+                    operationKind: commandSpec.kind,
+                    sceneSummary,
+                    startedAt: yield* Effect.clockWith((clock) => clock.currentTimeMillis),
+                } as const;
             });
             const execute = (state: LoopState, planned: Effect.Effect.Success<ReturnType<typeof plan>>) =>
                 Match.value(planned.operationKind).pipe(Match.when('write', () => _execWrite(planned.command, state.sequence).pipe(Effect.map((wf) => ({ command: planned.command,
@@ -237,14 +377,13 @@ class AgentLoop extends Effect.Service<AgentLoop>()('kargadan/AgentLoop', {
                     Match.when({ cmdErr: true }, () => Option.some(exec.result.error?.failureClass ?? ('fatal' as Envelope.FailureClass))),
                     Match.whenOr({ sceneErr: true }, { objErr: true }, () => Option.some('retryable' as Envelope.FailureClass)),
                     Match.when({ sceneBad: true }, () => Option.some('correctable' as Envelope.FailureClass)), Match.orElse(() => Option.none()));
-                const _semFallback = { confidence: 0, discrepancy: undefined as string | undefined, intentSatisfied: true };
+                const _semFallback = { confidence: 0, discrepancy: undefined as string | undefined, intentSatisfied: false };
                 const _semGen = ai.model.generateObject({ prompt: JSON.stringify({ args: exec.command.args, commandId: exec.command.commandId, intent: input.intent,
                     sceneAfter: Option.getOrUndefined(sceneDecoded), sceneBefore: Option.getOrUndefined(state.sceneSummary) }), schema: _SemanticVerifySchema });
                 const semanticCheck = yield* Option.match(failureClassification, {
-                    onNone: () => Option.match(input.architectOverride, { onNone: () => _semGen, onSome: (o) => Effect.locally(_semGen, AiRegistry.SessionOverrideRef, Option.some(o)) })
-                        .pipe(Effect.map((r) => r.value), Effect.catchAll(() => Effect.succeed(_semFallback))),
+                    onNone: () => _semGen.pipe(Effect.map((r) => r.value), Effect.catchAll((e) => _emit('kargadan.harness.verify.semantic.fallback', { error: String(e) }).pipe(Effect.as(_semFallback)))),
                     onSome: () => Effect.succeed(_semFallback) });
-                const effectiveClassification: typeof failureClassification = !semanticCheck.intentSatisfied && semanticCheck.confidence > 0.7
+                const effectiveClassification: typeof failureClassification = Option.isNone(failureClassification) && !semanticCheck.intentSatisfied && (semanticCheck.confidence > 0.7 || semanticCheck.confidence === 0)
                     ? Option.some('correctable' as Envelope.FailureClass) : failureClassification;
                 yield* Option.match(effectiveClassification, { onNone: () => Effect.void, onSome: (f) => hooks.onFailure({ advice: _adviceMap[f],
                     commandId: exec.command.commandId, failureClass: f, message: exec.result.error?.message ?? 'Verification detected non-success.' }) });
@@ -254,16 +393,18 @@ class AgentLoop extends Effect.Service<AgentLoop>()('kargadan/AgentLoop', {
                 const evidence: typeof Loop.evidence.Type = { deterministicFailureClass: Option.getOrNull(effectiveClassification), deterministicStatus: detStatus,
                     semanticDiscrepancy: Option.isNone(failureClassification) ? (semanticCheck.discrepancy ?? null) : null, visualStatus: visual.status };
                 return { command: exec.command, evidence, failureClass: effectiveClassification, observation: obs, operation: detStatus === 'ok' ? 'command.completed' : 'command.failed',
-                    params: { commandId: exec.command.commandId, dedupe: exec.result.dedupe, deterministicStatus: detStatus, observationCaptured: Option.isSome(obs),
-                        status: exec.result.status, visualStatus: visual.status, workflow: Option.getOrUndefined(exec.workflow) },
+                    params: { commandId: exec.command.commandId, dedupe: exec.result.dedupe, deterministicStatus: detStatus, execution: exec.result.execution,
+                        observationCaptured: Option.isSome(obs), status: exec.result.status, visualStatus: visual.status, workflow: Option.getOrUndefined(exec.workflow) },
                     result: Option.some({ dedupe: exec.result.dedupe, deterministic: { objectMetadataProbe: Option.getOrUndefined(objectProbe), sceneSummary: Option.getOrUndefined(sceneDecoded),
-                        sceneSummaryProbe: Option.getOrUndefined(sceneProbe), status: detStatus }, observation: Option.getOrUndefined(obs), status: detStatus, verified: detStatus === 'ok', visual,
+                        sceneSummaryProbe: Option.getOrUndefined(sceneProbe), status: detStatus }, execution: exec.result.execution, observation: Option.getOrUndefined(obs), status: detStatus, verified: detStatus === 'ok', visual,
                         workflow: Option.getOrUndefined(exec.workflow) }), startedAt: exec.startedAt, status: detStatus } as const;
             });
             const decide = (state: LoopState, planned: Effect.Effect.Success<ReturnType<typeof plan>>,
                 exec: Effect.Effect.Success<ReturnType<typeof execute>>, vf: Effect.Effect.Success<ReturnType<typeof verify>>) => {
                 const next = Match.value({ fault: Option.getOrElse(vf.failureClass, () => 'fatal' as const),
+                    followUp: planned.continuation === 'ground-object-refs' && vf.status === 'ok',
                     hasMoreSteps: Option.exists(state.pendingSteps, (steps) => state.currentStepIndex + 1 < steps.length), ok: vf.status === 'ok' }).pipe(
+                    Match.when({ followUp: true }, () => 'Planning' as const),
                     Match.when({ hasMoreSteps: true, ok: true }, () => 'Planning' as const), Match.when({ ok: true }, () => 'Completed' as const),
                     Match.when({ fault: 'correctable' }, () => state.correctionCycles < config.correctionCycles ? 'Planning' as const : 'Failed' as const),
                     Match.when({ fault: 'retryable' }, () => state.attempt < config.retryMaxAttempts ? 'Planning' as const : 'Failed' as const), Match.orElse(() => 'Failed' as const));
@@ -316,11 +457,11 @@ class AgentLoop extends Effect.Service<AgentLoop>()('kargadan/AgentLoop', {
                     Effect.catchAll(() => Effect.void), Effect.as({ ...baseline, sequence: r.sequence })))) });
             yield* Ref.set(eventSeqRef, Math.max(config.initialSequence, initialState.sequence + 1));
             const fibers = yield* Effect.all([Effect.fork(dispatch.takeEvent().pipe(
-                Effect.flatMap((evt) => Effect.sync(() => performance.now()).pipe(Effect.flatMap((t0) => Ref.modify(eventSeqRef, (counter) => [counter, counter + 1] as const).pipe(
-                    Effect.tap((seq) => _persist(chatRef, evt, { eventType: evt.eventType, sequence: seq }, { durationMs: Math.max(0, Math.round(performance.now() - t0)),
+                Effect.flatMap((evt) => Effect.clockWith((clock) => clock.currentTimeMillis).pipe(Effect.flatMap((t0) => Ref.modify(eventSeqRef, (counter) => [counter, counter + 1] as const).pipe(
+                    Effect.tap((seq) => Effect.clockWith((clock) => clock.currentTimeMillis).pipe(Effect.flatMap((t1) => _persist(chatRef, evt, { eventType: evt.eventType, sequence: seq }, { durationMs: Math.max(0, t1 - t0),
                         error: Option.none(), operation: _K.op.transportEvent(evt.eventType), params: { causationRequestId: evt.causationRequestId, delta: evt.delta,
-                            eventType: evt.eventType, sourceRevision: evt.sourceRevision, ...(evt.eventType === 'stream.compacted' ? { batchSummary: evt.delta } : {}) },
-                        result: Option.some({ eventId: evt.eventId }), sequence: seq, status: 'ok' })))))),
+                            eventType: evt.eventType, ...(evt.eventType === 'stream.compacted' ? { batchSummary: evt.delta } : {}) },
+                        result: Option.some({ eventId: evt.eventId }), sequence: seq, status: 'ok' })))))))),
                 Effect.tap(() => Effect.logDebug('kargadan.harness.transport.event')),
                 Effect.catchAll((e) => _emit('kargadan.harness.transport.event.failed', { error: String(e) })), Effect.forever)),
             Effect.fork(Ref.get(lastDispatchRef).pipe(
@@ -339,14 +480,20 @@ class AgentLoop extends Effect.Service<AgentLoop>()('kargadan/AgentLoop', {
                     Effect.map((r) => r.value.steps.length > 1 ? Option.some(r.value.steps.map((s) => s.step)) : Option.none<ReadonlyArray<string>>()),
                     Effect.catchAll(() => Effect.succeed(Option.none<ReadonlyArray<string>>())))
                 : Effect.succeed(Option.none<ReadonlyArray<string>>()));
-            const finalState = yield* ai.runAgentCore({
-                decide: (s, p: Parameters<typeof decide>[1], e: Parameters<typeof decide>[2], v: Parameters<typeof decide>[3]) => _stage(s, 'decide', decide(s, p, e, v)),
-                execute: (s, p: Parameters<typeof execute>[1]) => _stage(s, 'execute', execute(s, p)),
-                initialState: { ...initialState, pendingSteps: Option.orElse(initialState.pendingSteps, () => decomposed) } as LoopState,
-                isTerminal: (s) => s.status !== 'Planning',
-                persist: (s, p: Parameters<typeof persistPhase>[1], e: Parameters<typeof persistPhase>[2], v: Parameters<typeof persistPhase>[3], d: Parameters<typeof persistPhase>[4]) => _stage(s, 'persist', persistPhase(s, p, e, v, d)),
-                plan: (s) => _stage(s, 'plan', plan(s)), verify: (s, p: Parameters<typeof verify>[1], e: Parameters<typeof verify>[2]) => _stage(s, 'verify', verify(s, p, e)),
-            }).pipe(Effect.ensuring(Effect.forEach(fibers, Fiber.interrupt, { discard: true })));
+            const finalState = yield* Effect.iterate(
+                { ...initialState, pendingSteps: Option.orElse(initialState.pendingSteps, () => decomposed) } as LoopState,
+                {
+                    body: (state) => Effect.gen(function* () {
+                        const planned = yield* _stage(state, 'plan', plan(state));
+                        const executed = yield* _stage(state, 'execute', execute(state, planned));
+                        const verified = yield* _stage(state, 'verify', verify(state, planned, executed));
+                        const decided = yield* _stage(state, 'decide', decide(state, planned, executed, verified));
+                        yield* _stage(state, 'persist', persistPhase(state, planned, executed, verified, decided));
+                        return decided;
+                    }),
+                    while: (state) => state.status === 'Planning',
+                },
+            ).pipe(Effect.ensuring(Effect.forEach(fibers, Fiber.interrupt, { discard: true })));
             return { state: finalState, trace: yield* persistence.trace(finalState.identityBase.sessionId) } as const;
         }));
         return { handle: run } as const;

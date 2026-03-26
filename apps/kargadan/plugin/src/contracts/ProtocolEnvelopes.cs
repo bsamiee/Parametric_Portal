@@ -17,11 +17,11 @@ public sealed record CommandAckEnvelope(
     Guid RequestId);
 public sealed record CommandEnvelope(
     EnvelopeIdentity Identity,
-    CommandOperation Operation,
+    CommandOperation CommandId,
     Seq<SceneObjectRef> ObjectRefs,
     Option<IdempotencyToken> Idempotency,
     Option<UndoScope> UndoScope,
-    JsonElement Payload,
+    JsonElement Args,
     TelemetryContext TelemetryContext,
     int DeadlineMs);
 [Union]
@@ -74,7 +74,6 @@ public sealed record EventEnvelope {
     public EventId EventId { get; }
     public EventType EventType { get; }
     public EnvelopeIdentity Identity { get; }
-    public int SourceRevision { get; }
     public Option<RequestId> CausationRequestId { get; }
     public JsonElement Delta { get; }
     public TelemetryContext TelemetryContext { get; }
@@ -85,14 +84,12 @@ public sealed record EventEnvelope {
         EventId eventId,
         EventType eventType,
         EnvelopeIdentity identity,
-        int sourceRevision,
         Option<RequestId> causationRequestId,
         JsonElement delta,
         TelemetryContext telemetryContext) {
         EventId = eventId;
         EventType = eventType;
         Identity = identity;
-        SourceRevision = sourceRevision;
         CausationRequestId = causationRequestId;
         Delta = delta;
         TelemetryContext = telemetryContext;
@@ -104,21 +101,16 @@ public sealed record EventEnvelope {
         EventId eventId,
         EventType eventType,
         EnvelopeIdentity identity,
-        int sourceRevision,
         Option<RequestId> causationRequestId,
         JsonElement delta,
         TelemetryContext telemetryContext) =>
-        sourceRevision switch {
-            < 0 => FinFail<EventEnvelope>(Error.New(message: "SourceRevision must be non-negative.")),
-            _ => FinSucc(new EventEnvelope(
-                eventId: eventId,
-                eventType: eventType,
-                identity: identity,
-                sourceRevision: sourceRevision,
-                causationRequestId: causationRequestId,
-                delta: delta,
-                telemetryContext: telemetryContext))
-        };
+        FinSucc(new EventEnvelope(
+            eventId: eventId,
+            eventType: eventType,
+            identity: identity,
+            causationRequestId: causationRequestId,
+            delta: delta,
+            telemetryContext: telemetryContext));
 }
 
 internal static class TransportJson {
@@ -147,7 +139,6 @@ internal static class TransportJson {
                 eventType = envelope.EventType.Key,
                 requestId = (Guid)envelope.Identity.RequestId,
                 sessionId = (Guid)envelope.Identity.SessionId,
-                sourceRevision = envelope.SourceRevision,
             }, options),
             None: () => JsonSerializer.SerializeToElement(new {
                 _tag = EventTag,
@@ -158,7 +149,6 @@ internal static class TransportJson {
                 eventType = envelope.EventType.Key,
                 requestId = (Guid)envelope.Identity.RequestId,
                 sessionId = (Guid)envelope.Identity.SessionId,
-                sourceRevision = envelope.SourceRevision,
             }, options));
     internal static JsonElement Response(CommandResultEnvelope envelope, JsonSerializerOptions options) =>
         envelope switch {
@@ -166,10 +156,8 @@ internal static class TransportJson {
                 _tag = ResultTag,
                 appId = (Guid)success.Identity.AppId,
                 correlationId = ((Guid)success.Identity.RunId).ToString("N"),
-                dedupe = new {
-                    decision = success.Dedupe.Decision.Key,
-                    originalRequestId = (Guid)success.Dedupe.OriginalRequestId,
-                },
+                execution = new { durationMs = success.Execution.DurationMs, pluginRevision = (string)success.Execution.PluginRevision },
+                dedupe = new { decision = success.Dedupe.Decision.Key, originalRequestId = (Guid)success.Dedupe.OriginalRequestId },
                 requestId = (Guid)success.Identity.RequestId,
                 result = success.Result,
                 sessionId = (Guid)success.Identity.SessionId,
@@ -180,16 +168,9 @@ internal static class TransportJson {
                     _tag = ResultTag,
                     appId = (Guid)failure.Identity.AppId,
                     correlationId = ((Guid)failure.Identity.RunId).ToString("N"),
-                    dedupe = new {
-                        decision = failure.Dedupe.Decision.Key,
-                        originalRequestId = (Guid)failure.Dedupe.OriginalRequestId,
-                    },
-                    error = new {
-                        code = failure.Error.Reason.Code.Key,
-                        details,
-                        failureClass = failure.Error.Reason.FailureClass.Key,
-                        message = failure.Error.Reason.Message,
-                    },
+                    execution = new { durationMs = failure.Execution.DurationMs, pluginRevision = (string)failure.Execution.PluginRevision },
+                    dedupe = new { decision = failure.Dedupe.Decision.Key, originalRequestId = (Guid)failure.Dedupe.OriginalRequestId },
+                    error = new { code = failure.Error.Reason.Code.Key, details, failureClass = failure.Error.Reason.FailureClass.Key, message = failure.Error.Reason.Message },
                     requestId = (Guid)failure.Identity.RequestId,
                     result = failure.Result,
                     sessionId = (Guid)failure.Identity.SessionId,
@@ -199,15 +180,9 @@ internal static class TransportJson {
                     _tag = ResultTag,
                     appId = (Guid)failure.Identity.AppId,
                     correlationId = ((Guid)failure.Identity.RunId).ToString("N"),
-                    dedupe = new {
-                        decision = failure.Dedupe.Decision.Key,
-                        originalRequestId = (Guid)failure.Dedupe.OriginalRequestId,
-                    },
-                    error = new {
-                        code = failure.Error.Reason.Code.Key,
-                        failureClass = failure.Error.Reason.FailureClass.Key,
-                        message = failure.Error.Reason.Message,
-                    },
+                    execution = new { durationMs = failure.Execution.DurationMs, pluginRevision = (string)failure.Execution.PluginRevision },
+                    dedupe = new { decision = failure.Dedupe.Decision.Key, originalRequestId = (Guid)failure.Dedupe.OriginalRequestId },
+                    error = new { code = failure.Error.Reason.Code.Key, failureClass = failure.Error.Reason.FailureClass.Key, message = failure.Error.Reason.Message },
                     requestId = (Guid)failure.Identity.RequestId,
                     result = failure.Result,
                     sessionId = (Guid)failure.Identity.SessionId,

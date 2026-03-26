@@ -33,14 +33,15 @@ liveIt('P7-LIVE-03: duplicate idempotency key does not execute write twice', asy
                 idempotencyKey: `phase7:live:dedupe:${crypto.randomUUID().slice(0, 8)}`,
                 payloadHash: payloadHash(createArgs),
             } as const;
-            const firstResult = yield* execute(dispatch, makeCommand({
+            const firstCommand = makeCommand({
                 args: createArgs,
                 commandId: 'write.object.create',
                 idempotency,
                 identityBase,
                 operationTag: 'tests.phase7.dedupe.first',
                 undoScope: 'kargadan.phase7.live',
-            }));
+            });
+            const firstResult = yield* execute(dispatch, firstCommand);
             expect(firstResult.status).toBe('ok');
             const summaryAfterFirstResult = yield* execute(dispatch, makeCommand({
                 args: {},
@@ -69,8 +70,8 @@ liveIt('P7-LIVE-03: duplicate idempotency key does not execute write twice', asy
             expect(summaryAfterFirst.objectCount).toBeGreaterThanOrEqual(summaryBefore.objectCount + 1);
             expect(summaryAfterSecond.objectCount).toBe(summaryAfterFirst.objectCount);
             const undoResult = yield* execute(dispatch, makeCommand({
-                args: { script: '_Undo _Enter' },
-                commandId: 'script.run',
+                args: { requestId: firstCommand.requestId },
+                commandId: 'internal.undo.execution',
                 identityBase,
                 operationTag: 'tests.phase7.dedupe.undo_cleanup',
             }));

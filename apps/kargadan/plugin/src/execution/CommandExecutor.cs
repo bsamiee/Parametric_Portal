@@ -22,34 +22,35 @@ internal static class CommandExecutor {
         CommandOperation Operation,
         string Name,
         string Description,
+        bool Advertise,
         CommandEnvelopeRequirements Requirements,
         Seq<CommandCatalogParameter> Parameters,
         Seq<CommandCatalogExample> Examples,
+        bool WrapUndo,
         Func<RhinoDoc, CommandEnvelope, Fin<JsonElement>> Handler) {
         internal bool IsDestructive => !Operation.Category.Equals(CommandCategory.Read);
-        internal CommandDispatchMode DispatchMode => Operation.ExecutionMode.Equals(CommandExecutionMode.Script)
-            ? CommandDispatchMode.Script
-            : CommandDispatchMode.Direct;
-        internal bool RequiresUndoScope => Operation.ExecutionMode.Equals(CommandExecutionMode.DirectApi)
-            && Operation.Category.Equals(CommandCategory.Write);
     }
     private static readonly Seq<string> NoAliases = Seq<string>();
     private static readonly Seq<CommandCatalogParameter> NoParams = Seq<CommandCatalogParameter>();
-    internal static readonly double[] ZeroPoint = [0d, 0d, 0d];
+    private static readonly double[] ZeroPoint = [0d, 0d, 0d];
     internal static double[] ProjectPoint(Point3d pt) => [pt.X, pt.Y, pt.Z];
     internal static double[] ProjectPointOrZero(BoundingBox box, Func<BoundingBox, Point3d> selector) =>
-        box.IsValid ? ProjectPoint(selector(box)) : ZeroPoint;
+        box.IsValid ? ProjectPoint(selector(box)) : (double[])ZeroPoint.Clone();
     private static readonly Seq<CommandRoute> Routes = Seq(
         Route(CommandOperation.SceneSummary, "Read Scene Summary", "Returns active viewport, object count, layer count, and compact Layer-0 scene fields.",
             requiresObjectRefs: false, examples: Seq1(new CommandCatalogExample("{}", "Summarize the active scene.")), handler: SceneQueryCommands.ReadSceneSummary),
-        Route(CommandOperation.ObjectMetadata, "Read Object Metadata", "Returns metadata for the first object reference in the command envelope.",
+        Route(CommandOperation.ObjectMetadata, "Read Object Metadata", "Returns metadata for the first resolved scene object reference.",
             requiresObjectRefs: true,
-            @params: Params(Parameter(JsonFields.Detail, ParameterTypes.String, false, "Detail level: compact|standard|full. Defaults to standard.")),
-            examples: Seq1(new CommandCatalogExample("{}", "Read metadata from objectRefs[0].")), handler: ObjectQueryCommands.ReadObjectMetadata),
-        Route(CommandOperation.ObjectGeometry, "Read Object Geometry", "Returns geometric bounds for the first object reference in the command envelope.",
+            @params: Params(
+                Parameter(JsonFields.ObjectRefs, ParameterTypes.ObjectRefArray, false, "Optional explicit scene object references copied from read.object.list."),
+                Parameter(JsonFields.Detail, ParameterTypes.String, false, "Detail level: compact|standard|full. Defaults to standard.")),
+            examples: Seq1(new CommandCatalogExample("""{"objectRefs":[{"objectId":"<guid>","typeTag":"Brep"}]}""", "Read metadata from args.objectRefs[0].")), handler: ObjectQueryCommands.ReadObjectMetadata),
+        Route(CommandOperation.ObjectGeometry, "Read Object Geometry", "Returns geometric bounds for the first resolved scene object reference.",
             requiresObjectRefs: true,
-            @params: Params(Parameter(JsonFields.Detail, ParameterTypes.String, false, "Detail level: compact|standard|full. Defaults to standard.")),
-            examples: Seq1(new CommandCatalogExample("{}", "Read geometric bounds from objectRefs[0].")), handler: ObjectQueryCommands.ReadObjectGeometry),
+            @params: Params(
+                Parameter(JsonFields.ObjectRefs, ParameterTypes.ObjectRefArray, false, "Optional explicit scene object references copied from read.object.list."),
+                Parameter(JsonFields.Detail, ParameterTypes.String, false, "Detail level: compact|standard|full. Defaults to standard.")),
+            examples: Seq1(new CommandCatalogExample("""{"objectRefs":[{"objectId":"<guid>","typeTag":"Brep"}]}""", "Read geometric bounds from args.objectRefs[0].")), handler: ObjectQueryCommands.ReadObjectGeometry),
         Route(CommandOperation.LayerState, "Read Layer State", "Lists layer visibility and names.",
             requiresObjectRefs: false,
             @params: Params(
@@ -81,11 +82,15 @@ internal static class CommandExecutor {
                 Parameter(JsonFields.LayerIndex, ParameterTypes.Integer, false, "Target layer index."),
                 Parameter(JsonFields.Name, ParameterTypes.String, false, "Object name metadata.")),
             examples: Seq1(new CommandCatalogExample("""{"point":[0,0,0]}""", "Create a point at origin.")), handler: ObjectMutationCommands.HandleObjectCreate),
-        Route(CommandOperation.ObjectDelete, "Delete Object", "Deletes the first referenced object.",
-            requiresObjectRefs: true, examples: Seq1(new CommandCatalogExample("{}", "Delete objectRefs[0].")), handler: ObjectMutationCommands.HandleObjectDelete),
-        Route(CommandOperation.ObjectUpdate, "Update Object", "Transforms or updates the first referenced object. Supports translation, rotation, scale, mirror via 'transform' field, or attribute updates.",
+        Route(CommandOperation.ObjectDelete, "Delete Object", "Deletes the first resolved scene object reference.",
             requiresObjectRefs: true,
             @params: Params(
+                Parameter(JsonFields.ObjectRefs, ParameterTypes.ObjectRefArray, false, "Optional explicit scene object references copied from read.object.list.")),
+            examples: Seq1(new CommandCatalogExample("""{"objectRefs":[{"objectId":"<guid>","typeTag":"Brep"}]}""", "Delete args.objectRefs[0].")), handler: ObjectMutationCommands.HandleObjectDelete),
+        Route(CommandOperation.ObjectUpdate, "Update Object", "Transforms or updates the first resolved scene object reference. Supports translation, rotation, scale, mirror via 'transform' field, or attribute updates.",
+            requiresObjectRefs: true,
+            @params: Params(
+                Parameter(JsonFields.ObjectRefs, ParameterTypes.ObjectRefArray, false, "Optional explicit scene object references copied from read.object.list."),
                 Parameter(JsonFields.Transform, ParameterTypes.String, false, "Transform type: rotate|scale|mirror."),
                 Parameter(JsonFields.Translation, ParameterTypes.Number3, false, "Translation vector [x,y,z]."),
                 Parameter(JsonFields.Angle, ParameterTypes.Number, false, "Rotation angle in degrees (rotate)."),
@@ -98,19 +103,10 @@ internal static class CommandExecutor {
                 Parameter(JsonFields.LayerIndex, ParameterTypes.Integer, false, "Target layer index."),
                 Parameter(JsonFields.Name, ParameterTypes.String, false, "Updated object name.")),
             examples: Seq(
-                new CommandCatalogExample("""{"translation":[0,10,0]}""", "Move object by +10 in Y."),
-                new CommandCatalogExample("""{"transform":"rotate","angle":45,"axis":[0,0,1],"center":[0,0,0]}""", "Rotate 45 around Z.")),
+                new CommandCatalogExample("""{"objectRefs":[{"objectId":"<guid>","typeTag":"Brep"}],"translation":[0,10,0]}""", "Move object by +10 in Y."),
+                new CommandCatalogExample("""{"objectRefs":[{"objectId":"<guid>","typeTag":"Curve"}],"transform":"rotate","angle":45,"axis":[0,0,1],"center":[0,0,0]}""", "Rotate 45 around Z.")),
             handler: ObjectMutationCommands.HandleObjectUpdate),
-        Route(CommandOperation.ScriptRun, "Run Rhino Script", "Runs a Rhino command script through RhinoApp.RunScript.",
-            requiresObjectRefs: false,
-            @params: Params(Parameter(JsonFields.Script, ParameterTypes.String, true, "Rhino command script to execute.")),
-            examples: Seq1(new CommandCatalogExample("""{"script":"_Line 0,0,0 10,0,0 _Enter"}""", "Run a Rhino line command script.")),
-            handler: ScriptCommands.ExecuteScriptOperation),
-        Route(CommandOperation.CatalogRhinoCommands, "Catalog Rhino Commands", "Introspects the Rhino command registry and returns all registered commands.",
-            requiresObjectRefs: false,
-            examples: Seq1(new CommandCatalogExample("{}", "List all registered Rhino commands.")),
-            handler: SceneQueryCommands.ReadRhinoCommands),
-        Route(CommandOperation.ObjectList, "List Objects", "Enumerates scene objects matching optional type, layer, and name filters.",
+        Route(CommandOperation.ObjectList, "List Objects", "Enumerates scene objects matching optional type, layer, and name filters, and returns objectRef for command-addressable objects.",
             requiresObjectRefs: false,
             @params: Params(
                 Parameter(JsonFields.ObjectType, ParameterTypes.String, false, "Filter by object type: brep|mesh|curve|surface|point|annotation|instance."),
@@ -127,15 +123,25 @@ internal static class CommandExecutor {
             examples: Seq(
                 new CommandCatalogExample("""{"action":"clear"}""", "Clear all selection."),
                 new CommandCatalogExample("""{"action":"set","objectIds":["<guid>"]}""", "Select specific objects.")),
-            handler: SelectionCommands.HandleSelection));
+            handler: SelectionCommands.HandleSelection,
+            wrapUndo: false),
+        Route(CommandOperation.InternalUndoExecution, "Internal Undo Execution", "Rolls back the latest agent-owned write using typed execution metadata.",
+            advertise: false,
+            requiresObjectRefs: false,
+            @params: Params(
+                Parameter(JsonFields.RequestId, ParameterTypes.String, true, "Original request id.")),
+            examples: Seq1(new CommandCatalogExample("""{"requestId":"<guid>"}""", "Rollback the latest pending matching write.")),
+            handler: ObjectMutationCommands.HandleUndoExecution,
+            wrapUndo: false));
     private static readonly Dictionary<CommandOperation, CommandRoute> RoutesByOperation =
         Routes.ToDictionary(static route => route.Operation);
     internal static Seq<string> SupportedCapabilities { get; } =
         Routes
+            .Filter(static route => route.Advertise)
             .Map(static route => route.Operation.Key)
             .Distinct();
     internal static Seq<CommandCatalogEntry> CommandCatalog { get; } =
-        Routes.Map(ToCatalogEntry);
+        Routes.Filter(static route => route.Advertise).Map(ToCatalogEntry);
     internal static bool Supports(CommandOperation operation) =>
         RoutesByOperation.ContainsKey(operation);
     internal static Fin<JsonElement> Execute(
@@ -143,7 +149,7 @@ internal static class CommandExecutor {
         CommandEnvelope envelope,
         AgentStateCallback onUndoRedo) =>
         ResolveRoute(envelope: envelope).Bind((CommandRoute route) =>
-            route.RequiresUndoScope switch {
+            route.WrapUndo switch {
                 true => ExecuteDirectApi(
                     doc: doc,
                     envelope: envelope,
@@ -163,12 +169,14 @@ internal static class CommandExecutor {
         Fin<JsonElement> result = handler(doc, envelope);
         return result.Match(
             Succ: (JsonElement payload) => {
+                AgentUndoState undoState = new(
+                    RequestId: envelope.Identity.RequestId,
+                    UndoSerial: undoSerial);
                 _ = doc.AddCustomUndoEvent(
                     description: TextValues.AgentStateSnapshot,
                     handler: MakeUndoHandler(onUndoRedo: onUndoRedo),
-                    tag: new AgentUndoState(
-                        RequestId: envelope.Identity.RequestId,
-                        UndoSerial: undoSerial));
+                    tag: undoState);
+                _ = ObjectMutationCommands.RememberUndoState(undoState);
                 _ = doc.EndUndoRecord(undoRecordSerialNumber: undoSerial);
                 return FinSucc(payload);
             },
@@ -183,10 +191,39 @@ internal static class CommandExecutor {
         Guid objectId) =>
         Optional(doc.Objects.FindId(objectId))
             .ToFin(CommandParsers.CommandError(code: ErrorCode.PayloadMalformed, message: $"Object {objectId} not found."));
-    internal static Fin<Guid> GetPrimaryObjectId(CommandEnvelope envelope) =>
-        envelope.ObjectRefs.HeadOrNone()
-            .ToFin(CommandParsers.CommandError(code: ErrorCode.PayloadMalformed, message: $"Operation '{envelope.Operation.Key}' requires at least one object reference."))
-            .Map(static (SceneObjectRef sceneObjectRef) => (Guid)sceneObjectRef.ObjectId);
+    internal static Fin<Seq<SceneObjectRef>> ResolveObjectRefs(CommandEnvelope envelope) =>
+        CommandParsers.ParseOptionalSceneObjectRefs(envelope.Args).Map(option =>
+            option.Match(
+                Some: static refs => refs,
+                None: () => envelope.ObjectRefs));
+    internal static Fin<Seq<SceneObjectRef>> ResolveValidatedObjectRefs(
+        RhinoDoc doc,
+        CommandEnvelope envelope) =>
+        ResolveObjectRefs(envelope).Bind(objectRefs =>
+            objectRefs.Map(objectRef => ValidateObjectRef(
+                doc: doc,
+                objectRef: objectRef)).Sequence());
+    internal static Fin<Guid> GetPrimaryObjectId(
+        RhinoDoc doc,
+        CommandEnvelope envelope) =>
+        ResolveValidatedObjectRefs(doc: doc, envelope: envelope).Bind(objectRefs =>
+            objectRefs.HeadOrNone()
+                .ToFin(CommandParsers.CommandError(code: ErrorCode.PayloadMalformed, message: $"CommandId '{envelope.CommandId.Key}' requires at least one object reference in args.objectRefs or envelope.objectRefs."))
+                .Map(static sceneObjectRef => (Guid)sceneObjectRef.ObjectId));
+    private static Fin<SceneObjectRef> ValidateObjectRef(
+        RhinoDoc doc,
+        SceneObjectRef objectRef) =>
+        FindById(doc: doc, objectId: (Guid)objectRef.ObjectId).Bind(found =>
+            ObjectQueryCommands.ResolveSceneObjectType(found.ObjectType).ToFin(
+                CommandParsers.CommandError(
+                    code: ErrorCode.PayloadMalformed,
+                    message: $"Object {(Guid)objectRef.ObjectId} resolves to unsupported Rhino object type '{found.ObjectType}'."))
+            .Bind(actualType =>
+                string.Equals(actualType.Key, objectRef.TypeTag.Key, StringComparison.Ordinal)
+                    ? FinSucc(objectRef)
+                    : FinFail<SceneObjectRef>(CommandParsers.CommandError(
+                        code: ErrorCode.PayloadMalformed,
+                        message: $"Object {(Guid)objectRef.ObjectId} is '{actualType.Key}' but objectRef.typeTag declared '{objectRef.TypeTag.Key}'."))));
     private static CommandRoute Route(
         CommandOperation operation,
         string name,
@@ -194,17 +231,21 @@ internal static class CommandExecutor {
         bool requiresObjectRefs,
         Seq<CommandCatalogExample> examples,
         Func<RhinoDoc, CommandEnvelope, Fin<JsonElement>> handler,
-        Seq<CommandCatalogParameter> @params = default) =>
+        Seq<CommandCatalogParameter> @params = default,
+        bool advertise = true,
+        bool wrapUndo = true) =>
         new(
             Operation: operation,
             Name: name,
             Description: description,
+            Advertise: advertise,
             Requirements: new CommandEnvelopeRequirements(
                 RequiresTelemetryContext: true,
                 RequiresObjectRefs: requiresObjectRefs,
                 MinimumObjectRefCount: requiresObjectRefs ? 1 : 0),
             Parameters: @params.IsEmpty ? NoParams : @params,
             Examples: examples,
+            WrapUndo: wrapUndo && operation.Category.Equals(CommandCategory.Write),
             Handler: handler);
     private static Seq<CommandCatalogParameter> Params(params CommandCatalogParameter[] parameters) =>
         toSeq(parameters);
@@ -227,16 +268,16 @@ internal static class CommandExecutor {
             IsDestructive: route.IsDestructive,
             Aliases: NoAliases,
             Dispatch: new CommandDispatchMetadata(
-                Mode: route.DispatchMode),
+                Mode: CommandDispatchMode.Direct),
             Requirements: route.Requirements,
             Params: route.Parameters,
             Examples: route.Examples);
     private static Fin<CommandRoute> ResolveRoute(CommandEnvelope envelope) =>
         RoutesByOperation.TryGetValue(
-            envelope.Operation,
+            envelope.CommandId,
             out CommandRoute route) switch {
                 true => FinSucc(route),
-                _ => FinFail<CommandRoute>(CommandParsers.CommandError(code: ErrorCode.CapabilityUnsupported, message: $"Operation '{envelope.Operation.Key}' is unsupported.")),
+                _ => FinFail<CommandRoute>(CommandParsers.CommandError(code: ErrorCode.CapabilityUnsupported, message: $"CommandId '{envelope.CommandId.Key}' is unsupported.")),
             };
     private static EventHandler<CustomUndoEventArgs> MakeUndoHandler(
         AgentStateCallback onUndoRedo) =>
@@ -247,6 +288,7 @@ internal static class CommandExecutor {
                 handler: MakeUndoHandler(onUndoRedo: onUndoRedo),
                 tag: state);
             bool isUndo = !args.CreatedByRedo;
+            _ = ObjectMutationCommands.TrackUndoTransition(state, isUndo);
             _ = onUndoRedo(state: state, isUndo: isUndo)
                 .IfFail(error => RhinoApp.WriteLine(
                     $"[Kargadan] UndoRedo publish failed: isUndo={isUndo}, requestId={state.RequestId}, undoSerial={state.UndoSerial}, error={error}"));

@@ -4,8 +4,7 @@
  * Guarantees compensation on permission seed failure during provisioning.
  */
 import { SqlClient } from '@effect/sql';
-import { AiSettingsSchema } from '@parametric-portal/ai/registry';
-import { type App, AppSettingsSchema } from '@parametric-portal/database/models';
+import { type App, AppSettingsSchema, KargadanAiSettingsSchema as AiSettingsSchema } from '@parametric-portal/database/models';
 import { DatabaseService } from '@parametric-portal/database/repos';
 import { Effect, Layer, Match, Option, Schema as S } from 'effect';
 import { Context } from '../../context.ts';
@@ -22,7 +21,7 @@ const _ProvisionPayload = S.Struct({
     namespace: S.NonEmptyTrimmedString.pipe(S.pattern(/^[a-z0-9][a-z0-9-]{1,62}[a-z0-9]$/)),
     settings:  S.optional(S.Struct({
         ...AppSettingsSchema.fields,
-        ai: S.optionalWith(AiSettingsSchema, { default: () => S.decodeSync(AiSettingsSchema)({}) }),
+        ai: S.optional(AiSettingsSchema),
     })),
 });
 const _TransitionCommand = S.Union(

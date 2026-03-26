@@ -18,11 +18,6 @@
             "import": "./src/factory.ts",
             "default": "./src/factory.ts"
         },
-        "./field": {
-            "types": "./src/field.ts",
-            "import": "./src/field.ts",
-            "default": "./src/field.ts"
-        },
         "./migrator": {
             "types": "./src/migrator.ts",
             "import": "./src/migrator.ts",

@@ -1,13 +1,20 @@
 import { createHash } from 'node:crypto';
 import { SqlClient } from '@effect/sql';
-import { PgClient } from '@effect/sql-pg';
-import { Chunk, Config, Context, Effect, HashMap, HashSet, Layer, Match, Option, Schema as S, String as Str } from 'effect';
+import { Chunk, Context, Data, Effect, HashMap, HashSet, Layer, Match, Option, Schema as S } from 'effect';
 import type { AgentJournal } from './models.ts';
 import { PersistenceService } from './repos.ts';
 
 // --- [TYPES] -----------------------------------------------------------------
 
 type ToolCallProjector = (payload: { readonly params: unknown; readonly result: unknown }) => Record<string, unknown>;
+
+// --- [ERRORS] ----------------------------------------------------------------
+
+class AgentJournalConflictError extends Data.TaggedError('AgentJournalConflictError')<{
+    readonly entryKind: string;
+    readonly sequence: number;
+    readonly sessionId: string;
+}> {}
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
@@ -29,6 +36,7 @@ const ToolCallPayload = S.Struct({ durationMs: S.optional(S.Number), params: S.o
 
 const _sortKeys = (v: unknown): unknown =>
     Match.value(v).pipe(
+        Match.when(Match.instanceOf(Date), (date) => date.toISOString()),
         Match.when(Match.instanceOf(Array), (arr) => arr.map(_sortKeys)),
         Match.when((x: unknown): x is Record<string, unknown> => x !== null && typeof x === 'object', (obj) =>
             Object.fromEntries(Object.entries(obj).toSorted(([a], [b]) => a.localeCompare(b)).map(([k, val]) => [k, _sortKeys(val)]))),
@@ -45,14 +53,41 @@ class AgentPersistenceService extends Effect.Service<AgentPersistenceService>()(
         const { journal: repo } = yield* PersistenceService;
         const sql = yield* SqlClient.SqlClient;
         const projector = yield* _ToolCallProjectorTag;
-    const write = Effect.fn('database.agentPersistence.write')((entries: readonly S.Schema.Type<typeof AgentJournal.insert>[]) =>
-        repo.put([...entries]).pipe(
-            Effect.catchIf(
-                (e) => (e as { cause?: { code?: unknown; constraint?: unknown } }).cause?.code === '23505'
-                    && (e as { cause?: { code?: unknown; constraint?: unknown } }).cause?.constraint === 'idx_agent_journal_session_sequence_kind',
-                () => Effect.void,
-            ),
-        ));
+        const write = Effect.fn('database.agentPersistence.write')((entries: readonly S.Schema.Type<typeof AgentJournal.insert>[]) =>
+            Effect.forEach(entries, (entry) =>
+                repo.put([entry]).pipe(
+                    Effect.catchIf(
+                        (e) => (e as { cause?: { code?: unknown; constraint?: unknown } }).cause?.code === '23505'
+                            && (e as { cause?: { code?: unknown; constraint?: unknown } }).cause?.constraint === 'idx_agent_journal_session_sequence_kind',
+                        () => repo.find([
+                            { field: 'entryKind', value: entry.entryKind },
+                            { field: 'sequence', value: entry.sequence },
+                            { field: 'sessionId', value: entry.sessionId },
+                        ], { asc: false }).pipe(
+                            Effect.flatMap((rows) => Option.fromNullable(rows[0]).pipe(Option.match({
+                                onNone: () => Effect.fail(new AgentJournalConflictError({
+                                    entryKind: entry.entryKind,
+                                    sequence:  entry.sequence,
+                                    sessionId: entry.sessionId,
+                                })),
+                                onSome: (current) => Effect.succeed(current).pipe(
+                                    Effect.filterOrFail(
+                                        (row) =>
+                                            Option.getOrNull(row.status) === Option.getOrNull(entry.status)
+                                            && Option.getOrNull(row.stateHash) === Option.getOrNull(entry.stateHash)
+                                            && _stateHash(row.payloadJson) === _stateHash(entry.payloadJson),
+                                        () => new AgentJournalConflictError({
+                                            entryKind: entry.entryKind,
+                                            sequence:  entry.sequence,
+                                            sessionId: entry.sessionId,
+                                        }),
+                                    ),
+                                    Effect.asVoid,
+                                ),
+                            }))),
+                        ),
+                    ),
+                ), { discard: true }));
     const decodeStart = (json: unknown) =>
         S.decodeUnknown(StartPayload)(json).pipe(Effect.orElseSucceed(() => ({ userId: null }) as typeof StartPayload.Type));
     const decodeComplete = (json: unknown) =>
@@ -267,20 +302,19 @@ class AgentPersistenceService extends Effect.Service<AgentPersistenceService>()(
             status:      Option.some(call.status),
         },
     ]));
+    const deleteSession = Effect.fn('database.agentPersistence.deleteSession')((sessionId: string) =>
+        sql`DELETE FROM agent_journal WHERE session_id = ${sessionId}`.pipe(Effect.asVoid));
     const idempotency = (correlationId: string, payload: unknown, sequence: number) =>
         ({ idempotencyKey: `run:${correlationId.slice(0, 8)}:seq:${String(sequence).padStart(4, '0')}`, payloadHash: _stateHash(payload) }) as const;
-        return { completeSession, findResumable, hydrate, idempotency, list, persistCall, startSession, trace } as const;
+        return { completeSession, deleteSession, findResumable, hydrate, idempotency, list, persistCall, startSession, trace } as const;
     }),
 }) {}
 
 // --- [LAYERS] ----------------------------------------------------------------
 
-const AgentPersistenceLayer = (config: Parameters<typeof PgClient.layerConfig>[0], options?: { readonly projector?: ToolCallProjector }) =>
+const AgentPersistenceLayer = (options?: { readonly projector?: ToolCallProjector }) =>
     AgentPersistenceService.Default.pipe(
         Layer.provide(Layer.succeed(_ToolCallProjectorTag, options?.projector ?? (() => ({})))),
-        Layer.provideMerge(PgClient.layerConfig({
-            ...config, transformJson: Config.succeed(true), transformQueryNames: Config.succeed(Str.camelToSnake), transformResultNames: Config.succeed(Str.snakeToCamel),
-        })),
     );
 
 // --- [EXPORT] ----------------------------------------------------------------

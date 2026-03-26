@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.Text.Json;
+using ParametricPortal.Kargadan.Plugin.src.contracts;
 namespace ParametricPortal.Kargadan.Plugin.src.transport;
 
 internal static class WebSocketPortFile {
@@ -14,12 +15,13 @@ internal static class WebSocketPortFile {
             ".kargadan",
             "port");
     private static readonly string PortFileTempPath = PortFilePath + ".tmp";
-    internal static void Write(int port) {
+    internal static void Write(int port, TokenValue sessionToken) {
         string directory = Path.GetDirectoryName(PortFilePath)!;
         _ = Directory.CreateDirectory(directory);
         PortFilePayload payload = new(
             Port: port,
             Pid: Environment.ProcessId,
+            SessionToken: (string)sessionToken,
             StartedAt: DateTimeOffset.UtcNow);
         string json = JsonSerializer.Serialize(
             value: payload,
@@ -42,5 +44,5 @@ internal static class WebSocketPortFile {
             // why: best-effort cleanup on shutdown
         }
     }
-    private sealed record PortFilePayload(int Port, int Pid, DateTimeOffset StartedAt);
+    private sealed record PortFilePayload(int Port, int Pid, string SessionToken, DateTimeOffset StartedAt);
 }

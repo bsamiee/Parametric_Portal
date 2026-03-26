@@ -33,9 +33,6 @@ catalogs:
     '@effect/ai':
       specifier: 0.33.2
       version: 0.33.2
-    '@effect/ai-anthropic':
-      specifier: 0.23.0
-      version: 0.23.0
     '@effect/ai-google':
       specifier: 0.12.1
       version: 0.12.1
@@ -454,9 +451,6 @@ importers:
       '@biomejs/biome':
         specifier: 'catalog:'
         version: 2.4.6
-      '@dopplerhq/node-sdk':
-        specifier: 'catalog:'
-        version: 1.3.0
       '@effect/experimental':
         specifier: 'catalog:'
         version: 0.58.0(@effect/platform@0.94.5(effect@3.19.19))(effect@3.19.19)(ioredis@5.10.0)
@@ -731,18 +725,6 @@ importers:
 
   apps/kargadan/harness:
     dependencies:
-      '@effect/ai':
-        specifier: 'catalog:'
-        version: 0.33.2(@effect/experimental@0.58.0(@effect/platform@0.94.5(effect@3.19.19))(effect@3.19.19)(ioredis@5.10.0))(@effect/platform@0.94.5(effect@3.19.19))(@effect/rpc@0.73.2(@effect/platform@0.94.5(effect@3.19.19))(effect@3.19.19))(effect@3.19.19)
-      '@effect/ai-anthropic':
-        specifier: 'catalog:'
-        version: 0.23.0(@effect/ai@0.33.2(@effect/experimental@0.58.0(@effect/platform@0.94.5(effect@3.19.19))(effect@3.19.19)(ioredis@5.10.0))(@effect/platform@0.94.5(effect@3.19.19))(@effect/rpc@0.73.2(@effect/platform@0.94.5(effect@3.19.19))(effect@3.19.19))(effect@3.19.19))(@effect/experimental@0.58.0(@effect/platform@0.94.5(effect@3.19.19))(effect@3.19.19)(ioredis@5.10.0))(@effect/platform@0.94.5(effect@3.19.19))(effect@3.19.19)
-      '@effect/ai-google':
-        specifier: 'catalog:'
-        version: 0.12.1(@effect/ai@0.33.2(@effect/experimental@0.58.0(@effect/platform@0.94.5(effect@3.19.19))(effect@3.19.19)(ioredis@5.10.0))(@effect/platform@0.94.5(effect@3.19.19))(@effect/rpc@0.73.2(@effect/platform@0.94.5(effect@3.19.19))(effect@3.19.19))(effect@3.19.19))(@effect/experimental@0.58.0(@effect/platform@0.94.5(effect@3.19.19))(effect@3.19.19)(ioredis@5.10.0))(@effect/platform@0.94.5(effect@3.19.19))(effect@3.19.19)
-      '@effect/ai-openai':
-        specifier: 'catalog:'
-        version: 0.37.2(@effect/ai@0.33.2(@effect/experimental@0.58.0(@effect/platform@0.94.5(effect@3.19.19))(effect@3.19.19)(ioredis@5.10.0))(@effect/platform@0.94.5(effect@3.19.19))(@effect/rpc@0.73.2(@effect/platform@0.94.5(effect@3.19.19))(effect@3.19.19))(effect@3.19.19))(@effect/experimental@0.58.0(@effect/platform@0.94.5(effect@3.19.19))(effect@3.19.19)(ioredis@5.10.0))(@effect/platform@0.94.5(effect@3.19.19))(effect@3.19.19)
       '@effect/cli':
         specifier: 'catalog:'
         version: 0.73.2(@effect/platform@0.94.5(effect@3.19.19))(@effect/printer-ansi@0.47.0(@effect/typeclass@0.38.0(effect@3.19.19))(effect@3.19.19))(@effect/printer@0.47.0(@effect/typeclass@0.38.0(effect@3.19.19))(effect@3.19.19))(effect@3.19.19)
@@ -755,9 +737,6 @@ importers:
       '@effect/sql':
         specifier: 'catalog:'
         version: 0.49.0(@effect/experimental@0.58.0(@effect/platform@0.94.5(effect@3.19.19))(effect@3.19.19)(ioredis@5.10.0))(@effect/platform@0.94.5(effect@3.19.19))(effect@3.19.19)
-      '@effect/sql-pg':
-        specifier: 'catalog:'
-        version: 0.50.3(@effect/experimental@0.58.0(@effect/platform@0.94.5(effect@3.19.19))(effect@3.19.19)(ioredis@5.10.0))(@effect/platform@0.94.5(effect@3.19.19))(@effect/sql@0.49.0(@effect/experimental@0.58.0(@effect/platform@0.94.5(effect@3.19.19))(effect@3.19.19)(ioredis@5.10.0))(@effect/platform@0.94.5(effect@3.19.19))(effect@3.19.19))(effect@3.19.19)
       '@effect/workflow':
         specifier: 'catalog:'
         version: 0.16.0(@effect/experimental@0.58.0(@effect/platform@0.94.5(effect@3.19.19))(effect@3.19.19)(ioredis@5.10.0))(@effect/platform@0.94.5(effect@3.19.19))(@effect/rpc@0.73.2(@effect/platform@0.94.5(effect@3.19.19))(effect@3.19.19))(effect@3.19.19)
@@ -844,9 +823,6 @@ importers:
       vite:
         specifier: 'catalog:'
         version: 7.3.1(@types/node@25.4.0)(jiti@2.6.1)(lightningcss@1.32.0)(terser@5.46.0)(tsx@4.21.0)(yaml@2.8.2)
-      vitest:
-        specifier: 'catalog:'
-        version: 4.0.18(@opentelemetry/api@1.9.0)(@types/node@25.4.0)(@vitest/browser-playwright@4.0.18)(@vitest/ui@4.0.18)(happy-dom@20.8.3)(jiti@2.6.1)(jsdom@28.1.0(@noble/hashes@2.0.1))(lightningcss@1.32.0)(msw@2.12.8(@types/node@25.4.0)(typescript@6.0.0-dev.20251125))(terser@5.46.0)(tsx@4.21.0)(yaml@2.8.2)
 
   infrastructure:
     dependencies:
@@ -890,9 +866,6 @@ importers:
       '@effect/ai':
         specifier: 'catalog:'
         version: 0.33.2(@effect/experimental@0.58.0(@effect/platform@0.94.5(effect@3.19.19))(effect@3.19.19)(ioredis@5.10.0))(@effect/platform@0.94.5(effect@3.19.19))(@effect/rpc@0.73.2(@effect/platform@0.94.5(effect@3.19.19))(effect@3.19.19))(effect@3.19.19)
-      '@effect/ai-anthropic':
-        specifier: 'catalog:'
-        version: 0.23.0(@effect/ai@0.33.2(@effect/experimental@0.58.0(@effect/platform@0.94.5(effect@3.19.19))(effect@3.19.19)(ioredis@5.10.0))(@effect/platform@0.94.5(effect@3.19.19))(@effect/rpc@0.73.2(@effect/platform@0.94.5(effect@3.19.19))(effect@3.19.19))(effect@3.19.19))(@effect/experimental@0.58.0(@effect/platform@0.94.5(effect@3.19.19))(effect@3.19.19)(ioredis@5.10.0))(@effect/platform@0.94.5(effect@3.19.19))(effect@3.19.19)
       '@effect/ai-google':
         specifier: 'catalog:'
         version: 0.12.1(@effect/ai@0.33.2(@effect/experimental@0.58.0(@effect/platform@0.94.5(effect@3.19.19))(effect@3.19.19)(ioredis@5.10.0))(@effect/platform@0.94.5(effect@3.19.19))(@effect/rpc@0.73.2(@effect/platform@0.94.5(effect@3.19.19))(effect@3.19.19))(effect@3.19.19))(@effect/experimental@0.58.0(@effect/platform@0.94.5(effect@3.19.19))(effect@3.19.19)(ioredis@5.10.0))(@effect/platform@0.94.5(effect@3.19.19))(effect@3.19.19)
@@ -902,6 +875,9 @@ importers:
       '@effect/platform':
         specifier: 'catalog:'
         version: 0.94.5(effect@3.19.19)
+      '@effect/sql':
+        specifier: 'catalog:'
+        version: 0.49.0(@effect/experimental@0.58.0(@effect/platform@0.94.5(effect@3.19.19))(effect@3.19.19)(ioredis@5.10.0))(@effect/platform@0.94.5(effect@3.19.19))(effect@3.19.19)
       '@parametric-portal/database':
         specifier: workspace:*
         version: link:../database
@@ -1253,9 +1229,6 @@ importers:
       '@effect/workflow':
         specifier: 'catalog:'
         version: 0.16.0(@effect/experimental@0.58.0(@effect/platform@0.94.5(effect@3.19.19))(effect@3.19.19)(ioredis@5.10.0))(@effect/platform@0.94.5(effect@3.19.19))(@effect/rpc@0.73.2(@effect/platform@0.94.5(effect@3.19.19))(effect@3.19.19))(effect@3.19.19)
-      '@parametric-portal/ai':
-        specifier: workspace:*
-        version: link:../ai
       '@parametric-portal/database':
         specifier: workspace:*
         version: link:../database
@@ -2478,14 +2451,6 @@ packages:
     resolution: {integrity: sha512-/PP+HkNBdsZxZZt2h+AUly2XaTnZxhCFhVoleCtDQxpfQrMPuX36nSjSlHMZhmI5AavdSSv73/fe/TJEQ2Ewtg==}
     peerDependencies:
       effect: '>=3.0.4 <4.0.0'
-
-  '@effect/ai-anthropic@0.23.0':
-    resolution: {integrity: sha512-ftkyQpTY4OCPTe9hlB53WCXseWm11lOf+zXDNCJG2nAqW5mZ+4kd/PPiqV7jd2zDukAtLc0I+R3EGs1fOLCG5A==}
-    peerDependencies:
-      '@effect/ai': ^0.33.0
-      '@effect/experimental': ^0.58.0
-      '@effect/platform': ^0.94.0
-      effect: ^3.19.13
 
   '@effect/ai-google@0.12.1':
     resolution: {integrity: sha512-NGzH5RoPkVQRu0rDA4ch6riaYT//GK4rFlAJmg24HpoqCupw2FZ9inl4+y3x6gObyHet2mF6EXLdHnfW/WX+rg==}
@@ -10517,10 +10482,6 @@ packages:
   postcss-value-parser@4.2.0:
     resolution: {integrity: sha512-1NNCs6uurfkVbeXG4S8JFT9t19m45ICnif8zWLd5oPSZ50QnwMfK+H3jv408d4jw/7Bttv5axS5IiHoLaVNHeQ==}
 
-  postcss@8.5.6:
-    resolution: {integrity: sha512-3Ybi1tAuwAP9s0r1UQ2J4n5Y0G05bJkpUIO0/bI9MhwmD70S5aTWbXGBwxHrelT+XM1k6dM0pk+SwNkpTRN7Pg==}
-    engines: {node: ^10 || ^12 || >=14}
-
   postcss@8.5.8:
     resolution: {integrity: sha512-OW/rX8O/jXnm82Ey1k44pObPtdblfiuWnrd8X7GJ7emImCOstunGbXUpp7HdBrFQX6rJzn3sPT397Wp5aCwCHg==}
     engines: {node: ^10 || ^12 || >=14}
@@ -14172,14 +14133,6 @@ snapshots:
       '@smithy/protocol-http': 5.3.10
       '@smithy/smithy-client': 4.12.0
       '@smithy/types': 4.13.0
-      effect: 3.19.19
-
-  '@effect/ai-anthropic@0.23.0(@effect/ai@0.33.2(@effect/experimental@0.58.0(@effect/platform@0.94.5(effect@3.19.19))(effect@3.19.19)(ioredis@5.10.0))(@effect/platform@0.94.5(effect@3.19.19))(@effect/rpc@0.73.2(@effect/platform@0.94.5(effect@3.19.19))(effect@3.19.19))(effect@3.19.19))(@effect/experimental@0.58.0(@effect/platform@0.94.5(effect@3.19.19))(effect@3.19.19)(ioredis@5.10.0))(@effect/platform@0.94.5(effect@3.19.19))(effect@3.19.19)':
-    dependencies:
-      '@anthropic-ai/tokenizer': 0.0.4
-      '@effect/ai': 0.33.2(@effect/experimental@0.58.0(@effect/platform@0.94.5(effect@3.19.19))(effect@3.19.19)(ioredis@5.10.0))(@effect/platform@0.94.5(effect@3.19.19))(@effect/rpc@0.73.2(@effect/platform@0.94.5(effect@3.19.19))(effect@3.19.19))(effect@3.19.19)
-      '@effect/experimental': 0.58.0(@effect/platform@0.94.5(effect@3.19.19))(effect@3.19.19)(ioredis@5.10.0)
-      '@effect/platform': 0.94.5(effect@3.19.19)
       effect: 3.19.19
 
   '@effect/ai-google@0.12.1(@effect/ai@0.33.2(@effect/experimental@0.58.0(@effect/platform@0.94.5(effect@3.19.19))(effect@3.19.19)(ioredis@5.10.0))(@effect/platform@0.94.5(effect@3.19.19))(@effect/rpc@0.73.2(@effect/platform@0.94.5(effect@3.19.19))(effect@3.19.19))(effect@3.19.19))(@effect/experimental@0.58.0(@effect/platform@0.94.5(effect@3.19.19))(effect@3.19.19)(ioredis@5.10.0))(@effect/platform@0.94.5(effect@3.19.19))(effect@3.19.19)':
@@ -23919,12 +23872,6 @@ snapshots:
 
   postcss-value-parser@4.2.0: {}
 
-  postcss@8.5.6:
-    dependencies:
-      nanoid: 3.3.11
-      picocolors: 1.1.1
-      source-map-js: 1.2.1
-
   postcss@8.5.8:
     dependencies:
       nanoid: 3.3.11
@@ -25655,7 +25602,7 @@ snapshots:
       esbuild: 0.27.3
       fdir: 6.5.0(picomatch@4.0.3)
       picomatch: 4.0.3
-      postcss: 8.5.6
+      postcss: 8.5.8
       rollup: 4.59.0
       tinyglobby: 0.2.15
     optionalDependencies:

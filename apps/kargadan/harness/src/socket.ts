@@ -1,12 +1,18 @@
 import * as FileSystem from '@effect/platform/FileSystem';
 import * as Socket from '@effect/platform/Socket';
-import { Cause, Data, Deferred, Duration, Effect, HashMap, Layer, Match, Option, pipe, Queue, Ref, Schedule, Schema as S } from 'effect';
+import { Cause, Data, Deferred, Duration, Effect, Fiber, HashMap, Layer, Match, Option, pipe, Queue, Ref, Schedule, Schema as S } from 'effect';
 import { Envelope } from './protocol/schemas';
 import { HarnessConfig, PORT_FILE_PATH } from './config';
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
 const _decoder = new TextDecoder();
+const _TransportSchema = S.Struct({
+    pid:          S.Int,
+    port:         S.Int,
+    sessionToken: S.NonEmptyTrimmedString,
+    startedAt:    S.String,
+});
 const _FaultPolicy = {
     connection_stale:    { terminal: false },
     disconnected:        { terminal: true  },
@@ -38,10 +44,16 @@ const readPortFile = Effect.fn('kargadan.portDiscovery.read')(function* () {
     const content = yield* fs.readFileString(PORT_FILE_PATH).pipe(
         Effect.mapError(() => new SocketClientError({ detail: { path: PORT_FILE_PATH }, reason: 'port_file_not_found' })),
     );
-    const parsed = yield* S.decodeUnknown(S.parseJson(S.Struct({ pid: S.Int, port: S.Int, startedAt: S.String })))(content).pipe(
+    const parsed = yield* S.decodeUnknown(S.parseJson(_TransportSchema))(content).pipe(
         Effect.mapError((cause) => new SocketClientError({ detail: { cause, path: PORT_FILE_PATH }, reason: 'port_file_invalid' })),
     );
-    yield* Effect.try(() => process.kill(parsed.pid, 0)).pipe(
+    yield* Effect.try({
+        catch: (error) => error as NodeJS.ErrnoException,
+        try:   () => process.kill(parsed.pid, 0),
+    }).pipe(
+        Effect.catchAll((error) => ((error).code === 'EPERM'
+            ? Effect.void
+            : Effect.fail(error))),
         Effect.mapError(() => new SocketClientError({ detail: { path: PORT_FILE_PATH, pid: parsed.pid }, reason: 'port_file_stale' })),
     );
     return parsed;
@@ -67,11 +79,11 @@ class ReconnectionSupervisor extends Effect.Service<ReconnectionSupervisor>()('k
         );
         return {
             requireConnected: _requireConnected,
-            supervise: Effect.fn('kargadan.reconnect.supervise')(<A, E, R>(connectOnce: (port: number) => Effect.Effect<A, E, R>) =>
+            supervise: Effect.fn('kargadan.reconnect.supervise')(<A, E, R>(connectOnce: (transport: typeof _TransportSchema.Type) => Effect.Effect<A, E, R>) =>
                 readPortFile().pipe(
                     Effect.tap((info) => Ref.set(connectionState, 'connected').pipe(
                         Effect.zipRight(Effect.log('kargadan.reconnect: connected', { pid: info.pid, port: info.port })))),
-                    Effect.flatMap((info) => connectOnce(info.port)),
+                    Effect.flatMap(connectOnce),
                     Effect.catchAllCause((cause) => Cause.isInterruptedOnly(cause)
                         ? Effect.failCause(cause)
                         : Ref.set(connectionState, 'reconnecting').pipe(
@@ -89,6 +101,7 @@ class KargadanSocketClient extends Effect.Service<KargadanSocketClient>()('karga
         const reconnectSupervisor = yield* ReconnectionSupervisor;
         const config = yield* HarnessConfig;
         const writer = yield* socket.writer;
+        const closeSignal = yield* Deferred.make<void, never>();
         const pending = yield* Ref.make(HashMap.empty<string, {
             readonly deferred: Deferred.Deferred<Envelope.PendingReply, SocketClientError>;
             readonly tag:      Envelope.Outbound['_tag'];
@@ -167,9 +180,19 @@ class KargadanSocketClient extends Effect.Service<KargadanSocketClient>()('karga
             })),
             Effect.schedule(Schedule.fixed(Duration.millis(config.heartbeatTimeoutMs))));
         return {
+            close:            writer(new Socket.CloseEvent(1000, 'kargadan-complete')).pipe(
+                Effect.catchAll(() => Effect.void),
+                Effect.zipRight(Deferred.succeed(closeSignal, undefined)),
+                Effect.ignore),
             request:          _request,
-            stalenessChecker: _heartbeatStalenessChecker,
-            start:            () => Effect.all([socket.run(_dispatchChunk), _heartbeatStalenessChecker], { discard: true }).pipe(Effect.onError(() => _failAllPending('socket_closed')),),
+            start:            () => Effect.gen(function* () {
+                const heartbeatFiber = yield* Effect.forkScoped(_heartbeatStalenessChecker);
+                return yield* socket.run(_dispatchChunk).pipe(
+                    Effect.raceFirst(Deferred.await(closeSignal)),
+                    Effect.ensuring(Fiber.interrupt(heartbeatFiber).pipe(Effect.asVoid)),
+                    Effect.onError(() => _failAllPending('socket_closed')),
+                );
+            }),
             takeEvent:        () => Queue.take(events),
         } as const;
     }),
@@ -177,11 +200,16 @@ class KargadanSocketClient extends Effect.Service<KargadanSocketClient>()('karga
 
 // --- [LAYERS] ----------------------------------------------------------------
 
+const KargadanSocketClientLayer = (port: number) => Layer.unwrapEffect(
+    HarnessConfig.pipe(
+        Effect.map((harnessConfig) => Layer.provide(
+            KargadanSocketClient.Default,
+            Layer.provide(Socket.layerWebSocket(`ws://${harnessConfig.wsHost}:${port}`), Socket.layerWebSocketConstructorGlobal),
+        )),
+    ));
 const KargadanSocketClientLive = Layer.unwrapEffect(
-    Effect.all([readPortFile(), HarnessConfig]).pipe(
-        Effect.map(([{ port }, harnessConfig]) => Layer.provide(KargadanSocketClient.Default,
-            Layer.provide(Socket.layerWebSocket(`ws://${harnessConfig.wsHost}:${port}`), Socket.layerWebSocketConstructorGlobal)))));
+    readPortFile().pipe(Effect.map(({ port }) => KargadanSocketClientLayer(port))));
 
 // --- [EXPORT] ----------------------------------------------------------------
 
-export { KargadanSocketClient, KargadanSocketClientLive, readPortFile, ReconnectionSupervisor };
+export { KargadanSocketClient, KargadanSocketClientLayer, KargadanSocketClientLive, readPortFile, ReconnectionSupervisor };

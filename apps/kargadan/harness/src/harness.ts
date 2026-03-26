@@ -1,14 +1,14 @@
 import { AiRegistry } from '@parametric-portal/ai/registry';
-import { SessionOverride } from '@parametric-portal/ai/runtime-provider';
 import { AiService } from '@parametric-portal/ai/service';
+import { WorkflowEngine } from '@effect/workflow';
 import { AgentPersistenceService } from '@parametric-portal/database/agent-persistence';
 import { Client } from '@parametric-portal/database/client';
-import { Effect, FiberRef, Layer, Match, Option, Schema as S } from 'effect';
+import { Effect, Fiber, FiberRef, Layer, Match, Option, Schema as S } from 'effect';
 import { HarnessConfig, KargadanHost } from './config';
 import { CommandDispatch } from './protocol/dispatch';
 import type { CorrelationId, Envelope } from './protocol/schemas';
 import { AgentLoop } from './runtime/agent-loop';
-import { KargadanSocketClientLive, ReconnectionSupervisor } from './socket';
+import { KargadanSocketClientLayer, ReconnectionSupervisor } from './socket';
 
 // --- [SCHEMA] ----------------------------------------------------------------
 
@@ -34,32 +34,24 @@ const makeInteractiveHooks = (
     },
 }) satisfies Pick<NonNullable<Parameters<AgentLoop['handle']>[0]['hooks']>, 'onFailure' | 'onStage' | 'onTool'>;
 const run = Effect.fn('kargadan.harness.runHarness')((input?: {
-    readonly architectFallback?: ReadonlyArray<string>;
-    readonly architectPrimary?:  string;
-    readonly continue?:          boolean;
     readonly hooks?:             Parameters<AgentLoop['handle']>[0]['hooks'];
     readonly intent?:            string;
+    readonly resume?:            'auto' | 'off';
     readonly sessionId?:         string;
 }) =>
         Effect.scoped(
         Effect.gen(function* () {
-            const [dispatch, loop, reconnect, cfg, ai] = yield* Effect.all([
-                CommandDispatch, AgentLoop, ReconnectionSupervisor, HarnessConfig, AiService,
+            const [reconnect, cfg, ai] = yield* Effect.all([
+                ReconnectionSupervisor, HarnessConfig, AiService,
             ]);
             const agentPersistence = yield* AgentPersistenceService;
-            const architectOverrideInput = yield* SessionOverride.decodeFromInput({
-                fallback: (input?.architectFallback ?? []).map((entry) => entry.trim()).filter((entry) => entry.length > 0),
-                primary:  input?.architectPrimary?.trim() ?? '',
-            });
-            const architectOverride = Option.orElse(architectOverrideInput, () => cfg.resolveArchitectOverride);
             const intent = input?.intent ?? cfg.agentIntent;
             const requestedSessionId = Option.fromNullable(input?.sessionId);
-            const wantsContinue = input?.continue === true;
-            yield* FiberRef.set(AiRegistry.SessionOverrideRef, cfg.resolveSessionOverride);
+            const resumeMode = input?.resume ?? 'auto';
             yield* FiberRef.set(AiRegistry.OnTokenRefreshRef, Option.some(KargadanHost.auth.onTokenRefresh));
             const correlationId = crypto.randomUUID().replaceAll('-', '') as typeof CorrelationId.Type;
             const resumableSessionId = yield* Option.match(requestedSessionId, {
-                onNone: () => wantsContinue || input?.intent === undefined
+                onNone: () => resumeMode === 'auto'
                     ? Client.tenant.with(cfg.appId, agentPersistence.findResumable(cfg.appId))
                     : Effect.succeed(Option.none<string>()),
                 onSome: (id) => Effect.succeed(Option.some(id)),
@@ -85,14 +77,14 @@ const run = Effect.fn('kargadan.harness.runHarness')((input?: {
                 cfg.appId,
                 reconnect.supervise((port) =>
                     Effect.gen(function* () {
-                        yield* Effect.log('kargadan.harness: connecting', { port, sessionId: identityBase.sessionId });
-                        yield* Effect.forkScoped(dispatch.start());
-                        const ack = yield* dispatch.handshake({ ...identityBase, requestId: crypto.randomUUID(), token: cfg.sessionToken });
+                        const [dispatch, loop] = yield* Effect.all([CommandDispatch, AgentLoop]);
+                        yield* Effect.log('kargadan.harness: connecting', { port: port.port, sessionId: identityBase.sessionId });
+                        const dispatchFiber = yield* Effect.forkDaemon(dispatch.start());
+                        const ack = yield* dispatch.handshake({ ...identityBase, requestId: crypto.randomUUID(), token: port.sessionToken });
                         const receivedCatalog = yield* dispatch.receiveCatalog();
                         const handshakeCatalog = receivedCatalog.length === 0 ? ack.catalog : receivedCatalog;
-                        const mergedManifest = [...handshakeCatalog, ...CommandDispatch.templateCatalog];
-                        const seedProjection = { manifest: mergedManifest, source: 'handshake' as const,
-                            version: `handshake:${ack.server?.pluginRevision ?? 'unknown'}:${String(mergedManifest.length)}` };
+                        const seedProjection = { manifest: handshakeCatalog, source: 'handshake' as const,
+                            version: `handshake:${ack.server?.pluginRevision ?? 'unknown'}:${String(handshakeCatalog.length)}` };
                         const prepared = yield* Client.tenant.with(cfg.appId, ai.prepareKnowledge({
                             entityType: _MANIFEST_ENTITY_TYPE,
                             manifest:   seedProjection.manifest,
@@ -105,7 +97,7 @@ const run = Effect.fn('kargadan.harness.runHarness')((input?: {
                             prepared:      prepared.prepared,
                             source:        seedProjection.source,
                         });
-                        const catalogIds = new Set(mergedManifest.map((e) => e.id));
+                        const catalogIds = new Set(handshakeCatalog.map((e) => e.id));
                         const validatedResume = yield* Option.match(resume, {
                             onNone: () => Effect.succeed(resume),
                             onSome: (r) => S.decodeUnknown(_ResumedOpsCompat)(r.state).pipe(
@@ -118,12 +110,17 @@ const run = Effect.fn('kargadan.harness.runHarness')((input?: {
                         });
                         const runtimeIdentityBase = { appId: ack.appId, correlationId: ack.correlationId, sessionId: ack.sessionId };
                         return yield* loop.handle({
-                            architectOverride, capabilities: ack.acceptedCapabilities, catalog: mergedManifest,
-                            identityBase: runtimeIdentityBase, intent, resume: validatedResume,
+                            capabilities: ack.acceptedCapabilities, catalog: handshakeCatalog,
+                            identityBase: runtimeIdentityBase,
+                            intent,
+                            knowledge: { entityType: _MANIFEST_ENTITY_TYPE, namespace: _MANIFEST_NAMESPACE },
+                            resume: validatedResume,
                             ...(input?.hooks == null ? {} : { hooks: input.hooks }),
-                        }).pipe(Effect.tap((result) =>
-                            Effect.log('Harness loop complete', { correlationId: runtimeIdentityBase.correlationId, outcome: result })));
-                    }),
+                        }).pipe(
+                            Effect.tap((result) => Effect.log('Harness loop complete', { correlationId: runtimeIdentityBase.correlationId, outcome: result })),
+                            Effect.ensuring(dispatch.close.pipe(Effect.zipRight(Fiber.interruptFork(dispatchFiber)))),
+                        );
+                    }).pipe(Effect.provide(_AttemptLayer(port.port))),
                 ),
             );
             const completionError = Match.value(outcome.state.status).pipe(
@@ -148,21 +145,31 @@ const run = Effect.fn('kargadan.harness.runHarness')((input?: {
 
 // --- [LAYERS] ----------------------------------------------------------------
 
-const _TransportLayer = CommandDispatch.Default.pipe(
-    Layer.provideMerge(KargadanSocketClientLive.pipe(Layer.provideMerge(ReconnectionSupervisor.Default))),
+const _DispatchLayer = (port: number) => CommandDispatch.Default.pipe(
+    Layer.provideMerge(KargadanSocketClientLayer(port)),
 );
-const _RuntimeLayer = AgentLoop.Default.pipe(
-    Layer.provideMerge(_TransportLayer),
-    Layer.provideMerge(AiService.KnowledgeDefault),
-    Layer.provideMerge(HarnessConfig.persistenceLayer),
+const _AttemptLayer = (port: number) => AgentLoop.Default.pipe(
+    Layer.provideMerge(WorkflowEngine.layerMemory),
+    Layer.provideMerge(_DispatchLayer(port)),
+);
+const _ProbeLayer = Layer.mergeAll(
+    HarnessConfig.Default,
+    ReconnectionSupervisor.Default,
+);
+const _RuntimeLayer = Layer.mergeAll(
+    _ProbeLayer,
+    HarnessConfig.persistenceLayer,
+    WorkflowEngine.layerMemory,
+    HarnessConfig.aiLayer,
 );
 const probeLive = Effect.scoped(
     Effect.gen(function* () {
-        const [dispatch, cfg, reconnect] = yield* Effect.all([CommandDispatch, HarnessConfig, ReconnectionSupervisor]);
+        const [cfg, reconnect] = yield* Effect.all([HarnessConfig, ReconnectionSupervisor]);
         const identityBase = { appId: cfg.appId, correlationId: crypto.randomUUID().replaceAll('-', '') as typeof CorrelationId.Type, sessionId: crypto.randomUUID() };
-        return yield* reconnect.supervise(() => Effect.gen(function* () {
-            yield* Effect.forkScoped(dispatch.start()).pipe(Effect.asVoid);
-            const handshake = yield* dispatch.handshake({ ...identityBase, requestId: crypto.randomUUID(), token: cfg.sessionToken });
+        return yield* reconnect.supervise((port) => Effect.gen(function* () {
+            const dispatch = yield* CommandDispatch;
+            const dispatchFiber = yield* Effect.forkDaemon(dispatch.start());
+            const handshake = yield* dispatch.handshake({ ...identityBase, requestId: crypto.randomUUID(), token: port.sessionToken });
             const result = (yield* dispatch.execute(dispatch.buildCommand(identityBase, 'read.scene.summary', {}, {
                 operationTag: 'diagnostics.live.scene.summary',
             }))) as Envelope.Result;
@@ -177,9 +184,11 @@ const probeLive = Effect.scoped(
                     message: result.error?.message ?? 'read.scene.summary failed.',
                 })),
             );
-            return { handshake, summary } as const;
-        }));
-    }).pipe(Effect.provide(_TransportLayer)),
+            return yield* Effect.succeed({ handshake, summary } as const).pipe(
+                Effect.ensuring(dispatch.close.pipe(Effect.zipRight(Fiber.interruptFork(dispatchFiber)))),
+            );
+        }).pipe(Effect.provide(_DispatchLayer(port.port))));
+    }).pipe(Effect.provide(_ProbeLayer)),
 );
 
 // --- [FUNCTIONS] -------------------------------------------------------------

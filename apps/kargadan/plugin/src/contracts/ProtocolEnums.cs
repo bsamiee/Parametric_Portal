@@ -9,7 +9,6 @@ namespace ParametricPortal.Kargadan.Plugin.src.contracts;
 public sealed partial class ErrorCode {
     public static readonly ErrorCode ProtocolIncompatible = new("PROTOCOL_INCOMPATIBLE");
     public static readonly ErrorCode TokenInvalid = new("TOKEN_INVALID");
-    public static readonly ErrorCode TokenExpired = new("TOKEN_EXPIRED");
     public static readonly ErrorCode CapabilityUnsupported = new("CAPABILITY_UNSUPPORTED");
     public static readonly ErrorCode TransientIo = new("TRANSIENT_IO");
     public static readonly ErrorCode IdempotencyInvalid = new("IDEMPOTENCY_INVALID");
@@ -19,7 +18,6 @@ public sealed partial class ErrorCode {
         Map(
             protocolIncompatible: FailureClass.Fatal,
             tokenInvalid: FailureClass.Fatal,
-            tokenExpired: FailureClass.Fatal,
             capabilityUnsupported: FailureClass.Correctable,
             transientIo: FailureClass.Retryable,
             idempotencyInvalid: FailureClass.Correctable,
@@ -69,26 +67,9 @@ public sealed partial class CommandOperation {
     public static readonly CommandOperation ObjectCreate = new("write.object.create");
     public static readonly CommandOperation ObjectUpdate = new("write.object.update");
     public static readonly CommandOperation ObjectDelete = new("write.object.delete");
-    public static readonly CommandOperation ScriptRun = new("script.run");
-    public static readonly CommandOperation CatalogRhinoCommands = new("catalog.rhino.commands");
     public static readonly CommandOperation ObjectList = new("read.object.list");
     public static readonly CommandOperation SelectionManage = new("write.selection");
-    public CommandExecutionMode ExecutionMode =>
-        Map(
-            sceneSummary: CommandExecutionMode.DirectApi,
-            objectMetadata: CommandExecutionMode.DirectApi,
-            objectGeometry: CommandExecutionMode.DirectApi,
-            layerState: CommandExecutionMode.DirectApi,
-            viewState: CommandExecutionMode.DirectApi,
-            toleranceUnits: CommandExecutionMode.DirectApi,
-            viewCapture: CommandExecutionMode.DirectApi,
-            objectCreate: CommandExecutionMode.DirectApi,
-            objectUpdate: CommandExecutionMode.DirectApi,
-            objectDelete: CommandExecutionMode.DirectApi,
-            scriptRun: CommandExecutionMode.Script,
-            catalogRhinoCommands: CommandExecutionMode.DirectApi,
-            objectList: CommandExecutionMode.DirectApi,
-            selectionManage: CommandExecutionMode.DirectApi);
+    public static readonly CommandOperation InternalUndoExecution = new("internal.undo.execution");
     public CommandCategory Category =>
         Map(
             sceneSummary: CommandCategory.Read,
@@ -101,15 +82,13 @@ public sealed partial class CommandOperation {
             objectCreate: CommandCategory.Write,
             objectUpdate: CommandCategory.Write,
             objectDelete: CommandCategory.Write,
-            scriptRun: CommandCategory.Geometric,
-            catalogRhinoCommands: CommandCategory.Read,
             objectList: CommandCategory.Read,
-            selectionManage: CommandCategory.Write);
-    public static bool SupportsCapability(string capability) =>
-        TryGet((capability ?? string.Empty).Trim(), out CommandOperation? _);
+            selectionManage: CommandCategory.Write,
+            internalUndoExecution: CommandCategory.Write);
 }
 [SmartEnum<string>]
 public sealed partial class SceneObjectType {
+    public static readonly SceneObjectType Point = new("Point");
     public static readonly SceneObjectType Brep = new("Brep");
     public static readonly SceneObjectType Mesh = new("Mesh");
     public static readonly SceneObjectType Curve = new("Curve");
@@ -133,9 +112,8 @@ public sealed partial class CommandResultStatus {
 public sealed partial class EventType {
     public static readonly EventType ObjectsChanged = new("objects.changed");
     public static readonly EventType LayersChanged = new("layers.changed");
-    public static readonly EventType ViewChanged = new("view.changed");
     public static readonly EventType UndoRedo = new("undo.redo");
-    public static readonly EventType SessionLifecycle = new("session.lifecycle");
+    public static readonly EventType CommandLifecycle = new("command.lifecycle");
     public static readonly EventType StreamCompacted = new("stream.compacted");
     public static readonly EventType SelectionChanged = new("selection.changed");
     public static readonly EventType MaterialChanged = new("material.changed");
@@ -143,14 +121,8 @@ public sealed partial class EventType {
     public static readonly EventType TablesChanged = new("tables.changed");
 }
 [SmartEnum<string>]
-public sealed partial class CommandExecutionMode {
-    public static readonly CommandExecutionMode DirectApi = new("direct_api");
-    public static readonly CommandExecutionMode Script = new("script");
-}
-[SmartEnum<string>]
 public sealed partial class CommandDispatchMode {
     public static readonly CommandDispatchMode Direct = new("direct");
-    public static readonly CommandDispatchMode Script = new("script");
 }
 [SmartEnum<string>]
 public sealed partial class CommandCategory {

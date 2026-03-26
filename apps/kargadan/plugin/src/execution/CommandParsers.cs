@@ -5,6 +5,7 @@ using System.Runtime.InteropServices;
 using System.Text.Json;
 using LanguageExt;
 using LanguageExt.Common;
+using ParametricPortal.Kargadan.Plugin.src.contracts;
 using Rhino.DocObjects;
 using static LanguageExt.Prelude;
 
@@ -40,6 +41,7 @@ internal static class JsonFields {
     internal const string Angle = "angle";
     internal const string Axis = "axis";
     internal const string Center = "center";
+    internal const string CommandId = "commandId";
     internal const string Detail = "detail";
     internal const string Dpi = "dpi";
     internal const string Factor = "factor";
@@ -51,18 +53,21 @@ internal static class JsonFields {
     internal const string Line = "line";
     internal const string Name = "name";
     internal const string NamePattern = "namePattern";
+    internal const string ObjectId = "objectId";
     internal const string ObjectIds = "objectIds";
+    internal const string ObjectRefs = "objectRefs";
     internal const string ObjectType = "objectType";
     internal const string Origin = "origin";
     internal const string PlaneNormal = "planeNormal";
     internal const string PlaneOrigin = "planeOrigin";
     internal const string Point = "point";
     internal const string RealtimePasses = "realtimePasses";
-    internal const string Script = "script";
+    internal const string RequestId = "requestId";
     internal const string To = "to";
     internal const string Transform = "transform";
     internal const string TransparentBackground = "transparentBackground";
     internal const string Translation = "translation";
+    internal const string TypeTag = "typeTag";
     internal const string Width = "width";
 }
 internal static class ParameterTypes {
@@ -71,6 +76,8 @@ internal static class ParameterTypes {
     internal const string Line = "{from:number[3],to:number[3]}";
     internal const string Number = "number";
     internal const string Number3 = "number[3]";
+    internal const string ObjectRef = "{objectId:uuid,typeTag:string}";
+    internal const string ObjectRefArray = "{objectId:uuid,typeTag:string}[]";
     internal const string String = "string";
     internal const string StringArray = "string[]";
 }
@@ -291,6 +298,68 @@ internal static class CommandParsers {
                     .Map(static (Seq<Guid> guids) => guids),
             true => FinFail<Seq<Guid>>(ParseError(field, "an array of GUID strings")),
             _ => FinFail<Seq<Guid>>(Error.New($"{field} is required.")),
+        };
+    internal static Fin<Guid> ParseGuid(JsonElement payload, string field) =>
+        payload.TryGetProperty(field, out JsonElement element) switch {
+            true when element.ValueKind == JsonValueKind.String && Guid.TryParse(element.GetString(), out Guid guid) => FinSucc(guid),
+            true => FinFail<Guid>(ParseError(field, "a GUID string")),
+            _ => FinFail<Guid>(Error.New($"{field} is required.")),
+        };
+    internal static Fin<Option<Seq<SceneObjectRef>>> ParseOptionalSceneObjectRefs(JsonElement payload) =>
+        payload.TryGetProperty(JsonFields.ObjectRefs, out JsonElement element) switch {
+            false => FinSucc<Option<Seq<SceneObjectRef>>>(None),
+            true => ParseSceneObjectRefArray(element).Map(Some),
+        };
+    private static Fin<Seq<SceneObjectRef>> ParseSceneObjectRefArray(JsonElement element) =>
+        element.ValueKind switch {
+            JsonValueKind.Array =>
+                toSeq(element.EnumerateArray().ToArray())
+                    .Map(ParseSceneObjectRef)
+                    .Sequence()
+                    .Map(static (Seq<SceneObjectRef> refs) => refs),
+            _ => FinFail<Seq<SceneObjectRef>>(Error.New($"{JsonFields.ObjectRefs} must be an array when provided.")),
+        };
+    private static Fin<SceneObjectRef> ParseSceneObjectRef(JsonElement element) =>
+        element.ValueKind switch {
+            JsonValueKind.Object =>
+                from objectIdRaw in ParseRequiredPropertyAsString(
+                    parent: element,
+                    propertyName: JsonFields.ObjectId,
+                    errorMessage: $"{JsonFields.ObjectRefs} entries require {JsonFields.ObjectId} as a string.")
+                from typeTagRaw in ParseRequiredPropertyAsString(
+                    parent: element,
+                    propertyName: JsonFields.TypeTag,
+                    errorMessage: $"{JsonFields.ObjectRefs} entries require {JsonFields.TypeTag} as a string.")
+                from objectIdGuid in Guid.TryParse(objectIdRaw, out Guid parsedObjectId) switch {
+                    true => FinSucc(parsedObjectId),
+                    _ => FinFail<Guid>(Error.New($"{JsonFields.ObjectRefs} entries require {JsonFields.ObjectId} to be a valid GUID.")),
+                }
+                from objectId in DomainBridge.ParseValueObject<ObjectId, Guid>(candidate: objectIdGuid)
+                from typeTag in DomainBridge.ParseSmartEnum<SceneObjectType, string>(candidate: typeTagRaw)
+                    .BiMap(
+                        Succ: static (SceneObjectType parsedType) => parsedType,
+                        Fail: static (_) => Error.New($"{JsonFields.ObjectRefs} entries require a supported {JsonFields.TypeTag}."))
+                from sceneObjectRef in SceneObjectRef.Create(
+                    objectId: objectId,
+                    typeTag: typeTag)
+                select sceneObjectRef,
+            _ => FinFail<SceneObjectRef>(Error.New($"{JsonFields.ObjectRefs} entries must be objects.")),
+        };
+    private static Fin<string> ParseRequiredPropertyAsString(
+        JsonElement parent,
+        string propertyName,
+        string errorMessage) =>
+        parent.TryGetProperty(propertyName, out JsonElement element) switch {
+            true when element.ValueKind == JsonValueKind.String => FinSucc((element.GetString() ?? string.Empty).Trim()),
+            _ => FinFail<string>(Error.New(errorMessage)),
+        };
+    private static Fin<int> ParseRequiredPropertyAsInt(
+        JsonElement parent,
+        string propertyName,
+        string errorMessage) =>
+        parent.TryGetProperty(propertyName, out JsonElement element) switch {
+            true when element.TryGetInt32(out int value) => FinSucc(value),
+            _ => FinFail<int>(Error.New(errorMessage)),
         };
 
     // --- [TRANSFORM_PARSING] -------------------------------------------------

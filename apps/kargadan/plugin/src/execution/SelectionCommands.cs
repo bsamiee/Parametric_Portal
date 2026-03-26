@@ -13,12 +13,12 @@ internal static class SelectionCommands {
     internal static Fin<JsonElement> HandleSelection(
         RhinoDoc doc,
         CommandEnvelope envelope) =>
-        CommandParsers.ParseSelectionAction(envelope.Payload).Bind((string action) =>
+        CommandParsers.ParseSelectionAction(envelope.Args).Bind((string action) =>
             action switch {
                 "clear" => ApplySelection(doc: doc, objectIds: Seq<Guid>(), clearFirst: true, status: TextValues.SelectionCleared),
-                "set" => CommandParsers.ParseGuidArray(envelope.Payload, JsonFields.ObjectIds).Bind((Seq<Guid> ids) =>
+                "set" => CommandParsers.ParseGuidArray(envelope.Args, JsonFields.ObjectIds).Bind((Seq<Guid> ids) =>
                     ApplySelection(doc: doc, objectIds: ids, clearFirst: true, status: TextValues.SelectionSet)),
-                "add" => CommandParsers.ParseGuidArray(envelope.Payload, JsonFields.ObjectIds).Bind((Seq<Guid> ids) =>
+                "add" => CommandParsers.ParseGuidArray(envelope.Args, JsonFields.ObjectIds).Bind((Seq<Guid> ids) =>
                     ApplySelection(doc: doc, objectIds: ids, clearFirst: false, status: TextValues.SelectionAdded)),
                 _ => FinFail<JsonElement>(Error.New($"{JsonFields.Action} must be: set|add|clear.")),
             });

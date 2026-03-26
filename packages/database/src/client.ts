@@ -1,5 +1,5 @@
 /**
- * Provide PostgreSQL 18.2 connection pooling via @effect/sql-pg.
+ * Provide PostgreSQL 18.3 connection pooling via @effect/sql-pg.
  * Layer configuration, health check, statement statistics, tenant context for RLS.
  */
 import { PgClient } from '@effect/sql-pg';
@@ -10,8 +10,26 @@ import { Config, Context, Data, Duration, Effect, FiberRef, Function as F, Layer
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
+const ClientCapabilities = {
+    bootstrapExtensions: {
+        btreeGin:      { extension: 'btree_gin' },
+        fuzzystrmatch: { extension: 'fuzzystrmatch' },
+        partman:       { extension: 'pg_partman' },
+        pgTrgm:        { extension: 'pg_trgm' },
+        unaccent:      { extension: 'unaccent' },
+        vector:        { extension: 'vector', versionLabel: '0.8.2+' },
+    },
+    serverVersionLabel: '18.3+',
+    serverVersionMin:   180003,
+    supportedMajor:     18,
+    vector: {
+        extension:    'vector',
+        hnswSettings: ['hnsw.iterative_scan', 'hnsw.ef_search', 'hnsw.max_scan_tuples', 'hnsw.scan_mem_multiplier'] as const,
+        versionLabel: '0.8.2+',
+    },
+} as const;
 const _CONFIG = {
-    capabilities: { serverVersionMin: 180000 },
+    capabilities: ClientCapabilities,
     health: { timeout: Duration.seconds(5) },
     pgOptions: {
         extractPattern: /-c\s+[^ ]+/g,
@@ -30,9 +48,74 @@ const _CONFIG = {
     },
     tenant: {id: {system: '00000000-0000-7000-8000-000000000000', unspecified: '00000000-0000-7000-8000-ffffffffffff',} as const,},
 } as const;
+const _CAPABILITY_QUERY = `
+    SELECT
+        current_setting('server_version_num')::int AS server_version_num,
+        current_setting('server_version') AS server_version,
+        EXISTS (SELECT 1 FROM pg_extension WHERE extname = '${ClientCapabilities.vector.extension}') AS has_vector,
+        ARRAY(
+            SELECT setting_name
+            FROM unnest(ARRAY[${ClientCapabilities.vector.hnswSettings.map((setting) => `'${setting}'`).join(', ')}]) AS setting_name
+            WHERE current_setting(setting_name, true) IS NULL
+        ) AS missing_hnsw`;
+const _BOOTSTRAP_CAPABILITY_QUERY = `
+    SELECT
+        current_setting('server_version_num')::int AS server_version_num,
+        current_setting('server_version') AS server_version,
+        ARRAY(
+            SELECT extension_name
+            FROM (
+                VALUES
+                    (
+                        '${ClientCapabilities.bootstrapExtensions.vector.extension}',
+                        EXISTS (
+                            SELECT 1
+                            FROM pg_available_extension_versions
+                            WHERE name = '${ClientCapabilities.bootstrapExtensions.vector.extension}'
+                              AND string_to_array(regexp_replace(version, '[^0-9.]', '', 'g'), '.')::int[] >= ARRAY[0, 8, 2]
+                        )
+                    ),
+                    (
+                        '${ClientCapabilities.bootstrapExtensions.partman.extension}',
+                        EXISTS (
+                            SELECT 1 FROM pg_available_extensions WHERE name = '${ClientCapabilities.bootstrapExtensions.partman.extension}'
+                        )
+                    ),
+                    (
+                        '${ClientCapabilities.bootstrapExtensions.pgTrgm.extension}',
+                        EXISTS (
+                            SELECT 1 FROM pg_available_extensions WHERE name = '${ClientCapabilities.bootstrapExtensions.pgTrgm.extension}'
+                        )
+                    ),
+                    (
+                        '${ClientCapabilities.bootstrapExtensions.btreeGin.extension}',
+                        EXISTS (
+                            SELECT 1 FROM pg_available_extensions WHERE name = '${ClientCapabilities.bootstrapExtensions.btreeGin.extension}'
+                        )
+                    ),
+                    (
+                        '${ClientCapabilities.bootstrapExtensions.fuzzystrmatch.extension}',
+                        EXISTS (
+                            SELECT 1 FROM pg_available_extensions WHERE name = '${ClientCapabilities.bootstrapExtensions.fuzzystrmatch.extension}'
+                        )
+                    ),
+                    (
+                        '${ClientCapabilities.bootstrapExtensions.unaccent.extension}',
+                        EXISTS (
+                            SELECT 1 FROM pg_available_extensions WHERE name = '${ClientCapabilities.bootstrapExtensions.unaccent.extension}'
+                        )
+                    )
+            ) AS required(extension_name, available)
+            WHERE NOT available
+        ) AS missing_extensions`;
 
 // --- [ERRORS] ----------------------------------------------------------------
 
+class ClientBootstrapError extends Data.TaggedError('ClientBootstrapError')<{
+    readonly missingExtensions: readonly string[];
+    readonly serverVersion: string;
+    readonly serverVersionNum: number;
+}> {}
 class ClientCapabilityError extends Data.TaggedError('ClientCapabilityError')<{
     readonly hasVector: boolean;
     readonly missingHnsw: readonly string[];
@@ -66,17 +149,9 @@ const _isValidTrigramThresholds = (values: {
     && _isValidTrigramThreshold(values['wordSimilarity'])
     && _isValidTrigramThreshold(values['strictWordSimilarity']);
 const _guardCapabilities = (db: SqlClient.SqlClient) =>
-    db<{ hasVector: boolean; missingHnsw: string[]; serverVersion: string; serverVersionNum: number }>`
-        SELECT
-            current_setting('server_version_num')::int AS server_version_num,
-            current_setting('server_version') AS server_version,
-            EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'vector') AS has_vector,
-            ARRAY(
-                SELECT setting_name
-                FROM unnest(ARRAY['hnsw.iterative_scan', 'hnsw.ef_search', 'hnsw.max_scan_tuples', 'hnsw.scan_mem_multiplier']) AS setting_name
-                WHERE current_setting(setting_name, true) IS NULL
-            ) AS missing_hnsw`
+    db.unsafe(_CAPABILITY_QUERY)
         .pipe(
+            Effect.map((rows) => rows as Array<{ hasVector: boolean; missingHnsw: string[]; serverVersion: string; serverVersionNum: number }>),
             Effect.flatMap((rows) => Option.fromNullable(rows[0]).pipe(Option.match({
                 onNone: () => Effect.dieMessage('Capability guard query returned no rows'),
                 onSome: Effect.succeed,
@@ -90,10 +165,29 @@ const _guardCapabilities = (db: SqlClient.SqlClient) =>
             ),
             Effect.asVoid,
         );
+const _guardBootstrapCapabilities = (db: SqlClient.SqlClient) =>
+    db.unsafe(_BOOTSTRAP_CAPABILITY_QUERY)
+        .pipe(
+            Effect.map((rows) => rows as Array<{ missingExtensions: string[]; serverVersion: string; serverVersionNum: number }>),
+            Effect.flatMap((rows) => Option.fromNullable(rows[0]).pipe(Option.match({
+                onNone: () => Effect.dieMessage('Bootstrap capability query returned no rows'),
+                onSome: Effect.succeed,
+            }))),
+            Effect.filterOrFail(
+                (capability) =>
+                    capability.serverVersionNum >= _CONFIG.capabilities.serverVersionMin
+                    && capability.missingExtensions.length === 0,
+                (capability) => new ClientBootstrapError(capability),
+            ),
+            Effect.asVoid,
+        );
 
 // --- [LAYERS] ----------------------------------------------------------------
 
-const layerFromConfig = (cfg: Record<string, unknown>) =>
+const _layerFromConfig = (
+    cfg: Record<string, unknown>,
+    guardCapabilities: (db: SqlClient.SqlClient) => Effect.Effect<void, unknown>,
+) =>
     Layer.unwrapEffect(
         Effect.gen(function* () {
             const sslConfig = cfg['ssl'] as Record<string, unknown>;
@@ -158,10 +252,12 @@ const layerFromConfig = (cfg: Record<string, unknown>) =>
                 transformResultNames: Config.succeed(S.snakeToCamel),
                 url:                  Config.succeed(Redacted.make(parsedUrl.toString())),
             }).pipe(
-                Layer.tap((context) => _guardCapabilities(Context.get(context, SqlClient.SqlClient))),
+                Layer.tap((context) => guardCapabilities(Context.get(context, SqlClient.SqlClient))),
             );
         }),
     );
+const bootstrapLayerFromConfig = (cfg: Record<string, unknown>) => _layerFromConfig(cfg, _guardBootstrapCapabilities);
+const layerFromConfig = (cfg: Record<string, unknown>) => _layerFromConfig(cfg, _guardCapabilities);
 
 // --- [OBJECT] ----------------------------------------------------------------
 
@@ -194,7 +290,8 @@ const Client = (() => {
         });
     };
     return {
-        health:     _health('db.checkHealth', (db) => db`SELECT 1`),
+        bootstrapLayerFromConfig,
+        health: _health('db.checkHealth', (db) => db`SELECT 1`),
         healthDeep: _health('db.checkHealthDeep', (db) => db.withTransaction(db`SELECT 1`)),
         layerFromConfig,
         listen: {
@@ -271,3 +368,6 @@ const Client = (() => {
 // --- [EXPORT] ----------------------------------------------------------------
 
 export { Client };
+export { ClientBootstrapError };
+export { ClientCapabilities };
+export type ClientConfig = Parameters<typeof layerFromConfig>[0];

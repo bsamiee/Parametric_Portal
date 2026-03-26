@@ -1,4 +1,8 @@
 using System;
+using System.Diagnostics.CodeAnalysis;
+using System.IO;
+using System.Reflection;
+using System.Security.Cryptography;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -14,6 +18,7 @@ using ParametricPortal.Kargadan.Plugin.src.transport;
 using Rhino;
 using Rhino.DocObjects;
 using Rhino.PlugIns;
+using Thinktecture;
 using static LanguageExt.Prelude;
 using Duration = NodaTime.Duration;
 namespace ParametricPortal.Kargadan.Plugin.src.boundary;
@@ -35,6 +40,11 @@ public sealed class KargadanPlugin : PlugIn {
     private static readonly Atom<Option<KargadanPlugin>> _instance = Atom(Option<KargadanPlugin>.None);
     private readonly TimeProvider _timeProvider;
     private readonly Atom<Option<BoundaryState>> _state = Atom(Option<BoundaryState>.None);
+    private static string PluginRevisionText =>
+        typeof(KargadanPlugin).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion is string value
+            && !string.IsNullOrWhiteSpace(value)
+                ? value.Trim()
+                : typeof(KargadanPlugin).Assembly.GetName().Version?.ToString() ?? "0.0.0";
     public KargadanPlugin() : this(timeProvider: TimeProvider.System) { }
     internal KargadanPlugin(TimeProvider timeProvider) => _timeProvider = timeProvider;
     public override PlugInLoadTime LoadTime => PlugInLoadTime.AtStartup;
@@ -45,6 +55,7 @@ public sealed class KargadanPlugin : PlugIn {
             Instant now = Instant.FromDateTimeOffset(_timeProvider.GetUtcNow());
             Fin<SessionSnapshot> opened = state.SessionHost.Open(
                 identity: init.Identity,
+                token: init.Auth.Token,
                 heartbeatInterval: HandshakeHeartbeatInterval,
                 heartbeatTimeout: HandshakeHeartbeatTimeout,
                 now: now);
@@ -55,10 +66,9 @@ public sealed class KargadanPlugin : PlugIn {
                     SupportedMinor: 0,
                     Server: new ServerInfo(
                         RhinoVersion: VersionString.Create(RhinoApp.Version.ToString()),
-                        PluginRevision: VersionString.Create(Version.ToString())),
+                        PluginRevision: VersionString.Create(PluginRevisionText)),
                     SupportedCapabilities: CommandExecutor.SupportedCapabilities,
-                    Catalog: CommandExecutor.CommandCatalog,
-                    Now: now));
+                    Catalog: CommandExecutor.CommandCatalog));
             return opened.Bind((_) =>
                 negotiated switch {
                     HandshakeEnvelope.Init => FinFail<HandshakeEnvelope>(
@@ -99,7 +109,14 @@ public sealed class KargadanPlugin : PlugIn {
         expiresOnUtc: "2026-08-22T00:00:00Z")]
     private static Task<Fin<T>> RunOnUiThreadAsync<T>(Func<Fin<T>> operation) {
         TaskCompletionSource<Fin<T>> tcs = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        RhinoApp.InvokeOnUiThread(new Action(() => tcs.TrySetResult(operation())));
+        RhinoApp.InvokeOnUiThread(new Action(() =>
+            _ = tcs.TrySetResult(
+                Try(() => operation()).Match(
+                    Succ: static result => result,
+                    Fail: error => {
+                        RhinoApp.WriteLine($"[Kargadan] UI dispatch failed: {error}");
+                        return FinFail<T>(Error.New(message: error.Message));
+                    }))));
         return tcs.Task;
     }
     private async Task<Fin<JsonElement>> DispatchHandshakeAsync(
@@ -124,12 +141,16 @@ public sealed class KargadanPlugin : PlugIn {
                 Instant now = Instant.FromDateTimeOffset(_timeProvider.GetUtcNow());
                 return state.SessionHost.Timeout(now).Bind((SessionSnapshot snapshot) =>
                     snapshot.Phase switch {
-                        SessionPhase.Active => CommandRouter.Decode(
+                        SessionPhase.Active active => CommandRouter.Decode(
                                 envelope: message,
                                 sessionIdentity: snapshot.Identity)
-                            .Map((CommandEnvelope envelope) => new DecodedCommand(
-                                State: state,
-                                Envelope: envelope)),
+                            .Bind((CommandEnvelope envelope) =>
+                                active.Ack.Catalog.Exists(entry => string.Equals(entry.Id, envelope.CommandId.Key, StringComparison.Ordinal))
+                                || envelope.CommandId.Equals(CommandOperation.InternalUndoExecution)
+                                    ? FinSucc(new DecodedCommand(
+                                        State: state,
+                                        Envelope: envelope))
+                                    : FinFail<DecodedCommand>(Error.New(message: $"CommandId '{envelope.CommandId.Key}' was not accepted during handshake negotiation."))),
                         SessionPhase.Connected => FinFail<DecodedCommand>(
                             Error.New(message: "Session is not active; handshake is not fully negotiated.")),
                         SessionPhase.Terminal terminal => FinFail<DecodedCommand>(
@@ -152,19 +173,48 @@ public sealed class KargadanPlugin : PlugIn {
                     TransportJson.Response(resultEnvelope, JsonOptions))
             ).WaitAsync(timeoutCts.Token).ConfigureAwait(false);
         }
-        return await (decoded.IsFail
-            ? Task.FromResult(FinFail<JsonElement>(Error.New(message: "Command envelope decode failed.")))
-            : ExecuteDecodedAsync(decoded.IfFail(default(DecodedCommand)))).ConfigureAwait(false);
+        Task<Fin<JsonElement>> responseTask =
+            decoded
+                .Map(ExecuteDecodedAsync)
+                .IfFail(static error => Task.FromResult(FinFail<JsonElement>(Error.New(message: error.Message))));
+        return await responseTask.ConfigureAwait(false);
     }
     private static JsonElement BuildCommandAckPayload(CommandEnvelope envelope) =>
         TransportJson.CommandAck(envelope, JsonOptions);
     private static FailureReason ResolveFailureReason(Error error) =>
         FailureMapping.FromError(error);
+    private static Fin<RhinoDoc> ResolveDocument() =>
+        Optional(RhinoDoc.ActiveDoc)
+            .ToFin(Error.New(message: "No active Rhino document."))
+            .Match(
+                Succ: static (RhinoDoc doc) => FinSucc(doc),
+                Fail: static _ => Optional(RhinoDoc.OpenDocuments().FirstOrDefault())
+                    .ToFin(Error.New(message: "No open Rhino document is available."))
+                    .Match(
+                        Succ: static (RhinoDoc doc) => FinSucc(doc),
+                        Fail: static _ => ResolveDocumentFromTemplate()));
+    private static Fin<RhinoDoc> ResolveDocumentFromTemplate() =>
+        Optional(Rhino.ApplicationSettings.FileSettings.TemplateFile)
+            .Filter(File.Exists)
+            .Match(
+                Some: ResolveDocumentFromTemplateFile,
+                None: () => Optional(Rhino.ApplicationSettings.FileSettings.TemplateFolder)
+                    .Map(static (string folder) => Path.Combine(folder, "Default Template.3dm"))
+                    .Filter(File.Exists)
+                    .Match(
+                        Some: ResolveDocumentFromTemplateFile,
+                        None: () => FinFail<RhinoDoc>(Error.New(message: "No active Rhino document and no Rhino template file is available."))));
+    [SuppressMessage(
+        category: "Reliability",
+        checkId: "CA2000:Dispose objects before losing scope",
+        Justification = "RhinoDoc.Open transfers document ownership to Rhino's document manager.")]
+    private static Fin<RhinoDoc> ResolveDocumentFromTemplateFile(string templatePath) =>
+        Optional(RhinoDoc.Open(templatePath, out _))
+            .ToFin(Error.New(message: "Rhino failed to open a document from the default template."));
     private Fin<CommandResultEnvelope> ExecuteCommand(
         BoundaryState state,
         CommandEnvelope envelope) =>
-        Optional(RhinoDoc.ActiveDoc)
-            .ToFin(Error.New(message: "No active Rhino document."))
+        ResolveDocument()
             .Bind((RhinoDoc doc) =>
                 state.SessionHost.RegisterIdempotency(envelope).Bind((Option<RequestId> duplicateRequestId) =>
                     duplicateRequestId.Match(
@@ -181,7 +231,7 @@ public sealed class KargadanPlugin : PlugIn {
                                     Execution: metadata,
                                     TelemetryContext: envelope.TelemetryContext))
                             .Bind((CommandResultEnvelope result) =>
-                                state.SessionEvents.PublishLifecycleEvent(result: result).Map((_) => result)),
+                                state.SessionEvents.PublishCommandLifecycleEvent(result: result).Map((_) => result)),
                         None: () => {
                             long startedAtTimestamp = _timeProvider.GetTimestamp();
                             Fin<JsonElement> executionResult = CommandExecutor.Execute(
@@ -213,16 +263,15 @@ public sealed class KargadanPlugin : PlugIn {
                                                 Details: None),
                                             TelemetryContext: envelope.TelemetryContext)))
                                 .Bind((CommandResultEnvelope result) =>
-                                    state.SessionEvents.PublishLifecycleEvent(result: result).Map((_) => result));
+                                    state.SessionEvents.PublishCommandLifecycleEvent(result: result).Map((_) => result));
                         })));
-    private Fin<CommandResultEnvelope> BuildResult(
+    private static Fin<CommandResultEnvelope> BuildResult(
         CommandEnvelope envelope,
         int durationMs,
         Func<ExecutionMetadata, CommandResultEnvelope> build) =>
         ExecutionMetadata.Create(
             durationMs: durationMs,
-            pluginRevision: VersionString.Create(Version.ToString()),
-            sourceRevision: CurrentSourceRevision())
+            pluginRevision: VersionString.Create(PluginRevisionText))
         .Match(
             Succ: (ExecutionMetadata metadata) => FinSucc(build(metadata)),
             Fail: static (Seq<Error> errors) =>
@@ -232,8 +281,6 @@ public sealed class KargadanPlugin : PlugIn {
         Math.Max(
             0,
             (int)Math.Round(_timeProvider.GetElapsedTime(startedAtTimestamp).TotalMilliseconds));
-    private static int CurrentSourceRevision() =>
-        (int)Math.Min((long)RhinoObject.NextRuntimeSerialNumber, int.MaxValue);
     private Fin<JsonElement> SerializeHeartbeat(JsonElement message) {
         Instant now = Instant.FromDateTimeOffset(_timeProvider.GetUtcNow());
         return ReadState().Bind((BoundaryState state) =>
@@ -253,10 +300,15 @@ public sealed class KargadanPlugin : PlugIn {
         ticket: "TRAN-03",
         expiresOnUtc: "2026-08-22T00:00:00Z")]
     protected override LoadReturnCode OnLoad(ref string errorMessage) {
+        string transportTokenCandidate = Convert.ToHexString(RandomNumberGenerator.GetBytes(24));
+        if (!TokenValue.TryCreate(transportTokenCandidate, out TokenValue transportToken, out ValidationError? validationError)) {
+            errorMessage = $"Kargadan transport initialization failed: {validationError?.Message ?? "transport token generation failed."}";
+            return LoadReturnCode.ErrorNoDialog;
+        }
         _ = _instance.Swap((_) => Some(this));
         _ = _state.Swap((previousState) => {
             EventPublisher eventPublisher = new();
-            SessionHost sessionHost = new();
+            SessionHost sessionHost = new(transportToken: transportToken);
             SessionEventPublisher sessionEvents = new(
                 eventPublisher: eventPublisher,
                 sessionHost: sessionHost,
@@ -272,7 +324,14 @@ public sealed class KargadanPlugin : PlugIn {
             WebSocketHost webSocketHost = new(
                 dispatcher: DispatchMessageAsync,
                 drainPublishedEvents: eventPublisher.Drain,
-                requeueEvents: eventPublisher.Requeue);
+                requeueEvents: eventPublisher.Requeue,
+                transportToken: transportToken,
+                onConnectionClosed: () => {
+                    Instant disconnectedAt = Instant.FromDateTimeOffset(_timeProvider.GetUtcNow());
+                    _ = eventPublisher.Drain();
+                    _ = sessionHost.Close(reason: "transport-disconnect", now: disconnectedAt);
+                    return unit;
+                });
             BoundaryState boundaryState = new(
                 SessionEvents: sessionEvents,
                 SessionHost: sessionHost,

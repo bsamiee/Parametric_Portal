@@ -1,0 +1,19 @@
+{
+    "database": {
+        "composeRelativePath": "docker-compose.release.yml",
+        "digest": "sha256:pending",
+        "image": "ghcr.io/bsamiee/parametric_portal/kargadan-postgres@sha256:pending",
+        "requiredServerVersion": "18.3+",
+        "requiredVectorVersion": "0.8.2+"
+    },
+    "plugin": {
+        "bundleRelativePath": "plugin/kargadan-rhino-0.1.0-mac.yak",
+        "packageName": "kargadan-rhino",
+        "rhinoChannel": "wip",
+        "rhinoMajor": 9,
+        "rhpFileName": "ParametricPortal.Kargadan.Plugin.rhp",
+        "sha256": "",
+        "version": "0.1.0"
+    },
+    "version": "0.1.0"
+}

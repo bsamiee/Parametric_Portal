@@ -5,7 +5,7 @@ import { HarnessConfig } from '../../../apps/kargadan/harness/src/config.ts';
 import { CommandDispatch } from '../../../apps/kargadan/harness/src/protocol/dispatch.ts';
 import type { CorrelationId, SpanId, TraceId } from '../../../apps/kargadan/harness/src/protocol/schemas.ts';
 import type { Envelope, ObjectTypeTag } from '../../../apps/kargadan/harness/src/protocol/schemas.ts';
-import { KargadanSocketClientLive, ReconnectionSupervisor } from '../../../apps/kargadan/harness/src/socket.ts';
+import { KargadanSocketClientLive, readPortFile, ReconnectionSupervisor } from '../../../apps/kargadan/harness/src/socket.ts';
 import { Effect, Layer, Match, Option, Schema as S } from 'effect';
 import { expect } from 'vitest';
 
@@ -57,7 +57,7 @@ const makeCommand = (input: {
     readonly commandId: string;
     readonly identityBase: Envelope.IdentityBase;
     readonly idempotency?: { readonly idempotencyKey: string; readonly payloadHash: string };
-    readonly objectRefs?: ReadonlyArray<{ readonly objectId: string; readonly sourceRevision: number; readonly typeTag: typeof ObjectTypeTag.Type }>;
+    readonly objectRefs?: ReadonlyArray<{ readonly objectId: string; readonly typeTag: typeof ObjectTypeTag.Type }>;
     readonly operationTag: string;
     readonly undoScope?: string;
 }) => {
@@ -118,7 +118,7 @@ const withLiveDispatch = <A, E>(
     Effect.scoped(
         Effect.gen(function* () {
             yield* assertNoFakeFlags;
-            const [dispatch, cfg] = yield* Effect.all([CommandDispatch, HarnessConfig]);
+            const [dispatch, cfg, transport] = yield* Effect.all([CommandDispatch, HarnessConfig, readPortFile()]);
             yield* Effect.forkScoped(dispatch.start()).pipe(Effect.asVoid);
             const identityBase = {
                 appId: cfg.appId,
@@ -128,7 +128,7 @@ const withLiveDispatch = <A, E>(
             const ack = yield* dispatch.handshake({
                 ...identityBase,
                 requestId: crypto.randomUUID(),
-                token: cfg.sessionToken,
+                token: transport.sessionToken,
             } satisfies Envelope.Identity & { readonly token: string }).pipe(
                 Effect.flatMap((value) => S.decodeUnknown(_HandshakeAckCodec)(value)),
             );

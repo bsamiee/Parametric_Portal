@@ -5,7 +5,7 @@
  * Extensions: pg_trgm btree_gin fuzzystrmatch unaccent vector pg_partman.
  * Partitions: sessions(created_at), audit_logs(id), notifications(id) monthly via pg_partman.
  * Multivariate stats: users/permissions(app_id,role), jobs(app_id,status), audit_logs(app_id,target_type),
- *   notifications(app_id,status,channel), search_documents(scope_id,entity_type), search_embeddings(provider,model,dimensions).
+ *   notifications(app_id,status,channel), search_documents(scope_id,entity_type), search_embeddings(provider,dimensions).
  */
 import { SqlClient } from '@effect/sql';
 import { Effect } from 'effect';
@@ -573,15 +573,19 @@ export default Effect.gen(function* () {
             NULLIF(p_display_text, ''), NULLIF(p_content_text, ''),
             NULLIF((SELECT string_agg(value, ' ') FROM jsonb_each_text(coalesce(p_metadata, '{}'::jsonb))), '')))), '\s+', ' ', 'g')) $$;
         CREATE TEXT SEARCH CONFIGURATION parametric_search (COPY = english);
-        ALTER TEXT SEARCH CONFIGURATION parametric_search ALTER MAPPING FOR hword, hword_part, word WITH parametric_unaccent, english_stem`);
+        ALTER TEXT SEARCH CONFIGURATION parametric_search ALTER MAPPING FOR hword, hword_part, word WITH parametric_unaccent, english_stem;
+        CREATE OR REPLACE FUNCTION is_supported_search_embedding_profile(p_provider text, p_dimensions integer)
+            RETURNS boolean LANGUAGE sql IMMUTABLE PARALLEL SAFE AS $$
+            SELECT p_provider IN ('openai', 'gemini') AND p_dimensions = 1536 $$;
+        CREATE OR REPLACE FUNCTION search_embedding_profile_hash(p_embedding_input_hash text, p_provider text, p_dimensions integer)
+            RETURNS text LANGUAGE sql IMMUTABLE PARALLEL SAFE AS $$
+            SELECT md5(coalesce(p_embedding_input_hash, '') || E'\x1F' || p_provider || ':' || p_dimensions::text)
+            WHERE is_supported_search_embedding_profile(p_provider, p_dimensions) $$`);
     yield* sql.unsafe(String.raw`
         CREATE TABLE search_documents (
             entity_type TEXT NOT NULL, entity_id UUID NOT NULL, scope_id UUID,
             display_text TEXT NOT NULL, content_text TEXT, metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
             normalized_text TEXT NOT NULL, updated_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
-            document_hash TEXT GENERATED ALWAYS AS (
-                to_hex(crc32c(coalesce(display_text, '') || E'\x1F' || coalesce(content_text, '') || E'\x1F' || coalesce(metadata::text, '')))
-            ) STORED,
             search_vector TSVECTOR GENERATED ALWAYS AS (
                 setweight(to_tsvector('parametric_search', coalesce(display_text, '')), 'A') ||
                 setweight(to_tsvector('parametric_search', coalesce(content_text, '')), 'C') ||
@@ -589,16 +593,19 @@ export default Effect.gen(function* () {
             ) STORED,
             phonetic_daitch TEXT[] GENERATED ALWAYS AS (daitch_mokotoff(left(normalized_text, 255))) STORED,
             phonetic_code TEXT GENERATED ALWAYS AS (dmetaphone(left(normalized_text, 255))) STORED,
-            CONSTRAINT search_documents_pk PRIMARY KEY (entity_type, entity_id)
+            embedding_input_hash TEXT GENERATED ALWAYS AS (md5(coalesce(normalized_text, ''))) STORED,
+            CONSTRAINT search_documents_pk PRIMARY KEY (entity_type, entity_id),
+            CONSTRAINT search_documents_app_scope_required CHECK (entity_type <> 'app' OR scope_id IS NOT NULL)
         );
         CREATE TABLE search_embeddings (
             entity_type TEXT NOT NULL, entity_id UUID NOT NULL,
-            provider TEXT NOT NULL, model TEXT NOT NULL, dimensions INTEGER NOT NULL,
-            embedding HALFVEC NOT NULL, embedding_hash TEXT NOT NULL,
+            provider TEXT NOT NULL, dimensions INTEGER NOT NULL,
+            embedding HALFVEC(1536) NOT NULL, embedding_hash TEXT NOT NULL,
             updated_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
-            CONSTRAINT search_embeddings_pk PRIMARY KEY (entity_type, entity_id, provider, model, dimensions),
+            CONSTRAINT search_embeddings_pk PRIMARY KEY (entity_type, entity_id, provider, dimensions),
             CONSTRAINT search_embeddings_dimensions_positive CHECK (dimensions > 0),
             CONSTRAINT search_embeddings_dimension_match CHECK (halfvec_dims(embedding) = dimensions),
+            CONSTRAINT search_embeddings_supported_profile CHECK (is_supported_search_embedding_profile(provider, dimensions)),
             CONSTRAINT search_embeddings_document_fk FOREIGN KEY (entity_type, entity_id)
                 REFERENCES search_documents(entity_type, entity_id) ON DELETE CASCADE
         );
@@ -615,31 +622,19 @@ export default Effect.gen(function* () {
             CONSTRAINT search_terms_scope_term_unique UNIQUE NULLS NOT DISTINCT (scope_id, term));
         CREATE INDEX idx_search_terms_scope_term_trgm ON search_terms USING GIN (scope_id uuid_ops, term gin_trgm_ops) WITH (parallel_workers = 4);
         CREATE INDEX idx_search_terms_trgm_knn ON search_terms USING GIST (term gist_trgm_ops(siglen=64));
-        CREATE INDEX idx_search_embeddings_profile ON search_embeddings (provider, model, dimensions) INCLUDE (entity_type, entity_id, embedding_hash);
+        CREATE INDEX idx_search_embeddings_profile ON search_embeddings (provider, dimensions) INCLUDE (entity_type, entity_id, embedding_hash);
         CREATE INDEX idx_search_embeddings_openai_3_small ON search_embeddings
             USING hnsw ((embedding::halfvec(1536)) halfvec_ip_ops)
             WITH (m = 24, ef_construction = 200)
-            WHERE provider = 'openai' AND model = 'text-embedding-3-small' AND dimensions = 1536;
-        CREATE INDEX idx_search_embeddings_openai_3_large ON search_embeddings
-            USING hnsw ((embedding::halfvec(3072)) halfvec_ip_ops)
-            WITH (m = 24, ef_construction = 200)
-            WHERE provider = 'openai' AND model = 'text-embedding-3-large' AND dimensions = 3072;
+            WHERE provider = 'openai' AND dimensions = 1536;
         CREATE INDEX idx_search_embeddings_gemini_001 ON search_embeddings
-            USING hnsw ((embedding::halfvec(3072)) halfvec_ip_ops)
+            USING hnsw ((embedding::halfvec(1536)) halfvec_ip_ops)
             WITH (m = 24, ef_construction = 200)
-            WHERE provider = 'gemini' AND model = 'gemini-embedding-001' AND dimensions = 3072;
-        CREATE INDEX idx_search_embeddings_openai_3_large_mrl ON search_embeddings
-            USING hnsw ((embedding::halfvec(1024)) halfvec_ip_ops)
-            WITH (m = 16, ef_construction = 128)
-            WHERE provider = 'openai' AND model = 'text-embedding-3-large' AND dimensions = 3072;
-        CREATE INDEX idx_search_embeddings_gemini_001_mrl ON search_embeddings
-            USING hnsw ((embedding::halfvec(1024)) halfvec_ip_ops)
-            WITH (m = 16, ef_construction = 128)
-            WHERE provider = 'gemini' AND model = 'gemini-embedding-001' AND dimensions = 3072;
+            WHERE provider = 'gemini' AND dimensions = 1536;
         ALTER TABLE search_documents ALTER COLUMN entity_type SET STATISTICS 500;
         ALTER TABLE search_embeddings ALTER COLUMN provider SET STATISTICS 500;
         CREATE STATISTICS stat_search_documents_scope_entity (ndistinct, dependencies) ON scope_id, entity_type FROM search_documents;
-        CREATE STATISTICS stat_search_embeddings_profile_entity (ndistinct, dependencies) ON provider, model, dimensions, entity_type FROM search_embeddings`);
+        CREATE STATISTICS stat_search_embeddings_profile_entity (ndistinct, dependencies) ON provider, dimensions, entity_type FROM search_embeddings`);
     // --- [SEARCH_TRIGGERS] -----------------------------------------------------------
     yield* sql.unsafe(String.raw`
         CREATE OR REPLACE FUNCTION _search_terms_array(p_text text) RETURNS text[] LANGUAGE sql IMMUTABLE PARALLEL SAFE AS $$
@@ -662,7 +657,7 @@ export default Effect.gen(function* () {
         CREATE TRIGGER search_documents_terms_sync_update AFTER UPDATE ON search_documents FOR EACH ROW
             WHEN (OLD.scope_id IS DISTINCT FROM NEW.scope_id OR OLD.normalized_text IS DISTINCT FROM NEW.normalized_text) EXECUTE FUNCTION sync_search_terms();
         CREATE OR REPLACE VIEW search_document_source AS
-            SELECT 'app'::text AS entity_type, a.id AS entity_id, NULL::uuid AS scope_id,
+            SELECT 'app'::text AS entity_type, a.id AS entity_id, a.id AS scope_id,
                 a.name AS display_text, a.namespace AS content_text,
                 jsonb_build_object('name', a.name, 'namespace', a.namespace) AS metadata
             FROM apps a
@@ -698,13 +693,12 @@ export default Effect.gen(function* () {
                 metadata = EXCLUDED.metadata,
                 normalized_text = EXCLUDED.normalized_text,
                 updated_at = clock_timestamp() $$;
-        CREATE OR REPLACE FUNCTION sync_search_document() RETURNS TRIGGER AS $$ DECLARE _et TEXT := TG_ARGV[0]; BEGIN
-            IF TG_OP = 'DELETE' THEN
-                DELETE FROM search_documents WHERE entity_type = _et AND entity_id = OLD.id;
-                RETURN OLD;
-            END IF;
-            PERFORM upsert_search_document_from_source(_et, NEW.id);
-            RETURN NEW;
+        CREATE OR REPLACE FUNCTION sync_search_document() RETURNS TRIGGER AS $$ DECLARE _et TEXT := TG_ARGV[0]; _id UUID := coalesce(NEW.id, OLD.id); BEGIN
+            DELETE FROM search_documents d
+            WHERE d.entity_type = _et AND d.entity_id = _id
+              AND NOT EXISTS (SELECT 1 FROM search_document_source s WHERE s.entity_type = _et AND s.entity_id = _id);
+            PERFORM upsert_search_document_from_source(_et, _id);
+            RETURN coalesce(NEW, OLD);
         END; $$ LANGUAGE plpgsql;
         CREATE TRIGGER apps_search_upsert AFTER INSERT OR UPDATE OF name, namespace ON apps FOR EACH ROW EXECUTE FUNCTION sync_search_document('app');
         CREATE TRIGGER users_search_upsert AFTER INSERT OR UPDATE OF email, role, deleted_at ON users FOR EACH ROW WHEN (NEW.deleted_at IS NULL) EXECUTE FUNCTION sync_search_document('user');
@@ -716,19 +710,40 @@ export default Effect.gen(function* () {
             DELETE FROM search_embeddings WHERE entity_type = NEW.entity_type AND entity_id = NEW.entity_id;
             RETURN NEW;
         END; $$ LANGUAGE plpgsql;
-        CREATE TRIGGER search_documents_invalidate_embeddings AFTER UPDATE ON search_documents FOR EACH ROW WHEN (OLD.document_hash IS DISTINCT FROM NEW.document_hash) EXECUTE FUNCTION invalidate_embeddings_on_hash_change()`
+        CREATE TRIGGER search_documents_invalidate_embeddings AFTER UPDATE ON search_documents FOR EACH ROW
+            WHEN (OLD.embedding_input_hash IS DISTINCT FROM NEW.embedding_input_hash)
+            EXECUTE FUNCTION invalidate_embeddings_on_hash_change()`
     );
     // --- [SEARCH_REFRESH] ------------------------------------------------------------
     yield* sql.unsafe(String.raw`
         CREATE OR REPLACE FUNCTION refresh_search_documents(p_scope_id uuid DEFAULT NULL, p_include_global boolean DEFAULT false)
             RETURNS void LANGUAGE plpgsql SECURITY INVOKER AS $$ BEGIN
-            IF p_scope_id IS NULL THEN DELETE FROM search_documents WHERE entity_type <> 'command';
-            ELSE DELETE FROM search_documents WHERE scope_id = p_scope_id AND entity_type <> 'command'; IF p_include_global THEN DELETE FROM search_documents WHERE scope_id IS NULL AND entity_type <> 'command'; END IF; END IF;
             INSERT INTO search_documents (entity_type, entity_id, scope_id, display_text, content_text, metadata, normalized_text)
             SELECT s.entity_type, s.entity_id, s.scope_id, s.display_text, s.content_text, s.metadata,
                 normalize_search_text(s.display_text, s.content_text, s.metadata)
             FROM search_document_source s
-            WHERE p_scope_id IS NULL OR s.scope_id = p_scope_id OR (p_include_global AND s.scope_id IS NULL);
+            WHERE p_scope_id IS NULL OR s.scope_id = p_scope_id OR (p_include_global AND s.scope_id IS NULL)
+            ON CONFLICT (entity_type, entity_id) DO UPDATE SET
+                scope_id = EXCLUDED.scope_id,
+                display_text = EXCLUDED.display_text,
+                content_text = EXCLUDED.content_text,
+                metadata = EXCLUDED.metadata,
+                normalized_text = EXCLUDED.normalized_text,
+                updated_at = clock_timestamp();
+            DELETE FROM search_documents d
+            WHERE COALESCE(d.metadata->>'kind', '') <> 'search-manifest'
+              AND CASE
+                    WHEN p_scope_id IS NULL THEN TRUE
+                    WHEN p_include_global THEN d.scope_id = p_scope_id OR d.scope_id IS NULL
+                    ELSE d.scope_id = p_scope_id
+                  END
+              AND NOT EXISTS (
+                    SELECT 1
+                    FROM search_document_source s
+                    WHERE s.entity_type = d.entity_type
+                      AND s.entity_id = d.entity_id
+                      AND (p_scope_id IS NULL OR s.scope_id = p_scope_id OR (p_include_global AND s.scope_id IS NULL))
+                );
             ANALYZE search_documents; ANALYZE search_embeddings; ANALYZE search_terms;
         END $$;
         CREATE OR REPLACE FUNCTION notify_search_refresh() RETURNS void LANGUAGE sql SECURITY INVOKER AS $$

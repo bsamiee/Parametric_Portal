@@ -29,10 +29,10 @@
     },
     "dependencies": {
         "@effect/ai": "catalog:",
-        "@effect/ai-anthropic": "catalog:",
         "@effect/ai-google": "catalog:",
         "@effect/ai-openai": "catalog:",
         "@effect/platform": "catalog:",
+        "@effect/sql": "catalog:",
         "@parametric-portal/database": "workspace:*",
         "effect": "catalog:"
     },

@@ -13,18 +13,22 @@ const ResultStatus        = S.Literal('ok', 'error');
 const DedupeDecision      = S.Literal('executed', 'duplicate', 'rejected');
 const ErrorPayload        = S.Struct({ code: S.NonEmptyTrimmedString, details: S.optional(S.Unknown), failureClass: FailureClass, message: S.NonEmptyTrimmedString });
 const _EventSubtype       = S.Literal('added', 'deleted', 'replaced', 'modified', 'undeleted', 'selected', 'deselected', 'deselect_all', 'properties_changed');
-const _ObservationType    = S.Literal('objects.changed', 'layers.changed', 'view.changed', 'selection.changed', 'material.changed', 'properties.changed', 'tables.changed');
+const _ObservationType    = S.Literal('objects.changed', 'layers.changed', 'selection.changed', 'material.changed', 'properties.changed', 'tables.changed');
 const _HexId              = S.String.pipe(S.pattern(/^[A-Fa-f0-9]{8,64}$/));
 const CorrelationId       = _HexId.pipe(S.brand('CorrelationId'));
 const SpanId              = _HexId.pipe(S.brand('SpanId'));
 const TraceId             = _HexId.pipe(S.brand('TraceId'));
 const _Identity           = S.Struct({ appId:   S.UUID, correlationId: CorrelationId, requestId: S.UUID, sessionId: S.UUID });
-const _EventBase          = S.extend(_Identity, S.Struct({ _tag: S.Literal('event'), causationRequestId: S.optional(S.UUID), eventId: S.UUID, sourceRevision: NonNegInt }));
+const _EventBase          = S.extend(_Identity, S.Struct({ _tag: S.Literal('event'), causationRequestId: S.optional(S.UUID), eventId: S.UUID }));
 const WorkflowExecutionId = S.NonEmptyTrimmedString.annotations({ identifier:'WorkflowExecutionId' });
 const _WorkflowFields = S.Struct({
     approved:    S.optional(S.Boolean),
     commandId:   S.optional(S.String),
     executionId: S.optional(S.String),
+});
+const ExecutionMetadata = S.Struct({
+    durationMs:     NonNegInt,
+    pluginRevision: S.NonEmptyTrimmedString,
 });
 const _TracedBase = S.extend(_Identity, S.Struct({ telemetryContext: S.Struct({
     attempt:      S.Int.pipe(S.greaterThanOrEqualTo(1)),
@@ -35,7 +39,7 @@ const _TracedBase = S.extend(_Identity, S.Struct({ telemetryContext: S.Struct({
 const CatalogEntrySchema = S.Struct({
     ...ManifestEntrySchema.fields,
     category:      S.NonEmptyTrimmedString,
-    dispatch:      S.Struct({ mode: S.Literal('direct', 'script') }),
+    dispatch:      S.Struct({ mode: S.Literal('direct') }),
     examples:      S.Array(S.Struct({ description: S.NonEmptyString, input: S.NonEmptyString })),
     isDestructive: S.Boolean,
     params:        S.Array(S.Struct({ description: S.NonEmptyString, name: S.NonEmptyTrimmedString, required: S.Boolean, type: S.NonEmptyTrimmedString })),
@@ -45,13 +49,14 @@ const CatalogEntrySchema = S.Struct({
         requiresTelemetryContext: S.optionalWith(S.Boolean, { default: () => true  }),
     }), { default: () => ({ minimumObjectRefCount: 0, requiresObjectRefs: false, requiresTelemetryContext: true }) }),
 });
-const ObjectTypeTag     = S.Literal('Brep', 'Mesh', 'Curve', 'Surface', 'Annotation', 'Instance', 'LayoutDetail');
-const Operation         = S.NonEmptyTrimmedString;
+const ObjectTypeTag =     S.Literal('Point', 'Brep', 'Mesh', 'Curve', 'Surface', 'Annotation', 'Instance', 'LayoutDetail');
+const Operation =         S.NonEmptyTrimmedString;
 const _CompactionSchema = S.Struct({ estimatedTokensAfter: NonNegInt, estimatedTokensBefore: NonNegInt, mode: S.Literal('history_reset'), sequence: NonNegInt, targetTokens: NonNegInt, triggerTokens: NonNegInt });
-const _EvidenceSchema          = S.Struct({ deterministicFailureClass: S.NullOr(FailureClass), deterministicStatus: ResultStatus,
-    semanticDiscrepancy: S.optional(S.NullOr(S.String)), visualStatus: S.Literal('captured', 'capture_failed', 'capability_missing') });
-const _ExecutionHistoryEntry   = S.Struct({ args: S.Record({ key: S.String, value: S.Unknown }), commandId: S.String, resultSummary: S.optional(S.Unknown) });
-const _SceneSchema      = S.Struct({ activeLayer: S.Struct({ index: S.Int, name: S.String }), activeView: S.String, layerCount: NonNegInt, objectCount: NonNegInt,
+const _EvidenceSchema =   S.Struct({
+    deterministicFailureClass: S.NullOr(FailureClass), deterministicStatus: ResultStatus,
+    semanticDiscrepancy:       S.optional(S.NullOr(S.String)), visualStatus: S.Literal('captured', 'capture_failed', 'capability_missing') });
+const _ExecutionHistoryEntry = S.Struct({ args: S.Record({ key: S.String, value: S.Unknown }), commandId: S.String, resultSummary: S.optional(S.Unknown) });
+const _SceneSchema =    S.Struct({ activeLayer: S.Struct({ index: S.Int, name: S.String }), activeView: S.String, layerCount: NonNegInt, objectCount: NonNegInt,
     objectCountsByType: S.Record({ key: S.String, value: NonNegInt }),
     tolerances:         S.Struct({ absoluteTolerance: S.Number, angleToleranceRadians: S.Number, unitSystem: S.String }),
     worldBoundingBox:   S.Struct({ max: S.Tuple(S.Number, S.Number, S.Number), min: S.Tuple(S.Number, S.Number, S.Number) }) });
@@ -59,9 +64,9 @@ const Loop = {
     compaction:            _CompactionSchema,
     evidence:              _EvidenceSchema,
     executionHistoryEntry: _ExecutionHistoryEntry,
-    scene:        _SceneSchema,
+    scene:                 _SceneSchema,
     searchResult: S.Struct({ items: S.Array(S.Struct({ metadata: S.NullOr(S.Record({ key: S.String, value: S.Unknown })) })) }),
-    state: S.Struct({ attempt: S.Int.pipe(S.greaterThanOrEqualTo(1)), correctionCycles: NonNegInt,
+    state:        S.Struct({ attempt: S.Int.pipe(S.greaterThanOrEqualTo(1)), correctionCycles: NonNegInt,
         currentStepIndex:     S.optional(NonNegInt), executionHistory: S.optional(S.Array(_ExecutionHistoryEntry)), identityBase: S.optional(S.Unknown),
         lastCompaction:       S.optional(_CompactionSchema), operations: S.Array(Operation), pendingSteps: S.optional(S.Array(S.String)), recentObservation: S.optional(S.Unknown),
         sceneSummary:         S.optional(_SceneSchema), sequence: NonNegInt, status: S.Literal('Planning', 'Completed', 'Failed'),
@@ -79,12 +84,10 @@ const Envelope = S.Union(
         commandId:   Operation,
         deadlineMs:  S.Int.pipe(S.greaterThan(0)),
         idempotency: S.optional(S.Struct({ idempotencyKey: S.String.pipe(S.pattern(/^[A-Za-z0-9:_-]{8,128}$/)), payloadHash: S.String.pipe(S.pattern(/^[a-f0-9]{64}$/)) })),
-        objectRefs:  S.optional(S.Array(S.Struct({ objectId: S.UUID, sourceRevision: NonNegInt, typeTag: ObjectTypeTag }))),
-        operation:   S.optional(Operation),
-        payload:     S.optional(S.Record({ key: S.String, value: S.Unknown })),
+    objectRefs:  S.optional(S.Array(S.Struct({ objectId: S.UUID, typeTag: ObjectTypeTag }))),
         undoScope:   S.optional(S.NonEmptyTrimmedString) })),
     S.extend(_TracedBase, S.Struct({ _tag:     S.Literal('handshake.init'),
-        auth:             S.Struct({ token:    S.NonEmptyTrimmedString, tokenExpiresAt: S.DateFromString }),
+        auth:             S.Struct({ token: S.NonEmptyTrimmedString }),
         capabilities:     S.Struct({ optional: S.Array(S.NonEmptyTrimmedString), required: S.Array(S.NonEmptyTrimmedString) }),
         protocolVersion:  S.Struct({ major:    NonNegInt, minor: NonNegInt }),
     })),
@@ -108,16 +111,6 @@ const Envelope = S.Union(
     }),
     S.Union(
         S.extend(_EventBase, S.Struct({
-            delta: S.Struct({
-                isUndoRedo:  S.optional(S.Boolean),
-                objectId:    S.optional(S.UUID),
-                oldObjectId: S.optional(S.UUID),
-                subtype:     _EventSubtype,
-                typeTag:     S.optional(ObjectTypeTag),
-            }),
-            eventType: _ObservationType,
-        })),
-        S.extend(_EventBase, S.Struct({
             delta:     S.Struct({ isUndo: S.Boolean, requestId: S.UUID, undoSerial: NonNegInt }),
             eventType: S.Literal('undo.redo')
         })),
@@ -128,13 +121,13 @@ const Envelope = S.Union(
                 failureClass:   S.optional(FailureClass),
                 status:         ResultStatus,
             }),
-            eventType: S.Literal('session.lifecycle')
+            eventType: S.Literal('command.lifecycle')
         })),
         S.extend(_EventBase, S.Struct({
             delta: S.Struct({
                 batchWindowMs: NonNegInt,
                 categories:    S.Array(S.Struct({
-                    category:  S.Union(_ObservationType, S.Literal('undo.redo', 'session.lifecycle', 'stream.compacted')),
+                    category:  S.Union(_ObservationType, S.Literal('undo.redo', 'command.lifecycle', 'stream.compacted')),
                     count:     NonNegInt,
                     subtypes:  S.Array(S.Struct({ count: NonNegInt, subtype: _EventSubtype }))
                 })),
@@ -145,11 +138,12 @@ const Envelope = S.Union(
         })),
     ),
     S.extend(_Identity, S.Struct({
-        _tag:   S.Literal('result'),
-        dedupe: S.optional(S.Struct({ decision: DedupeDecision, originalRequestId: S.UUID })),
-        error:  S.optional(ErrorPayload),
-        result: S.optional(S.Unknown),
-        status: ResultStatus })),
+        _tag:      S.Literal('result'),
+        dedupe:    S.optional(S.Struct({ decision: DedupeDecision, originalRequestId: S.UUID })),
+        error:     S.optional(ErrorPayload),
+        execution: S.optional(ExecutionMetadata),
+        result:    S.optional(S.Unknown),
+        status:    ResultStatus })),
 );
 
 // --- [FUNCTIONS] -------------------------------------------------------------
@@ -183,7 +177,7 @@ const kargadanToolCallProjector = (payload: { readonly params: unknown; readonly
 type LoopState = {
     readonly attempt:              number; readonly correctionCycles: number; readonly currentStepIndex: number;
     readonly executionHistory:     ReadonlyArray<typeof _ExecutionHistoryEntry.Type>;
-    readonly identityBase: Envelope.IdentityBase;
+    readonly identityBase:         Envelope.IdentityBase;
     readonly lastCompaction:       Option.Option<typeof Loop.compaction.Type>; readonly operations: ReadonlyArray<string>;
     readonly pendingSteps:         Option.Option<ReadonlyArray<string>>;
     readonly recentObservation:    Option.Option<unknown>; readonly sceneSummary: Option.Option<unknown>;
@@ -193,6 +187,7 @@ type LoopState = {
 
 namespace Envelope {
     export type CatalogEntry = typeof CatalogEntrySchema.Type;
+    export type ExecutionMetadata = typeof ExecutionMetadata.Type;
     export type FailureClass = typeof FailureClass.Type;
     export type ErrorPayload = typeof ErrorPayload.Type;
     export type Identity     = typeof _Identity.Type;
@@ -210,5 +205,5 @@ namespace Envelope {
 
 // --- [EXPORT] ----------------------------------------------------------------
 
-export { CorrelationId, DEFAULT_LOOP_OPERATIONS, Envelope, ErrorPayload, FailureClass, kargadanToolCallProjector, Loop, NonNegInt, ObjectTypeTag, Operation, SpanId, TraceId };
+export { CorrelationId, DEFAULT_LOOP_OPERATIONS, Envelope, ErrorPayload, FailureClass, kargadanToolCallProjector, Loop, ObjectTypeTag, Operation, SpanId, TraceId };
 export type { LoopState };

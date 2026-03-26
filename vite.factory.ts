@@ -280,7 +280,6 @@ const plugins = {
         tsconfigPaths({ projects: ['./tsconfig.json'] }),
         ...(c.react === true ? [react({ babel: { plugins: [['babel-plugin-react-compiler', {}]] } })] : []),
         ...(c.css === undefined ? [] : [tailwindcss({ optimize: { minify: true } })]),
-        Inspect({ build: true, dev: false, outputDir: '.vite-inspect' }),
     ],
     server: () => [tsconfigPaths({ projects: ['./tsconfig.json'] })],
 } as const;

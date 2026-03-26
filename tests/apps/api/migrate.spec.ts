@@ -1,4 +1,4 @@
-/** Migrate entrypoint tests: env-config wiring, MigratorLive delegation, lifecycle log sequence.
+/** Migrate entrypoint tests: env-config wiring, MigratorRun delegation, lifecycle log sequence.
  * Oracle: referential identity (process.env), mock return shape, ordered log contract. */
 import { it } from '@effect/vitest';
 import { Effect } from 'effect';
@@ -40,19 +40,16 @@ vi.mock('@parametric-portal/server/env', async () => ({
         },
     },
 }));
-vi.mock('@parametric-portal/database/migrator', async () => {
-    const { Layer } = await import('effect');
-    return {
-        MigratorLive: (config: unknown) => {
-            _capture.migratorArg = config;
-            return Layer.empty;
-        },
-    };
-});
+vi.mock('@parametric-portal/database/migrator', async () => ({
+    MigratorRun: (config: unknown) => {
+        _capture.migratorArg = config;
+        return Effect.void;
+    },
+}));
 
 // --- [EDGE_CASES] ------------------------------------------------------------
 
-it.effect('env wiring + MigratorLive delegation + lifecycle logs', () => Effect.gen(function* () {
+it.effect('env wiring + MigratorRun delegation + lifecycle logs', () => Effect.gen(function* () {
     _capture.ready = new Promise<void>((resolve) => { _capture.onComplete = resolve; });
     _capture.envArg = undefined;
     _capture.logs.length = 0;

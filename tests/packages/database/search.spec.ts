@@ -8,7 +8,7 @@ import { expect, vi } from 'vitest';
 // --- [CONSTANTS] -------------------------------------------------------------
 
 const _ID = '00000000-0000-0000-0000-000000000001';
-const _PROFILE = { dimensions: 2, model: 'm', provider: 'openai' } as const;
+const _PROFILE = { dimensions: 1_536, provider: 'openai' } as const;
 const { _calls } = vi.hoisted(() => ({ _calls: [] as Array<Record<string, unknown>> }));
 const _sql = Object.assign(
     (strings: TemplateStringsArray, ..._values: ReadonlyArray<unknown>) => Effect.succeed({ strings: [...strings], values: _values }),
@@ -34,7 +34,7 @@ vi.mock('@effect/sql', async (importOriginal) => {
         SqlSchema: {
             ...orig.SqlSchema,
             findAll: (spec: { execute: (p: Record<string, unknown>) => unknown }) => (params: Record<string, unknown>) => {
-                const boom = (params['term'] === 'boom' && 'search boom') || (params['prefix'] === 'boom' && 'suggest boom') || (params['model'] === 'explode-model' && 'embedding boom');
+                const boom = (params['term'] === 'boom' && 'search boom') || (params['prefix'] === 'boom' && 'suggest boom') || (Array.isArray(params['entityTypes']) && params['entityTypes'].includes('boom') && 'embedding boom');
                 const value = Match.value(params).pipe(
                     Match.when((p) => 'term' in p, () => [{ displayText: 'Doc', entityId: _ID, entityType: 'app', facets: { app: 1 }, metadata: {}, rank: 0.9, snippet: null, totalCount: 1 }]),
                     Match.when((p) => 'prefix' in p, () => [{ frequency: 3, term: `${String(params['prefix'])}-suggest` }]),
@@ -43,7 +43,12 @@ vi.mock('@effect/sql', async (importOriginal) => {
                 return boom ? _fail(spec, params, boom) : _run(spec, params, value);
             },
             single: (spec: { execute: (p: Record<string, unknown>) => unknown }) => (params: Record<string, unknown>) =>
-                _run(spec, params, { dimensions: Number(params['dimensions'] ?? 0), documentHash: String(params['documentHash'] ?? 'hash'), entityId: String(params['entityId'] ?? '00000000-0000-0000-0000-000000000000'), entityType: String(params['entityType'] ?? 'app'), model: String(params['model'] ?? ''), provider: String(params['provider'] ?? 'openai') }),
+                _run(spec, params, Match.value(params).pipe(
+                    Match.when((p) => 'sourceHash' in p, () => ({ hash: `fingerprint:${String(params['sourceHash'] ?? '')}` })),
+                    Match.when((p) => 'metadataJson' in p, () => ({ documentHash: 'hash', entityId: String(params['entityId'] ?? '00000000-0000-0000-0000-000000000000'), entityType: String(params['entityType'] ?? 'app') })),
+                    Match.when((p) => 'embeddingJson' in p, () => ({ dimensions: Number(params['dimensions'] ?? 0), entityId: String(params['entityId'] ?? '00000000-0000-0000-0000-000000000000'), entityType: String(params['entityType'] ?? 'app'), provider: String(params['provider'] ?? 'openai') })),
+                    Match.orElse(() => ({ count: 1 })),
+                )),
             void: (spec: { execute: (p: Record<string, unknown>) => unknown }) => (params: Record<string, unknown>) => _run(spec, params, undefined).pipe(Effect.asVoid),
         },
     };
@@ -80,15 +85,16 @@ it.effect.prop('P4: search limit clamped to [1..100]', { raw: fc.integer({ max: 
 it.effect('E1: Test() defaults are deterministic + partial override preserves others', () =>
     Effect.gen(function* () {
         const repo = yield* SearchRepo;
-        const [search, suggest, sources, stale, refresh, upsert] = yield* Effect.all([
+        const [search, suggest, sources, stale, pruned, refresh, upsert] = yield* Effect.all([
             repo.search({ scopeId: null, term: 'anything' }), repo.suggest({ prefix: 'ab', scopeId: null }),
             repo.embeddingSources({ profile: _PROFILE, scopeId: null }), repo.staleEmbeddings({ profile: _PROFILE, scopeId: null }),
+            repo.pruneEmbeddings({ profile: _PROFILE, scopeId: null }),
             repo.refresh(null, false),
-            repo.upsertEmbedding({ documentHash: 'h', embedding: [0.1, 0.2], entityId: _ID, entityType: 'app', profile: _PROFILE }),
+            repo.upsertEmbedding({ documentHash: 'h', embedding: Array.from({ length: _PROFILE.dimensions }, () => 0.1), entityId: _ID, entityType: 'app', profile: _PROFILE }),
         ]);
         expect(search).toStrictEqual({ cursor: null, facets: null, hasNext: false, hasPrev: false, items: [], total: 0 });
-        expect(suggest).toStrictEqual([]); expect(sources).toStrictEqual([]); expect(stale).toStrictEqual([]); expect(refresh).toBeUndefined();
-        expect(upsert).toStrictEqual({ dimensions: 1_536, entityId: '00000000-0000-0000-0000-000000000000', entityType: 'app', model: 'text-embedding-3-small', provider: 'openai' });
+        expect(suggest).toStrictEqual([]); expect(sources).toStrictEqual([]); expect(stale).toStrictEqual([]); expect(pruned).toBe(0); expect(refresh).toBeUndefined();
+        expect(upsert).toStrictEqual({ dimensions: 1_536, entityId: '00000000-0000-0000-0000-000000000000', entityType: 'app', provider: 'openai' });
     }).pipe(Effect.provide(SearchRepo.Test()), Effect.provideService(SqlClient.SqlClient, _sql)));
 it.effect('E2: Test() partial override preserves other defaults', () =>
     Effect.gen(function* () {
@@ -98,12 +104,13 @@ it.effect('E2: Test() partial override preserves other defaults', () =>
     }).pipe(Effect.provide(SearchRepo.Test({ search: () => Effect.succeed({ cursor: null, facets: null, hasNext: false, hasPrev: false, items: [], total: 42 }) })), Effect.provideService(SqlClient.SqlClient, _sql)));
 it.effect('E3: failure wrapping produces SearchError', () =>
     Effect.gen(function* () {
+        const shortVector = [0.1, 0.2];
         const exits = yield* Effect.all([
-            _live(Effect.gen(function* () { return yield* (yield* SearchRepo).upsertEmbedding({ documentHash: 'h', embedding: [0.1, 0.2], entityId: _ID, entityType: 'app', profile: { dimensions: 3, model: 'm', provider: 'openai' } }); })).pipe(Effect.exit),
-            _live(Effect.gen(function* () { return yield* (yield* SearchRepo).search({ embedding: { profile: { dimensions: 5, model: 'm', provider: 'openai' }, vector: [0.1] }, scopeId: null, term: 'test' }); })).pipe(Effect.exit),
+            _live(Effect.gen(function* () { return yield* (yield* SearchRepo).upsertEmbedding({ documentHash: 'h', embedding: shortVector, entityId: _ID, entityType: 'app', profile: _PROFILE }); })).pipe(Effect.exit),
+            _live(Effect.gen(function* () { return yield* (yield* SearchRepo).search({ embedding: { profile: _PROFILE, vector: [0.1] }, scopeId: null, term: 'test' }); })).pipe(Effect.exit),
             _live(Effect.gen(function* () { return yield* (yield* SearchRepo).search({ scopeId: null, term: 'boom' }); })).pipe(Effect.exit),
             _live(Effect.gen(function* () { return yield* (yield* SearchRepo).suggest({ prefix: 'boom', scopeId: null }); })).pipe(Effect.exit),
-            _live(Effect.gen(function* () { return yield* (yield* SearchRepo).embeddingSources({ profile: { dimensions: 2, model: 'explode-model', provider: 'openai' }, scopeId: null }); })).pipe(Effect.exit),
+            _live(Effect.gen(function* () { return yield* (yield* SearchRepo).embeddingSources({ entityTypes: ['boom'], profile: _PROFILE, scopeId: null }); })).pipe(Effect.exit),
         ]);
         expect(exits.every((exit) => Exit.isFailure(exit as never))).toBe(true);
         expect(_exitStr(exits[0] as never)).toContain('SearchError');
@@ -115,17 +122,19 @@ it.effect('E4: happy path with embeddings + option defaults passthrough', () =>
     _live(Effect.gen(function* () {
         _calls.splice(0);
         const repo = yield* SearchRepo;
-        const fullVector = Array.from({ length: 3072 }, () => 0.1);
-        const [search, searchEmbed, suggest, sources, refresh, upsert] = yield* Effect.all([
+        const fullVector = Array.from({ length: 1_536 }, () => 0.1);
+        const [search, searchEmbed, suggest, sources, fingerprint, pruned, refresh, upsert] = yield* Effect.all([
             repo.search({ includeFacets: true, scopeId: null, term: 'portal' }),
-            repo.search({ embedding: { profile: _PROFILE, vector: [0.5, 0.5] }, scopeId: null, term: 'test' }),
+            repo.search({ embedding: { profile: _PROFILE, vector: fullVector }, scopeId: null, term: 'test' }),
             repo.suggest({ includeGlobal: true, limit: 15, prefix: 'po', scopeId: '00000000-0000-0000-0000-000000000010' }),
-            repo.embeddingSources({ profile: { dimensions: 2, model: 'text-embedding-3-large', provider: 'openai' }, scopeId: null }),
+            repo.embeddingSources({ profile: _PROFILE, scopeId: null }),
+            repo.profileFingerprint({ profile: _PROFILE, sourceHash: 'manifest-hash' }),
+            repo.pruneEmbeddings({ profile: _PROFILE, scopeId: null }),
             repo.refresh('00000000-0000-0000-0000-000000000010', true),
-            repo.upsertEmbedding({ documentHash: 'h', embedding: fullVector, entityId: _ID, entityType: 'app', profile: { dimensions: 3072, model: 'text-embedding-3-large', provider: 'openai' } }),
+            repo.upsertEmbedding({ documentHash: 'h', embedding: fullVector, entityId: _ID, entityType: 'app', profile: { dimensions: 1_536, provider: 'openai' } }),
         ]);
         expect(search.total).toBe(1); expect(searchEmbed.total).toBe(1); expect(suggest[0]?.term).toContain('po');
-        expect(sources).toHaveLength(1); expect(refresh).toBeUndefined(); expect(upsert.entityId).toBe(_ID);
+        expect(sources).toHaveLength(1); expect(fingerprint).toStrictEqual({ hash: 'fingerprint:manifest-hash' }); expect(pruned).toBe(1); expect(refresh).toBeUndefined(); expect(upsert.entityId).toBe(_ID);
         _calls.splice(0);
         yield* repo.search({ entityTypes: ['app', 'user'], includeSnippets: false, scopeId: null, term: 'test' });
         const searchCall = _calls.at(-1) as Record<string, unknown>;
@@ -138,6 +147,14 @@ it.effect('E4: happy path with embeddings + option defaults passthrough', () =>
         yield* repo.embeddingSources({ profile: _PROFILE, scopeId: null });
         const esCall = _calls.at(-1) as Record<string, unknown>;
         expect(esCall['entityTypes']).toStrictEqual([]); expect(esCall['includeGlobal']).toBe(false); expect(esCall['limit']).toBe(200);
+        _calls.splice(0);
+        yield* repo.profileFingerprint({ profile: _PROFILE, sourceHash: 'profile-source' });
+        const fingerprintCall = _calls.at(-1) as Record<string, unknown>;
+        expect(fingerprintCall['provider']).toBe('openai'); expect(fingerprintCall['dimensions']).toBe(1_536); expect(fingerprintCall['sourceHash']).toBe('profile-source');
+        _calls.splice(0);
+        yield* repo.pruneEmbeddings({ profile: _PROFILE, scopeId: null });
+        const pruneCall = _calls.at(-1) as Record<string, unknown>;
+        expect(pruneCall['provider']).toBe('openai'); expect(pruneCall['dimensions']).toBe(1_536);
         _calls.splice(0);
         yield* repo.refresh();
         const refreshCall = _calls.at(-1) as Record<string, unknown>;

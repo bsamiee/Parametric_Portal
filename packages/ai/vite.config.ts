@@ -11,12 +11,10 @@ export default defineConfig(
             entry: './src/service.ts',
             external: [
                 '@effect/ai',
-                '@effect/ai-anthropic',
                 '@effect/ai-google',
                 '@effect/ai-openai',
                 '@effect/platform',
                 '@parametric-portal/database',
-                '@parametric-portal/server',
                 'effect',
             ],
             mode: 'library',

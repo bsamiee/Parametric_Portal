@@ -12,7 +12,6 @@ export default defineConfig(
                 'agent-persistence': './src/agent-persistence.ts',
                 client: './src/client.ts',
                 factory: './src/factory.ts',
-                field: './src/field.ts',
                 migrator: './src/migrator.ts',
                 models: './src/models.ts',
                 page: './src/page.ts',

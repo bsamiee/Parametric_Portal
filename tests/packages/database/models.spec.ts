@@ -69,6 +69,24 @@ it.effect('E2: settings defaults determinism', () => Effect.sync(() => {
     expect(decoded.webhooks).toStrictEqual([]);
     expect(decoded.oauthProviders).toStrictEqual([]);
 }));
+it.effect('E2.5: flat AI settings decode and reject legacy nested shape', () => Effect.sync(() => {
+    const valid = S.decodeUnknownEither(AppSettingsSchema)({
+        ai: {
+            maxOutputTokens: 4096,
+            model: 'text-embedding-3-large',
+            provider: 'openai',
+            temperature: 0.2,
+            topP: 0.9,
+        },
+    });
+    const legacy = S.decodeUnknownEither(AppSettingsSchema)({
+        ai: {
+            language: { model: 'gpt-4.1', provider: 'openai' },
+        },
+    });
+    expect(Either.isRight(valid)).toBe(true);
+    expect(Either.isLeft(legacy)).toBe(true);
+}));
 it.effect('E3: Generated fields omitted from insert + Sensitive fields omitted from json', () => Effect.sync(() => {
     _GENERATED_INSERT.forEach(([model, fields]) => {
         fields.forEach((field) => {

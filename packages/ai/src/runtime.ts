@@ -1,5 +1,5 @@
-import { type AiError as AiSdkError, Chat, EmbeddingModel, LanguageModel, Tokenizer, type Response, type Tool } from '@effect/ai';
-import { Effect, ExecutionPlan, Layer, Match, Option, Stream } from 'effect';
+import { type AiError as AiSdkError, Chat, LanguageModel, type Response, type Tool } from '@effect/ai';
+import { Effect, Layer, Match, Option, Stream } from 'effect';
 import { AiRegistry } from './registry.ts';
 import { AiError, AiRuntimeProvider } from './runtime-provider.ts';
 
@@ -22,27 +22,23 @@ type OperationContext = { readonly appSettings: AiRegistry.Settings; readonly cr
 
 const _capMaxTokens = (settings: AiRegistry.Settings): AiRegistry.Settings => ({
     ...settings,
-    language: {
-        ...settings.language,
-        maxTokens: Math.min(settings.language.maxTokens, settings.policy.maxTokensPerRequest),
-    },
+    maxOutputTokens: Math.min(settings.maxOutputTokens ?? settings.policy.maxTokensPerRequest, settings.policy.maxTokensPerRequest),
 });
 const _languageMeta = (descriptor: OperationDescriptor, context: OperationContext) => ({
     annotation: {
         operation: { name: descriptor.id },
         request:   {
-            maxTokens:   context.appSettings.language.maxTokens,
-            model:       context.appSettings.language.primary.model,
-            temperature: context.appSettings.language.temperature,
-            topK:        context.appSettings.language.topK,
-            topP:        context.appSettings.language.topP,
+            maxTokens:   context.appSettings.maxOutputTokens,
+            model:       context.appSettings.model,
+            temperature: context.appSettings.temperature,
+            topP:        context.appSettings.topP,
         },
-        system: context.appSettings.language.primary.provider,
+        system: context.appSettings.provider,
     },
     labels: {
-        model:     context.appSettings.language.primary.model,
+        model:     context.appSettings.model,
         operation: descriptor.id,
-        provider:  context.appSettings.language.primary.provider,
+        provider:  context.appSettings.provider,
         tenant:    context.tenantId,
     },
 });
@@ -50,16 +46,16 @@ const _embeddingMeta = (descriptor: OperationDescriptor, context: OperationConte
     annotation: {
         operation: { name: descriptor.id },
         request:   {
-            dimensions: context.appSettings.embedding.primary.dimensions,
-            model:      context.appSettings.embedding.primary.model,
+            dimensions: context.appSettings.embedding.dimensions,
+            model:      context.appSettings.embedding.model,
         },
-        system: context.appSettings.embedding.primary.provider,
+        system: context.appSettings.embedding.provider,
     },
     labels: {
-        dimensions: String(context.appSettings.embedding.primary.dimensions),
-        model:      context.appSettings.embedding.primary.model,
+        dimensions: String(context.appSettings.embedding.dimensions),
+        model:      context.appSettings.embedding.model,
         operation:  descriptor.id,
-        provider:   context.appSettings.embedding.primary.provider,
+        provider:   context.appSettings.embedding.provider,
         tenant:     context.tenantId,
     },
 });
@@ -69,6 +65,10 @@ const _embeddingMeta = (descriptor: OperationDescriptor, context: OperationConte
 class AiRuntime extends Effect.Service<AiRuntime>()('ai/Runtime', {
     effect: Effect.gen(function* () {
         const provider = yield* AiRuntimeProvider;
+        const _usageTokens = (usage: {
+            readonly inputTokens?: number | undefined;
+            readonly totalTokens?: number | undefined;
+        }) => usage.totalTokens ?? usage.inputTokens ?? 0;
         const enforceRequestTokens = (descriptor: OperationDescriptor, context: OperationContext, source: string, totalTokens: number) =>
             Effect.filterOrFail(
                 Effect.succeed(totalTokens),
@@ -78,36 +78,39 @@ class AiRuntime extends Effect.Service<AiRuntime>()('ai/Runtime', {
                 Effect.tapError(() => provider.observePolicyDenied(descriptor.id, context.tenantId)),
                 Effect.asVoid,
             );
-        const incrementBudget = (tenantId: string, totalTokens: number, rateDelta = 1) =>
-            provider.readBudget(tenantId).pipe(
-                Effect.flatMap((current) =>
-                    provider.writeBudget(tenantId, {
-                        dailyTokens: current.dailyTokens + totalTokens,
-                        rateCount:   current.rateCount + rateDelta,
-                    })),
-            );
         const resolveContext = (descriptor: OperationDescriptor) =>
             provider.resolveTenantId.pipe(
                 Effect.bindTo('tenantId'),
                 Effect.bind('appSettings', ({ tenantId }) => provider.resolveSettings(tenantId).pipe(Effect.map(_capMaxTokens))),
-                Effect.bind('credentials', ({ appSettings }) =>
-                    Effect.forEach(AiRegistry.requiredProviders(appSettings), (name) =>
-                        provider.resolveCredential(name).pipe(Effect.map((credential) => [name, credential] as const)),
-                    ).pipe(Effect.map((entries) => Object.fromEntries(entries) as AiRegistry.Credentials))),
+                Effect.bind('credentials', ({ appSettings, tenantId }) => provider.resolveCredential(appSettings.provider, tenantId).pipe(
+                    Effect.map((credential) => ({ [appSettings.provider]: credential } as AiRegistry.Credentials)),
+                )),
                 Effect.tap(({ tenantId, appSettings }) =>
-                    provider.readBudget(tenantId).pipe(
+                    provider.readUsage(tenantId).pipe(
                         Effect.filterOrFail(
-                            (budget) => budget.dailyTokens < appSettings.policy.maxTokensPerDay && budget.rateCount < appSettings.policy.maxRequestsPerMinute,
-                            (budget) => new AiError({
-                                cause:     { dailyTokens: budget.dailyTokens, limits: { daily: appSettings.policy.maxTokensPerDay, rate: appSettings.policy.maxRequestsPerMinute }, rateCount: budget.rateCount, tenantId },
+                            (usage) => usage.dailyTokens < appSettings.policy.maxTokensPerDay && usage.minuteRequests < appSettings.policy.maxRequestsPerMinute,
+                            (usage) => new AiError({
+                                cause: {
+                                    dailyTokens: usage.dailyTokens,
+                                    limits: { daily: appSettings.policy.maxTokensPerDay, rate: appSettings.policy.maxRequestsPerMinute },
+                                    minuteRequests: usage.minuteRequests,
+                                    tenantId,
+                                },
                                 operation: descriptor.id,
-                                reason:    budget.dailyTokens >= appSettings.policy.maxTokensPerDay ? 'budget_exceeded' : 'rate_exceeded',
+                                reason:    usage.dailyTokens >= appSettings.policy.maxTokensPerDay ? 'budget_exceeded' : 'rate_exceeded',
                             }),
                         ),
                         Effect.asVoid,
                         Effect.tapError(() => provider.observePolicyDenied(descriptor.id, tenantId)),
                     ),
                 ),
+                Effect.mapError(AiError.from(descriptor.id)),
+            );
+        const resolveLocalContext = (descriptor: OperationDescriptor) =>
+            provider.resolveTenantId.pipe(
+                Effect.bindTo('tenantId'),
+                Effect.bind('appSettings', ({ tenantId }) => provider.resolveSettings(tenantId).pipe(Effect.map(_capMaxTokens))),
+                Effect.map(({ appSettings, tenantId }) => ({ appSettings, credentials: {} as AiRegistry.Credentials, tenantId })),
                 Effect.mapError(AiError.from(descriptor.id)),
             );
         const runEffectOperation = <A, E, R>(
@@ -117,7 +120,7 @@ class AiRuntime extends Effect.Service<AiRuntime>()('ai/Runtime', {
             onSuccess:  (value: A, meta: ReturnType<typeof _languageMeta> | ReturnType<typeof _embeddingMeta>) => Effect.Effect<void, unknown, never> = () => Effect.void,
         ) => {
             const meta = descriptor.rail === 'language' ? _languageMeta(descriptor, context) : _embeddingMeta(descriptor, context);
-            return provider.trackEffect(descriptor.id, meta.labels, effect).pipe(
+            return effect.pipe(
                 Effect.tap((value) => onSuccess(value, meta)),
                 Effect.tapError((error) => provider.observeError(descriptor.id, meta.labels, error)),
                 Effect.ensuring(provider.annotate(meta.annotation)),
@@ -165,11 +168,6 @@ class AiRuntime extends Effect.Service<AiRuntime>()('ai/Runtime', {
                     return { ...options, toolChoice: constrained, toolkit: { ...resolvedToolkit, tools: filtered as Tools } } as Options;
                 });
         };
-        const languagePlan = (context: OperationContext) => {
-            const layers = AiRegistry.layers(context.appSettings, context.credentials);
-            const [head, ...tail] = [layers.language, ...layers.fallbackLanguage] as const;
-            return ExecutionPlan.make({ provide: head }, ...tail.map((layer) => ({ provide: layer })));
-        };
         const runLanguage = <A extends { readonly usage: Response.Usage }, Tools extends Record<string, Tool.Any>, Options extends LanguageModel.GenerateTextOptions<Tools>, R>(
             descriptor: OperationDescriptor,
             options: Options,
@@ -177,9 +175,11 @@ class AiRuntime extends Effect.Service<AiRuntime>()('ai/Runtime', {
         ) => Effect.gen(function* () {
             const context = yield* resolveContext(descriptor);
             const policyOptions = yield* applyToolPolicy<Tools, Options>(descriptor, context, options);
-            const withPlan = Effect.withExecutionPlan(run(policyOptions), languagePlan(context));
+            const withPlan = run(policyOptions).pipe(
+                Effect.provide(AiRegistry.languageLayer(context.appSettings, context.credentials)),
+            );
             const withPolicy = withPlan.pipe(
-                Effect.tap((response) => incrementBudget(context.tenantId, response.usage.totalTokens ?? 0).pipe(Effect.ignore)),
+                Effect.tap((response) => provider.incrementUsage(context.tenantId, { requests: 1, tokens: response.usage.totalTokens ?? 0 })),
                 Effect.tap((response) => enforceRequestTokens(descriptor, context, 'usage.totalTokens', response.usage.totalTokens ?? 0)),
             );
             return yield* runEffectOperation(descriptor, context, withPolicy, (response, meta) =>
@@ -191,51 +191,66 @@ class AiRuntime extends Effect.Service<AiRuntime>()('ai/Runtime', {
                     const context = yield* resolveContext(descriptor);
                     const policyOptions = yield* applyToolPolicy<Tools, LanguageModel.GenerateTextOptions<Tools>>(descriptor, context, options);
                     const meta = _languageMeta(descriptor, context);
-                    const withPlan = Stream.withExecutionPlan(LanguageModel.streamText(policyOptions), languagePlan(context));
+                    const withPlan = LanguageModel.streamText(policyOptions).pipe(
+                        Stream.provideLayer(AiRegistry.languageLayer(context.appSettings, context.credentials)),
+                    );
                     const withFinish = Stream.mapEffect(withPlan, (part) =>
                         (part.type === 'finish' && 'usage' in part
-                            ? incrementBudget(context.tenantId, part.usage.totalTokens ?? 0).pipe(
-                                Effect.ignore,
+                            ? provider.incrementUsage(context.tenantId, { requests: 1, tokens: part.usage.totalTokens ?? 0 }).pipe(
                                 Effect.zipRight(enforceRequestTokens(descriptor, context, 'usage.totalTokens', part.usage.totalTokens ?? 0)),
                                 Effect.zipRight(Effect.all([provider.observeTokens(meta.labels, part.usage), provider.annotate({ ...meta.annotation, usage: part.usage })], { discard: true })),
                             )
                             : Effect.void).pipe(Effect.as(part)));
-                    return provider.trackStream(
-                        descriptor.id,
-                        meta.labels,
-                        Stream.onStart(
-                            Stream.tapError(withFinish, (error) => provider.observeError(descriptor.id, meta.labels, error)),
-                            Effect.all([provider.annotate(meta.annotation), provider.observeRequest(descriptor.id, meta.labels)], { discard: true }),
-                        ),
+                    return Stream.onStart(
+                        Stream.tapError(withFinish, (error) => provider.observeError(descriptor.id, meta.labels, error)),
+                        Effect.all([provider.annotate(meta.annotation), provider.observeRequest(descriptor.id, meta.labels)], { discard: true }),
                     );
                 }).pipe(Effect.mapError(AiError.from(descriptor.id))),
             ).pipe(Stream.mapError(AiError.from(descriptor.id)));
-        const runEmbedding = <A>(descriptor: OperationDescriptor, usage: AiRegistry.EmbeddingUsage, effect: (service: EmbeddingModel.Service) => Effect.Effect<A, AiSdkError.AiError>) =>
+        const embed = (input: string, options?: { readonly usage?: AiRegistry.EmbeddingUsage }) =>
             Effect.gen(function* () {
-                const context = yield* resolveContext(descriptor);
-                const embeddingEffect = EmbeddingModel.EmbeddingModel.pipe(
-                    Effect.flatMap(effect),
-                    Effect.provide(AiRegistry.embeddingLayer(context.appSettings.embedding.primary, context.credentials, usage)),
-                    Effect.tap(() => incrementBudget(context.tenantId, 0).pipe(Effect.ignore)),
+                const context = yield* resolveContext(AI_OPERATIONS.embed);
+                const effect = AiRegistry.embed(context.appSettings.embedding, context.credentials, options?.usage ?? 'document', input).pipe(
+                    Effect.tap((result) => provider.incrementUsage(context.tenantId, { requests: 1, tokens: _usageTokens(result.usage) })),
+                    Effect.tap((result) => enforceRequestTokens(AI_OPERATIONS.embed, context, 'usage.totalTokens', _usageTokens(result.usage))),
                 );
-                return yield* runEffectOperation(descriptor, context, embeddingEffect, (value, meta) =>
-                    provider.observeEmbedding(meta.labels, Array.isArray(value) && Array.isArray(value[0]) ? value.length : 1));
+                return yield* runEffectOperation(AI_OPERATIONS.embed, context, effect, (result, meta) =>
+                    Effect.all([
+                        provider.observeEmbedding(meta.labels, 1),
+                        provider.observeTokens(meta.labels, result.usage),
+                        provider.annotate({ ...meta.annotation, usage: result.usage }),
+                    ], { discard: true })).pipe(
+                    Effect.map((result) => result.embedding),
+                );
+            });
+        const embedMany = (input: ReadonlyArray<string>, options?: { readonly usage?: AiRegistry.EmbeddingUsage }) =>
+            Effect.gen(function* () {
+                const context = yield* resolveContext(AI_OPERATIONS.embedMany);
+                const effect = AiRegistry.embedMany(context.appSettings.embedding, context.credentials, options?.usage ?? 'document', input).pipe(
+                    Effect.tap((result) => provider.incrementUsage(context.tenantId, { requests: 1, tokens: _usageTokens(result.usage) })),
+                    Effect.tap((result) => enforceRequestTokens(AI_OPERATIONS.embedMany, context, 'usage.totalTokens', _usageTokens(result.usage))),
+                );
+                return yield* runEffectOperation(AI_OPERATIONS.embedMany, context, effect, (result, meta) =>
+                    Effect.all([
+                        provider.observeEmbedding(meta.labels, result.embeddings.length),
+                        provider.observeTokens(meta.labels, result.usage),
+                        provider.annotate({ ...meta.annotation, usage: result.usage }),
+                    ], { discard: true })).pipe(
+                    Effect.map((result) => result.embeddings),
+                );
             });
         const settings = () =>
             provider.resolveTenantId.pipe(
                 Effect.flatMap((tenantId) => provider.resolveSettings(tenantId)),
                 Effect.map(_capMaxTokens),
             );
-        const embeddingSettings = () => settings().pipe(Effect.map((value) => value.embedding.primary));
-        const countTokens = Effect.fn('AiRuntime.countTokens')((input: string) =>
+        const countTokens = Effect.fn('AiRuntime.countTokens')((input: string): Effect.Effect<number, unknown, never> =>
             resolveContext(AI_OPERATIONS.countTokens).pipe(
                 Effect.flatMap((context) =>
-                    Tokenizer.Tokenizer.pipe(
-                        Effect.flatMap((tokenizer) => tokenizer.tokenize(input)),
-                        Effect.map((tokens) => tokens.length),
-                        Effect.provide(AiRegistry.languageLayer(context.appSettings.language, context.credentials)),
+                    AiRegistry.countTokens(context.appSettings, context.credentials, input).pipe(
                         Effect.flatMap((count) => runEffectOperation(AI_OPERATIONS.countTokens, context, Effect.succeed(count))),
-                    )),
+                    ),
+                ),
             ),
         );
         const generateText = <Tools extends Record<string, Tool.Any> = Record<string, never>>(options: LanguageModel.GenerateTextOptions<Tools>) =>
@@ -253,13 +268,9 @@ class AiRuntime extends Effect.Service<AiRuntime>()('ai/Runtime', {
         );
         const streamText = <Tools extends Record<string, Tool.Any> = Record<string, never>>(options: LanguageModel.GenerateTextOptions<Tools>) =>
             runLanguageStream(AI_OPERATIONS.streamText, options);
-        const embed = (input: string, options?: { readonly usage?: AiRegistry.EmbeddingUsage }) =>
-            runEmbedding(AI_OPERATIONS.embed, options?.usage ?? 'document', (service) => service.embed(input));
-        const embedMany = (input: ReadonlyArray<string>, options?: { readonly concurrency?: number | undefined; readonly usage?: AiRegistry.EmbeddingUsage }) =>
-            runEmbedding(AI_OPERATIONS.embedMany, options?.usage ?? 'document', (service) => service.embedMany(input, { concurrency: options?.concurrency }));
         const runtimeLanguageLayer = Layer.succeed(LanguageModel.LanguageModel, { generateObject, generateText, streamText } as LanguageModel.Service);
         const chat = (options?: { readonly prompt?: Parameters<typeof Chat.fromPrompt>[0] }) =>
-            resolveContext(AI_OPERATIONS.chat).pipe(
+            resolveLocalContext(AI_OPERATIONS.chat).pipe(
                 Effect.flatMap((context) => runEffectOperation(
                     AI_OPERATIONS.chat,
                     context,
@@ -267,7 +278,7 @@ class AiRuntime extends Effect.Service<AiRuntime>()('ai/Runtime', {
                 )),
             );
         const deserializeChat = (chatJson: string) =>
-            resolveContext(AI_OPERATIONS.chat).pipe(
+            resolveLocalContext(AI_OPERATIONS.chat).pipe(
                 Effect.flatMap((context) => runEffectOperation(
                     AI_OPERATIONS.chat,
                     context,
@@ -275,7 +286,7 @@ class AiRuntime extends Effect.Service<AiRuntime>()('ai/Runtime', {
                 )),
             );
         const serializeChat = (chatService: Chat.Service) =>
-            resolveContext(AI_OPERATIONS.chat).pipe(
+            resolveLocalContext(AI_OPERATIONS.chat).pipe(
                 Effect.flatMap((context) => runEffectOperation(AI_OPERATIONS.chat, context, chatService.exportJson)),
             );
         const compactChat = Effect.fn('AiRuntime.compactChat')((
@@ -298,12 +309,12 @@ class AiRuntime extends Effect.Service<AiRuntime>()('ai/Runtime', {
                                 const compacted = yield* chat({ prompt: options.buildPrompt({ before: beforeCount, serialized }) });
                                 const json = yield* serializeChat(compacted).pipe(Effect.catchAll(() => Effect.succeed('')));
                                 const after = yield* countTokens(json).pipe(Effect.option);
-                                return Option.flatMap(after, (a) => a <= options.target ? Option.some({ after: a, before: beforeCount, compacted }) : Option.none());
+                                return Option.flatMap(after, (value) => value <= options.target ? Option.some({ after: value, before: beforeCount, compacted }) : Option.none());
                             }),
                 });
             }),
         );
-        return { chat, compactChat, countTokens, deserializeChat, embed, embeddingSettings, embedMany, generateObject, generateText, serializeChat, settings, streamText };
+        return { chat, compactChat, countTokens, deserializeChat, embed, embedMany, generateObject, generateText, serializeChat, settings, streamText };
     }),
 }) {
     static readonly Live = AiRuntime.Default.pipe(Layer.provideMerge(AiRuntimeProvider.Default));

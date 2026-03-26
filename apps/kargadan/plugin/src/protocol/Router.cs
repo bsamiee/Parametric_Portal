@@ -9,16 +9,13 @@ using static LanguageExt.Prelude;
 namespace ParametricPortal.Kargadan.Plugin.src.protocol;
 
 internal static class CommandRouter {
-    private static readonly JsonElement EmptyJsonElement = JsonSerializer.SerializeToElement(new { });
     private const int MinimumDeadlineMs = 1;
     private static class JsonFields {
         internal const string AppId = "appId";
         internal const string Tag = "_tag";
         internal const string CorrelationId = "correlationId";
-        internal const string Operation = "operation";
         internal const string CommandId = "commandId";
         internal const string DeadlineMs = "deadlineMs";
-        internal const string Payload = "payload";
         internal const string Args = "args";
         internal const string RequestId = "requestId";
         internal const string SessionId = "sessionId";
@@ -31,14 +28,12 @@ internal static class CommandRouter {
         internal const string Auth = "auth";
         internal const string Mode = "mode";
         internal const string Token = "token";
-        internal const string TokenExpiresAt = "tokenExpiresAt";
         internal const string Idempotency = "idempotency";
         internal const string IdempotencyKey = "idempotencyKey";
         internal const string PayloadHash = "payloadHash";
         internal const string ObjectRefs = "objectRefs";
         internal const string ObjectId = "objectId";
         internal const string TypeTag = "typeTag";
-        internal const string SourceRevision = "sourceRevision";
         internal const string UndoScope = "undoScope";
         internal const string TelemetryContext = "telemetryContext";
         internal const string Attempt = "attempt";
@@ -64,7 +59,7 @@ internal static class CommandRouter {
                     from protocolVersion in DecodeProtocolVersion(handshakeEnvelope)
                     from identity in DecodeIdentity(handshakeEnvelope, protocolVersion, now)
                     from capabilities in DecodeCapabilities(handshakeEnvelope)
-                    from auth in DecodeAuthToken(handshakeEnvelope, now)
+                    from auth in DecodeAuthToken(handshakeEnvelope)
                     from telemetryContext in DecodeTelemetryContext(handshakeEnvelope)
                     select new HandshakeEnvelope.Init(
                         Identity: identity,
@@ -127,35 +122,38 @@ internal static class CommandRouter {
             errorMessage: "requestId must be a GUID string on command envelopes.")
         from requestIdGuid in DecodeGuid(requestIdRaw, "requestId must be a valid GUID.")
         from requestId in DomainBridge.ParseValueObject<RequestId, Guid>(candidate: requestIdGuid)
-        from operation in DecodeOperation(envelope: envelope)
+        from commandId in DecodeCommandId(envelope: envelope)
         from deadlineMs in DecodeDeadlineMs(
             envelope: envelope,
-            operation: operation)
-        from payload in DecodePayload(envelope: envelope)
+            commandId: commandId)
+        from args in DecodeArgs(envelope: envelope)
         from objectRefs in DecodeObjectRefs(envelope: envelope)
         from idempotency in DecodeIdempotency(envelope: envelope)
         from undoScope in DecodeUndoScope(envelope: envelope)
         from telemetryContext in DecodeTelemetryContext(envelope: envelope)
         select new CommandEnvelope(
             Identity: sessionIdentity with { RequestId = requestId },
-            Operation: operation,
+            CommandId: commandId,
             ObjectRefs: objectRefs,
             Idempotency: idempotency,
             UndoScope: undoScope,
-            Payload: payload,
+            Args: args,
             TelemetryContext: telemetryContext,
             DeadlineMs: deadlineMs);
-    private static Fin<CommandOperation> DecodeOperation(JsonElement envelope) =>
-        from operationKey in DecodeOperationKey(envelope: envelope)
-        from operation in DomainBridge.ParseSmartEnum<CommandOperation, string>(
-            candidate: operationKey)
+    private static Fin<CommandOperation> DecodeCommandId(JsonElement envelope) =>
+        from commandIdKey in RequireStringProperty(
+            parent: envelope,
+            propertyName: JsonFields.CommandId,
+            errorMessage: $"Command envelope must include '{JsonFields.CommandId}'.")
+        from commandId in DomainBridge.ParseSmartEnum<CommandOperation, string>(
+            candidate: commandIdKey)
             .BiMap(
-                Succ: static (CommandOperation operation) => operation,
+                Succ: static (CommandOperation commandId) => commandId,
                 Fail: (Error _) => Error.New(
-                    message: $"Unsupported operation '{operationKey}' on command envelope."))
-        from supportedOperation in CommandExecutor.Supports(operation) switch {
-            true => FinSucc(operation),
-            _ => FinFail<CommandOperation>(Error.New(message: $"Operation '{operationKey}' is not enabled in the current command route table.")),
+                    message: $"Unsupported commandId '{commandIdKey}' on command envelope."))
+        from supportedOperation in CommandExecutor.Supports(commandId) switch {
+            true => FinSucc(commandId),
+            _ => FinFail<CommandOperation>(Error.New(message: $"CommandId '{commandIdKey}' is not enabled in the current command route table.")),
         }
         select supportedOperation;
     private static Fin<EnvelopeIdentity> DecodeIdentity(
@@ -231,9 +229,7 @@ internal static class CommandRouter {
         select new CapabilitySet(
             Required: required,
             Optional: optional);
-    private static Fin<AuthToken> DecodeAuthToken(
-        JsonElement envelope,
-        Instant now) =>
+    private static Fin<AuthToken> DecodeAuthToken(JsonElement envelope) =>
         from authElement in RequireObjectProperty(
             parent: envelope,
             propertyName: JsonFields.Auth,
@@ -243,22 +239,13 @@ internal static class CommandRouter {
             parent: authElement,
             propertyName: JsonFields.Token,
             errorMessage: "auth.token must be a string.")
-        from expiresAtRaw in RequireStringProperty(
-            parent: authElement,
-            propertyName: JsonFields.TokenExpiresAt,
-            errorMessage: "auth.tokenExpiresAt must be an ISO datetime string.")
+        from _ in authElement.TryGetProperty("tokenExpiresAt", out _) switch {
+            true => FinFail<Unit>(Error.New(message: "auth.tokenExpiresAt is no longer supported.")),
+            false => FinSucc(unit),
+        }
         from token in DomainBridge.ParseValueObject<TokenValue, string>(candidate: tokenRaw)
-        from expiresAt in DateTimeOffset.TryParse(
-            input: expiresAtRaw,
-            formatProvider: System.Globalization.CultureInfo.InvariantCulture,
-            styles: System.Globalization.DateTimeStyles.RoundtripKind,
-            result: out DateTimeOffset parsedExpiresAt)
-            ? FinSucc(Instant.FromDateTimeOffset(parsedExpiresAt))
-            : FinFail<Instant>(Error.New(message: "auth.tokenExpiresAt must be a valid ISO datetime string."))
         from auth in AuthToken.Create(
-            token: token,
-            issuedAt: now,
-            expiresAt: expiresAt)
+            token: token)
         select auth;
     private static Fin<TelemetryContext> BuildTransportTelemetry(
         EnvelopeIdentity identity,
@@ -272,51 +259,20 @@ internal static class CommandRouter {
             operationTag: operationTag,
             attempt: 1)
         select context;
-    private static Fin<string> DecodeOperationKey(JsonElement envelope) =>
-        (cmdId: ReadOptionalString(parent: envelope, propertyName: JsonFields.CommandId),
-         legacy: ReadOptionalString(parent: envelope, propertyName: JsonFields.Operation)) switch {
-             ( { IsSome: true } cmd, { IsSome: true } leg) when string.Equals((string)cmd, (string)leg, StringComparison.Ordinal) =>
-                 FinSucc((string)cmd),
-             ( { IsSome: true }, { IsSome: true } leg) =>
-                 FinFail<string>(Error.New(
-                     message: $"Envelope command identity mismatch: '{JsonFields.CommandId}' and '{JsonFields.Operation}'='{(string)leg}'.")),
-             ( { IsSome: true } cmd, _) => FinSucc((string)cmd),
-             (_, { IsSome: true } leg) => FinSucc((string)leg),
-             _ => FinFail<string>(Error.New(
-                 message: $"Command envelope must include '{JsonFields.CommandId}' (preferred) or '{JsonFields.Operation}'.")),
-         };
     private static Fin<int> DecodeDeadlineMs(
         JsonElement envelope,
-        CommandOperation operation) =>
+        CommandOperation commandId) =>
         envelope.TryGetProperty(JsonFields.DeadlineMs, out JsonElement deadlineElement) switch {
-            false => FinSucc(operation.Category.DefaultDeadlineMs),
+            false => FinSucc(commandId.Category.DefaultDeadlineMs),
             true when deadlineElement.TryGetInt32(out int parsedDeadlineMs) =>
                 FinSucc(Math.Max(MinimumDeadlineMs, parsedDeadlineMs)),
             true => FinFail<int>(Error.New(message: "deadlineMs must be an integer when provided.")),
         };
-    private static Fin<JsonElement> DecodePayload(JsonElement envelope) {
-        bool hasArgs = envelope.TryGetProperty(JsonFields.Args, out JsonElement argsElement);
-        bool hasPayload = envelope.TryGetProperty(JsonFields.Payload, out JsonElement payloadElement);
-        return (hasArgs, hasPayload) switch {
-            (true, true) when !JsonElement.DeepEquals(argsElement, payloadElement) =>
-                FinFail<JsonElement>(Error.New(
-                    message: $"Envelope contains both '{JsonFields.Args}' and '{JsonFields.Payload}' with different values.")),
-            (true, _) => EnsurePayloadObject(
-                payload: argsElement,
-                source: JsonFields.Args),
-            (false, true) => EnsurePayloadObject(
-                payload: payloadElement,
-                source: JsonFields.Payload),
-            _ => FinSucc(EmptyJsonElement),
-        };
-    }
-    private static Fin<JsonElement> EnsurePayloadObject(
-        JsonElement payload,
-        string source) =>
-        payload.ValueKind switch {
-            JsonValueKind.Object => FinSucc(payload),
-            _ => FinFail<JsonElement>(Error.New(
-                message: $"Envelope '{source}' must be an object when provided.")),
+    private static Fin<JsonElement> DecodeArgs(JsonElement envelope) =>
+        envelope.TryGetProperty(JsonFields.Args, out JsonElement argsElement) switch {
+            false => FinFail<JsonElement>(Error.New(message: $"Command envelope must include '{JsonFields.Args}'.")),
+            true when argsElement.ValueKind == JsonValueKind.Object => FinSucc(argsElement),
+            true => FinFail<JsonElement>(Error.New(message: $"Envelope '{JsonFields.Args}' must be an object when provided.")),
         };
     private static Fin<TelemetryContext> DecodeTelemetryContext(JsonElement envelope) =>
         from telemetryContextElement in RequireObjectProperty(
@@ -387,10 +343,6 @@ internal static class CommandRouter {
                     parent: element,
                     propertyName: JsonFields.TypeTag,
                     errorMessage: "objectRefs entries require typeTag as a string.")
-                from sourceRevision in RequireInt32Property(
-                    parent: element,
-                    propertyName: JsonFields.SourceRevision,
-                    errorMessage: "objectRefs entries require sourceRevision as an integer.")
                 from objectIdGuid in Guid.TryParse(objectIdRaw, out Guid parsedObjectId) switch {
                     true => FinSucc(parsedObjectId),
                     _ => FinFail<Guid>(Error.New(message: "objectId must be a valid GUID.")),
@@ -399,7 +351,6 @@ internal static class CommandRouter {
                 from typeTag in DomainBridge.ParseSmartEnum<SceneObjectType, string>(candidate: typeTagRaw)
                 from sceneObjectRef in SceneObjectRef.Create(
                     objectId: objectId,
-                    sourceRevision: sourceRevision,
                     typeTag: typeTag)
                 select sceneObjectRef,
             _ => FinFail<SceneObjectRef>(Error.New(message: "objectRefs entries must be objects.")),
@@ -461,14 +412,5 @@ internal static class CommandRouter {
         Guid.TryParse(raw, out Guid value) switch {
             true => FinSucc(value),
             _ => FinFail<Guid>(Error.New(message: errorMessage)),
-        };
-    private static Option<string> ReadOptionalString(
-        JsonElement parent,
-        string propertyName) =>
-        parent.TryGetProperty(propertyName, out JsonElement propertyElement) switch {
-            true when propertyElement.ValueKind == JsonValueKind.String =>
-                Optional((propertyElement.GetString() ?? string.Empty).Trim())
-                    .Filter(static value => value.Length > 0),
-            _ => None,
         };
 }

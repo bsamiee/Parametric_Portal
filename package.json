@@ -59,7 +59,6 @@
         "class-variance-authority": "catalog:",
         "clsx": "catalog:",
         "cmdk": "catalog:",
-        "@dopplerhq/node-sdk": "catalog:",
         "date-fns": "catalog:",
         "effect": "catalog:",
         "fast-check": "catalog:",
@@ -107,11 +106,10 @@
     },
     "knip": {
         "ignoreBinaries": [
-            "hadolint",
-            "postject"
+            "hadolint"
         ],
         "ignoreFiles": [
-            "apps/kargadan/harness/migrations/*.ts"
+            "apps/kargadan/plugin/scripts/package-yak.ts"
         ],
         "ignoreIssues": {
             "apps/kargadan/harness/src/protocol/schemas.ts": [
@@ -144,14 +142,6 @@
             "packages/database": {
                 "entry": [
                     "migrations/*.ts"
-                ]
-            },
-            "apps/kargadan/harness": {
-                "ignoreDependencies": [
-                    "@effect/ai",
-                    "@effect/ai-anthropic",
-                    "@effect/ai-google",
-                    "@effect/ai-openai"
                 ]
             }
         }

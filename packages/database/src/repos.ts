@@ -22,7 +22,11 @@ const _byActiveDedupe =
 // --- [REPOSITORIES] ----------------------------------------------------------
 
 const makeUserRepo = Effect.gen(function* () {
-    const repository = yield* repo(User, 'users', { resolve: { byEmail: 'email', byRole: { field: 'role', many: true } }, scoped: 'appId' });
+    const repository = yield* repo(User, 'users', {
+        resolve: { byEmail: 'email', byRole: { field: 'role', many: true } },
+        scoped:  'appId',
+        wrap:    { email: 'casefold' },
+    });
     return { ...repository, setPreferences: (id: string, preferences: S.Schema.Type<typeof User.fields.preferences>) => repository.set(id, { preferences }),};
 });
 const makePermissionRepo = Effect.gen(function* () {
@@ -37,7 +41,10 @@ const makePermissionRepo = Effect.gen(function* () {
     };
 });
 const makeAppRepo = Effect.gen(function* () {
-    const repository = yield* repo(App, 'apps', { resolve: { byNamespace: 'namespace' } });
+    const repository = yield* repo(App, 'apps', {
+        resolve: { byNamespace: 'namespace' },
+        wrap:    { namespace: 'casefold' },
+    });
     const _decodeSettings = (rawValue: unknown) => S.decodeUnknown(AppSettingsSchema)(rawValue, { errors: 'all', onExcessProperty: 'ignore' });
     return { ...repository,
         readSettings: (id: string, lock: false | 'update' = false) => repository.one([{ field: 'id', value: id }], lock).pipe(
@@ -51,6 +58,7 @@ const makeAppRepo = Effect.gen(function* () {
 });
 const makeSessionRepo = Effect.gen(function* () {
     const repository = yield* repo(Session, 'sessions', {
+        expires: 'expiryRefresh',
         purge: 'purge_sessions',
         resolve: {
             byAccessToken:  { field: 'tokenAccess',  through: { table: 'session_tokens', target: 'sessionId' } },
@@ -67,18 +75,26 @@ const makeSessionRepo = Effect.gen(function* () {
     };
 });
 const makeApiKeyRepo = Effect.gen(function* () {
-    const repository = yield* repo(ApiKey, 'api_keys', { purge: { column: 'deletedAt', defaultDays: 365, table: 'api_keys' }, resolve: { byHash: 'hash', byUser: { field: 'userId', many: true } } });
+    const repository = yield* repo(ApiKey, 'api_keys', {
+        purge:   { column: 'deletedAt', defaultDays: 365, table: 'api_keys' },
+        resolve: { byHash: 'hash', byUser: { field: 'userId', many: true } },
+    });
     return { ...repository, touch: repository.touch('lastUsedAt'),};
 });
 const makeOauthAccountRepo = Effect.gen(function* () {
     const repository = yield* repo(OauthAccount, 'oauth_accounts', {
         conflict: { keys: ['provider', 'externalId'], only: ['tokenPayload'] },
-        purge: { column: 'deletedAt', defaultDays: 90, table: 'oauth_accounts' }, resolve: { byExternal: ['provider', 'externalId'], byUser: { field: 'userId', many: true } },
+        purge: { column: 'deletedAt', defaultDays: 90, table: 'oauth_accounts' },
+        resolve: { byExternal: ['provider', 'externalId'], byUser: { field: 'userId', many: true } },
     });
     return { ...repository, byExternal: (provider: string, externalId: string) => repository.by('byExternal', { externalId, provider }),};
 });
 const makeAssetRepo = Effect.gen(function* () {
-    const repository = yield* repo(Asset, 'assets', { purge: { column: 'deletedAt', defaultDays: 30, table: 'assets' }, resolve: { byHash: 'hash', byType: { field: 'type', many: true }, byUser: { field: 'userId', many: true } }, scoped: 'appId' });
+    const repository = yield* repo(Asset, 'assets', {
+        purge:    { column: 'deletedAt', defaultDays: 30, table: 'assets' },
+        resolve:  { byHash: 'hash', byType: { field: 'type', many: true }, byUser: { field: 'userId', many: true } },
+        scoped:   'appId',
+    });
     return { ...repository,
         byFilter: (userId: string, { after, before, ids, types }: { after?: Date; before?: Date; ids?: string[]; types?: string[] } = {}) => repository.find(repository.preds({ after, before, id: ids, type: types, userId })),
         findStaleForPurge: (olderThanDays: number) => Clock.currentTimeMillis.pipe(Effect.andThen((now) => repository.find([{ field: 'deletedAt',  op: 'notNull' },{ field: 'deletedAt',  op: 'lt', value: new Date(now - olderThanDays * 24 * 60 * 60 * 1000) },{ field: 'storageRef', op: 'notNull' },])),),
@@ -95,12 +111,15 @@ const makeAuditRepo = Effect.gen(function* () {
 const makeMfaSecretRepo = Effect.gen(function* () {
     const repository = yield* repo(MfaSecret, 'mfa_secrets', {
         conflict: { keys: ['userId'],    only: ['backups', 'enabledAt', 'encrypted']                          },
-        purge:    { column: 'deletedAt', defaultDays: 90, table: 'mfa_secrets' }, resolve: { byUser: 'userId' },
+        purge:    { column: 'deletedAt', defaultDays: 90, table: 'mfa_secrets' },
+        resolve:  { byUser: 'userId' },
     });
     return { ...repository, softDelete: (userId: string) => repository.drop([{ field: 'userId', value: userId }]),};
 });
 const makeWebauthnCredentialRepo = Effect.gen(function* () {
-    const repository = yield* repo(WebauthnCredential, 'webauthn_credentials', { resolve: { byCredentialId: 'credentialId', byUser: { field: 'userId', many: true } } });
+    const repository = yield* repo(WebauthnCredential, 'webauthn_credentials', {
+        resolve: { byCredentialId: 'credentialId', byUser: { field: 'userId', many: true } },
+    });
     return { ...repository,
         touch: repository.touch('lastUsedAt'),
         updateCounter: (id: string, counter: number) => repository.set(id, { counter, lastUsedAt: Update.now }),
@@ -118,7 +137,12 @@ const makeJobRepo = Effect.gen(function* () {
     };
 });
 const makeJobDlqRepo = Effect.gen(function* () {
-    const repository = yield* repo(JobDlq, 'job_dlq', { purge: { column: 'replayedAt', defaultDays: 30, table: 'job_dlq' }, resolve: { byRequest: { field: 'contextRequestId', many: true }, bySource: 'sourceId' }, scoped: 'appId' });
+    const repository = yield* repo(JobDlq, 'job_dlq', {
+        purge:   { column: 'replayedAt', defaultDays: 30, table: 'job_dlq' },
+        resolve: { byRequest: { field: 'contextRequestId', many: true }, bySource: 'sourceId' },
+        scoped:  'appId',
+        soft:    'replayedAt',
+    });
     return { ...repository,
         countPending:   (type?: string) => repository.count(repository.wildcard('type', type)),
         listPending:    (options?: { type?: string | undefined; limit?: number | undefined; cursor?: string | undefined }) => repository.page(repository.wildcard('type', options?.type), options),
@@ -127,7 +151,10 @@ const makeJobDlqRepo = Effect.gen(function* () {
     };
 });
 const makeNotificationRepo = Effect.gen(function* () {
-    const repository = yield* repo(Notification, 'notifications', { resolve: { byDedupe: 'dedupeKey', byJob: { field: 'jobKey', many: true } }, scoped: 'appId' });
+    const repository = yield* repo(Notification, 'notifications', {
+        resolve: { byDedupe: 'dedupeKey', byJob: { field: 'jobKey', many: true } },
+        scoped:  'appId',
+    });
     return { ...repository,
         byActiveDedupe: _byActiveDedupe(repository.one)(['queued', 'sending']),
         transition: (id: string, updates: { status: S.Schema.Type<typeof Notification.fields.status>; delivery?: S.Schema.Type<typeof Notification.fields.delivery>; correlation?: S.Schema.Type<typeof Notification.fields.correlation>; retryCurrent?: S.Schema.Type<typeof Notification.fields.retryCurrent>; retryMax?: S.Schema.Type<typeof Notification.fields.retryMax> }, whenStatus?: S.Schema.Type<typeof Notification.fields.status>) =>
@@ -148,7 +175,8 @@ const makeNotificationRepo = Effect.gen(function* () {
 const makeKvStoreRepo = Effect.gen(function* () {
     const repository = yield* repo(KvStore, 'kv_store', {
         conflict:  { keys: ['key'], only: ['value', 'expiresAt'] },
-        purge:     { column: 'expiresAt', defaultDays: 30, table: 'kv_store' }, resolve: { byKey: 'key' },
+        purge:     { column: 'expiresAt', defaultDays: 30, table: 'kv_store' },
+        resolve:   { byKey: 'key' },
     });
     return { ...repository,
         getJson: <A, I, R>(key: string, schema: S.Schema<A, I, R>) => repository.by('byKey', key).pipe(Effect.flatMap(repository.json.decode('value', schema))),

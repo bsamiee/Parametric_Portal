@@ -1,0 +1,56 @@
+name: Kargadan Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      database_digest:
+        description: Real sha256 digest for the published kargadan-postgres image.
+        required: true
+        type: string
+      database_image:
+        description: Fully qualified image reference to pin into the packaged release.
+        required: true
+        type: string
+      yak_path:
+        description: Absolute path to Rhino's yak binary on the macOS runner.
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    name: Build Packaged Kargadan Release
+    runs-on: [self-hosted, macOS]
+    timeout-minutes: 45
+    env:
+      KARGADAN_RELEASE_DATABASE_DIGEST: ${{ inputs.database_digest }}
+      KARGADAN_RELEASE_DATABASE_IMAGE: ${{ inputs.database_image }}
+      KARGADAN_YAK_PATH: ${{ inputs.yak_path }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Setup Environment
+        uses: ./.github/actions/node-env
+
+      - name: Validate yak path
+        run: |
+          set -euo pipefail
+          test -x "${KARGADAN_YAK_PATH}"
+
+      - name: Build Yak Package
+        run: pnpm exec nx run @parametric-portal/kargadan-harness:yak:package
+
+      - name: Build Packaged Release
+        run: pnpm exec nx run @parametric-portal/kargadan-harness:release
+
+      - name: Packaged Release Smoke
+        run: pnpm exec nx run @parametric-portal/kargadan-harness:smoke:packaged
+
+      - name: Upload Release Bundle
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: kargadan-release
+          path: apps/kargadan/harness/dist/release
+          if-no-files-found: error

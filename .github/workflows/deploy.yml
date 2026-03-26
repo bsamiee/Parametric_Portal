@@ -11,9 +11,10 @@ concurrency:
   group: deploy-${{ github.ref }}
   cancel-in-progress: false
 
+permissions: {}
+
 env:
   REGISTRY: ghcr.io
-  IMAGE_PREFIX: ghcr.io/${{ github.repository }}
 
 jobs:
   # --- BUILD IMAGES -----------------------------------------------------------
@@ -36,7 +37,17 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Derive Image Prefix
+        id: image-prefix
+        env:
+          REPO_NAME: ${{ github.event.repository.name }}
+          REPO_OWNER: ${{ github.repository_owner }}
+        run: echo "prefix=ghcr.io/${REPO_OWNER,,}/${REPO_NAME,,}" >> "$GITHUB_OUTPUT"
+
       - uses: ./.github/actions/node-env
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@ce360397dd3f832beb865e1373c09c0e9f86d70a # v4.0.0
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@b5ca514318bd6ebac0fb2aedd5d36ec1b5c232a2 # v3.10.0
@@ -70,8 +81,8 @@ jobs:
           file: apps/api/Dockerfile
           push: true
           tags: |
-            ${{ env.IMAGE_PREFIX }}/api:${{ steps.meta.outputs.tag }}
-            ${{ env.IMAGE_PREFIX }}/api:latest
+            ${{ steps.image-prefix.outputs.prefix }}/api:${{ steps.meta.outputs.tag }}
+            ${{ steps.image-prefix.outputs.prefix }}/api:latest
           cache-from: type=gha,scope=api
           cache-to: type=gha,mode=max,scope=api
           provenance: true
@@ -79,13 +90,13 @@ jobs:
 
       - name: Sign API Image
         if: steps.build-api.outcome == 'success'
-        run: cosign sign --yes "${{ env.IMAGE_PREFIX }}/api@${{ steps.build-api.outputs.digest }}"
+        run: cosign sign --yes "${{ steps.image-prefix.outputs.prefix }}/api@${{ steps.build-api.outputs.digest }}"
 
       - name: Attest API Provenance
         if: steps.build-api.outcome == 'success'
         uses: actions/attest-build-provenance@ef244123eb79f2f7a7e75d99086184180e6d0018 # v2.1.0
         with:
-          subject-name: ${{ env.IMAGE_PREFIX }}/api
+          subject-name: ${{ steps.image-prefix.outputs.prefix }}/api
           subject-digest: ${{ steps.build-api.outputs.digest }}
           push-to-registry: true
 
@@ -93,7 +104,7 @@ jobs:
         if: steps.build-api.outcome == 'success'
         uses: aquasecurity/trivy-action@915b19bbe73b92a6cf82a1bc12b087c9a19a5fe2 # v0.28.0
         with:
-          image-ref: '${{ env.IMAGE_PREFIX }}/api@${{ steps.build-api.outputs.digest }}'
+          image-ref: '${{ steps.image-prefix.outputs.prefix }}/api@${{ steps.build-api.outputs.digest }}'
           format: sarif
           output: trivy-api.sarif
           severity: CRITICAL,HIGH
@@ -114,8 +125,8 @@ jobs:
           file: apps/parametric_icons/Dockerfile
           push: true
           tags: |
-            ${{ env.IMAGE_PREFIX }}/icons:${{ steps.meta.outputs.tag }}
-            ${{ env.IMAGE_PREFIX }}/icons:latest
+            ${{ steps.image-prefix.outputs.prefix }}/icons:${{ steps.meta.outputs.tag }}
+            ${{ steps.image-prefix.outputs.prefix }}/icons:latest
           build-args: |
             VITE_API_URL=${{ vars.API_URL }}
           cache-from: type=gha,scope=icons
@@ -125,13 +136,13 @@ jobs:
 
       - name: Sign Icons Image
         if: steps.build-icons.outcome == 'success'
-        run: cosign sign --yes "${{ env.IMAGE_PREFIX }}/icons@${{ steps.build-icons.outputs.digest }}"
+        run: cosign sign --yes "${{ steps.image-prefix.outputs.prefix }}/icons@${{ steps.build-icons.outputs.digest }}"
 
       - name: Attest Icons Provenance
         if: steps.build-icons.outcome == 'success'
         uses: actions/attest-build-provenance@ef244123eb79f2f7a7e75d99086184180e6d0018 # v2.1.0
         with:
-          subject-name: ${{ env.IMAGE_PREFIX }}/icons
+          subject-name: ${{ steps.image-prefix.outputs.prefix }}/icons
           subject-digest: ${{ steps.build-icons.outputs.digest }}
           push-to-registry: true
 
@@ -139,7 +150,7 @@ jobs:
         if: steps.build-icons.outcome == 'success'
         uses: aquasecurity/trivy-action@915b19bbe73b92a6cf82a1bc12b087c9a19a5fe2 # v0.28.0
         with:
-          image-ref: '${{ env.IMAGE_PREFIX }}/icons@${{ steps.build-icons.outputs.digest }}'
+          image-ref: '${{ steps.image-prefix.outputs.prefix }}/icons@${{ steps.build-icons.outputs.digest }}'
           format: sarif
           output: trivy-icons.sarif
           severity: CRITICAL,HIGH
@@ -151,6 +162,50 @@ jobs:
           sarif_file: trivy-icons.sarif
           category: container-icons
 
+      - name: Build Kargadan Postgres
+        id: build-kargadan-postgres
+        if: contains(steps.affected.outputs.apps, '@parametric-portal/kargadan-harness') || github.event_name == 'workflow_dispatch'
+        uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6.18.0
+        with:
+          context: apps/kargadan/harness/assets/postgres
+          file: apps/kargadan/harness/assets/postgres/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ${{ steps.image-prefix.outputs.prefix }}/kargadan-postgres:${{ steps.meta.outputs.tag }}
+            ${{ steps.image-prefix.outputs.prefix }}/kargadan-postgres:latest
+          cache-from: type=gha,scope=kargadan-postgres
+          cache-to: type=gha,mode=max,scope=kargadan-postgres
+          provenance: true
+          sbom: true
+
+      - name: Sign Kargadan Postgres Image
+        if: steps.build-kargadan-postgres.outcome == 'success'
+        run: cosign sign --yes "${{ steps.image-prefix.outputs.prefix }}/kargadan-postgres@${{ steps.build-kargadan-postgres.outputs.digest }}"
+
+      - name: Attest Kargadan Postgres Provenance
+        if: steps.build-kargadan-postgres.outcome == 'success'
+        uses: actions/attest-build-provenance@ef244123eb79f2f7a7e75d99086184180e6d0018 # v2.1.0
+        with:
+          subject-name: ${{ steps.image-prefix.outputs.prefix }}/kargadan-postgres
+          subject-digest: ${{ steps.build-kargadan-postgres.outputs.digest }}
+          push-to-registry: true
+
+      - name: Scan Kargadan Postgres Image
+        if: steps.build-kargadan-postgres.outcome == 'success'
+        uses: aquasecurity/trivy-action@915b19bbe73b92a6cf82a1bc12b087c9a19a5fe2 # v0.28.0
+        with:
+          image-ref: '${{ steps.image-prefix.outputs.prefix }}/kargadan-postgres@${{ steps.build-kargadan-postgres.outputs.digest }}'
+          format: sarif
+          output: trivy-kargadan-postgres.sarif
+          severity: CRITICAL,HIGH
+
+      - name: Upload Kargadan Postgres Trivy Results
+        if: steps.build-kargadan-postgres.outcome == 'success'
+        uses: github/codeql-action/upload-sarif@5d4e8d1aca955e8d8589aabd499c5cae939e33c7 # v4.31.9
+        with:
+          sarif_file: trivy-kargadan-postgres.sarif
+          category: container-kargadan-postgres
   # --- UPDATE MANIFESTS (GitOps) ----------------------------------------------
   update-manifests:
     name: Update K8s Manifests

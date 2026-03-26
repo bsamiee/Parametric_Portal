@@ -28,13 +28,12 @@ internal sealed class SessionEventPublisher {
         _sessionHost = sessionHost;
         _timeProvider = timeProvider;
     }
-    internal Fin<Unit> PublishLifecycleEvent(CommandResultEnvelope result) {
+    internal Fin<Unit> PublishCommandLifecycleEvent(CommandResultEnvelope result) {
         return result.Switch(
             success: (CommandResultEnvelope.Success success) =>
                 PublishEventEnvelope(
-                    eventType: EventType.SessionLifecycle,
+                    eventType: EventType.CommandLifecycle,
                     identity: success.Identity,
-                    sourceRevision: success.Execution.SourceRevision,
                     causationRequestId: Some(success.Identity.RequestId),
                     delta: JsonSerializer.SerializeToElement(new {
                         dedupeDecision = success.Dedupe.Decision.Key,
@@ -43,9 +42,8 @@ internal sealed class SessionEventPublisher {
                     telemetryContext: success.TelemetryContext),
             failure: (CommandResultEnvelope.Failure failure) =>
                 PublishEventEnvelope(
-                    eventType: EventType.SessionLifecycle,
+                    eventType: EventType.CommandLifecycle,
                     identity: failure.Identity,
-                    sourceRevision: failure.Execution.SourceRevision,
                     causationRequestId: Some(failure.Identity.RequestId),
                     delta: JsonSerializer.SerializeToElement(new {
                         errorCode = failure.Error.Reason.Code.Key,
@@ -99,7 +97,6 @@ internal sealed class SessionEventPublisher {
                             RequestId = requestId,
                             IssuedAt = publishedAt,
                         },
-                        sourceRevision: 0,
                         causationRequestId: causationRequestId,
                         delta: buildDelta(snapshot),
                         telemetryContext: telemetryContext)),
@@ -107,7 +104,6 @@ internal sealed class SessionEventPublisher {
     private Fin<Unit> PublishEventEnvelope(
         EventType eventType,
         EnvelopeIdentity identity,
-        int sourceRevision,
         Option<RequestId> causationRequestId,
         JsonElement delta,
         TelemetryContext telemetryContext) =>
@@ -116,7 +112,6 @@ internal sealed class SessionEventPublisher {
                 eventId: eventId,
                 eventType: eventType,
                 identity: identity,
-                sourceRevision: sourceRevision,
                 causationRequestId: causationRequestId,
                 delta: delta,
                 telemetryContext: telemetryContext)

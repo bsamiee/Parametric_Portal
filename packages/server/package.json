@@ -186,7 +186,6 @@
         "@effect/rpc": "catalog:",
         "@effect/sql": "catalog:",
         "@effect/workflow": "catalog:",
-        "@parametric-portal/ai": "workspace:*",
         "@parametric-portal/database": "workspace:*",
         "@parametric-portal/types": "workspace:*",
         "@simplewebauthn/server": "catalog:",

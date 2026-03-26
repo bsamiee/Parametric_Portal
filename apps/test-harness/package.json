@@ -27,7 +27,6 @@
         "tailwindcss-react-aria-components": "catalog:",
         "tw-animate-css": "catalog:",
         "typescript": "catalog:",
-        "vite": "catalog:",
-        "vitest": "catalog:"
+        "vite": "catalog:"
     }
 }

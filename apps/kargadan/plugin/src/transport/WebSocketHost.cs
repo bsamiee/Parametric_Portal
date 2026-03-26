@@ -36,7 +36,9 @@ internal sealed class WebSocketHost : IDisposable {
     };
     private readonly MessageDispatcher _dispatcher;
     private readonly EventEnvelopeDrain _drainPublishedEvents;
+    private readonly Func<Unit> _onConnectionClosed;
     private readonly EventEnvelopeRequeue _requeueEvents;
+    private readonly TokenValue _transportToken;
     private readonly CancellationTokenSource _cts = new();
     private readonly SemaphoreSlim _sendGate = new(1, 1);
     private HttpListener? _listener;
@@ -46,10 +48,14 @@ internal sealed class WebSocketHost : IDisposable {
     internal WebSocketHost(
         MessageDispatcher dispatcher,
         EventEnvelopeDrain drainPublishedEvents,
-        EventEnvelopeRequeue requeueEvents) {
+        EventEnvelopeRequeue requeueEvents,
+        TokenValue transportToken,
+        Func<Unit> onConnectionClosed) {
         _dispatcher = dispatcher;
         _drainPublishedEvents = drainPublishedEvents;
+        _onConnectionClosed = onConnectionClosed;
         _requeueEvents = requeueEvents;
+        _transportToken = transportToken;
     }
     internal int Port { get; private set; }
     internal void Start() {
@@ -58,7 +64,7 @@ internal sealed class WebSocketHost : IDisposable {
         _listener.Prefixes.Add($"http://127.0.0.1:{port}/");
         _listener.Start();
         Port = port;
-        WebSocketPortFile.Write(port: Port);
+        WebSocketPortFile.Write(port: Port, sessionToken: _transportToken);
         RhinoApp.WriteLine($"[Kargadan] WebSocket server listening on 127.0.0.1:{Port}");
         _ = Task.Run(() => AcceptLoopAsync(cancellationToken: _cts.Token));
     }
@@ -201,6 +207,7 @@ internal sealed class WebSocketHost : IDisposable {
                 // why: loop cancellation is expected when connection scope closes
             }
             await CloseWebSocketSafelyAsync(webSocket: webSocket).ConfigureAwait(false);
+            _ = _onConnectionClosed();
             RhinoApp.WriteLine("[Kargadan] Client disconnected.");
         } finally {
             webSocket.Dispose();
