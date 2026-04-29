@@ -131,7 +131,7 @@ catalog:
   typescript: 6.0.0-dev.20251125
   uuid: 13.0.0
   vaul: 1.1.2
-  vite: 7.3.1
+  vite: 7.3.2
   vite-plugin-compression: 0.5.1
   vite-plugin-csp: 1.1.2
   vite-plugin-image-optimizer: 2.0.3
