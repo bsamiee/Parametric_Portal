@@ -141,7 +141,7 @@ catalog:
   vite-plugin-webfont-dl: 3.12.0
   vite-tsconfig-paths: 6.1.1
   vitest: 4.0.18
-  yaml: 2.8.2
+  yaml: 2.8.3
   zundo: 2.3.0
   zustand: 5.0.11
   zustand-computed: 2.1.1
