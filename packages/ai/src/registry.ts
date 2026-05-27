@@ -3,7 +3,7 @@ import { LanguageModel, type AiError as AiSdkError, type Response, Tokenizer } f
 import { type Generated as GoogleGenerated, GoogleClient, GoogleLanguageModel } from '@effect/ai-google';
 import { type Generated as OpenAiGenerated, OpenAiClient, OpenAiLanguageModel } from '@effect/ai-openai';
 import { FetchHttpClient, HttpClient, HttpClientRequest } from '@effect/platform';
-import { KargadanAiSettingsSchema as AiSettingsSchema, type KargadanAiProviderSchema as AiProviderSchema } from '@parametric-portal/database/models';
+import { AiSettingsSchema, type AiProviderSchema } from '@parametric-portal/database/models';
 import { Array as A, Effect, FiberRef, Layer, Option, Redacted, Schema as S } from 'effect';
 
 // --- [SCHEMA] ----------------------------------------------------------------
@@ -21,8 +21,6 @@ const _GeminiModelListSchema = S.Struct({
 
 // --- [TYPES] -----------------------------------------------------------------
 
-type _Provider = typeof AiProviderSchema.Type;
-type _PersistedSettings = typeof AiSettingsSchema.Type;
 type _EmbeddingUsage = 'document' | 'query' | 'similarity';
 type _EmbeddingBatch = {
     readonly embeddings: ReadonlyArray<readonly number[]>;
@@ -30,18 +28,18 @@ type _EmbeddingBatch = {
 };
 type _LiveModel = {
     readonly id:       string;
-    readonly provider: _Provider;
+    readonly provider: typeof AiProviderSchema.Type;
     readonly title:    string;
 };
-type _Credential<P extends _Provider = _Provider> = ({
+type _Credential<P extends typeof AiProviderSchema.Type = typeof AiProviderSchema.Type> = ({
     gemini: { readonly accessToken: Redacted.Redacted<string>; readonly kind: 'oauth-desktop'; readonly projectId: string };
     openai: { readonly kind: 'api-secret'; readonly secret: Redacted.Redacted<string> };
 })[P];
-type _Credentials = Partial<{ [P in _Provider]: _Credential<P> }>;
+type _Credentials = Partial<{ [P in typeof AiProviderSchema.Type]: _Credential<P> }>;
 type _OnTokenRefresh = (data: { readonly accessToken: string; readonly expiresAt: string; readonly refreshToken: string }) => Effect.Effect<void>;
-type _Embedding = (typeof _EMBEDDING_PROFILES)[_Provider];
-type _GenerationSettings<P extends _Provider = _Provider> = Pick<_PersistedSettings, 'maxOutputTokens' | 'model' | 'temperature' | 'topP'> & { readonly provider: P };
-type _Settings<P extends _Provider = _Provider> = _PersistedSettings & {
+type _Embedding = (typeof _EMBEDDING_PROFILES)[typeof AiProviderSchema.Type];
+type _GenerationSettings<P extends typeof AiProviderSchema.Type = typeof AiProviderSchema.Type> = Pick<typeof AiSettingsSchema.Type, 'maxOutputTokens' | 'model' | 'temperature' | 'topP'> & { readonly provider: P };
+type _Settings<P extends typeof AiProviderSchema.Type = typeof AiProviderSchema.Type> = typeof AiSettingsSchema.Type & {
     readonly provider: P;
     readonly embedding: (typeof _EMBEDDING_PROFILES)[P];
     readonly knowledge: {
@@ -127,7 +125,7 @@ const _httpJson = <A>(request: ReturnType<typeof HttpClientRequest.get>, schema:
         Effect.provide(FetchHttpClient.layer),
         Effect.flatMap(S.decodeUnknown(schema)),
     );
-const _credential = <P extends _Provider>(credentials: _Credentials, provider: P) =>
+const _credential = <P extends typeof AiProviderSchema.Type>(credentials: _Credentials, provider: P) =>
     Option.getOrThrowWith(Option.fromNullable(credentials[provider]), () => new Error(`Missing credential for provider: ${provider}`)) as _Credential<P>;
 const _ProviderCatalog = {
     gemini: {
@@ -294,7 +292,7 @@ const _ProviderCatalog = {
         title: 'OpenAI',
     },
 } as const;
-const _listLanguageModels = (provider: _Provider, credentials: _Credentials): Effect.Effect<ReadonlyArray<_LiveModel>, Error> =>
+const _listLanguageModels = (provider: typeof AiProviderSchema.Type, credentials: _Credentials): Effect.Effect<ReadonlyArray<_LiveModel>, Error> =>
     provider === 'gemini'
         ? _ProviderCatalog.gemini.listModels(_credential(credentials, 'gemini'))
         : _ProviderCatalog.openai.listModels(_credential(credentials, 'openai'));
@@ -328,7 +326,7 @@ const AiRegistry = {
     decodeAppSettings: (raw: unknown) =>
         S.decodeUnknown(S.Struct({ ai: S.optional(S.Unknown) }))(raw).pipe(
             Effect.flatMap(({ ai }) => Option.fromNullable(ai).pipe(Option.match({
-                onNone: () => Effect.fail(new Error('AI model not selected. Run `kargadan ai select --provider <provider> --model <model>`.')),
+                onNone: () => Effect.fail(new Error('AI model not selected. Configure settings.ai with a provider and model.')),
                 onSome: (value) => S.decodeUnknown(AiSettingsSchema)(value, { errors: 'all', onExcessProperty: 'ignore' }),
             }))),
             Effect.map((settings) => ({
@@ -355,9 +353,9 @@ const AiRegistry = {
         provider:        settings.provider,
         temperature:     settings.temperature,
         topP:            settings.topP,
-    }) satisfies _PersistedSettings,
+    }) satisfies typeof AiSettingsSchema.Type,
     providers: _ProviderCatalog,
-    validateCredential: (provider: _Provider, credential: _Credential) =>
+    validateCredential: (provider: typeof AiProviderSchema.Type, credential: _Credential) =>
         _listLanguageModels(provider, { [provider]: credential } as _Credentials).pipe(
             Effect.filterOrFail(
                 (models) => models.length > 0,
@@ -376,7 +374,7 @@ namespace AiRegistry {
     export type EmbeddingUsage = _EmbeddingUsage;
     export type LiveModel = _LiveModel;
     export type OnTokenRefresh = _OnTokenRefresh;
-    export type Provider = _Provider;
+    export type Provider = typeof AiProviderSchema.Type;
     export type Settings = _Settings;
 }
 

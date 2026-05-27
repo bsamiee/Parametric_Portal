@@ -84,7 +84,7 @@ const run = async (params: RunParams & { readonly spec: AlertSpec }): Promise<vo
         else {
             await mutate(ctx, {
                 body,
-                label: classification.labels[0],
+                label: classification.labels.at(0) ?? 'tech-debt',
                 labels: [...classification.labels],
                 pattern: alertSpecs.ci.pattern,
                 t: 'issue',

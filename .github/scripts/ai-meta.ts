@@ -118,12 +118,13 @@ const callAiApi = (config: MetaConfig, prompt: string): Promise<string | null> =
 // --- Effect Pipeline ---------------------------------------------------------
 
 const fixTarget = (ctx: Ctx, config: MetaConfig, target: Target, issue: Issue): Promise<number> =>
-    fixRules[target].ok(issue)
-        ? Promise.resolve(0)
-        : ((local) =>
-              (local ? Promise.resolve(local) : callAiApi(config, fixRules[target].prompt(issue))).then((value) =>
-                  value ? fixRules[target].write(ctx, issue.number, value.trim().split('\n')[0]).then(() => 1) : 0,
-              ))(fixRules[target].fix(issue));
+    ((rule) =>
+        rule.ok(issue)
+            ? Promise.resolve(0)
+            : ((local) =>
+                  (local ? Promise.resolve(local) : callAiApi(config, rule.prompt(issue))).then((value) =>
+                      value ? rule.write(ctx, issue.number, value.trim().split('\n').at(0) ?? '').then(() => 1) : 0,
+                  ))(rule.fix(issue)))(fixRules[target]);
 const syncBreakingLabel = (ctx: Ctx, issue: Issue): Promise<number> => {
     const breaking = isBreak(issue.title, issue.body);
     const hasLabel = issue.labels.some((label) => label.name === B.breaking.label);

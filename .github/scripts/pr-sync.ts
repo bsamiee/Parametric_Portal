@@ -53,7 +53,7 @@ const getDominantType = (commits: ReadonlyArray<Commit>): TypeKey => {
 };
 const titleType = (title: string): TypeKey | null => {
     const match = B.pr.pattern.exec(title);
-    return match ? (match[1].toLowerCase() as TypeKey) : null;
+    return match ? ((match.at(1) ?? '').toLowerCase() as TypeKey) : null;
 };
 const formatPrTitle = (type: TypeKey, brk: boolean, subject: string): string =>
     `${B.meta.fmt.title(type, brk)} ${subject}`;

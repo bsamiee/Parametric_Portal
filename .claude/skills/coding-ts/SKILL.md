@@ -1,8 +1,8 @@
 ---
 name: coding-ts
 description: >-
-  Enforces TypeScript + Effect style, type discipline, error handling,
-  concurrency, and module organization standards.
+  Enforces TypeScript + Effect functional/ROP style, type discipline,
+  polymorphic surfaces, and module organization standards.
   Use when writing, editing, reviewing, refactoring, or debugging
   .ts/.tsx modules, implementing domain models, Effect services,
   persistence adapters, or boundary handlers, or configuring TypeScript,
@@ -25,7 +25,7 @@ All code follows five governing principles:
 - **Immutability**: `S.Class` copy-update transitions, `Ref` for managed mutable state, zero `let` in domain code. Effect data structures (`HashMap`, `HashSet`, `Chunk`, `List`) over JS stdlib (`Map`, `Set`, `Array`) — structural sharing, referential transparency, and `Equal`/`Hash` integration by default. JS stdlib collections only at system boundaries (FFI, serialization)
 - **Typed error channels**: `Data.TaggedEnum` for file-internal errors (never exported), `class extends Data.TaggedError` for cross-cutting domain errors (polymorphic, few per system), composed via `mapError`/`catchTag`/`catchTags`
 - **Exhaustive dispatch**: vocabulary-driven dispatch (`Record` lookup) for keyed domains — vocabulary objects are the sole dispatch mechanism when a domain is keyed by string/enum; `Match` is reserved for structural/predicate matching on non-keyed shapes only. When a vocabulary object defines thresholds/tiers, classification iterates or indexes the vocabulary — never reimplements the vocabulary's knowledge as `Match.when` chains
-- **Type anchoring**: one `S.Class` per concept — derive projections via `pick`/`omit`/`partial`/`extend`, never parallel structs
+- **Type anchoring**: use `S.Class`/`Model.Class` for external codecs, persisted models, and domain authorities; use inferred plain objects for internal config/state when no runtime authority is needed. Derive projections via `pick`/`omit`/`partial`/`extend`, never parallel structs
 - **Expression control flow**: `pipe` + monadic combinators (`map`, `flatMap`, `tap`, `filterOrFail`), zero statement branching
 - **Programmatic logic**: bounded vocabulary objects as discriminant sources, `Record`-driven dispatch, zero stringly-typed routing
 - **Private integration**: module logic is the export's implementation, not its neighbor — `_`-prefixed internals are closures, scoped captures, or inline compositions inside the exported class/service/function, not standalone module-level declarations consumed by a single caller
@@ -63,7 +63,7 @@ One library's types per module boundary. Bridge at layer edges via Schema decode
 ## Contracts
 
 **Type discipline**
-- One canonical `S.Class` per concept; derive all projections (`pick`/`omit`/`partial`/`extend`), never parallel `S.Struct` variants.
+- One canonical runtime authority per boundary concept: `S.Class`/`Model.Class` for decoded or persisted concepts; inferred plain objects for internal config/state. Derive all projections (`pick`/`omit`/`partial`/`extend`), never parallel `S.Struct` variants.
 - Search existing shapes before creating new ones — extend or modify fields over declaring fresh schemas.
 - Avoid module-level `type`/`interface` when inference from runtime declarations suffices.
 - No parallel schemas/brands/types for the same domain concept.
@@ -79,7 +79,7 @@ One library's types per module boundary. Bridge at layer edges via Schema decode
 - Error classes and enums belong in the `[ERRORS]` section — never in `[SCHEMA]`. Schema defines data shapes; errors define failure modes. Even when an error uses Schema internally, its declaration site is `[ERRORS]`.
 - Domain error classes carry polymorphic/agnostic logic reusable across all call sites.
 - One canonical `reason → policy` projection table per domain error class — zero inline status/retry/transport literals outside it.
-- Decode unknown input at boundaries, map unknown causes immediately.
+- Decode unknown input at boundaries, map unknown causes immediately into bounded tagged errors.
 
 **Surface**
 - Private-by-default: every non-exported symbol (values, functions, AND types) carries `_` prefix. Module exports 1–2 symbols maximum — no exceptions. Branded primitives integrate into the owning class/service (fields, static factories), never exported as standalone module-level symbols.
@@ -105,22 +105,17 @@ One library's types per module boundary. Bridge at layer edges via Schema decode
 | ------------------------------------- | ------------------------------------ |
 | [patterns.md](references/patterns.md) | Cross-boundary integration contracts |
 
-**Core** (always):
-
-| Reference                                 | Focus                                    |
-| ----------------------------------------- | ---------------------------------------- |
-| [types.md](references/types.md)           | Type derivation, compression, inference  |
-| [objects.md](references/objects.md)       | Schemas, classes, shapes, projections    |
-| [effects.md](references/effects.md)       | Effect pipelines, ROP, composition       |
-| [matching.md](references/matching.md)     | Exhaustive expression control flow       |
-| [errors.md](references/errors.md)         | Error construction, architecture, policy |
-| [transforms.md](references/transforms.md) | Folds, projections, pipeline strategies  |
-| [surface.md](references/surface.md)       | Public API creation and refinement       |
-
-**Specialized** (load when task matches):
+**Task-routed references**:
 
 | Reference                                       | Load when                                |
 | ----------------------------------------------- | ---------------------------------------- |
+| [types.md](references/types.md)                 | Type derivation, compression, inference  |
+| [objects.md](references/objects.md)             | Schema/Class/Model boundary work         |
+| [effects.md](references/effects.md)             | Effect pipelines, ROP, composition       |
+| [matching.md](references/matching.md)           | Exhaustive expression control flow       |
+| [errors.md](references/errors.md)               | Error construction, architecture, policy |
+| [transforms.md](references/transforms.md)       | Folds, projections, pipeline strategies  |
+| [surface.md](references/surface.md)             | Public API creation and refinement       |
 | [composition.md](references/composition.md)     | Layer and module boundary composition    |
 | [services.md](references/services.md)           | Service topology and dependency strategy |
 | [persistence.md](references/persistence.md)     | SQL/model boundary work                  |
@@ -167,6 +162,15 @@ One library's types per module boundary. Bridge at layer edges via Schema decode
 - Required during iteration: `pnpm quality`.
 - Required for final completion: `pnpm quality`, `pnpm dotnet`, `pnpm python`.
 - Reject completion when load order, contracts, or checks are not satisfied.
+- Examples inside this skill are executable doctrine: no unmarked `Object.*`, ternaries, `undefined as never`, bare `Error`, unbounded `unknown`, or one-use helper extraction in golden paths.
+
+## Skill eval prompts
+
+- Explicit invocation: "Using coding-ts, refactor this .ts service into an Effect ROP pipeline with a single polymorphic surface."
+- Implicit invocation: "Review this `.tsx` boundary handler for schema, error rail, and Effect service problems."
+- Noisy context: "Ignore the surrounding product notes and only fix the TypeScript persistence adapter."
+- Negative control: "Design a PostgreSQL index strategy only." Expected: do not invoke TS references unless TypeScript code is involved.
+- Compliance checks: output should load only relevant references, avoid command thrash, avoid new helper files, preserve functional/Effect doctrine, and run `pnpm quality` or a narrower existing TS gate when code is touched.
 
 ## First-class libraries
 

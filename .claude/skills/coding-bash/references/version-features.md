@@ -3,12 +3,12 @@
 
 <br>
 
-Bash 5.2/5.3 feature exploitation. Fork-free substitution, REPLY capture, GLOBSORT pipelines, epoch instrumentation, monotonic clock, trap signal dispatch, loadable builtins (fltexpr, strptime, kv), shell options (array_expand_once, read -E, source -p), version gating. Minimum baseline is 5.2 — features below that threshold are unconditionally available.
+Bash 5.2/5.3 feature exploitation. Fork-free substitution, REPLY-bound substitution, GLOBSORT pipelines, epoch instrumentation, monotonic clock, trap signal dispatch, loadable builtins (fltexpr, strptime, kv), shell options (array_expand_once, read -E, source -p), version gating. Minimum baseline is 5.2 — features below that threshold are unconditionally available.
 
 | [IDX] | [PATTERN]              |  [S]  | [VER] | [USE_WHEN]                                           |
 | :---: | :--------------------- | :---: | :---: | :--------------------------------------------------- |
 |  [1]  | Fork-free substitution |  S1   |  5.3  | Tight loops, accumulator patterns, hot-path captures |
-|  [2]  | REPLY capture          |  S2   |  5.3  | Result binding, conditional stdout processing        |
+|  [2]  | REPLY-bound expansion  |  S2   |  5.3  | Result binding, structured side-effect separation    |
 |  [3]  | GLOBSORT pipelines     |  S3   |  5.3  | File processing by size/mtime without sort(1)        |
 |  [4]  | Epoch instrumentation  |  S4   | 5.2+  | Benchmarking, TTL caches, SRANDOM nonces             |
 |  [5]  | Monotonic clock        |  S5   |  5.3  | Elapsed time immune to NTP drift, SLA enforcement    |
@@ -76,36 +76,35 @@ subdir=${ cd /tmp && pwd; } # PWD IS /tmp — current shell mutated
 Use `${ }` for inline value construction in hot paths. Use `$()` when isolation is required — side-effect propagation is load-bearing for accumulators but hazardous for pure transforms.
 
 ---
-## [2][REPLY_CAPTURE]
->**Dictum:** *REPLY capture decouples command execution from stdout interception.*
+## [2][REPLY_BOUND_EXPANSION]
+>**Dictum:** *REPLY-bound expansion decouples current-shell execution from inline stdout capture.*
 
 <br>
 
-`${| cmd; }` executes in the current shell, stores stdout in `REPLY`, and expands to empty string. REPLY is overwritten on each invocation — bind immediately.
+`${| cmd; }` executes `cmd` in the current shell, expands to the value of `REPLY`, and restores `REPLY` after expansion. It does not capture stdout. The command must assign `REPLY` directly; any stdout it writes still goes to the caller's stdout. Bind the expansion immediately when the value matters.
 
 ```bash
-# Sequential capture: each ${| } overwrites REPLY — bind immediately
+# Sequential binding: each body sets REPLY, expansion reads that value
 get_system_profile() {
     local os kernel arch
-    ${| uname -s; };  os="${REPLY}"
-    ${| uname -r; };  kernel="${REPLY}"
-    ${| uname -m; };  arch="${REPLY}"
+    os=${| REPLY="$(uname -s)"; }
+    kernel=${| REPLY="$(uname -r)"; }
+    arch=${| REPLY="$(uname -m)"; }
     printf '%s/%s (%s)' "${os}" "${kernel}" "${arch}"
 }
 # Nameref integration: REPLY capture feeding higher-order return
 extract_field() {
     local -n _out=$1
-    ${| jq -r ".${2}" < "${3}"; }
-    _out="${REPLY}"
+    _out=${| REPLY="$(jq -r ".${2}" < "${3}")"; }
 }
 local db_host; extract_field db_host "database.host" config.json
 
 # Guard pattern: REPLY + arithmetic for threshold checks
-${| df --output=pcent / | tail -1 | tr -d '[:space:]%'; }
-(( REPLY > 90 )) && _warn "Disk usage critical: ${REPLY}%"
+disk_pct=${| REPLY="$(df --output=pcent / | tail -1 | tr -d '[:space:]%')"; }
+(( disk_pct > 90 )) && _warn "Disk usage critical: ${disk_pct}%"
 ```
 
-`${| }` vs `${ }`: the latter expands to captured stdout inline; the former stores in REPLY and expands to empty. Use `${ }` for inline value construction, `${| }` when the result needs conditional processing or the command has both stdout and side effects worth separating.
+`${| }` vs `${ }`: `${ }` expands to captured stdout inline; `${| }` expands to `REPLY` set by the command body. Use `${ }` for stdout capture, `${| }` when a current-shell body should compute a value through `REPLY` while stdout remains independent.
 
 ---
 ## [3][GLOBSORT_PIPELINES]
@@ -137,10 +136,12 @@ done
 GLOBSORT="+numeric"
 versions=(releases/v*.tar.gz)
 readonly latest="${versions[-1]}"
-# Scoped GLOBSORT — variable is global, no local support
+# Scoped GLOBSORT — use local scope inside wrapper functions
 _with_globsort() {
     local -r saved="${GLOBSORT:-name}" spec="$1"; shift
-    GLOBSORT="${spec}"; "$@"; GLOBSORT="${saved}"
+    local GLOBSORT="${spec}"
+    "$@"
+    GLOBSORT="${saved}"
 }
 _with_globsort "-mtime" process_logs /var/log/
 # nosort: bypass sorting for large directories where order is irrelevant

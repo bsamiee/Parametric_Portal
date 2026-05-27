@@ -1,6 +1,6 @@
 # Replication
 
-Logical replication topology, publication/subscription patterns, and conflict management for PostgreSQL 18.2+.
+Logical replication topology, publication/subscription patterns, and conflict management for PostgreSQL 18.
 
 
 ## Publications

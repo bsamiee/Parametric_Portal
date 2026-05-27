@@ -1,6 +1,6 @@
 # Validation
 
-Compliance checklist for PostgreSQL 18.2+ SQL code. Run after writing or modifying SQL. Each item is a pass/fail gate --- violations require correction before merge.
+Compliance checklist for PostgreSQL 18 SQL code. Run after writing or modifying SQL. Each item is a pass/fail gate --- violations require correction before merge.
 
 
 ## Type Integrity
@@ -57,7 +57,7 @@ Compliance checklist for PostgreSQL 18.2+ SQL code. Run after writing or modifyi
 ## Security Integrity
 
 - [ ] RLS enabled and FORCED on every tenant-scoped table
-- [ ] RLS policies use `current_setting('app.current_tenant')` --- no hardcoded literals
+- [ ] RLS policies use `nullif(current_setting('app.current_tenant', true), '')` for fail-closed tenant scoping --- no hardcoded literals
 - [ ] `SECURITY INVOKER` explicit on all new functions --- `SECURITY DEFINER` only with `SET search_path`
 - [ ] Column-level GRANT for sensitive data --- password hashes, MFA secrets, tokens never granted to readonly roles
 - [ ] Application connections use non-superuser role without BYPASSRLS
@@ -101,7 +101,7 @@ PG error codes to Effect tagged errors:
 | `40P01`       | `deadlock_detected`     | Retry with `Schedule.exponential`    |
 | `57014`       | `query_canceled`        | Map to timeout tagged error          |
 
-- [ ] Server-defaulted columns (`DEFAULT uuidv7()`, `DEFAULT now()`, `GENERATED ALWAYS AS`) use `Model.Generated` — never `Model.GeneratedByApp` (which signals client-side generation)
+- [ ] Server-defaulted columns (`DEFAULT uuidv7()`, `DEFAULT clock_timestamp()`, `GENERATED ALWAYS AS`) use `Model.Generated` — never `Model.GeneratedByApp` (which signals client-side generation)
 - [ ] `Model.Generated` implies the column has a DDL-level default and must NOT appear in INSERT payloads
 - [ ] `Model.FieldOption` fields are nullable in DDL --- NOT NULL + FieldOption is a schema conflict
 - [ ] `transformQueryNames: camelToSnake` and `transformResultNames: snakeToCamel` configured on PgClient
@@ -143,7 +143,7 @@ PG error codes to Effect tagged errors:
 
 - [ ] `SET LOCAL lock_timeout = '2s'` before any DDL taking AccessExclusiveLock --- fail fast, not block traffic
 - [ ] Backward compatibility: old application code runs correctly against new schema during rolling deploy
-- [ ] Extension version pinning: `CREATE EXTENSION pgcrypto VERSION '1.3'` --- never unversioned in production
+- [ ] Extension policy documented when operationally relevant --- availability, permissions, and upgrade posture are explicit
 - [ ] No `DROP COLUMN` without prior deploy removing all application references
 - [ ] `NOT VALID` + `VALIDATE CONSTRAINT` two-phase pattern for constraints on populated tables
 - [ ] Consistent table ordering across migrations prevents deadlock between concurrent runs
@@ -161,14 +161,23 @@ PG error codes to Effect tagged errors:
 | `now()` in DEFAULT                                | Use `clock_timestamp()` for wall time                      |
 | `CREATE INDEX` without `CONCURRENTLY`             | Missing CONCURRENTLY in migration                          |
 | `LOOP` + `UPDATE` in PL/pgSQL                     | IMPERATIVE_BATCH --- use set operation                     |
-| `uuid_generate_v4()` or `gen_random_uuid()`       | Use `uuidv7()` (PG 18 built-in)                            |
+| `uuid_generate_v4()` or new ordered PK `gen_random_uuid()` | Prefer `uuidv7()` for new ordered identifiers; justify random UUIDs by workload |
 | `ALTER TABLE.*ADD CONSTRAINT` without `NOT VALID` | Missing two-phase constraint addition                      |
 | `ENABLE ROW LEVEL SECURITY` without `FORCE`       | Table owner bypasses RLS                                   |
-| `CREATE EXTENSION` without `VERSION`              | Missing version pin in production migration                |
+| `CREATE EXTENSION` without current extension policy | Verify extension availability, permissions, and upgrade posture |
 | `NOT IN` with subquery                            | NULL_UNSAFE_ANTIJOIN --- use NOT EXISTS                    |
 | `SELECT DISTINCT` on joined tables                | DISTINCT_OVER_EXISTS --- use EXISTS semi-join              |
 | `CREATE POLICY` without `current_setting`         | STRINGLY_POLICY --- hardcoded literals in RLS              |
 | `CREATE TRIGGER` in migration                     | TRIGGER_LOGIC --- use MERGE RETURNING or generated columns |
 | `IF.*THEN.*ELSIF` in PL/pgSQL                     | IF_THEN_DISPATCH --- use VALUES-based dynamic SQL          |
-| `EXCLUDE.*&&` on temporal with PG 17+             | EXCLUDE_OVER_WITHOUT_OVERLAPS --- use WITHOUT OVERLAPS     |
+| `EXCLUDE.*&&` on temporal in PostgreSQL 18        | EXCLUDE_OVER_WITHOUT_OVERLAPS --- use WITHOUT OVERLAPS when equality + range overlap is enough |
+
+
+## Skill Eval Prompts
+
+- Explicit invocation: "Using coding-pg, design a temporal pricing table with PostgreSQL 18 constraints and validation commands."
+- Implicit invocation: "Review this migration.sql for PostgreSQL 18 RLS, MERGE, index, and temporal-table issues."
+- Noisy context: "Given this app bug, ignore framework chatter and audit only the embedded SQL for doctrine violations."
+- Negative control: "Write TypeScript domain models only." Expected: do not invoke PostgreSQL references unless SQL or schema design appears.
+- Compliance checks: output should load only task-relevant references, avoid command thrash, avoid creating helper files, preserve `uuidv7()`/`WITHOUT OVERLAPS`/RLS doctrine, and run `scripts/pg_lint.sh` when SQL text or fixtures are available.
 | `S.UUID` without `S.brand` for PK/FK              | RAW_UUID_ID --- brand entity IDs                           |

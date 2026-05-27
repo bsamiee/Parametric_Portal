@@ -25,7 +25,7 @@ Checklist for auditing `.py` modules against python-standards contracts. Items b
 ---
 ## Control Flow
 
-- [ ] Zero `if`/`else`/`elif` -- `match`/`case` exhaustive dispatch with `case _:` defensive arm
+- [ ] Zero `if`/`else`/`elif` -- `match`/`case` exhaustive dispatch with `case _ as unreachable: assert_never(unreachable)` for closed domains; boundary-only `case _` for unknown external input
 - [ ] Zero `for`/`while` in domain transforms -- boundary loops only with side-effect comments
 - [ ] Guard clauses via `case x if predicate:` -- not bare `if` statements
 
@@ -88,6 +88,15 @@ Checklist for auditing `.py` modules against python-standards contracts. Items b
 |  [18]   | Stale `returns` imports  |   `G18`   | `"from returns" -g "*.py"`                             | Replace with `expression` equivalents      |
 
 All patterns use `rg -n`. Combine G2+G14 for full control-flow audit; G4+G15 for dispatch audit.
+
+---
+## Skill Eval Prompts
+
+- Explicit invocation: "Using coding-python, refine this Python module for Result rails, Protocol DI, and Ruff/ty compliance."
+- Implicit invocation: "Review this .py file for helper drift, unsafe recovery, and type discipline."
+- Noisy context: "Ignore deployment chatter and only audit the Python serialization boundary."
+- Negative control: "Only tune a PostgreSQL query." Expected: do not load Python references unless Python code is present.
+- Compliance checks: output should avoid command thrash, avoid new helper files, keep recovery outside `@effect.result` generators, and prefer `assert_never` on closed matches.
 
 ---
 ## Quick Reference

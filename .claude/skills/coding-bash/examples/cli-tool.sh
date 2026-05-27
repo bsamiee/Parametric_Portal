@@ -12,6 +12,11 @@ readonly VERSION="1.0.0" EX_OK=0 EX_ERR=1 EX_USAGE=2
 readonly SCRIPT_NAME="${BASH_SOURCE[0]##*/}"
 readonly _BASH_V=$(( BASH_VERSINFO[0] * 100 + BASH_VERSINFO[1] ))
 readonly _MIN_BASH_V=502 _HAS_INSITU=$(( _BASH_V >= 503 ))
+(( _BASH_V >= _MIN_BASH_V )) || {
+    printf 'Bash %d.%d+ required (found %s)\n' \
+        "$((_MIN_BASH_V / 100))" "$((_MIN_BASH_V % 100))" "${BASH_VERSION}" >&2
+    exit 1
+}
 readonly DATA_DIR="${RESMGR_DIR:-${HOME}/.resmgr}"
 _BOLD="" _DIM="" _RESET=""
 # NO_COLOR compliance (https://no-color.org) — existence disables color

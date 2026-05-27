@@ -24,41 +24,25 @@ const _capMaxTokens = (settings: AiRegistry.Settings): AiRegistry.Settings => ({
     ...settings,
     maxOutputTokens: Math.min(settings.maxOutputTokens ?? settings.policy.maxTokensPerRequest, settings.policy.maxTokensPerRequest),
 });
-const _languageMeta = (descriptor: OperationDescriptor, context: OperationContext) => ({
-    annotation: {
-        operation: { name: descriptor.id },
-        request:   {
-            maxTokens:   context.appSettings.maxOutputTokens,
-            model:       context.appSettings.model,
-            temperature: context.appSettings.temperature,
-            topP:        context.appSettings.topP,
-        },
-        system: context.appSettings.provider,
-    },
-    labels: {
-        model:     context.appSettings.model,
-        operation: descriptor.id,
-        provider:  context.appSettings.provider,
-        tenant:    context.tenantId,
-    },
-});
-const _embeddingMeta = (descriptor: OperationDescriptor, context: OperationContext) => ({
-    annotation: {
-        operation: { name: descriptor.id },
-        request:   {
-            dimensions: context.appSettings.embedding.dimensions,
-            model:      context.appSettings.embedding.model,
-        },
-        system: context.appSettings.embedding.provider,
-    },
-    labels: {
-        dimensions: String(context.appSettings.embedding.dimensions),
-        model:      context.appSettings.embedding.model,
-        operation:  descriptor.id,
-        provider:   context.appSettings.embedding.provider,
-        tenant:     context.tenantId,
-    },
-});
+const _KIND_SPECIFIC = {
+    embedding: (context: OperationContext) => ({
+        labels:  { dimensions: String(context.appSettings.embedding.dimensions), model: context.appSettings.embedding.model, provider: context.appSettings.embedding.provider },
+        request: { dimensions: context.appSettings.embedding.dimensions, model: context.appSettings.embedding.model },
+        system:  context.appSettings.embedding.provider,
+    }),
+    language: (context: OperationContext) => ({
+        labels:  { model: context.appSettings.model, provider: context.appSettings.provider },
+        request: { maxTokens: context.appSettings.maxOutputTokens, model: context.appSettings.model, temperature: context.appSettings.temperature, topP: context.appSettings.topP },
+        system:  context.appSettings.provider,
+    }),
+} as const;
+const _operationMeta = (descriptor: OperationDescriptor, context: OperationContext) => {
+    const specific = _KIND_SPECIFIC[descriptor.rail](context);
+    return {
+        annotation: { operation: { name: descriptor.id }, request: specific.request, system: specific.system },
+        labels:     { ...specific.labels, operation: descriptor.id, tenant: context.tenantId },
+    };
+};
 
 // --- [SERVICES] --------------------------------------------------------------
 
@@ -117,9 +101,9 @@ class AiRuntime extends Effect.Service<AiRuntime>()('ai/Runtime', {
             descriptor: OperationDescriptor,
             context:    OperationContext,
             effect:     Effect.Effect<A, E, R>,
-            onSuccess:  (value: A, meta: ReturnType<typeof _languageMeta> | ReturnType<typeof _embeddingMeta>) => Effect.Effect<void, unknown, never> = () => Effect.void,
+            onSuccess:  (value: A, meta: ReturnType<typeof _operationMeta>) => Effect.Effect<void, unknown, never> = () => Effect.void,
         ) => {
-            const meta = descriptor.rail === 'language' ? _languageMeta(descriptor, context) : _embeddingMeta(descriptor, context);
+            const meta = _operationMeta(descriptor, context);
             return effect.pipe(
                 Effect.tap((value) => onSuccess(value, meta)),
                 Effect.tapError((error) => provider.observeError(descriptor.id, meta.labels, error)),
@@ -190,7 +174,7 @@ class AiRuntime extends Effect.Service<AiRuntime>()('ai/Runtime', {
                 Effect.gen(function* () {
                     const context = yield* resolveContext(descriptor);
                     const policyOptions = yield* applyToolPolicy<Tools, LanguageModel.GenerateTextOptions<Tools>>(descriptor, context, options);
-                    const meta = _languageMeta(descriptor, context);
+                    const meta = _operationMeta(descriptor, context);
                     const withPlan = LanguageModel.streamText(policyOptions).pipe(
                         Stream.provideLayer(AiRegistry.languageLayer(context.appSettings, context.credentials)),
                     );

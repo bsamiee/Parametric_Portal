@@ -5,7 +5,7 @@ description: >-
   concurrency, and module organization standards.
   Use when writing, editing, reviewing, refactoring, or debugging
   .py/.pyi modules, implementing domain models, ROP pipelines,
-  Protocol-driven services, or configuring pyproject.toml, ruff, or mypy.
+  Protocol-driven services, or configuring pyproject.toml, Ruff, or ty.
 ---
 
 # [H1][CODING-PYTHON]
@@ -101,7 +101,7 @@ All code follows six governing principles:
 | [decorators.md](references/decorators.md) | ParamSpec algebra, ordering, composition, descriptor protocol                        |
 | [transforms.md](references/transforms.md) | Compositional logic: dispatch, folds, polymorphism, monadic composition, AOP algebra |
 
-**Core** (always):
+**Task-routed references**:
 
 | Reference                                 | Focus                                                                            |
 | ----------------------------------------- | -------------------------------------------------------------------------------- |
@@ -127,6 +127,16 @@ All code follows six governing principles:
 - Required during iteration: `pnpm python`.
 - Required for final completion: `pnpm quality`, `pnpm dotnet`, `pnpm python`.
 - Reject completion when load order, contracts, or checks are not satisfied.
+- Python tool posture is Ruff + ty first; mention alternate checkers only when the target project already configures them.
+- Examples inside this skill are executable doctrine: no unjustified `type: ignore`, no unmarked `cast`, no `.or_else_with` recovery inside `@effect.result` generators, and `case _ as unreachable: assert_never(unreachable)` for closed domains.
+
+## Skill eval prompts
+
+- Explicit invocation: "Using coding-python, refactor this .py module into expression Result rails with Protocol DI."
+- Implicit invocation: "Review this Python service for ty/Ruff issues, monadic error handling, and helper drift."
+- Noisy context: "Ignore the product notes and only audit the Python serialization boundary."
+- Negative control: "Write only SQL DDL." Expected: do not invoke Python references unless Python code appears.
+- Compliance checks: output should load only relevant references, avoid command thrash, avoid new helper files, preserve Result/Option doctrine, and run `pnpm python` or narrower Ruff/ty gates when code is touched.
 
 
 ## First-class libraries

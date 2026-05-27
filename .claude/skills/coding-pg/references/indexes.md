@@ -1,6 +1,6 @@
 # Indexes
 
-Index type selection, composition, and maintenance for PostgreSQL 18.2+. Every WHERE clause pattern has a corresponding index -- unindexed predicates on tables exceeding 10K rows require documented justification.
+Index type selection, composition, and maintenance for PostgreSQL 18. Every WHERE clause pattern has a corresponding index -- unindexed predicates on tables exceeding 10K rows require documented justification.
 
 
 ## B-tree
@@ -66,13 +66,13 @@ Index selection for approximate nearest-neighbor. Full schema patterns, query sy
 | <1M vectors, RAM available        | HNSW    | `m` (connectivity, default 16), `ef_construction` (build quality, default 64) |
 | <1M vectors, append-heavy         | IVFFlat | `lists` ~ sqrt(rows); cheaper writes, worse recall than HNSW                  |
 | >1M vectors or memory-constrained | DiskANN | SBQ/OPQ quantization reduces size 10x+ with <1% recall loss                   |
-| Multi-tenant filtered search      | DiskANN | `filter_columns = 'tenant_id'` — label pre-filtering in index scan            |
+| Multi-tenant filtered search      | DiskANN | Indexed label column — label pre-filtering in index scan                      |
 
-HNSW tuning: `m=4` for high-dimensional (>1000D), `m=32` for low-dimensional (<100D). Higher `ef_construction` improves recall at build-time cost. No incremental updates — requires dual-index rotation for 0-downtime re-tuning (see Index Maintenance).
+HNSW tuning: `m=4` for high-dimensional (>1000D), `m=32` for low-dimensional (<100D). Higher `ef_construction` improves recall at build-time cost. HNSW indexes are maintained on writes, but structural retuning still requires dual-index rotation for 0-downtime replacement (see Index Maintenance).
 
 IVFFlat: `lists` parameter controls cluster count (sqrt(rows) typical). Requires `VACUUM` after bulk insert — stale cluster statistics degrade recall significantly.
 
-`filter_columns` constraint: DiskANN label pre-filtering works for discrete low-cardinality columns (tenant_id, category, status) — not continuous range predicates. Temporal filtering alongside vector search requires composite strategy: DiskANN `filter_columns` for tenant + post-filtering for time-range, or partitioned vector tables by time window with per-partition HNSW indexes.
+DiskANN label constraint: label pre-filtering works for discrete low-cardinality dimensions encoded into the indexed label column — not continuous range predicates. Temporal filtering alongside vector search requires composite strategy: DiskANN labels for tenant/category plus post-filtering for time-range, or partitioned vector tables by time window with per-partition HNSW indexes.
 
 
 ## BRIN (Block Range Index)
@@ -134,7 +134,7 @@ Bloom vs composite B-tree:
 | monotonic append-only timestamp                | BRIN           | default; intra-chunk scans on TimescaleDB hypertables |
 | wide-table equality, >5 cols, <10% selectivity | Bloom          | signature length tuned to NDV                         |
 | vector similarity <1M rows, RAM available      | HNSW           | `m`, `ef_construction` tuned to dimensionality        |
-| vector similarity >1M rows, memory-constrained | DiskANN        | SBQ/OPQ quantization; `filter_columns` multi-tenant   |
+| vector similarity >1M rows, memory-constrained | DiskANN        | SBQ/OPQ quantization; label filtering for tenants     |
 | full-text ranking, phrase proximity            | pg_search BM25 | Tantivy-backed, `@@@` operator                        |
 
 
@@ -210,7 +210,7 @@ Concurrent operations:
 1. Build replacement: `CREATE INDEX CONCURRENTLY idx_v2 ON t (col) INCLUDE (new_cols)`
 2. Verify plan: `EXPLAIN ... WHERE col = ...` picks `idx_v2`
 3. Drop old: `DROP INDEX CONCURRENTLY idx_v1`
-4. HNSW indexes have no incremental updates — dual-index rotation is the only 0-downtime path for re-tuning `m`/`ef_construction`
+4. HNSW indexes are updated on writes, but `m`/`ef_construction` retuning requires dual-index rotation
 
 Bloat monitoring:
 ```sql

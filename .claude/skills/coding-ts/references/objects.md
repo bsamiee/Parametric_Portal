@@ -2,14 +2,15 @@
 
 ## Schema selection
 
-**Zero `S.Struct` in domain code.** Every domain concept uses `S.Class` or `Model.Class` — never a bare `S.Struct` declaration at module level. `S.Struct` is permitted only inside `S.transform` (as from/to schemas) and inside `S.Class`/`Model.Class` field definitions where it is structurally required.
+**Runtime authorities only where they earn their keep.** External codecs, persisted models, and domain authorities use `S.Class` or `Model.Class`. Internal config/state that never crosses a trust boundary stays as inferred plain objects. `S.Struct` is permitted inside transforms, RPC payloads, and field definitions where a runtime codec is structurally required; never export parallel structs for the same concept.
 
 | Context            | Use                                                    | Never                        |
 | ------------------ | ------------------------------------------------------ | ---------------------------- |
 | Domain entity      | `Model.Class` with field modifiers                     | `S.Struct` + separate type   |
 | Value object       | `S.Class` with computed getters                        | `S.Struct` + manual parse    |
 | Wire codec         | `S.transform(S.Struct({...}), S.Struct({...}), {...})` | standalone `S.Struct` export |
-| Inline field shape | `S.Struct({...})` as field value                       | —                            |
+| Internal config    | Inferred `as const satisfies ...` object               | Schema wrapping for no decode |
+| Inline field shape | `S.Struct({...})` as field value                       | —                             |
 
 Derive all projections from the class: `Task.pipe(S.pick("a", "b"))`, `Task.pipe(S.omit("c"))`, `S.partialWith(Task, { exact: true })`. Never declare parallel `TaskInsert`/`TaskUpdate`/`TaskSelect` structs.
 
@@ -20,7 +21,7 @@ Branded primitives are inline field modifiers: `S.String.pipe(S.brand("TenantId"
 A class absorbs its behavioral surface — vocabulary-driven getters, cross-field invariants, transform projections — so the module exports ONE class. `_`-prefixed vocabularies and projections are implementation substrate consumers never touch.
 
 ```ts
-import { Duration, Schema as S } from "effect"
+import { Duration, Record as R, Schema as S } from "effect"
 
 const _Protocol = {
   h2:   { secure: true,  multiplex: true,  upgrade: false },
@@ -31,7 +32,7 @@ const _Protocol = {
 class Target extends S.Class<Target>("Target")(S.Struct({
   host:     S.NonEmptyString,
   port:     S.Number.pipe(S.int(), S.between(1, 65535)),
-  protocol: S.Literal(...Object.keys(_Protocol) as [keyof typeof _Protocol, ...(keyof typeof _Protocol)[]]),
+  protocol: S.Literal(...R.keys(_Protocol) as [keyof typeof _Protocol, ...(keyof typeof _Protocol)[]]),
   weight:   S.Number.pipe(S.between(0, 1)),
   zone:     S.NonEmptyString,
   drain:    S.optionalWith(S.Boolean, { default: () => false }),
@@ -42,7 +43,7 @@ class Target extends S.Class<Target>("Target")(S.Struct({
   get active()    { return !this.drain && this.weight > 0 }
   // polymorphic projection — one static method replaces N exported decoders
   static readonly as = <K extends keyof typeof _Projections>(variant: K) =>
-    S.decodeUnknown(_Projections[variant]) as unknown as
+    S.decodeUnknown(_Projections[variant]) as
       (input: unknown) => import("effect/Effect").Effect<S.Schema.Type<(typeof _Projections)[K]>, S.ParseError, never>
 }
 
@@ -68,7 +69,7 @@ const _Projections = {
 
 ```ts
 import { Model, SqlClient, SqlSchema } from "@effect/sql"
-import { Array as A, Data, Effect, Option, Schema as S } from "effect"
+import { Array as A, Data, Effect, Option, Record as R, Schema as S } from "effect"
 
 class Entity extends Model.Class<Entity>("Entity")({
   id:        Model.Generated(Model.GeneratedByApp(S.UUID)),
@@ -94,7 +95,7 @@ class Entity extends Model.Class<Entity>("Entity")({
     const _upsert = (id: typeof Entity.fields.id.Type, data: typeof Entity.update.Type, occ: Date) =>
       sql`UPDATE entity SET ${sql.update(data)}, updated_at = NOW()
           WHERE id = ${id} AND updated_at = ${occ} RETURNING *`.pipe(
-        Effect.flatMap((rows) => Option.match(A.head(Array.from(rows)), {
+        Effect.flatMap((rows) => Option.match(A.head(rows), {
           onNone: () => Effect.fail(new _RepoFault({ reason: "stale" })),
           onSome: Effect.succeed,
         })))
@@ -141,7 +142,7 @@ const _Encoding = {
   none: { id: 0, streamable: false },
 } as const satisfies Record<string, { id: number; streamable: boolean }>
 
-const _EncodingId = Object.fromEntries(Object.entries(_Encoding).map(([k, v]) => [v.id, k])) as
+const _EncodingId = R.fromEntries(R.toEntries(_Encoding).map(([k, v]) => [v.id, k])) as
   Record<number, keyof typeof _Encoding>
 
 const Envelope = S.transform(

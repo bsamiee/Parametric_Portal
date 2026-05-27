@@ -1,6 +1,6 @@
 # Extensions
 
-First-class extension integration for PostgreSQL 18.2+. Install with `CREATE EXTENSION ... CASCADE` for automatic dependency resolution.
+First-class extension integration for PostgreSQL 18. Install with `CREATE EXTENSION ... CASCADE` for automatic dependency resolution.
 
 ## pgvector (0.8+)
 
@@ -25,14 +25,14 @@ CREATE INDEX ON documents USING diskann (embedding);
 CREATE INDEX ON documents USING diskann (embedding) WITH (num_neighbors = 50);
 
 -- Filtered DiskANN search — label-based pre-filtering avoids post-filter recall degradation
-CREATE INDEX ON documents USING diskann (embedding)
-    WITH (num_neighbors = 50, search_list_size = 100,
-          filter_columns = 'tenant_id, category');
+-- Store discrete tenant/category labels in a smallint[] column indexed with the vector.
+CREATE INDEX ON documents USING diskann (embedding, labels)
+    WITH (num_neighbors = 50, search_list_size = 100);
 
 -- Query with filter pushdown into index scan
 SELECT id, embedding <=> $1::vector AS distance
 FROM documents
-WHERE tenant_id = $2 AND category = $3
+WHERE labels @> ARRAY[$2::smallint, $3::smallint]
 ORDER BY embedding <=> $1::vector LIMIT 20;
 ```
 
@@ -70,7 +70,7 @@ ORDER BY embedding <=> $1::vector LIMIT 20;
 - DiskANN for >1M vectors or memory-constrained; HNSW for <1M with RAM budget
 - SBQ compression for dimensions >768 (e.g., text-embedding-3-large at 3072); same distance operators
 - Pre-filter: partial indexes (`WHERE tenant_id = X`) for high-selectivity; iterative scan for low-selectivity
-- DiskANN `filter_columns`: label-based pre-filtering pushes WHERE predicates into the index scan — avoids post-filter recall degradation on high-selectivity filters (28x lower p95 latency vs external vector DBs on filtered workloads)
+- DiskANN label filtering: store discrete filters as labels and query with label containment so filtering participates in the index scan — avoids post-filter recall degradation on high-selectivity filters
 
 ## pg_search (BM25 via Tantivy)
 

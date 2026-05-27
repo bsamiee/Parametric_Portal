@@ -6,7 +6,7 @@
  * Per-endpoint addError() only for endpoint-specific errors (NotFound, Conflict, Validation).
  */
 import { HttpApi, HttpApiEndpoint, HttpApiGroup, HttpApiSchema, Multipart, OpenApi } from '@effect/platform';
-import {ApiKey, App, AppSettingsSchema, Asset, AuditOperationSchema, AuditLog, Job, JobDlq, KargadanAiSettingsSchema as AiSettingsSchema, Notification, OAuthProviderSchema, Permission, PreferencesSchema, RoleSchema, Session, User, WebhookUrlSchema} from '@parametric-portal/database/models';
+import {AiSettingsSchema, ApiKey, App, AppSettingsSchema, Asset, AuditOperationSchema, AuditLog, Job, JobDlq, Notification, OAuthProviderSchema, Permission, PreferencesSchema, RoleSchema, Session, User, WebhookUrlSchema} from '@parametric-portal/database/models';
 import { Url } from '@parametric-portal/types/types';
 import { Schema as S } from 'effect';
 import { HttpError } from './errors.ts';

@@ -4,7 +4,7 @@
  * Guarantees compensation on permission seed failure during provisioning.
  */
 import { SqlClient } from '@effect/sql';
-import { type App, AppSettingsSchema, KargadanAiSettingsSchema as AiSettingsSchema } from '@parametric-portal/database/models';
+import { AiSettingsSchema, type App, AppSettingsSchema } from '@parametric-portal/database/models';
 import { DatabaseService } from '@parametric-portal/database/repos';
 import { Effect, Layer, Match, Option, Schema as S } from 'effect';
 import { Context } from '../../context.ts';

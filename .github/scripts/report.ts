@@ -8,9 +8,10 @@ import { type Ctx, call, createCtx, fn, type Issue, mutate, type RunParams } fro
 // --- Types -------------------------------------------------------------------
 
 type SourceFn = (ctx: Ctx, cfg: ContentConfig, spec: ContentSpec, p: RunParams) => Promise<unknown>;
+type SourceKey = 'fetch' | 'params' | 'payload';
 type ContentSpec = { readonly kind: string } & Record<string, unknown>;
 type ContentConfig = {
-    readonly src: { readonly source: 'fetch'; readonly op: string; readonly args?: ReadonlyArray<unknown> };
+    readonly src: { readonly source: SourceKey; readonly op: string; readonly args?: ReadonlyArray<unknown> };
     readonly fmt: { readonly format: 'table'; readonly title: string; readonly headers: ReadonlyArray<string> };
     readonly out: {
         readonly output: 'summary' | 'comment' | 'issue';
@@ -25,7 +26,7 @@ type ContentConfig = {
 
 // --- Constants ---------------------------------------------------------------
 
-const reportSpecs: Record<string, ContentConfig> = Object.freeze({
+const reportSpecs = Object.freeze({
     aging: {
         filters: [
             { display: 'Critical', label: 'critical' },
@@ -36,11 +37,11 @@ const reportSpecs: Record<string, ContentConfig> = Object.freeze({
         row: 'count',
         src: { args: ['open'], op: 'issue.list', source: 'fetch' },
     },
-} as const);
+} as const satisfies Record<string, ContentConfig>);
 
 // --- Pure Functions ----------------------------------------------------------
 
-const dataSources: Record<string, SourceFn> = {
+const dataSources: Record<SourceKey, SourceFn> = {
     fetch: async (ctx, cfg) => call(ctx, cfg.src.op, ...(cfg.src.args ?? [])),
     params: async (_, __, spec) => spec,
     payload: async (_, __, ___, params) => params.context.payload,
@@ -49,7 +50,7 @@ const dataSources: Record<string, SourceFn> = {
 // --- Dispatch Tables ---------------------------------------------------------
 
 const buildRows = (cfg: ContentConfig, data: unknown): ReadonlyArray<ReadonlyArray<string>> => {
-    const builders: Record<string, () => ReadonlyArray<ReadonlyArray<string>>> = {
+    const builders: Record<NonNullable<ContentConfig['row']>, () => ReadonlyArray<ReadonlyArray<string>>> = {
         count: () => fn.rowsCount(data as ReadonlyArray<Issue>, cfg.filters ?? []),
         list: () => (data as ReadonlyArray<Record<string, unknown>>).map((r) => Object.values(r).map(String)),
     };
@@ -77,7 +78,7 @@ const outputHandlers = {
             title: cfg.out.title ?? cfg.fmt.title,
         });
     },
-    summary: async (_: Ctx, params: RunParams, body: string): Promise<void> => {
+    summary: async (_: Ctx, params: RunParams, body: string, __: ContentConfig, ___: number): Promise<void> => {
         params.core.summary.addRaw(body).write();
     },
 } as const;
@@ -85,7 +86,7 @@ const outputHandlers = {
 // --- Dispatch Tables ---------------------------------------------------------
 
 const contentFormatters = {
-    body: (_cfg: ContentConfig, spec: ContentSpec): string => fn.body([], spec as Record<string, string>),
+    body: (_cfg: ContentConfig | undefined, spec: ContentSpec): string => fn.body([], spec as Record<string, string>),
     table: (cfg: ContentConfig, data: unknown, now: Date): string => {
         const rows = buildRows(cfg, data);
         return fn.report(cfg.fmt.title, cfg.fmt.headers, rows, { footer: fn.timestamp(now) });
@@ -98,10 +99,22 @@ const run = async (params: RunParams & { readonly spec: ContentSpec }): Promise<
     const ctx = createCtx(params);
     const cfg = reportSpecs[params.spec.kind as keyof typeof reportSpecs];
     const now = new Date();
-    const data = await dataSources[cfg.src.source](ctx, cfg, params.spec, params);
+    const data = await (cfg === undefined
+        ? Promise.resolve(undefined)
+        : dataSources[cfg.src.source](ctx, cfg, params.spec, params));
     const body =
-        cfg.fmt.format === 'table' ? contentFormatters.table(cfg, data, now) : contentFormatters.body(cfg, params.spec);
-    await outputHandlers[cfg.out.output](ctx, params, body, cfg, (params.spec as { number?: number }).number ?? 0);
+        cfg === undefined
+            ? contentFormatters.body({} as ContentConfig, params.spec)
+            : cfg.fmt.format === 'table'
+              ? contentFormatters.table(cfg, data, now)
+              : contentFormatters.body(cfg, params.spec);
+    await (cfg === undefined ? outputHandlers['summary'] : outputHandlers[cfg.out.output])(
+        ctx,
+        params,
+        body,
+        cfg ?? reportSpecs.aging,
+        (params.spec as { number?: number }).number ?? 0,
+    );
     params.core.info(`${params.spec.kind} report generated`);
 };
 

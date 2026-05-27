@@ -66,41 +66,43 @@ const validateEffort = (value: unknown): value is number => typeof value === 'nu
 
 const validators: Record<keyof AiMeta, Validator> = {
     agent: (obj) =>
-        obj.agent && !validateField('agent', obj.agent)
-            ? `Invalid agent: ${obj.agent}. Must be one of: ${VALID_SETS.agent.join(', ')}`
+        obj['agent'] && !validateField('agent', obj['agent'])
+            ? `Invalid agent: ${obj['agent']}. Must be one of: ${VALID_SETS.agent.join(', ')}`
             : null,
     effort: (obj) =>
-        obj.effort && !validateEffort(obj.effort) ? `Invalid effort: ${obj.effort}. Must be a positive number` : null,
+        obj['effort'] && !validateEffort(obj['effort'])
+            ? `Invalid effort: ${obj['effort']}. Must be a positive number`
+            : null,
     phase: (obj) =>
-        obj.phase && !validateField('phase', obj.phase)
-            ? `Invalid phase: ${obj.phase}. Must be one of: ${VALID_SETS.phase.join(', ')}`
+        obj['phase'] && !validateField('phase', obj['phase'])
+            ? `Invalid phase: ${obj['phase']}. Must be one of: ${VALID_SETS.phase.join(', ')}`
             : null,
     project: () => null,
     state: (obj) =>
-        obj.state && !validateField('state', obj.state)
-            ? `Invalid state: ${obj.state}. Must be one of: ${VALID_SETS.state.join(', ')}`
+        obj['state'] && !validateField('state', obj['state'])
+            ? `Invalid state: ${obj['state']}. Must be one of: ${VALID_SETS.state.join(', ')}`
             : null,
-    type: (obj) => {
-        if (!obj.type) {
-            return 'Missing required field: type';
-        }
-        const isValid = validateField('type', obj.type);
-        return isValid ? null : `Invalid type: ${obj.type}. Must be one of: ${VALID_SETS.type.join(', ')}`;
-    },
+    type: (obj) =>
+        obj['type']
+            ? validateField('type', obj['type'])
+                ? null
+                : `Invalid type: ${obj['type']}. Must be one of: ${VALID_SETS.type.join(', ')}`
+            : 'Missing required field: type',
 };
 const validate = (obj: Record<string, unknown>): ParseResult => {
     const errors = Object.values(validators)
         .map((validator) => validator(obj))
         .filter(Boolean) as ReadonlyArray<string>;
+    const type = obj['type'];
     const meta = {
-        agent: obj.agent as string | undefined,
-        effort: obj.effort as number | undefined,
-        phase: obj.phase as string | undefined,
-        project: obj.project as string | undefined,
-        state: obj.state as string | undefined,
-        type: obj.type as string,
+        ...(typeof obj['agent'] === 'string' ? { agent: obj['agent'] } : {}),
+        ...(typeof obj['effort'] === 'number' ? { effort: obj['effort'] } : {}),
+        ...(typeof obj['phase'] === 'string' ? { phase: obj['phase'] } : {}),
+        ...(typeof obj['project'] === 'string' ? { project: obj['project'] } : {}),
+        ...(typeof obj['state'] === 'string' ? { state: obj['state'] } : {}),
+        type: typeof type === 'string' ? type : '',
     };
-    return errors.length > 0 ? { error: errors[0], success: false } : { meta, success: true };
+    return errors.length > 0 ? { error: errors.at(0) ?? 'Invalid metadata', success: false } : { meta, success: true };
 };
 
 // --- Entry Point -------------------------------------------------------------

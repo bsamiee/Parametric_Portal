@@ -34,11 +34,11 @@ const FeatureFlagsSchema = S.Struct({
     enableRealtime:        S.optionalWith(S.Int.pipe(S.between(0, 100)), { default: () => 100 }),
     enableWebhooks:        S.optionalWith(S.Int.pipe(S.between(0, 100)), { default: () => 0   }),
 });
-const KargadanAiProviderSchema = S.Literal('gemini', 'openai');
-const KargadanAiSettingsSchema = S.Struct({
+const AiProviderSchema = S.Literal('gemini', 'openai');
+const AiSettingsSchema = S.Struct({
     maxOutputTokens: S.optional(S.Int.pipe(S.greaterThan(0))),
     model:           S.NonEmptyTrimmedString,
-    provider:        KargadanAiProviderSchema,
+    provider:        AiProviderSchema,
     temperature:     S.optional(S.Number),
     topP:            S.optional(S.Number),
 });
@@ -55,7 +55,7 @@ const WebhookUrlSchema = S.String.pipe(
     S.brand('WebhookUrl'),
 );
 const AppSettingsSchema = S.Struct({
-    ai:             S.optional(KargadanAiSettingsSchema),
+    ai:             S.optional(AiSettingsSchema),
     featureFlags:   S.optionalWith(FeatureFlagsSchema, { default: () => S.decodeSync(FeatureFlagsSchema)({}) }),
     oauthProviders: S.optionalWith(S.Array(
         S.Struct({
@@ -292,6 +292,6 @@ class KvStore extends Model.Class<KvStore>('KvStore')({
 export {
     AgentJournal, ApiKey, App, Asset, AuditLog, Job, JobDlq, JobStatusSchema, KvStore, MfaSecret, Notification,
     AppSettingsDefaults, AppSettingsSchema, FeatureFlagsSchema,
-    AuditOperationSchema, KargadanAiProviderSchema, KargadanAiSettingsSchema, PreferencesSchema, OAuthProviderSchema, OauthAccount,
+    AiProviderSchema, AiSettingsSchema, AuditOperationSchema, PreferencesSchema, OAuthProviderSchema, OauthAccount,
     Permission, RoleSchema, Session, User, WebauthnCredential, WebhookUrlSchema,
 };

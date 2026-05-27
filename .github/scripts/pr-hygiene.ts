@@ -114,9 +114,13 @@ const fetchCommitFiles = async (ctx: Ctx, n: number, since: string): Promise<Rea
         recent.map(async (c) => ({
             files: (
                 (
-                    (await ctx.github.rest.repos.getCommit({ owner: ctx.owner, ref: c.sha, repo: ctx.repo })).data as {
-                        files?: ReadonlyArray<{ filename: string }>;
-                    }
+                    (
+                        await (ctx.github.rest['repos']?.['getCommit']?.({
+                            owner: ctx.owner,
+                            ref: c.sha,
+                            repo: ctx.repo,
+                        }) ?? Promise.resolve({ data: {} }))
+                    ).data as { files?: ReadonlyArray<{ filename: string }> }
                 ).files ?? []
             ).map((f) => f.filename),
             sha: c.sha,
@@ -139,20 +143,23 @@ const replyToThread = (
     commentId: number,
     body: string,
 ): Promise<{ success: boolean; nodeId: string | null }> =>
-    ctx.github.rest.pulls
-        .createReplyForReviewComment({
+    (
+        ctx.github.rest['pulls']?.['createReplyForReviewComment']?.({
             body,
             comment_id: commentId,
             owner: ctx.owner,
             pull_number: n,
             repo: ctx.repo,
-        })
-        .then(
-            (result) => ({ nodeId: (result.data as { node_id?: string }).node_id ?? null, success: true }),
-            () => ({ nodeId: null, success: false }),
-        );
+        }) ?? Promise.reject(new Error('GitHub REST pulls.createReplyForReviewComment is unavailable'))
+    ).then(
+        (result) => ({ nodeId: (result.data as { node_id?: string }).node_id ?? null, success: true }),
+        () => ({ nodeId: null, success: false }),
+    );
 const deleteComment = (ctx: Ctx, id: number): Promise<boolean> =>
-    ctx.github.rest.issues.deleteComment({ comment_id: id, owner: ctx.owner, repo: ctx.repo }).then(
+    (
+        ctx.github.rest['issues']?.['deleteComment']?.({ comment_id: id, owner: ctx.owner, repo: ctx.repo }) ??
+        Promise.reject(new Error('GitHub REST issues.deleteComment is unavailable'))
+    ).then(
         () => true,
         () => false,
     );

@@ -1,8 +1,8 @@
 ---
 name: coding-csharp
 description: >-
-  Enforces C# + LanguageExt style, type discipline, error handling,
-  concurrency, and module organization standards.
+  Enforces C# + LanguageExt functional/ROP style, type discipline,
+  runtime-record effects, Scrutor composition, and module organization standards.
   Use when writing, editing, reviewing, refactoring, or debugging
   .cs modules, implementing domain models, sealed DU hierarchies,
   Eff/Fin/Validation pipelines, or configuring .csproj, analyzers, or DI.
@@ -99,34 +99,37 @@ All code follows six governing principles:
 | [validation.md](references/validation.md) | Compliance checklist and completion gate |
 | [patterns.md](references/patterns.md)     | Anti-pattern detection heuristics        |
 
-**Core** (always):
+**Task-routed references**:
 
-| Reference                                 | Focus                                      |
-| ----------------------------------------- | ------------------------------------------ |
-| [types.md](references/types.md)           | C# types, generics, constraints            |
-| [objects.md](references/objects.md)       | Records, DU hierarchies, value objects     |
-| [effects.md](references/effects.md)       | Fin/Validation/Eff/IO pipelines, ROP       |
-| [errors.md](references/errors.md)         | Error construction, DU hierarchies, policy |
-| [transforms.md](references/transforms.md) | Folds, LINQ composition, K<F,A>            |
-| [surface.md](references/surface.md)       | API minimization and arity collapse        |
-
-**Specialized** (load when task matches):
-
-| Reference                                       | Load when                                          |
-| ----------------------------------------------- | -------------------------------------------------- |
-| [composition.md](references/composition.md)     | DI topology, Scrutor decorators, Layer composition |
-| [persistence.md](references/persistence.md)     | EF Core, repositories                              |
-| [concurrency.md](references/concurrency.md)     | Channels, cancellation                             |
-| [observability.md](references/observability.md) | Serilog, OpenTelemetry                             |
-| [performance.md](references/performance.md)     | SIMD, Span, hot paths                              |
-| [diagnostics.md](references/diagnostics.md)     | Debugging, profiling                               |
-| [testing.md](references/testing.md)             | FsCheck PBT, xUnit, benchmarks                     |
+| Reference                                       | Load when                              |
+| ----------------------------------------------- | -------------------------------------- |
+| [types.md](references/types.md)                 | C# types, generics, constraints        |
+| [objects.md](references/objects.md)             | Records, DU hierarchies, value objects |
+| [effects.md](references/effects.md)             | Fin/Validation/Eff/IO pipelines, ROP   |
+| [transforms.md](references/transforms.md)       | Folds, LINQ composition, K<F,A>        |
+| [composition.md](references/composition.md)     | DI topology and runtime-record wiring  |
+| [scrutor.md](references/scrutor.md)             | Scrutor scan/decorator composition     |
+| [persistence.md](references/persistence.md)     | EF Core, repositories                  |
+| [concurrency.md](references/concurrency.md)     | Channels, cancellation                 |
+| [observability.md](references/observability.md) | Serilog, OpenTelemetry                 |
+| [performance.md](references/performance.md)     | SIMD, Span, hot paths                  |
+| [diagnostics.md](references/diagnostics.md)     | Debugging, profiling                   |
+| [testing.md](references/testing.md)             | FsCheck PBT, xUnit, benchmarks         |
 
 ## Validation gate
 
 - Required during iteration: `pnpm dotnet`.
 - Required for final completion: `pnpm quality`, `pnpm dotnet`, `pnpm python`.
 - Reject completion when load order, contracts, or checks are not satisfied.
+- Examples inside this skill are executable doctrine: runtime-record `Eff<RT,T>.Asks`, generated Thinktecture factories only when they serve boundary construction, no v4 `Has<...>` pattern, and no single-call helper extraction.
+
+## Skill eval prompts
+
+- Explicit invocation: "Using coding-csharp, refactor this .cs service into LanguageExt Eff/Fin rails with runtime-record DI."
+- Implicit invocation: "Review this C# module for Thinktecture value object, Scrutor decorator, and no-helper compliance."
+- Noisy context: "Ignore frontend notes and only audit the C# persistence adapter."
+- Negative control: "Only write TypeScript Effect code." Expected: do not load C# references unless C# code appears.
+- Compliance checks: output should load only relevant references, avoid command thrash, avoid helper files, preserve runtime-record/LanguageExt doctrine, and run `pnpm dotnet` or narrower configured .NET gates when code is touched.
 
 
 ## First-class libraries

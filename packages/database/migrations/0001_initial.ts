@@ -46,10 +46,7 @@ export default Effect.gen(function* () {
             RETURN NULL; END; $$ LANGUAGE plpgsql;
         CREATE OR REPLACE FUNCTION get_current_tenant_id() RETURNS uuid
             LANGUAGE sql STABLE PARALLEL SAFE SECURITY INVOKER SET search_path TO public
-            AS $$ SELECT NULLIF(current_setting('app.current_tenant', true), '')::uuid $$;
-        CREATE OR REPLACE FUNCTION get_tenant_user_ids() RETURNS SETOF uuid
-            LANGUAGE sql STABLE PARALLEL SAFE SECURITY DEFINER SET search_path TO public
-            AS $$ SELECT id FROM users WHERE app_id = get_current_tenant_id() AND deleted_at IS NULL $$`);
+            AS $$ SELECT NULLIF(current_setting('app.current_tenant', true), '')::uuid $$`);
     // --- [TYPES] ---------------------------------------------------------------------
     yield* sql.unsafe(String.raw`
         CREATE TYPE app_role AS ENUM ('owner', 'admin', 'member', 'viewer', 'guest');
@@ -101,7 +98,10 @@ export default Effect.gen(function* () {
         CREATE UNIQUE INDEX idx_users_app_email_active ON users(app_id, email) INCLUDE (id, role) WHERE deleted_at IS NULL;
         CREATE INDEX idx_users_app_id ON users(app_id) INCLUDE (id, email, role) WHERE deleted_at IS NULL;
         CREATE STATISTICS stat_users_app_role (ndistinct, dependencies, mcv) ON app_id, role FROM users;
-        ALTER TABLE users ALTER COLUMN email SET STATISTICS 500, ALTER COLUMN role SET STATISTICS 500`);
+        ALTER TABLE users ALTER COLUMN email SET STATISTICS 500, ALTER COLUMN role SET STATISTICS 500;
+        CREATE OR REPLACE FUNCTION get_tenant_user_ids() RETURNS SETOF uuid
+            LANGUAGE sql STABLE PARALLEL SAFE SECURITY DEFINER SET search_path TO public
+            AS $$ SELECT id FROM users WHERE app_id = get_current_tenant_id() AND deleted_at IS NULL $$`);
     yield* sql.unsafe(String.raw`
         CREATE TABLE permissions (
             id UUID PRIMARY KEY DEFAULT uuidv7(),
@@ -124,8 +124,7 @@ export default Effect.gen(function* () {
             created_at TIMESTAMPTZ GENERATED ALWAYS AS (uuid_extract_timestamp(id)) STORED,
             updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
             CONSTRAINT sessions_agent_length CHECK (agent IS NULL OR length(agent) <= 1024)
-        ) PARTITION BY RANGE (created_at) WITH (fillfactor = 80, autovacuum_vacuum_scale_factor = 0.05, autovacuum_analyze_scale_factor = 0.02);
-        CREATE TABLE sessions_default PARTITION OF sessions DEFAULT;
+        );
         CREATE TABLE session_tokens (
             session_id UUID PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
             token_access hex64 NOT NULL UNIQUE, token_refresh hex64 NOT NULL UNIQUE);
@@ -138,13 +137,6 @@ export default Effect.gen(function* () {
         END; $$ LANGUAGE plpgsql;
         CREATE TRIGGER sessions_tokens_sync_upsert AFTER INSERT OR UPDATE OF token_access, token_refresh ON sessions FOR EACH ROW EXECUTE FUNCTION sync_session_tokens();
         CREATE TRIGGER sessions_tokens_sync_delete AFTER DELETE ON sessions FOR EACH ROW EXECUTE FUNCTION sync_session_tokens();
-        CREATE OR REPLACE FUNCTION _register_monthly_partition(
-            p_table text, p_control text, p_retention text, p_time_encoder regproc DEFAULT NULL, p_time_decoder regproc DEFAULT NULL
-        ) RETURNS void LANGUAGE plpgsql VOLATILE AS $fn$ BEGIN
-            PERFORM partman.create_parent(p_parent_table := 'public.' || p_table, p_control := p_control, p_type := 'range',
-                p_interval := '1 month', p_premake := 4, p_default_table := false, p_time_encoder := p_time_encoder, p_time_decoder := p_time_decoder);
-            UPDATE partman.part_config SET infinite_time_partitions = true, retention = p_retention, retention_keep_table = false WHERE parent_table = 'public.' || p_table;
-        END $fn$;
         CREATE INDEX idx_sessions_app_user_active ON sessions(app_id, user_id)
             INCLUDE (expiry_access, expiry_refresh, verified_at, updated_at, ip_address) WHERE deleted_at IS NULL;
         CREATE INDEX idx_sessions_cleanup ON sessions(deleted_at, (GREATEST(expiry_access, expiry_refresh)));
@@ -156,7 +148,7 @@ export default Effect.gen(function* () {
             name TEXT NOT NULL, hash hex64 NOT NULL, encrypted BYTEA NOT NULL,
             expires_at TIMESTAMPTZ, deleted_at TIMESTAMPTZ, last_used_at TIMESTAMPTZ,
             updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-            prefix TEXT GENERATED ALWAYS AS (left(hash, 16)) VIRTUAL,
+            prefix TEXT GENERATED ALWAYS AS (left(hash::text, 16)) STORED,
             CONSTRAINT api_keys_hash_unique UNIQUE (hash),
             CONSTRAINT api_keys_name_not_empty CHECK (length(trim(name)) > 0));
         CREATE INDEX idx_api_keys_user_active ON api_keys(user_id) INCLUDE (id, name, expires_at, last_used_at) WHERE deleted_at IS NULL;
@@ -196,7 +188,7 @@ export default Effect.gen(function* () {
         CREATE INDEX idx_audit_app_target ON audit_logs(app_id, target_type, target_id, id DESC) INCLUDE (user_id, operation);
         CREATE INDEX idx_audit_app_user ON audit_logs(app_id, user_id, id DESC) INCLUDE (target_type, operation) WHERE user_id IS NOT NULL;
         CREATE INDEX idx_audit_request ON audit_logs(request_id) WHERE request_id IS NOT NULL;
-        CREATE INDEX idx_audit_delta ON audit_logs USING GIN (delta jsonb_path_ops) WITH (parallel_workers = 4) WHERE delta IS NOT NULL;
+        CREATE INDEX idx_audit_delta ON audit_logs USING GIN (delta jsonb_path_ops) WHERE delta IS NOT NULL;
         CREATE INDEX idx_audit_context_ip ON audit_logs(context_ip) WHERE context_ip IS NOT NULL;
         CREATE TRIGGER audit_logs_immutable BEFORE UPDATE OR DELETE ON audit_logs FOR EACH ROW EXECUTE FUNCTION reject_dml('UPDATE', 'DELETE');
         ALTER TABLE audit_logs ALTER COLUMN target_type SET STATISTICS 500, ALTER COLUMN operation SET STATISTICS 500;
@@ -242,7 +234,7 @@ export default Effect.gen(function* () {
         CREATE INDEX idx_jobs_app_updated ON jobs(app_id, updated_at DESC) INCLUDE (status, type);
         CREATE UNIQUE INDEX idx_jobs_dedupe_active ON jobs(app_id, dedupe_key) WHERE dedupe_key IS NOT NULL AND status IN ('queued', 'processing');
         CREATE INDEX idx_jobs_batch ON jobs(batch_key) WHERE batch_key IS NOT NULL;
-        CREATE INDEX idx_jobs_app_status_type_gin ON jobs USING GIN (app_id, status, type) WITH (parallel_workers = 4);
+        CREATE INDEX idx_jobs_app_status_type_gin ON jobs USING GIN (app_id, status, type);
         ALTER TABLE jobs ALTER COLUMN type SET STATISTICS 500, ALTER COLUMN status SET STATISTICS 500;
         ALTER TABLE jobs ALTER COLUMN payload SET STORAGE MAIN, ALTER COLUMN history SET STORAGE MAIN;
         CREATE STATISTICS stat_jobs_app_status (ndistinct, dependencies, mcv) ON app_id, status FROM jobs;
@@ -260,9 +252,7 @@ export default Effect.gen(function* () {
             job_key TEXT GENERATED ALWAYS AS (NULLIF(trim(correlation->>'job'), '')) STORED,
             updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
             CONSTRAINT notifications_correlation_shape CHECK (correlation IS NULL OR jsonb_typeof(correlation) = 'object'),
-            CONSTRAINT notifications_template_not_empty CHECK (length(trim(template)) > 0))
-        PARTITION BY RANGE (id) WITH (fillfactor = 80, autovacuum_vacuum_scale_factor = 0.05, autovacuum_analyze_scale_factor = 0.02);
-        CREATE TABLE notifications_default PARTITION OF notifications DEFAULT;
+            CONSTRAINT notifications_template_not_empty CHECK (length(trim(template)) > 0));
         CREATE INDEX idx_notifications_app_status ON notifications(app_id, status, id DESC) INCLUDE (channel, template, retry_current, retry_max);
         CREATE INDEX idx_notifications_app_user ON notifications(app_id, user_id, id DESC) INCLUDE (channel, status, template) WHERE user_id IS NOT NULL;
         CREATE INDEX idx_notifications_app_updated ON notifications(app_id, updated_at DESC) INCLUDE (channel, status, user_id);
@@ -299,12 +289,6 @@ export default Effect.gen(function* () {
         CREATE INDEX idx_agent_journal_app_session_sequence ON agent_journal(app_id, session_id, sequence DESC);
         CREATE INDEX idx_agent_journal_app_kind_created ON agent_journal(app_id, entry_kind, created_at DESC);
         CREATE INDEX idx_agent_journal_run_kind ON agent_journal(run_id, entry_kind, created_at DESC)`);
-    // --- [PARTITIONS] ----------------------------------------------------------------
-    yield* sql.unsafe(String.raw`DO $$ BEGIN
-        PERFORM _register_monthly_partition('sessions', 'created_at', '30 days');
-        PERFORM _register_monthly_partition('audit_logs', 'id', '90 days', 'partman.uuid7_time_encoder'::regproc, 'partman.uuid7_time_decoder'::regproc);
-        PERFORM _register_monthly_partition('notifications', 'id', '90 days', 'partman.uuid7_time_encoder'::regproc, 'partman.uuid7_time_decoder'::regproc);
-    END $$`);
     yield* sql.unsafe(String.raw`
         CREATE TABLE job_dlq (
             id UUID PRIMARY KEY DEFAULT uuidv7(), source dlq_source NOT NULL DEFAULT 'job',
@@ -345,11 +329,10 @@ export default Effect.gen(function* () {
         ] LOOP EXECUTE format('CREATE INDEX idx_%s_%s_fk ON %I(%I)', _pair[1], _pair[2], _pair[1], _pair[2]); END LOOP;
         FOR _tbl IN SELECT unnest(ARRAY[
             'apps','users','permissions','api_keys','oauth_accounts','assets',
-            'mfa_secrets','webauthn_credentials','jobs','notifications','kv_store',
-            'search_documents','search_embeddings'
+            'mfa_secrets','webauthn_credentials','jobs','notifications','kv_store'
         ]) LOOP EXECUTE format(
             'CREATE TRIGGER %I BEFORE UPDATE ON %I '
-            'FOR EACH ROW WHEN (OLD.* IS DISTINCT FROM NEW.*) '
+            'FOR EACH ROW '
             'EXECUTE FUNCTION set_updated_at()',
             _tbl || '_updated_at', _tbl);
         END LOOP;
@@ -567,11 +550,11 @@ export default Effect.gen(function* () {
 
     // --- [SEARCH] --------------------------------------------------------------------
     yield* sql.unsafe(String.raw`
-        CREATE TEXT SEARCH DICTIONARY IF NOT EXISTS parametric_unaccent (TEMPLATE = unaccent, RULES = 'unaccent');
+        CREATE TEXT SEARCH DICTIONARY parametric_unaccent (TEMPLATE = unaccent, RULES = 'unaccent');
         CREATE OR REPLACE FUNCTION normalize_search_text(p_display_text text, p_content_text text DEFAULT NULL, p_metadata jsonb DEFAULT NULL)
             RETURNS text LANGUAGE sql STABLE PARALLEL SAFE AS $$ SELECT trim(regexp_replace(casefold(unaccent('parametric_unaccent'::regdictionary, concat_ws(' ',
             NULLIF(p_display_text, ''), NULLIF(p_content_text, ''),
-            NULLIF((SELECT string_agg(value, ' ') FROM jsonb_each_text(coalesce(p_metadata, '{}'::jsonb))), '')))), '\s+', ' ', 'g')) $$;
+            NULLIF((SELECT string_agg(value, ' ') FROM jsonb_each_text(coalesce(p_metadata, '{}'::jsonb))), '')))) COLLATE "C", '\s+', ' ', 'g')) $$;
         CREATE TEXT SEARCH CONFIGURATION parametric_search (COPY = english);
         ALTER TEXT SEARCH CONFIGURATION parametric_search ALTER MAPPING FOR hword, hword_part, word WITH parametric_unaccent, english_stem;
         CREATE OR REPLACE FUNCTION is_supported_search_embedding_profile(p_provider text, p_dimensions integer)
@@ -604,15 +587,15 @@ export default Effect.gen(function* () {
             updated_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
             CONSTRAINT search_embeddings_pk PRIMARY KEY (entity_type, entity_id, provider, dimensions),
             CONSTRAINT search_embeddings_dimensions_positive CHECK (dimensions > 0),
-            CONSTRAINT search_embeddings_dimension_match CHECK (halfvec_dims(embedding) = dimensions),
+            CONSTRAINT search_embeddings_dimension_match CHECK (vector_dims(embedding) = dimensions),
             CONSTRAINT search_embeddings_supported_profile CHECK (is_supported_search_embedding_profile(provider, dimensions)),
             CONSTRAINT search_embeddings_document_fk FOREIGN KEY (entity_type, entity_id)
                 REFERENCES search_documents(entity_type, entity_id) ON DELETE CASCADE
         );
         CREATE INDEX idx_search_documents_scope ON search_documents (scope_id, entity_type);
-        CREATE INDEX idx_search_documents_scope_entity_vector ON search_documents USING GIN (scope_id uuid_ops, entity_type text_ops, search_vector) WITH (parallel_workers = 4);
+        CREATE INDEX idx_search_documents_scope_entity_vector ON search_documents USING GIN (scope_id uuid_ops, entity_type text_ops, search_vector);
         CREATE INDEX idx_search_documents_scope_entity_trgm ON search_documents
-            USING GIN (scope_id uuid_ops, entity_type text_ops, normalized_text gin_trgm_ops) WITH (parallel_workers = 4);
+            USING GIN (scope_id uuid_ops, entity_type text_ops, normalized_text gin_trgm_ops);
         CREATE INDEX idx_search_documents_trgm_knn ON search_documents USING GIST (normalized_text gist_trgm_ops(siglen=64));
         CREATE INDEX idx_search_documents_phonetic ON search_documents (phonetic_code) WHERE phonetic_code <> '';
         CREATE INDEX idx_search_documents_phonetic_daitch ON search_documents USING GIN (phonetic_daitch);
@@ -620,7 +603,7 @@ export default Effect.gen(function* () {
             scope_id UUID, term TEXT NOT NULL, frequency INTEGER NOT NULL CHECK (frequency > 0),
             updated_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
             CONSTRAINT search_terms_scope_term_unique UNIQUE NULLS NOT DISTINCT (scope_id, term));
-        CREATE INDEX idx_search_terms_scope_term_trgm ON search_terms USING GIN (scope_id uuid_ops, term gin_trgm_ops) WITH (parallel_workers = 4);
+        CREATE INDEX idx_search_terms_scope_term_trgm ON search_terms USING GIN (scope_id uuid_ops, term gin_trgm_ops);
         CREATE INDEX idx_search_terms_trgm_knn ON search_terms USING GIST (term gist_trgm_ops(siglen=64));
         CREATE INDEX idx_search_embeddings_profile ON search_embeddings (provider, dimensions) INCLUDE (entity_type, entity_id, embedding_hash);
         CREATE INDEX idx_search_embeddings_openai_3_small ON search_embeddings
@@ -633,6 +616,9 @@ export default Effect.gen(function* () {
             WHERE provider = 'gemini' AND dimensions = 1536;
         ALTER TABLE search_documents ALTER COLUMN entity_type SET STATISTICS 500;
         ALTER TABLE search_embeddings ALTER COLUMN provider SET STATISTICS 500;
+        CREATE TRIGGER search_documents_updated_at BEFORE UPDATE ON search_documents FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+        CREATE TRIGGER search_embeddings_updated_at BEFORE UPDATE ON search_embeddings FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+        CREATE TRIGGER search_terms_updated_at BEFORE UPDATE ON search_terms FOR EACH ROW EXECUTE FUNCTION set_updated_at();
         CREATE STATISTICS stat_search_documents_scope_entity (ndistinct, dependencies) ON scope_id, entity_type FROM search_documents;
         CREATE STATISTICS stat_search_embeddings_profile_entity (ndistinct, dependencies) ON provider, dimensions, entity_type FROM search_embeddings`);
     // --- [SEARCH_TRIGGERS] -----------------------------------------------------------
@@ -782,14 +768,14 @@ export default Effect.gen(function* () {
     // --- [SEED_PERMISSIONS] ----------------------------------------------------------
     yield* sql.unsafe(String.raw`
         WITH tenants(app_id) AS (VALUES ('00000000-0000-7000-8000-000000000001'::uuid),('00000000-0000-7000-8000-000000000000'::uuid)),
-        all_roles(role) AS (VALUES ('owner'),('admin'),('member'),('viewer'),('guest')),
+        all_roles(role) AS (VALUES ('owner'::app_role),('admin'::app_role),('member'::app_role),('viewer'::app_role),('guest'::app_role)),
         all_actions(resource, action) AS (VALUES
             ('auth','logout'),('auth','me'),('auth','mfaStatus'),('auth','mfaEnroll'),('auth','mfaVerify'),('auth','mfaDisable'),('auth','mfaRecover'),('auth','listApiKeys'),('auth','createApiKey'),
             ('auth','deleteApiKey'),('auth','rotateApiKey'),('auth','linkProvider'),('auth','unlinkProvider'),
             ('users','getMe'),('users','updateProfile'),('users','deactivate'),('users','getNotificationPreferences'),('users','updateNotificationPreferences'),('users','listNotifications'),('users','subscribeNotifications'),
             ('audit','getMine'),('transfer','export'),('transfer','import'),('search','search'),('search','suggest'),('jobs','subscribe'),
             ('storage','sign'),('storage','exists'),('storage','remove'),('storage','upload'),('storage','getAsset'),('storage','createAsset'),('storage','updateAsset'),('storage','archiveAsset'),('storage','listAssets'),('websocket','connect')),
-        privileged_roles(role) AS (VALUES ('owner'),('admin')),
+        privileged_roles(role) AS (VALUES ('owner'::app_role),('admin'::app_role)),
         privileged_actions(resource, action) AS (VALUES ('users','updateRole'),('audit','getByEntity'),('audit','getByUser'),('search','refresh'),('search','refreshEmbeddings'),
             ('webhooks','list'),('webhooks','register'),('webhooks','remove'),('webhooks','test'),('webhooks','retry'),('webhooks','status'),
             ('admin','listUsers'),('admin','listSessions'),('admin','deleteSession'),('admin','revokeSessionsByIp'),('admin','listJobs'),('admin','cancelJob'),('admin','listDlq'),('admin','replayDlq'),
@@ -808,7 +794,7 @@ export default Effect.gen(function* () {
             ('agent_journal','app'),
             ('api_keys','user'),('oauth_accounts','user'),('mfa_secrets','user'),('webauthn_credentials','user'),
             ('session_tokens','session'),('search_documents','scope'),('search_embeddings','document'),('search_terms','scope')
-        ) AS t(tbl text, kind text) LOOP
+        ) AS t(tbl, kind) LOOP
             EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', _r.tbl);
             EXECUTE format('ALTER TABLE %I FORCE ROW LEVEL SECURITY', _r.tbl);
             EXECUTE format('CREATE POLICY %I ON %I %s', _r.tbl||'_tenant_isolation', _r.tbl, CASE _r.kind

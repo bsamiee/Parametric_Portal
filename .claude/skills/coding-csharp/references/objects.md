@@ -22,7 +22,7 @@ Effect orchestration lives in `effects.md`; polymorphic compression lives in `co
 |   [5]   | **Stack-confined parser/workspace**              | `readonly ref struct`     |
 
 [IMPORTANT]:
-- [1] Use generated `TryCreate` as the external ingress gate.
+- [1] Use generated `TryCreate` as the external ingress gate for simple boundary wrappers; use custom `Fin<T>` factories only when algebraic interfaces, normalization, or domain-specific error rails require them.
 - [2] Use generated exhaustive `Switch`/`Map`; keep behavior co-located with the enum.
 - [3] Use generated exhaustive `Switch`/`Map`; avoid nullable/flag choreography.
 - [4] Aggregate transitions return typed codomains (`Fin<T>` / `Validation<Error,T>`) via `with`-expressions.
@@ -40,7 +40,7 @@ Effect orchestration lives in `effects.md`; polymorphic compression lives in `co
 <br>
 
 Thinktecture v10 source-generates construction APIs; LanguageExt provides typed error channels.
-Use `TryCreate` for untrusted input and project to `Fin<T>` / `Validation<Error,T>` via DomainBridge.
+Use `TryCreate` for untrusted input and project to `Fin<T>` / `Validation<Error,T>` at the boundary. A generic bridge is acceptable only when it serves multiple boundary types; single-call bridges are inlined into the owning adapter.
 Boundary adapters register integration once: `UseThinktectureValueConverters()`, `ThinktectureModelBinderProvider`, and `ThinktectureJsonConverterFactory`.
 
 ```csharp
@@ -84,6 +84,7 @@ public readonly partial struct OrderId {
 [CRITICAL]:
 - `Create` is for trusted internal construction; `TryCreate` is the boundary gate.
 - Never expose primitives in public domain signatures once a value object exists.
+- `SkipFactoryMethods = true` belongs to algebraic domain atoms whose construction must return a custom `Fin<T>` rail; do not disable generated factories for simple HTTP/JSON/EF wrappers.
 
 ---
 ## [3][DOMAIN_BRIDGE]
@@ -91,8 +92,7 @@ public readonly partial struct OrderId {
 
 <br>
 
-Single bridge unifies value object and smart enum parsing into the `Fin<T>` error channel.
-Callers needing `Validation<Error,T>` compose via `.ToValidation()` -- no separate `Validate` wrapper.
+Single bridge unifies value object and smart enum parsing into the `Fin<T>` error channel when the module has multiple boundary value types. Callers needing `Validation<Error,T>` compose via `.ToValidation()` -- no separate `Validate` wrapper and no one-use bridge.
 
 ```csharp
 namespace Domain.Objects;

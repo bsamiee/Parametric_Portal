@@ -1,6 +1,6 @@
 # Observability
 
-Statistics views, automatic plan capture, wait event analysis, and I/O diagnostics for PostgreSQL 18.2+. Plan analysis (EXPLAIN) lives in performance.md --- this file covers runtime monitoring and diagnostics.
+Statistics views, automatic plan capture, wait event analysis, and I/O diagnostics for PostgreSQL 18. Plan analysis (EXPLAIN) lives in performance.md --- this file covers runtime monitoring and diagnostics.
 
 
 ## pg_stat_statements

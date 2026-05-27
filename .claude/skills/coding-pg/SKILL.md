@@ -1,16 +1,11 @@
 ---
 name: coding-pg
 description: >-
-  Enforces PostgreSQL 18.2+ SQL style, schema design, query algebra, index
-  strategy, extension integration, security posture, and observability standards.
-  Use when writing, editing, reviewing, or debugging .sql files, migration scripts,
-  DDL schemas, stored functions/procedures, RLS policies, index definitions, or any
-  SQL embedded in TypeScript via @effect/sql-pg. Also use when designing partitioning
-  strategies, configuring extensions (pgvector, pg_cron, pg_partman, TimescaleDB,
-  PostGIS), tuning query plans, or reviewing database security and observability
-  posture. Activate for any PostgreSQL work even if the user does not explicitly
-  say "database" — schema changes, migration files, SQL fragments in Effect code,
-  and performance investigations all qualify.
+  Use for PostgreSQL 18 SQL, migrations, DDL, functions, RLS policies,
+  indexes, query plans, extensions, and SQL embedded in TypeScript via
+  @effect/sql-pg. Enforces set-algebraic queries, schema-level invariants,
+  current PostgreSQL features, extension-first design, tenant security,
+  observability, and migration safety.
 ---
 
 # [H1][CODING-PG]
@@ -22,6 +17,7 @@ All SQL follows five governing principles:
 - **Strongly typed** — domain types, composite types, range types; zero untyped `text` columns for structured data
 - **Programmatic** — variable-driven predicates, parameterized DDL, zero stringly-typed identifiers
 - **Declarative-first** — constraints, generated columns, and RLS policies enforce invariants at the schema level; application logic is last resort
+- **Source-current** — PostgreSQL 18/current docs are the truth baseline; examples must state current semantics, not stale point-version folklore
 
 
 ## Paradigm
@@ -77,7 +73,7 @@ All SQL follows five governing principles:
 - BRIN for append-only monotonic columns (timestamps, serial IDs) — orders of magnitude smaller than B-tree.
 
 **Security**
-- RLS enabled on every tenant-scoped table; policies use `current_setting('app.current_tenant')`.
+- RLS enabled on every tenant-scoped table; policies use fail-closed `nullif(current_setting('app.current_tenant', true), '')` tenant scoping.
 - Functions default to `SECURITY INVOKER` (always the default); `SECURITY DEFINER` only with `SET search_path = pg_catalog, public`.
 - Column-level `GRANT` for sensitive fields — never rely on view-based column hiding alone.
 
@@ -107,9 +103,9 @@ All SQL follows five governing principles:
 | UNVALIDATED_CONSTRAINT        | `ADD CONSTRAINT ... NOT VALID` without subsequent `VALIDATE CONSTRAINT`        |
 | IF_THEN_DISPATCH              | PL/pgSQL `IF p_op = 'get' THEN ... ELSIF` instead of VALUES-based dynamic SQL  |
 | NONCOMPOSABLE_CAGG            | `PERCENTILE_CONT` in hierarchical CAGG; non-composable across tiers            |
-| LEGACY_UUID                   | `gen_random_uuid()` or `uuid_generate_v4()` instead of `uuidv7()` (PG 18)      |
+| LEGACY_UUID                   | Non-ordered UUID generation on new ordered PKs where `uuidv7()` fits better    |
 | STALE_HEALTH_VIEW             | Materialized views for real-time health monitoring instead of inline queries   |
-| EXCLUDE_OVER_WITHOUT_OVERLAPS | EXCLUDE instead of WITHOUT OVERLAPS PK/UNIQUE for temporal overlap (PG 17+)    |
+| EXCLUDE_OVER_WITHOUT_OVERLAPS | EXCLUDE instead of WITHOUT OVERLAPS PK/UNIQUE for temporal overlap in PG 18    |
 | RAW_UUID_ID                   | Raw `S.UUID` for PK/FK instead of `S.UUID.pipe(S.brand('EntityId'))`           |
 | BARE_FOR_UPDATE               | `FOR UPDATE` without `SKIP LOCKED` on batch/queue processing patterns          |
 | NULL_UNSAFE_ANTIJOIN          | `NOT IN (SELECT ...)` instead of `NOT EXISTS`; NULL in subquery yields UNKNOWN |
@@ -119,15 +115,13 @@ All SQL follows five governing principles:
 ## Load Sequence
 
 **Foundation** (always load):
-- `references/ddl.md` — schema design, domain/composite/range types, temporal constraints, generated columns, partitioning, lock levels
 - `references/validation.md` — compliance checklist, Effect-SQL alignment, migration safety
 
-**Core** (load for query/function work):
+**Task-routed references** (load when the task matches):
+- `references/ddl.md` — schema design, domain/composite/range types, temporal constraints, generated columns, partitioning, lock levels
 - `references/queries.md` — CTE algebra, MERGE, window functions, JSON_TABLE, recursive patterns
 - `references/indexes.md` — index type selection, partial indexes, covering indexes, maintenance
 - `references/functions.md` — polymorphic functions, custom aggregates, procedures, PL/pgSQL dispatch
-
-**Specialized** (load ONLY when prompt mentions the topic):
 - `references/extensions.md` — load when: pgvector, pg_trgm, PostGIS, TimescaleDB, pg_cron, pg_partman, pg_duckdb, embeddings, similarity search, time-series, spatial, partitioning automation, analytics, OLAP, analytical
 - `references/security.md` — load when: RLS, row-level security, tenant isolation, privileges, audit, pgaudit
 - `references/observability.md` — load when: monitoring, statistics, auto_explain, wait events, lock contention
@@ -159,5 +153,5 @@ All SQL follows five governing principles:
 
 After writing or modifying SQL, run in order:
 
-1. **Automated lint**: `bash .claude/skills/coding-pg/scripts/pg_lint.sh [PATH...]` — 25 anti-pattern detectors (rg-based + structural). Errors (E) block merge; warnings (W) require justification. Supports `--json` for CI integration, `--sql-only`/`--ts-only` for targeted scans.
+1. **Automated lint**: `bash scripts/pg_lint.sh [PATH...]` from this skill directory — anti-pattern detectors (rg-based + structural). Errors (E) block merge; warnings (W) require justification. Supports `--json`, `--sql-only`, `--ts-only`, and `--self-test`.
 2. **Manual checklist**: `references/validation.md` — compliance gates not automatable (Effect-SQL alignment, migration safety, lock-level awareness).

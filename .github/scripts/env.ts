@@ -11,7 +11,7 @@ declare const process: { readonly env: Record<string, string | undefined> };
 
 const ENV = {
     // Nx Cloud workspace ID - fallback must match nx.json nxCloudId
-    nxCloudWorkspaceId: process.env.NX_CLOUD_WORKSPACE_ID ?? '6929c006315634b45342f623',
+    nxCloudWorkspaceId: process.env['NX_CLOUD_WORKSPACE_ID'] ?? '6929c006315634b45342f623',
 } as const;
 
 // --- Export ------------------------------------------------------------------

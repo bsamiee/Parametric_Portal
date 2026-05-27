@@ -2,26 +2,19 @@
 
 ## Composition Root and Lifetime Policy
 
-Eagerly resolving scoped capabilities into the Eff reader environment at runtime construction captures scope-bound references into a potentially longer-lived reader, producing the same captive dependency violation as injecting a scoped service into a singleton — except that `ValidateScopes` cannot detect it because the reader carries `IServiceProvider`, not a typed dependency graph.
+Eagerly resolving scoped capabilities into an `Eff` runtime captures scope-bound references into a potentially longer-lived reader, producing the same captive dependency violation as injecting a scoped service into a singleton. The current pattern is a plain runtime record with explicit properties and `Eff<RT,T>.Asks`; do not resurrect v4 `Has<...>`/`Readable.asks` machinery.
 
 ```csharp
 namespace Infra.Composition;
 
-public record AppRuntime(IServiceProvider Scope) :
-    Has<Eff<AppRuntime>, IClock>,
-    Has<Eff<AppRuntime>, IObjectStore> {
-    static K<Eff<AppRuntime>, A> Asks<A>(Func<AppRuntime, A> f) =>
-        Readable.asks<Eff<AppRuntime>, AppRuntime, A>(f);
-    static K<Eff<AppRuntime>, IClock> Has<Eff<AppRuntime>, IClock>.Ask =>
-        Asks(static (AppRuntime rt) => rt.Scope.GetRequiredService<IClock>());
-    static K<Eff<AppRuntime>, IObjectStore> Has<Eff<AppRuntime>, IObjectStore>.Ask =>
-        Asks(static (AppRuntime rt) => rt.Scope.GetRequiredService<IObjectStore>());
+public sealed record AppRuntime(IServiceProvider Scope) {
+    public IClock Clock => Scope.GetRequiredService<IClock>();
+    public IObjectStore Store => Scope.GetRequiredService<IObjectStore>();
 }
 
-static Eff<RT, Unit> SyncClock<RT>()
-    where RT : Has<Eff<RT>, IClock>, Has<Eff<RT>, IObjectStore> =>
-    from clock in Has<Eff<RT>, IClock>.Ask
-    from store in Has<Eff<RT>, IObjectStore>.Ask
+static Eff<AppRuntime, Unit> SyncClock() =>
+    from clock in Eff<AppRuntime, IClock>.Asks(static (AppRuntime rt) => rt.Clock)
+    from store in Eff<AppRuntime, IObjectStore>.Asks(static (AppRuntime rt) => rt.Store)
     from _     in liftEff(() => store.Put("last-sync", clock.UtcNow()))
     select unit;
 
@@ -40,7 +33,7 @@ public sealed class EffLifecycleHost(
 }
 ```
 
-- `Has.Ask` defers resolution via `Readable.asks` — each capability resolves from whatever scope the runtime carries; `SyncClock<RT>` demonstrates the payoff: multi-capability constraint composition via LINQ comprehension, testable with any runtime satisfying the trait bounds, not coupled to `AppRuntime`
+- `Eff<AppRuntime,T>.Asks` defers resolution through explicit runtime-record properties; `SyncClock` demonstrates the payoff: multi-capability composition via LINQ comprehension without a service-locator surface leaking into the domain pipeline
 - `RunScoped` captures `factory` (non-static, primary constructor parameter — startup-only, not hot-path) as the sole bridge: `CreateAsyncScope()` guarantees disposal under cancellation, `new AppRuntime(scope.ServiceProvider)` binds runtime to scope lifetime, `using EnvIO` owns the cancellation-linked environment, `RunUnsafeAsync` collapses `Error` into exceptions at the host boundary where `StartAsync`/`StopAsync` propagate failures as shutdown signals
 - `boot`/`drain` are pre-composed Eff programs passed at registration — callers sequence via LINQ comprehension before the host sees them; `IHostedService` provides the two-phase contract (`StartAsync` forward, `StopAsync` reverse) without lifecycle ceremony
 
@@ -176,4 +169,4 @@ public static class DecoratorChain {
 - [NEVER] Runtime service location (GetService/GetRequiredService) in domain transforms — composition root responsibility only.
 - [ALWAYS] Keyed service vocabularies are SmartEnum<T> — never raw strings. String literal keys forbidden outside test fixtures.
 - [OVERLAP: effects.md] Resilience policies registered as keyed services, injected via decorators — effects.md owns pipeline definition, composition.md owns injection site.
-- [OVERLAP: surface.md] Middleware/filter ordering declared in composition root — surface.md owns endpoint contract, composition.md owns pipeline topology.
+- [OVERLAP: API boundary] Middleware/filter ordering is declared in the composition root; endpoint contracts live with the owning API module while this file owns pipeline topology.

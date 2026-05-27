@@ -145,13 +145,17 @@ def recover[T](fault: Fault[T], fb: T) -> Result[T, Hard[T]]:
 
 @effect.result[float, Fault[str]]()
 def ingest(dec: Decode[str], xf: Refine[str, float], store: Store[float], raw: bytes, fb: str, key: str):
-    parsed: str = yield from dec.parse(raw).or_else_with(lambda e: recover(e, fb))
+    parsed: str = yield from dec.parse(raw)
     refined: float = yield from xf.apply(parsed)
     yield from store.put(key, refined)
     return refined
+
+def ingest_or_fallback(dec: Decode[str], xf: Refine[str, float], store: Store[float], raw: bytes, fb: str, key: str) -> Result[float, Fault[str]]:
+    return ingest(dec, xf, store, raw, fb, key).or_else_with(lambda e: recover(e, fb).bind(
+        lambda parsed: xf.apply(parsed).bind(lambda refined: store.put(key, refined).map(lambda _: refined))))
 ```
 
-`Arrow[A, B, E]` is the Kleisli category for `Result` — `compose` threads `E | F` union accumulation through `bind`, and `recover` is an arrow from `Fault[T]` to `Result[T, Hard[T]]` that eliminates `Soft` by `Literal` discriminant match. The `@effect.result` generator subsumes Kleisli ceremony: `parsed` binds from `dec.parse(raw).or_else_with(...)` where `or_else_with` applies recovery only on `Error`; subsequent `yield from xf.apply(parsed)` freely references `parsed` — the cross-step dependency `compose` cannot express because intermediate values are trapped in arrow return types. Error type parameterization tracks provenance: `Refine[T, U]` returns `Hard[T]` (not `Hard[U]`), preserving pre-refinement input for upstream retry context, while `Soft` carries `raw: bytes` (original wire payload). Adding a third severity level without a match arm triggers `assert_never` — exhaustive dispatch is structural, not policy-based.
+`Arrow[A, B, E]` is the Kleisli category for `Result` — `compose` threads `E | F` union accumulation through `bind`, and `recover` is an arrow from `Fault[T]` to `Result[T, Hard[T]]` that eliminates `Soft` by `Literal` discriminant match. The `@effect.result` generator binds only happy-path values; recovery stays in `ingest_or_fallback` at the composition boundary via `.or_else_with(...)`. Error type parameterization tracks provenance: `Refine[T, U]` returns `Hard[T]` (not `Hard[U]`), preserving pre-refinement input for upstream retry context, while `Soft` carries `raw: bytes` (original wire payload). Adding a third severity level without a match arm triggers `assert_never` — exhaustive dispatch is structural, not policy-based.
 
 ---
 

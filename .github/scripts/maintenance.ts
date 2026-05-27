@@ -106,8 +106,10 @@ const fetchOpenPRs = async (ctx: Ctx): Promise<ReadonlyArray<PR>> =>
 const fetchBranchCommit = async (ctx: Ctx, branch: string): Promise<BranchCommit> =>
     (await call(ctx, 'branch.get', branch)) as BranchCommit;
 const deleteBranch = async (ctx: Ctx, branch: string): Promise<{ success: boolean; error?: string }> =>
-    ctx.github.rest.git
-        .deleteRef({ owner: ctx.owner, ref: `heads/${branch}`, repo: ctx.repo })
+    (
+        ctx.github.rest['git']?.['deleteRef']?.({ owner: ctx.owner, ref: `heads/${branch}`, repo: ctx.repo }) ??
+        Promise.reject(new Error('GitHub REST git.deleteRef is unavailable'))
+    )
         .then(() => ({ success: true }))
         .catch((err: Error) => ({ error: err.message || 'Unknown error', success: false }));
 const warnDraftPR = async (ctx: Ctx, pr: PR): Promise<void> => {

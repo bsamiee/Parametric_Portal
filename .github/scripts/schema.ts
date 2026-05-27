@@ -779,25 +779,29 @@ const ops: Record<string, Op> = {
 
 const call = async (ctx: Ctx, key: string, ...args: ReadonlyArray<unknown>): Promise<unknown> => {
     const op = ops[key];
-    const transform = op.out ?? ((data: unknown) => data);
-    const params = { owner: ctx.owner, repo: ctx.repo, ...op.map(args) };
-    const execute = async (): Promise<unknown> => {
-        const isGraphQL = !!op.query;
-        const result = isGraphQL
-            ? await ctx.github.graphql(op.query as string, params)
-            : await ctx.github.rest[op.api?.[0] ?? ''][op.api?.[1] ?? ''](params);
-        // SECURITY: Type guard replaces unsafe type assertion (runtime validation)
-        const extractData = (): unknown => {
-            if (isGraphQL) {
-                return result;
-            }
-            return isRestApiResponse(result) ? result.data : undefined;
-        };
-        const data = extractData();
-        return data === undefined ? undefined : transform(data);
-    };
+    return op === undefined
+        ? Promise.reject(new Error(`Unknown GitHub operation: ${key}`))
+        : ((operation) => {
+              const transform = operation.out ?? ((data: unknown) => data);
+              const params = { owner: ctx.owner, repo: ctx.repo, ...operation.map(args) };
+              const execute = async (): Promise<unknown> => {
+                  const isGraphQL = !!operation.query;
+                  const result = isGraphQL
+                      ? await ctx.github.graphql(operation.query as string, params)
+                      : await ctx.github.rest[operation.api?.[0] ?? '']?.[operation.api?.[1] ?? '']?.(params);
+                  // SECURITY: Type guard replaces unsafe type assertion (runtime validation)
+                  const extractData = (): unknown => {
+                      if (isGraphQL) {
+                          return result;
+                      }
+                      return isRestApiResponse(result) ? result.data : undefined;
+                  };
+                  const data = extractData();
+                  return data === undefined ? undefined : transform(data);
+              };
 
-    return op.safe ? execute().catch(() => undefined) : execute();
+              return operation.safe ? execute().catch(() => undefined) : execute();
+          })(op);
 };
 
 // --- Dispatch Tables ---------------------------------------------------------

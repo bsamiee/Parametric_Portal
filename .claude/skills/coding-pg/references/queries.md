@@ -48,7 +48,7 @@ CTE contracts:
 - Queue drain pattern: `DELETE ... WHERE id IN (SELECT ... FOR UPDATE SKIP LOCKED) RETURNING *` atomically claims and removes rows
 
 
-## MERGE (PG 15+)
+## MERGE
 
 ```sql
 MERGE INTO inventory AS tgt
@@ -70,13 +70,13 @@ RETURNING merge_action() AS action,
 
 MERGE contracts:
 - `merge_action()` returns `'INSERT'`, `'UPDATE'`, or `'DELETE'` -- typed signal for downstream event emission
-- `OLD.*` / `NEW.*` in RETURNING: access pre/post values -- replaces audit trigger patterns
+- `OLD.*` / `NEW.*` in RETURNING access pre/post values in PostgreSQL 18 -- replaces audit trigger patterns
 - `OLD` is NULL for INSERT actions; `NEW` is NULL for DELETE actions
 - MERGE acquires ROW EXCLUSIVE lock -- same as UPDATE; does NOT escalate to table lock
 - Join condition must be deterministic -- each source row matches at most one target row
 - Multiple WHEN MATCHED clauses: first matching condition wins (order matters)
 - MERGE is atomic -- all matched rows processed in single statement execution
-- MERGE fires row-level triggers only -- not statement-level BEFORE/AFTER triggers per action
+- MERGE fires statement-level triggers for the actions specified in the command and row-level triggers for rows that execute the corresponding action
 - MERGE RETURNING composes inside CTEs for downstream INSERT/audit pipelines
 
 
@@ -110,7 +110,7 @@ SELECT region, product_category, date_trunc('month', sale_date) AS month,
        COUNT(*) AS sale_count,
        GROUPING(region, product_category, date_trunc('month', sale_date)) AS grouping_bits
 FROM sales
-WHERE tenant_id = current_setting('app.current_tenant')::uuid
+WHERE tenant_id = nullif(current_setting('app.current_tenant', true), '')::uuid
 GROUP BY GROUPING SETS (
     (region, product_category, date_trunc('month', sale_date)),   -- full detail
     (region, product_category),                                   -- by region+product
@@ -262,7 +262,7 @@ Window contracts:
 - Gap detection: `(expression)::int` coercion preferred over CASE for boolean-to-integer projection
 
 
-## JSON_TABLE and SQL/JSON (PG 17+)
+## JSON_TABLE and SQL/JSON
 
 JSON_TABLE -- structured relational extraction from JSONB:
 
@@ -299,7 +299,7 @@ SQL/JSON contracts:
 - `DEFAULT ... ON EMPTY` provides fallback when path yields no match (distinct from NULL)
 - `DEFAULT ... ON ERROR` / `ERROR ON ERROR`: control behavior when path expression fails
 - `RETURNING type`: explicit cast of extracted value -- avoids text intermediary
-- Multiple NESTED PATH siblings produce a cross-product -- use separate JSON_TABLE calls for independent arrays
+- Multiple NESTED PATH siblings are combined as sibling row groups, not a cross-product; use separate JSON_TABLE calls when independent arrays need explicit pairing semantics
 - jsonb_path_query returns `setof jsonb` -- use `jsonb_path_query_first` for scalar extraction
 - SQL/JSON path language uses `@` for current item, `$` for root -- not JSONPath dot notation
 - jsonb_path_query variables: second argument is jsonb object -- keys become `$varname` in path expression

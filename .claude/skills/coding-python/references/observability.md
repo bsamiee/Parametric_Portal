@@ -16,8 +16,6 @@ import logging
 from collections.abc import Callable
 from contextvars import ContextVar
 from functools import wraps
-from typing import cast
-
 import structlog
 from opentelemetry import trace
 from opentelemetry.trace import StatusCode
@@ -27,7 +25,6 @@ from structlog.processors import (
     CallsiteParameter, CallsiteParameterAdder, TimeStamper, add_log_level,
 )
 from structlog.stdlib import BoundLogger, LoggerFactory, ProcessorFormatter
-from structlog.types import Processor
 
 # --- [CODE] -------------------------------------------------------------------
 
@@ -74,14 +71,14 @@ def _inject_trace_identifiers(
 
 def configure_structlog() -> None:
     processors: tuple[Processor, ...] = (
-        cast(Processor, merge_contextvars),
-        cast(Processor, CallsiteParameterAdder(
+        merge_contextvars,
+        CallsiteParameterAdder(
             {CallsiteParameter.MODULE, CallsiteParameter.FUNC_NAME, CallsiteParameter.LINENO},
-        )),
-        cast(Processor, add_log_level),
-        cast(Processor, TimeStamper(fmt="iso", utc=True)),
-        cast(Processor, _inject_trace_identifiers),
-        cast(Processor, ProcessorFormatter.wrap_for_formatter),
+        ),
+        add_log_level,
+        TimeStamper(fmt="iso", utc=True),
+        _inject_trace_identifiers,
+        ProcessorFormatter.wrap_for_formatter,
     )
     structlog.configure(
         processors=processors, logger_factory=LoggerFactory(),

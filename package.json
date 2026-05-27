@@ -108,13 +108,7 @@
         "ignoreBinaries": [
             "hadolint"
         ],
-        "ignoreFiles": [
-            "apps/kargadan/plugin/scripts/package-yak.ts"
-        ],
         "ignoreIssues": {
-            "apps/kargadan/harness/src/protocol/schemas.ts": [
-                "types"
-            ],
             "packages/devtools/src/client.ts": [
                 "types"
             ]

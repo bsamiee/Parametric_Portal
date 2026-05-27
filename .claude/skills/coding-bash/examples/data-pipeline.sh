@@ -225,7 +225,11 @@ _parse_args() {
 
 _self_test() {
     _info "Running self-tests..."
-    local -r test_data='[{"level":" INFO ","latency_ms":10,"endpoint":"/a"},{"level":"ERROR","latency_ms":20,"endpoint":"/b"}]'
+    local -r tmp="$(mktemp "${TMPDIR:-/tmp}/data-pipeline-test.XXXXXX")"
+    _register_cleanup "rm -f $(printf '%q' "${tmp}")"
+    printf '%s\n' '{"events":[{"level":" INFO ","latency_ms":10,"endpoint":"/a"},{"level":"ERROR","latency_ms":20,"endpoint":"/b"}]}' > "${tmp}"
+    local test_data=""
+    _extract_page "${tmp}" 0 50 test_data || _die "ASSERT: extract page failed"
     local agg=""; _aggregate_metrics "${test_data}" agg
     [[ "$(jq '.total' <<< "${agg}")" == "2" ]] || _die "ASSERT: aggregate total failed"
     [[ "$(jq -r '.by_level | keys[0]' <<< "${agg}")" == "ERROR" ]] || _die "ASSERT: trim/level failed"

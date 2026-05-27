@@ -195,7 +195,11 @@ _self_test() {
     _assert_match "${SPAN_ID}" '^[0-9a-f]{16}$'
     _ts; _assert_set "${REPLY}" "timestamp"; _assert_match "${REPLY}" '^[0-9]{4}-'
     _assert_set "${BASH_MONOSECONDS}" "BASH_MONOSECONDS"
-    _assert_set "${BASH_TRAPSIG+defined}" "BASH_TRAPSIG available"
+    local trap_sig=""
+    trap 'trap_sig="${BASH_TRAPSIG}"' USR2
+    kill -USR2 "$$"
+    trap - USR2
+    _assert_eq "${trap_sig}" "$(kill -l USR2)"
     SERVICE_NAME="test-svc" _validate_env
     _info "All self-tests passed ($(( BASH_MONOSECONDS - t0 ))s monotonic)"
 }

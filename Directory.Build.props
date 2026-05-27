@@ -48,13 +48,6 @@
         <TestcontainersPostgreSqlVersion>4.10.0</TestcontainersPostgreSqlVersion>
         <FsCheckVersion>3.3.2</FsCheckVersion>
         <BenchmarkDotNetVersion>0.15.8</BenchmarkDotNetVersion>
-        <RhinoCommonVersion>9.0.25350.305-wip</RhinoCommonVersion>
-        <RhinoInsideVersion>9.0.26013.15500-beta</RhinoInsideVersion>
-        <RhinoTestingVersion>9.0.5-beta</RhinoTestingVersion>
-    </PropertyGroup>
-
-    <PropertyGroup Condition="'$(MSBuildProjectName)' == 'ParametricPortal.Kargadan.Plugin'">
-        <LanguageExtCoreVersion>4.4.9</LanguageExtCoreVersion>
     </PropertyGroup>
 
     <ItemGroup Label="Global Libraries" Condition="'$(IsLocalCSharpAnalyzerProject)' != 'true'">
@@ -86,11 +79,6 @@
         <Using Include="LanguageExt.Pretty" />
         <Using Include="LanguageExt.Traits.Domain" />
         <Using Include="LanguageExt.Prelude" Static="true" />
-    </ItemGroup>
-
-    <ItemGroup Label="Plugin LanguageExt Using Overrides" Condition="'$(MSBuildProjectName)' == 'ParametricPortal.Kargadan.Plugin'">
-        <Using Remove="LanguageExt.Traits" />
-        <Using Remove="LanguageExt.Traits.Domain" />
     </ItemGroup>
 
     <ItemGroup Label="Analyzer Packages" Condition="'$(IsLocalCSharpAnalyzerProject)' != 'true'">

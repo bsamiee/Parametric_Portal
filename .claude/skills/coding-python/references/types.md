@@ -24,7 +24,8 @@ type Convert[A, B] = Callable[[float], Result[float, Rejection]]
 
 @dataclass(frozen=True, slots=True)
 class Measurement[U: Unit = "K"]:
-    value: float; unit: U  # type: ignore[assignment]
+    value: float
+    unit: U
 
 def is_absolute(m: Measurement) -> TypeIs[Measurement["K"]]:
     return m.unit == "K" and m.value >= 0

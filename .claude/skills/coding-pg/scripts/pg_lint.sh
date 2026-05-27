@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# pg_lint — PostgreSQL 18.2+ anti-pattern linter (25 detectors)
+# pg_lint — PostgreSQL 18 anti-pattern linter
 
 set -Eeuo pipefail
 shopt -s inherit_errexit nullglob extglob
@@ -12,7 +12,6 @@ readonly _R=$'\033[31m' _Y=$'\033[33m' _G=$'\033[32m' _B=$'\033[1m' _Z=$'\033[0m
 declare -i _t=0; [[ -t 1 ]] && _t=1; readonly _TTY="${_t}"; unset -v _t
 declare -Ar _CLR=([E]="${_R}" [W]="${_Y}")
 declare -Ar _CTR=([E]=_errs [W]=_warns)
-declare -Ar _FMT_FN=([json]=_emit_json [text]=_emit_text)
 
 # --- [TRAPS] ------------------------------------------------------------------
 
@@ -21,7 +20,7 @@ declare -i _CLEANING=0
 _register() { _CLEANUP+=("$1"); }
 _on_exit() {
     (( _CLEANING )) && return; _CLEANING=1
-    local i; for (( i=${#_CLEANUP[@]}-1; i>=0; i-- )); do eval "${_CLEANUP[i]}" 2>/dev/null || :; done
+    local i; for (( i=${#_CLEANUP[@]}-1; i>=0; i-- )); do rm -rf -- "${_CLEANUP[i]}" 2>/dev/null || :; done
 }
 # shellcheck disable=SC2329
 _on_err() {
@@ -42,24 +41,30 @@ _emit_text() {
         && printf '%s[%s]%s %s — %s\n' "${_CLR[$2]}" "$1" "${_Z}" "$3" "$4" \
         || printf '[%s] %s — %s\n' "$1" "$3" "$4"
 }
+_emit() {
+    case "${_FMT}" in
+        json) _emit_json "$@" ;;
+        text) _emit_text "$@" ;;
+    esac
+}
 
 # --- [RULES] ------------------------------------------------------------------
 
 # LABEL<FS>LEVEL<FS>EXT<FS>FLAGS<FS>MESSAGE<FS>PATTERN
 readonly -a _RG_RULES=(
     "DUAL_COLUMN_RANGE${_S}E${_S}sql${_S}-i${_S}Use tstzrange — never dual start/end columns${_S}(start_date|_start|valid_from|begin_at).*(end_date|_end|valid_to|end_at)"
-    "LEGACY_UUID${_S}E${_S}sql${_S}-i${_S}Use uuidv7() — PG 18 built-in${_S}(uuid_generate_v4|gen_random_uuid)\\s*\\("
+    "LEGACY_UUID${_S}W${_S}sql${_S}-i${_S}Prefer uuidv7() for new ordered PKs; justify random UUIDs by workload${_S}(uuid_generate_v4|gen_random_uuid)\\s*\\("
     "NOW_DEFAULT${_S}E${_S}sql${_S}-iP${_S}Use clock_timestamp() — now() is txn-start${_S}DEFAULT\\s+now\\s*\\(\\)"
     "OFFSET_PAGINATION${_S}E${_S}sql${_S}-iP${_S}Use keyset pagination${_S}LIMIT\\s+\\S+\\s+OFFSET"
     "NULL_UNSAFE_ANTIJOIN${_S}E${_S}sql${_S}-iP${_S}Use NOT EXISTS — NULL poisons NOT IN${_S}NOT\\s+IN\\s*\\(\\s*SELECT"
     "IMPERATIVE_BATCH${_S}E${_S}sql${_S}-iP${_S}Use set-based MERGE/CTE — not row-at-a-time${_S}FOR\\s+\\w+\\s+IN\\s+.*\\bLOOP\\b"
     "IF_THEN_DISPATCH${_S}E${_S}sql${_S}-iP${_S}Use VALUES-based dynamic SQL${_S}\\bIF\\b.*\\bTHEN\\b.*\\bELSIF\\b"
-    "BARE_FOR_UPDATE${_S}E${_S}sql${_S}-P${_S}FOR UPDATE requires SKIP LOCKED${_S}FOR\\s+UPDATE\\b(?!\\s+SKIP\\s+LOCKED)"
+    "BARE_FOR_UPDATE${_S}W${_S}sql${_S}-P${_S}Queue/batch FOR UPDATE usually needs SKIP LOCKED; justify plain row locks${_S}FOR\\s+UPDATE\\b(?![^;]*(SKIP\\s+LOCKED|NOWAIT|OF\\s+\\w+))"
     "NONCOMPOSABLE_CAGG${_S}W${_S}sql${_S}-iP${_S}Non-composable across CAGG tiers${_S}percentile_(cont|disc)\\s*\\("
     "DISTINCT_OVER_EXISTS${_S}W${_S}sql${_S}-iP${_S}Use EXISTS semi-join — DISTINCT forces sort/dedup${_S}SELECT\\s+DISTINCT\\b.*\\bJOIN\\b"
-    "MISSING_EXT_VERSION${_S}W${_S}sql${_S}-iP${_S}Pin extension version in production migrations${_S}CREATE\\s+EXTENSION\\b(?!.*VERSION)(?!.*IF\\s+NOT\\s+EXISTS)"
+    "EXTENSION_POLICY${_S}W${_S}sql${_S}-iP${_S}Document extension availability, privileges, and upgrade posture${_S}CREATE\\s+EXTENSION\\b(?!.*IF\\s+NOT\\s+EXISTS)"
     "TRIGGER_LOGIC${_S}W${_S}sql${_S}-iP${_S}Prefer MERGE RETURNING or generated columns${_S}CREATE\\s+(OR\\s+REPLACE\\s+)?TRIGGER"
-    "EXCLUDE_WITHOUT_OVERLAPS${_S}W${_S}sql${_S}-iP${_S}Use WITHOUT OVERLAPS PK/UNIQUE (PG 17+)${_S}EXCLUDE\\s+USING\\s+gist\\s*\\(.*&&"
+    "EXCLUDE_WITHOUT_OVERLAPS${_S}W${_S}sql${_S}-iP${_S}Use WITHOUT OVERLAPS PK/UNIQUE for temporal constraints in PG 18${_S}EXCLUDE\\s+USING\\s+gist\\s*\\(.*&&"
     "UNVALIDATED_CONSTRAINT${_S}W${_S}sql${_S}-iP${_S}Use NOT VALID + VALIDATE two-phase${_S}ADD\\s+CONSTRAINT\\b(?!.*NOT\\s+VALID)"
     "MISSING_CONCURRENTLY${_S}W${_S}sql${_S}-P${_S}Use CREATE INDEX CONCURRENTLY in migrations${_S}CREATE\\s+(UNIQUE\\s+)?INDEX\\b(?!\\s+CONCURRENTLY)"
     "APPLICATION_SIDE_JSON${_S}W${_S}sql${_S}-iP${_S}Use jsonb_path_query/JSON_TABLE${_S}SELECT\\s+\\w+\\.(data|metadata|payload|config|settings)\\s*(,|\\s+FROM)"
@@ -86,7 +91,8 @@ _tally() {
     local -a lines; mapfile -t lines <<< "$4"
     local -n ctr="${_CTR[${level}]}"
     (( ctr += ${#lines[@]} ))
-    local line; for line in "${lines[@]}"; do "${_EMITTER}" "${label}" "${level}" "${msg}" "${line}"; done
+    [[ "${_QUIET}" == true ]] && return 0
+    local line; for line in "${lines[@]}"; do _emit "${label}" "${level}" "${msg}" "${line}"; done
 }
 _run_rg() {
     local -r workdir="$1"
@@ -140,13 +146,13 @@ _check_sprawl() {
     local -a lines; mapfile -t lines <<< "${results}"
     local line m l; for line in "${lines[@]}"; do
         IFS=$'\t' read -r m l <<< "${line}"
-        (( ++_warns )); "${_EMITTER}" "INDEX_SPRAWL" "W" "${m}" "${l}"
+        (( ++_warns )); _emit "INDEX_SPRAWL" "W" "${m}" "${l}"
     done
 }
 
 # --- [INTERFACE] --------------------------------------------------------------
 _usage() { cat <<'EOF'
-pg_lint — PostgreSQL 18.2+ anti-pattern linter (25 detectors)
+pg_lint — PostgreSQL 18 anti-pattern linter
 USAGE:  pg_lint [OPTIONS] [PATH...]
   -h,--help  -q,--quiet  --sql-only  --ts-only  --json  --self-test
 EXIT: 0=clean 1=errors 2=usage
@@ -183,9 +189,12 @@ _summary() {
 
 # --- [SELF-TEST] --------------------------------------------------------------
 
-_self_test() (
+_self_test() {
     local -i pass=0 fail=0
-    local td; td=$(mktemp -d); trap 'rm -rf "${td}"' EXIT
+    local _SQL=true _TS=false _QUIET=true _FMT=text
+    local -i _errs=0 _warns=0 _checks=0
+    local -a _PATHS=()
+    local td; td=$(mktemp -d)
     local wd; wd=$(mktemp -d "${td}/w.XXXXXX")
     cat > "${td}/bad.sql" <<'SQL'
 CREATE TABLE t (start_date date, end_date date);
@@ -199,43 +208,41 @@ CREATE FUNCTION x() RETURNS void LANGUAGE sql SECURITY DEFINER AS $$ SELECT 1 $$
 ALTER TABLE t ENABLE ROW LEVEL SECURITY;
 CREATE POLICY p ON t USING (tenant_id = 'hardcoded');
 SQL
-    # shellcheck disable=SC2030
-    _PATHS=("${td}") _TS=false _FMT=text _QUIET=true _errs=0 _warns=0 _checks=0
-    readonly _EMITTER=_emit_text
+    _PATHS=("${td}")
     _run_rg "${wd}"; _run_pairs
     _assert() {
         [[ "$2" == "$3" ]] && { (( ++pass )); return 0; }
         printf 'FAIL: %s (expected=%s actual=%s)\n' "$1" "$2" "$3" >&2; (( ++fail )); return 0
     }
-    _assert "rg errors detected" true "$( (( _errs >= 5 )) && printf true || printf false)"
-    _assert "pair errors detected" true "$( (( _errs >= 8 )) && printf true || printf false)"
+    _assert "rg errors detected" true "$( (( _errs >= 4 )) && printf true || printf false)"
+    _assert "pair errors detected" true "$( (( _errs >= 7 )) && printf true || printf false)"
     _assert "checks executed" true "$( (( _checks >= 20 )) && printf true || printf false)"
     printf '%d passed, %d failed (%d checks, %d errors, %d warnings)\n' \
         "${pass}" "${fail}" "${_checks}" "${_errs}" "${_warns}"
+    rm -rf -- "${td}"
     return $(( fail > 0 ))
-)
+}
 
 # --- [ENTRY] ------------------------------------------------------------------
 
 _main() {
     _parse "$@"
     readonly _SQL _TS _QUIET _FMT _PATHS
-    readonly _EMITTER="${_FMT_FN[${_FMT}]}"
     command -v rg >/dev/null 2>&1 \
         || { printf '%s[ERR]%s ripgrep (rg) required\n' "${_R}" "${_Z}" >&2; exit "${_USAGE}"; }
     [[ "${_FMT}" != json ]] || command -v jq >/dev/null 2>&1 \
         || { printf '%s[ERR]%s jq required for --json\n' "${_R}" "${_Z}" >&2; exit "${_USAGE}"; }
     local -r t0="${EPOCHREALTIME}"
     local workdir; workdir=$(mktemp -d)
-    _register "rm -rf '${workdir}'"
+    _register "${workdir}"
     _run_rg "${workdir}"
     _run_pairs
     _check_sprawl
     local -r t1="${EPOCHREALTIME}"
     declare -gi _elapsed=$(( (${t1%.*} - ${t0%.*}) * 1000000 + 10#${t1#*.} - 10#${t0#*.} ))
     _summary
-    # shellcheck disable=SC2031
-    (( _errs > 0 )) && exit "${_FAIL}"
+    (( _errs > 0 )) && { _on_exit; exit "${_FAIL}"; }
+    _on_exit
     exit "${_OK}"
 }
 _main "$@"

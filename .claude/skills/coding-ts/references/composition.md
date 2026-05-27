@@ -63,7 +63,9 @@ const Pipeline = (() => {
 Exposing every internal node creates accidental coupling. `Layer.project` narrows to consumer-facing subset; `discard` produces initialization-only layers (no output); `passthrough` re-exposes requirements as outputs for test introspection.
 
 ```ts
-import { Context, Duration, Effect, Layer } from "effect"
+import { Context, Data, Duration, Effect, Layer } from "effect"
+
+class _PoolFault extends Data.TaggedError("PoolFault")<{ readonly reason: "deadline" }> {}
 
 class Pool extends Context.Tag("Cmp/Pool")<Pool, {
   readonly acquire: Effect.Effect<{ readonly query: <A>(sql: string) => Effect.Effect<A>; readonly release: Effect.Effect<void> }>
@@ -75,8 +77,8 @@ const Boundary = (() => {
   const Config = Context.GenericTag<{ readonly maxConns: number; readonly timeout: Duration.Duration }>("Cmp/PoolConfig")
   const PoolLive = Layer.effect(Pool, Config.pipe(Effect.map(({ maxConns, timeout }) => ({
     acquire: Effect.succeed({
-      query: <A>(sql: string) => Effect.succeed(sql as unknown as A).pipe(
-        Effect.timeoutFail({ duration: timeout, onTimeout: () => new Error("query.deadline") }),
+      query: <A>(_sql: string): Effect.Effect<A, _PoolFault> => Effect.never.pipe(
+        Effect.timeoutFail({ duration: timeout, onTimeout: () => new _PoolFault({ reason: "deadline" }) }),
       ),
       release: Effect.log("conn.released"),
     }),

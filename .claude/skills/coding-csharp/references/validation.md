@@ -134,4 +134,4 @@ Concrete search patterns an agent can apply to any `.cs` file:
 
 - [ ] FluentValidation async rules (`MustAsync`, `CustomAsync`) execute via `ValidateAsync` only -- never `Validate` when async rules exist
 - [ ] RuleSets are boundary contracts (`IncludeRuleSets`) and map to `Validation<Error,T>` before entering domain pipelines
-- [ ] Bridge converts `ValidationResult` to `Validation<Error,T>` at boundary -- see `effect-module.template.md` [BOUNDARY_BRIDGE] for the canonical implementation
+- [ ] Bridge converts `ValidationResult` to `Validation<Error,T>` at boundary -- keep the adapter inline at the boundary or in the owning composition module; no template/helper-file proliferation

@@ -30,10 +30,10 @@ type _ActionResult<K  extends _Action> =
     : Effect.Effect<void, NotFound>
 
 // one signature — K carries discriminant through indexed access to return type
-const _dispatch: <K extends _Action>(
+declare const _dispatch: <K extends _Action>(
     action: K,
     payload: { readonly tenantId: string },
-) => _ActionResult<K> = undefined as never // body lives in Effect service, not type reference
+) => _ActionResult<K> // body lives in Effect service, not type reference
 ```
 
 Rename a key and every derivation + dispatch site fails simultaneously. `ReturnType` / `Parameters` extract from function shapes without explicit annotation — use when the function IS the authority:
@@ -79,10 +79,10 @@ type _ServiceOf<out A, out E, in R> = { readonly run: (deps: R) => Effect.Effect
 
 // Without NoInfer: T inferred from both args — ambiguous widening
 // With NoInfer: T inferred solely from first arg, second must conform
-const _provide = <A, E, R>(
+declare const _provide: <A, E, R>(
     effect: Effect.Effect<A, E, R>,
     layer:  NoInfer<Layer.Layer<R, E>>,
-): Effect.Effect<A, E> => undefined as never
+) => Effect.Effect<A, E>
 ```
 
 `extends` in generic position is a constraint (upper bound) — it restricts T's domain. Combined with conditional return types, constraints narrow both input and output simultaneously:

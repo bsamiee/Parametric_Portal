@@ -1,11 +1,11 @@
 # Performance
 
-AIO, JIT, parallel query, vacuum optimization, cost model tuning, connection pooling, plan-driven diagnostics for PostgreSQL 18.2+.
+AIO, JIT, parallel query, vacuum optimization, cost model tuning, connection pooling, plan-driven diagnostics for PostgreSQL 18.
 
 
 ## Asynchronous I/O (PG 18)
 
-2-3x throughput for sequential scans, bitmap heap scans, and vacuum on Linux with io_uring.
+Asynchronous I/O can materially improve sequential scans, bitmap heap scans, and vacuum on Linux with io_uring; verify gains with workload-specific `EXPLAIN (ANALYZE, BUFFERS, SETTINGS)`.
 
 ```ini
 io_method = io_uring                      # Linux 5.6+ (IORING_FEAT_NODROP); 'worker' is compile-time only, not a runtime fallback
@@ -16,7 +16,7 @@ maintenance_io_concurrency = 100          # vacuum, CREATE INDEX prefetch
 ```
 
 AIO contracts:
-- Primary benefit: sequential scans, bitmap heap scans, VACUUM (2-3x throughput). Index point lookups see modest improvement (10-20%) only under high-concurrency prefetch conditions — already single-page I/O
+- Primary benefit: sequential scans, bitmap heap scans, VACUUM. Index point lookups usually see only modest improvement under high-concurrency prefetch conditions because they are already single-page I/O
 - `io_uring` requires Linux 5.6+ with `IORING_FEAT_NODROP`; non-Linux platforms degrade to synchronous I/O (no thread-based fallback). `worker` mode is a compile-time option, not automatic
 - Breakeven: AIO overhead (submission queue management) exceeds benefit for queries returning <100 rows via index scan — disable per-session with `SET LOCAL io_max_concurrency = 1` for OLTP-heavy connections
 
@@ -81,7 +81,7 @@ Advanced vacuum patterns:
 
 Vacuum contracts:
 - `VACUUM (SKIP_LOCKED)` for tables with concurrent long transactions -- vacuums only unlocked pages
-- AIO (PG 18) accelerates vacuum I/O -- 2-3x faster on SSD with io_uring
+- AIO (PG 18) can accelerate vacuum I/O on SSD with io_uring; measure against production-shaped tables before claiming a multiplier
 - Dead tuple storage: PG 17+ uses TidStore (radix tree) instead of flat array -- handles billions of dead tuples without memory exhaustion
 - `VACUUM FULL` rewrites entire table -- takes AccessExclusiveLock; use `pg_repack` extension for online table compaction
 

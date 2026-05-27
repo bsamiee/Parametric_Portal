@@ -1,6 +1,6 @@
 # Security
 
-Row-level security, privilege architecture, authentication, audit, and pgaudit for PostgreSQL 18.2+. Security is enforced at the database level --- application-layer authorization is redundant defense, not primary enforcement.
+Row-level security, privilege architecture, authentication, audit, and pgaudit for PostgreSQL 18. Security is enforced at the database level --- application-layer authorization is redundant defense, not primary enforcement.
 
 
 ## Row-Level Security (RLS)
@@ -16,8 +16,8 @@ ALTER TABLE orders ENABLE ROW LEVEL SECURITY;
 ALTER TABLE orders FORCE ROW LEVEL SECURITY;  -- without FORCE, table owners bypass RLS
 
 CREATE POLICY tenant_isolation ON orders
-    USING (tenant_id = current_setting('app.current_tenant')::uuid)
-    WITH CHECK (tenant_id = current_setting('app.current_tenant')::uuid);
+    USING (tenant_id = nullif(current_setting('app.current_tenant', true), '')::uuid)
+    WITH CHECK (tenant_id = nullif(current_setting('app.current_tenant', true), '')::uuid);
 ```
 
 Admin bypass: `CREATE POLICY admin_access ON orders FOR ALL TO app_admin USING (true) WITH CHECK (true);`
@@ -33,7 +33,7 @@ Combining permissive + restrictive for layered access:
 ```sql
 -- Permissive: tenant sees own rows (OR'd with other permissive policies)
 CREATE POLICY tenant_read ON orders FOR SELECT
-    USING (tenant_id = current_setting('app.current_tenant')::uuid);
+    USING (tenant_id = nullif(current_setting('app.current_tenant', true), '')::uuid);
 
 -- Restrictive: even within tenant, only active rows visible (AND'd with permissive result)
 CREATE POLICY active_only ON orders AS RESTRICTIVE FOR SELECT
@@ -52,7 +52,7 @@ CREATE POLICY valid_period_access ON versioned_entities
 - `USING` filters visible rows (SELECT, UPDATE, DELETE); `WITH CHECK` validates new/modified rows (INSERT, UPDATE)
 - `FORCE ROW LEVEL SECURITY` applies policies even to table owners --- without it, table owners bypass RLS
 - **Policy combination semantics**: PERMISSIVE policies (the default) OR together. RESTRICTIVE policies (`AS RESTRICTIVE`) AND together. Final access: at least one PERMISSIVE must pass AND every RESTRICTIVE must pass. When no PERMISSIVE policy exists for an operation, access is denied. Policy type --- not role assignment --- determines combination logic.
-- `current_setting('app.current_tenant')` must be set via `SET LOCAL` or `set_config(..., true)` in each transaction --- not session-level. **Failure mode**: if the GUC is never set, `current_setting()` returns empty string (not NULL) --- policy evaluates `tenant_id = ''::uuid` which casts to `00000000-0000-0000-0000-000000000000`, silently matching any row with that UUID. Defense: add `CHECK (tenant_id != '00000000-0000-0000-0000-000000000000')` on tenant columns, or use `nullif(current_setting('app.current_tenant', true), '')` with a RESTRICTIVE deny-all policy when NULL
+- `current_setting('app.current_tenant')` must be set via `SET LOCAL` or `set_config(..., true)` in each transaction --- not session-level. **Failure mode**: without `missing_ok`, a missing GUC raises an error; with `current_setting('app.current_tenant', true)`, a missing GUC returns NULL. Defense: use `nullif(current_setting('app.current_tenant', true), '')` and a RESTRICTIVE deny-all policy when NULL
 - Performance: RLS predicates are appended to every query --- ensure indexed columns used in policies. Planner pushes simple RLS predicates (`col = const`) into index scans; complex predicates (subqueries, function calls) force scan-time filtering --- keep policy expressions index-friendly
 - Superusers and roles with BYPASSRLS bypass RLS --- never use superuser for application connections
 - Schema isolation vs RLS tradeoff: schema-per-tenant eliminates RLS overhead but complicates shared infrastructure (migrations, connection routing, monitoring). RLS preferred for shared-schema multi-tenancy; schema isolation for strict compliance boundaries.

@@ -1,31 +1,29 @@
 ---
 name: coding-bash
 description: >-
-  Enforces Bash 5.2+/5.3 functional style, immutability, dispatch-table
-  routing, and production patterns for shell automation.
-  Use when writing, editing, reviewing, refactoring, or debugging
-  .sh/.bash scripts, CLI tools, cron jobs, deployment automation,
-  container entrypoints, CI pipelines, or text processing workflows.
-  Also use when debugging ShellCheck SC codes or auditing shell
-  best practices.
+  Use for Bash 5.2+/5.3 scripts, shell CLIs, entrypoints, CI jobs, cron,
+  text-processing pipelines, ShellCheck remediation, and shell reviews.
+  Enforces strict mode, dispatch-table routing, fork-minimal primitives,
+  atomic I/O, signal-safe cleanup, and pragmatic functional shell patterns.
 ---
 
 # [H1][CODING-BASH]
 >**Dictum:** *Functional patterns and strict mode produce maintainable shell automation.*
 
 All code follows five governing principles:
-- **Functional** — immutable locals, pure functions, dispatch tables, zero mutable state
+- **Functional** — immutable locals, pure functions, dispatch tables, and tightly bounded mutable shell state
 - **Polymorphic** — one parser, one dispatcher, one logger; extend via table entries not code branches
 - **Production-hardened** — ERR traps, atomic I/O, signal forwarding, cleanup registries, version gating
 - **Fork-minimal** — `printf -v`, `$(<file)`, `EPOCHSECONDS`, fork-free `${ }` substitution (5.3), `BASH_MONOSECONDS` monotonic timing, `mapfile` over subshell patterns
 - **Ecosystem-first** — `rg`/`fd`/`jq`/`sd`/`choose`/`mlr` over sed/grep/find/cut when available
+- **Executable doctrine** — examples and templates must pass syntax, ShellCheck, and their own self-tests
 
 
 ## Paradigm
 
 - **Immutability**: `local -r` for all non-mutating function locals, `readonly` for module-level constants. Mutable state only for argument parsing — frozen via `readonly` in `_main` before core logic
 - **Dispatch tables**: `declare -Ar` for O(1) command routing, two-dimensional `verb:resource` keyed dispatch, option metadata, validation rules, log-level gating, env contract validation (regex patterns per env var). `case/esac` reserved exclusively for glob/regex pattern matching — never conditional routing
-- **Pure functions**: Input via positional parameters, output via stdout or nameref (`local -n`). No global reads except `readonly` constants. Side effects isolated to `_main` and trap handlers
+- **Pure functions**: Input via positional parameters, output via stdout or nameref (`local -n`). No global reads except `readonly` constants. Side effects isolated to `_main`, trap handlers, cleanup registries, and explicitly marked shell boundary loops
 - **Metadata-driven help**: `_OPT_META` with `short|long|desc|VALUE_NAME|default` entries generates `_usage` programmatically. One table entry + one `case` branch per option
 - **Middleware composition**: `_use()` registers middleware functions into `_MIDDLEWARE` array; `_run_with_middleware()` executes the chain before handler dispatch. Argument parsing in 3 composable phases — subcommand dispatch (O(1) table lookup), flag parsing (case/esac), positional collection
 - **Expression over statement**: `${var:-default}` over if-empty checks, `${var:?message}` over assert-not-empty, `(( expr ))` over `test`, parameter expansion over external commands
@@ -70,9 +68,10 @@ All code follows five governing principles:
 - `case/esac` for pattern matching (globs, regexes) only — never for if/elif-style routing.
 - `declare -Ar` dispatch tables for command routing: `"${_DISPATCH[${cmd}]}" "${args[@]}"`. Nest for subdomains: `_CONFIG_SUBCMDS`, `_INIT_SUBCMDS`.
 - `[[ ]]` over `[ ]`. `(( ))` for arithmetic. `&&`/`||` for short-circuit.
-- `mapfile -t` / `readarray -d ''` over `while read` loops for collection.
+- `mapfile -t` / `readarray -d ''` over `while read` loops for collection. Streaming consumers may use `while IFS= read -r` with a comment naming the stream boundary.
 - Ternary via arithmetic: `(( condition )) && action1 || action2` or `${var:+if_set}${var:-if_unset}`.
 - Bounded concurrency: `wait -n -p finished_pid` with job-count gate `(( ${#jobs[@]} >= MAX_JOBS ))` — see `_run_pool` pattern in examples.
+- Shell reality exceptions must be explicit: option parsing uses `case`; cleanup stacks may use a static `eval` template over shell-quoted commands; bounded counters and polling loops may mutate when the mutation is the resource protocol.
 
 **Error handling**
 - `set -Eeuo pipefail` + `shopt -s inherit_errexit` in every script. No exceptions.
@@ -96,7 +95,7 @@ All code follows five governing principles:
 - ~350 LOC scrutiny threshold — investigate compression via dispatch tables and awk programs, not file splitting.
 
 **Resources**
-- Temporary files: `mktemp` + `_register_cleanup "rm -f '${tmp}'"`. Work directories: `mktemp -d` with `SRANDOM` in path for uniqueness.
+- Temporary files: `mktemp` + `_register_cleanup "rm -f -- $(printf '%q' "${tmp}")"` or equivalent static quoted cleanup template. Work directories: `mktemp -d` with `SRANDOM` in path for uniqueness.
 - Signal forwarding for PID 1: trap TERM/INT, `kill -"${sig}" "${_CHILD_PID}"`, exit with signal code (143/130). Guard on `(( _CHILD_PID > 0 ))`. On 5.3, `BASH_TRAPSIG` enables unified signal handler with dispatch-table routing by signal number. `GLOBSORT` controls glob ordering (e.g., `-mtime` for newest-first file discovery).
 - Retry: `_retry_exec max delay max_delay cmd...` — exponential backoff `delay=$(( delay * 2 > max_delay ? max_delay : delay * 2 ))` with `SRANDOM` jitter.
 - Env contracts: `declare -Ar _ENV_CONTRACT=([VAR]='^regex$')` validated at startup — dispatch table over env vars, regex per key.
@@ -108,30 +107,25 @@ All code follows five governing principles:
 
 **Foundation** (always):
 
-| [REFERENCE]                                                   | [FOCUS]                                       |
-| ------------------------------------------------------------- | --------------------------------------------- |
-| [bash-scripting-guide.md](references/bash-scripting-guide.md) | Primitives, strict mode, expansion, arrays    |
-| [script-patterns.md](references/script-patterns.md)           | Arg parsing, help, ERR traps, parallel, retry |
+| [REFERENCE]                                                   | [FOCUS]                                    |
+| ------------------------------------------------------------- | ------------------------------------------ |
+| [bash-scripting-guide.md](references/bash-scripting-guide.md) | Primitives, strict mode, expansion, arrays |
 
-**Core** (always):
+**Task-routed references** (load only when the task matches):
 
-| [REFERENCE]                                             | [FOCUS]                                                    |
-| ------------------------------------------------------- | ---------------------------------------------------------- |
-| [version-features.md](references/version-features.md)   | 5.2/5.3 features, fork-free substitution, version gating   |
-| [variable-features.md](references/variable-features.md) | Call stacks, namerefs, traps, process lifecycle, 5.3 vars  |
-| [array-operations.md](references/array-operations.md)   | Set algebra, structural transforms, higher-order traversal |
-| [string-operations.md](references/string-operations.md) | Transform pipelines, regex extraction, codecs, templates   |
-| [file-operations.md](references/file-operations.md)     | Atomic writes, FD multiplexing, directory traversal        |
-
-**Specialized** (load when task matches):
-
-| [REFERENCE]                                                     | [LOAD_WHEN]                                      |
-| --------------------------------------------------------------- | ------------------------------------------------ |
-| [bash-logging.md](references/bash-logging.md)                   | Structured logging, CI integration, tracing      |
-| [bash-testing.md](references/bash-testing.md)                   | bats-core 1.13+ suites, coverage, hypothesis PBT |
-| [bash-portability.md](references/bash-portability.md)           | Cross-shell compat, containers, POSIX            |
-| [text-processing-guide.md](references/text-processing-guide.md) | rg/awk/sd/jq/yq/mlr tool selection               |
-| [validation.md](references/validation.md)                       | ShellCheck codes, static analysis, CI            |
+| [REFERENCE]                                                     | [FOCUS]                                                    |
+| --------------------------------------------------------------- | ---------------------------------------------------------- |
+| [version-features.md](references/version-features.md)           | 5.2/5.3 features, fork-free substitution, version gating   |
+| [variable-features.md](references/variable-features.md)         | Call stacks, namerefs, traps, process lifecycle, 5.3 vars  |
+| [array-operations.md](references/array-operations.md)           | Set algebra, structural transforms, higher-order traversal |
+| [string-operations.md](references/string-operations.md)         | Transform pipelines, regex extraction, codecs, templates   |
+| [file-operations.md](references/file-operations.md)             | Atomic writes, FD multiplexing, directory traversal        |
+| [script-patterns.md](references/script-patterns.md)             | Arg parsing, help, ERR traps, parallel, retry              |
+| [bash-logging.md](references/bash-logging.md)                   | Structured logging, CI integration, tracing                |
+| [bash-testing.md](references/bash-testing.md)                   | bats-core 1.13+ suites, coverage, hypothesis PBT           |
+| [bash-portability.md](references/bash-portability.md)           | Cross-shell compat, containers, POSIX                      |
+| [text-processing-guide.md](references/text-processing-guide.md) | rg/awk/sd/jq/yq/mlr tool selection                         |
+| [validation.md](references/validation.md)                       | ShellCheck codes, static analysis, CI                      |
 
 **Examples** (read one matching your target archetype before writing):
 
@@ -151,12 +145,13 @@ All code follows five governing principles:
 **Control-flow violations**
 - IMPERATIVE DISPATCH: `if/elif/else` chain for command routing. Use `declare -Ar` dispatch table + O(1) lookup.
 - WHILE-READ COLLECTION: `while IFS= read -r line` loop to build arrays. Use `mapfile -t arr < <(cmd)`.
+- UNMARKED STREAM LOOP: `while read` without a streaming-boundary comment. Streaming consumers are valid; collection loops are not.
 - NAKED WRITE: Direct `>` or `>>` for output files. Use `mktemp` + `mv` atomic pattern.
 
 **Safety violations**
 - HARDCODED FD: `exec 3>file` with literal FD numbers. Use `exec {fd}>file` for safe dynamic allocation.
 - UNQUOTED EXPANSION: `$var` without quotes. Always `"${var}"` — exceptions only in `(( ))` arithmetic.
-- EVAL INJECTION: `eval "$user_string"` with untrusted input. Use `declare -Ar` dispatch or `case/esac` pattern match.
+- EVAL INJECTION: `eval "$user_string"` with untrusted input. Only static cleanup/capture templates over shell-quoted values are allowed; otherwise use `declare -Ar` dispatch or `case/esac` pattern match.
 - ECHO OVER PRINTF: `echo -e`/`echo -n` for formatted output. Use `printf` — portable, no ambiguity, format strings.
 
 **Organization violations**
@@ -167,7 +162,16 @@ All code follows five governing principles:
 ## Validation gate
 
 - Required: `bash -n script.sh` (syntax check), ShellCheck 0.11.0+ clean (static analysis).
-- Reject completion when strict mode, readonly discipline, or ShellCheck compliance not satisfied.
+- Required for executable examples: run `--self-test` when present.
+- Reject completion when strict mode, readonly discipline, ShellCheck compliance, or example self-tests are not satisfied.
+
+## Skill eval prompts
+
+- Explicit invocation: "Using coding-bash, refactor this .sh CLI into dispatch-table Bash 5.3 style with self-tests."
+- Implicit invocation: "Review this deployment script for ShellCheck, strict mode, cleanup, and streaming-loop issues."
+- Noisy context: "Ignore CI chatter and only audit the Bash entrypoint."
+- Negative control: "Only write PostgreSQL DDL." Expected: do not load Bash references unless shell code appears.
+- Compliance checks: output should load only relevant references, avoid command thrash, avoid helper files, preserve marked shell-reality exceptions, and run `bash -n`, ShellCheck, and `--self-test` when applicable.
 
 
 ## First-class tools

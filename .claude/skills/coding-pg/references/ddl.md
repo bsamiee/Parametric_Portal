@@ -1,6 +1,6 @@
 # DDL
 
-Schema design patterns for PostgreSQL 18.2+.
+Schema design patterns for PostgreSQL 18.
 
 
 ## Canonical table pattern
@@ -64,7 +64,7 @@ CREATE DOMAIN slug AS text
 
 CREATE DOMAIN percentage AS numeric(5,2) CHECK (VALUE >= 0 AND VALUE <= 100);
 
--- Composite domain: structured type with field-level domain validation
+-- Composite type: structured value used by function parameters and returns
 CREATE TYPE monetary AS (amount numeric(19,4), currency text);
 ```
 
@@ -102,7 +102,7 @@ Range types replace dual start/end columns with algebraic interval semantics. Bu
 
 Dual `start_date`/`end_date` columns are FORBIDDEN — always `tstzrange` with range constraint.
 
-**WITHOUT OVERLAPS is the primary temporal constraint mechanism (PG 17+).** Use `WITHOUT OVERLAPS` in PRIMARY KEY or UNIQUE constraints for temporal non-overlap. EXCLUDE constraints are the manual fallback ONLY when PG <17 compatibility is required or when the constraint involves operators beyond equality + range overlap (e.g., three-way exclusion with non-equality operators).
+**WITHOUT OVERLAPS is the primary PostgreSQL 18 temporal constraint mechanism.** Use `WITHOUT OVERLAPS` in PRIMARY KEY or UNIQUE constraints for temporal non-overlap. EXCLUDE constraints are the manual fallback ONLY when compatibility with older PostgreSQL is required or when the constraint involves operators beyond equality + range overlap (e.g., three-way exclusion with non-equality operators).
 
 ```sql
 CREATE TYPE price_range AS RANGE (SUBTYPE = numeric);
@@ -277,7 +277,7 @@ SELECT partman.create_parent(
 - `enable_partition_pruning = on` (default) — planner eliminates non-matching partitions
 - pg_partman: `partman.create_parent()` + `partman.run_maintenance()` via pg_cron
 - `ALTER TABLE ... DETACH PARTITION ... CONCURRENTLY` for online removal (PG 14+)
-- `ENABLE ROW MOVEMENT` when UPDATE can change partition key — internally executes `DELETE` + `INSERT` across partitions (acquires locks on both), significantly more expensive than same-partition UPDATE; treat partition key columns as effectively immutable after insert
+- Updating a partition key can route the row to another partition by deleting from the old partition and inserting into the new one; it is materially more expensive than same-partition UPDATE and can surface concurrency conflicts. Treat partition key columns as effectively immutable after insert
 - Default partition catches unmatched rows — monitor size as health signal
 
 
@@ -399,7 +399,7 @@ CREATE TABLE chunks (
 ALTER TABLE chunks ENABLE ROW LEVEL SECURITY;
 ALTER TABLE chunks FORCE ROW LEVEL SECURITY;
 CREATE POLICY tenant_isolation ON chunks
-    USING (tenant_id = current_setting('app.current_tenant')::uuid);
+    USING (tenant_id = nullif(current_setting('app.current_tenant', true), '')::uuid);
 
 CREATE INDEX ON chunks USING hnsw (embedding vector_cosine_ops) WITH (m = 16, ef_construction = 200);
 CREATE INDEX ON chunks USING gin (search_text);
@@ -413,5 +413,5 @@ CREATE INDEX ON chunks (tenant_id, created_at);
 - Tenant isolation via RLS — vector queries automatically scoped
 - `position` preserves document ordering for context window assembly
 - pg_trgm completes the retrieval triad: semantic (vector distance) + lexical (BM25 rank) + fuzzy (trigram similarity) — each captures different user intent failure modes
-- **Multi-tenant scale (>1M vectors)**: replace HNSW with DiskANN + `filter_columns = 'tenant_id'` (requires `CREATE EXTENSION vectorscale`) — pushes tenant predicate into the index scan as label-based pre-filtering instead of post-filtering, preventing recall degradation when any single tenant owns <5% of total vectors. HNSW + RLS post-filter visits `ef_search` neighbors first then discards non-matching tenants, which at high selectivity returns fewer than `LIMIT k` results or requires expensive iterative scan expansion
+- **Multi-tenant scale (>1M vectors)**: replace HNSW with DiskANN plus label-column filtering when `vectorscale` is available. Store discrete tenant/category labels in the indexed label column and query with label containment so filtering participates in index search instead of relying only on post-filtering. HNSW + RLS post-filter visits `ef_search` neighbors first then discards non-matching tenants, which at high selectivity can return fewer than `LIMIT k` results or require expensive iterative scan expansion
 - **Write amplification**: the three-index strategy (HNSW + GIN tsvector + GIN trgm) means each INSERT touches three indexes — acceptable for moderate ingestion but bottleneck for bulk pipelines. Mitigation: load into unindexed staging table, batch-merge via `MERGE INTO chunks ... USING staging`, then `CREATE INDEX CONCURRENTLY` post-load. For incremental ingestion, maintain indexes but set `gin_pending_list_limit = 64MB` to batch GIN updates and accept slightly stale trigram results during high-write bursts

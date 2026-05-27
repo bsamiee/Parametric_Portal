@@ -219,9 +219,11 @@ const resilient = <E>(isTransient: (cause: Cause.Cause<E>) => boolean) =>
 `cachedFunction` is unbounded with custom `Equivalence`. Critical type distinction: `Cache.make` captures R at construction (getter eliminates R); `cachedFunction` retains R per invocation.
 
 ```ts
-import { Array as Arr, Cache, Duration, Effect, Equivalence, Exit, Request, RequestResolver } from "effect"
+import { Array as Arr, Cache, Data, Duration, Effect, Equivalence, Exit, Request, RequestResolver } from "effect"
 
-interface FetchUser extends Request.Request<string, Error> {
+class FetchFault extends Data.TaggedError("FetchFault")<{ readonly cause: unknown }> {}
+
+interface FetchUser extends Request.Request<string, FetchFault> {
   readonly _tag: "FetchUser"
   readonly id:   number
 }
@@ -232,7 +234,7 @@ const fetchResolver = RequestResolver.makeBatched(
     Effect.tryPromise({
       try:   (signal) => fetch("/api/users", { method: "POST", signal,
         body: JSON.stringify(Arr.map(reqs, (r) => r.id)) }).then((r) => r.json() as Promise<ReadonlyArray<string>>),
-      catch: (cause) => new Error(String(cause)),
+      catch: (cause) => new FetchFault({ cause }),
     }).pipe(
       Effect.andThen((names) => Effect.forEach(reqs, (req, i) => Request.succeed(req, names[i]!))),
       Effect.catchAll((err)  => Effect.forEach(reqs, (req)    => Request.fail(req, err))),

@@ -60,6 +60,17 @@ type Metrics = {
     readonly workflows: ReadonlyArray<WorkflowMetric>;
     readonly workflowRate: number;
 };
+type SectionFn = (metrics: Metrics, repo: string) => string;
+type Sections = {
+    readonly actions: SectionFn;
+    readonly activity: SectionFn;
+    readonly badges: SectionFn;
+    readonly ci: SectionFn;
+    readonly footer: SectionFn;
+    readonly header: SectionFn;
+    readonly health: SectionFn;
+    readonly thresholds: SectionFn;
+};
 
 // --- Pure Functions ----------------------------------------------------------
 
@@ -158,7 +169,7 @@ const collect = async (ctx: Ctx): Promise<Metrics> => {
 
 // --- Dispatch Tables ---------------------------------------------------------
 
-const sections: Record<string, (metrics: Metrics, repo: string) => string> = {
+const sections: Sections = {
     actions: (_, repo) => {
         const internal = B.dashboard.actions.map((action) => md.link(`\`${action.label}\``, url(repo, action.path)));
         const external = externalLinks
@@ -251,19 +262,20 @@ const sections: Record<string, (metrics: Metrics, repo: string) => string> = {
                     : md.shield('', '!', colors.warning, 'flat-square'),
                 md.url.workflow(repo, file),
             );
-        const trendPct = (rates: ReadonlyArray<number>): string => {
-            const diff = rates.length >= 2 ? rates[rates.length - 1] - rates[0] : 0;
-            const diffStr = (d: number): string => {
-                if (d > 0) {
-                    return `+${d}%`;
-                }
-                if (d < 0) {
-                    return `${d}%`;
-                }
-                return '-';
-            };
-            return diffStr(diff);
-        };
+        const trendPct = (rates: ReadonlyArray<number>): string =>
+            ((first, last) => {
+                const diff = first === undefined || last === undefined ? 0 : last - first;
+                const diffStr = (d: number): string => {
+                    if (d > 0) {
+                        return `+${d}%`;
+                    }
+                    if (d < 0) {
+                        return `${d}%`;
+                    }
+                    return '-';
+                };
+                return diffStr(diff);
+            })(rates.at(0), rates.at(-1));
         const rows = metrics.workflows.map((wf) => [
             md.link(wf.name, md.url.workflow(repo, wf.file)),
             String(wf.runs),

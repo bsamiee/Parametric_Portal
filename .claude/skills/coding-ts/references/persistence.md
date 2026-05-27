@@ -1,6 +1,6 @@
 # Persistence
 
-`@effect/sql` + `@effect/sql-pg` + PostgreSQL 18.2. `Model.Class` is `VariantSchema` — one declaration yields six typed projections. Field modifiers operate as projection algebra over the variant space. Tenant isolation is transaction-local `SET` via `FiberRef`. OCC is `WHERE updated_at = $expected`, not a version column.
+`@effect/sql` + `@effect/sql-pg` + PostgreSQL 18. `Model.Class` is `VariantSchema` — one declaration yields six typed projections. Field modifiers operate as projection algebra over the variant space. Tenant isolation is transaction-local `SET` via `FiberRef`. OCC is `WHERE updated_at = $expected`, not a version column.
 
 
 ## Model projection
@@ -44,7 +44,7 @@ const fixture = Entity.insert.make({
 `queryWith` factors predicate assembly, optional batching, and typed error lifting into a single curried entrypoint. Predicate projection follows `Option.fromNullable` → `Option.map(sql fragment)` → `Array.getSomes` → `sql.and` — each filter field contributes zero or one fragment, and `Array.match` emits `TRUE` for empty predicates. `Effect.flatten` lifts `Option` from `findOne` into the error channel as `NoSuchElementException`, enabling typed `catchTag` recovery without exception unwrapping.
 
 ```ts
-import { Array as A, Data, Duration, Effect, Option, Schema as S, pipe } from "effect"
+import { Array as A, Data, Duration, Effect, Option, Record as R, Schema as S, pipe } from "effect"
 import { Model, SqlClient, SqlSchema, type Statement } from "@effect/sql"
 
 class QueryError extends Data.TaggedError("QueryError")<{ readonly reason: "not_found" | "invalid" }> {}
@@ -60,8 +60,8 @@ const queryWith = <M extends Model.Model.Any>(model: M, tableName: string) =>
       toFrag: { [K in keyof F]?: (v: NonNullable<F[K]>) => Statement.Fragment },
     ) =>
       A.match(
-        A.getSomes(Object.entries(toFrag).map(([k, fn]) =>
-          pipe(Option.fromNullable(f[k]), Option.map((v) => fn!(v as never))))),
+        A.getSomes(R.toEntries(toFrag).map(([k, fn]) =>
+          pipe(Option.zip(Option.fromNullable(fn), Option.fromNullable(f[k])), Option.map(([make, value]) => make(value))))),
         { onEmpty: () => sql`TRUE`, onNonEmpty: (ps) => sql.and(ps as ReadonlyArray<Statement.Fragment>) },
       )
     const findOrFail = <R extends S.Schema.Any>(req: R, exec: (r: S.Schema.Type<R>) => Statement.Fragment) =>
@@ -83,7 +83,7 @@ const queryWith = <M extends Model.Model.Any>(model: M, tableName: string) =>
 
 ## Write algebra
 
-A vocabulary object maps write strategies (`patch`, `upsert`, `occ`) to SQL template generators and OCC predicates — each strategy entry fully determines the SQL shape and the version-check semantics. The discriminant disappears at call site: `Strategy[kind]` resolves both the template factory and the `WHERE` clause predicate in a single lookup. `MERGE RETURNING` with `merge_action()` yields a typed signal (`'INSERT' | 'UPDATE'`) that exhaustive match dispatch propagates into domain events without intermediate parsing.
+A vocabulary object maps write strategies (`patch`, `upsert`, `occ`) to SQL template generators and OCC predicates — each strategy entry fully determines the SQL shape and the version-check semantics. The discriminant disappears at call site: `Strategy[kind]` resolves both the template factory and the `WHERE` clause predicate in a single lookup. `MERGE RETURNING` with `merge_action()` yields a typed signal (`'INSERT' | 'UPDATE' | 'DELETE'`) that exhaustive match dispatch propagates into domain events without intermediate parsing.
 
 ```ts
 import { Array as A, Data, Effect, Match, Option, pipe } from "effect"
@@ -93,12 +93,14 @@ import { PgClient } from "@effect/sql-pg"
 class WriteConflict extends Data.TaggedError("WriteConflict")<{
   readonly entity: string; readonly id: string; readonly reason: "stale" | "empty"
 }> {}
+type MergeAction = "INSERT" | "UPDATE" | "DELETE"
+type WriteRow = { readonly _action: MergeAction } & Readonly<Record<string, unknown>>
 
 const Strategy = {
-  patch:  { signal: (row: unknown) => ({ event: "patched" as const,   row }) },
-  upsert: { signal: (row: unknown) => ({ event: "upserted" as const,  row }) },
-  occ:    { signal: (row: unknown) => ({ event: "versioned" as const, row }) },
-} as const satisfies Record<string, { signal: (r: unknown) => { event: string; row: unknown } }>
+  patch:  { conflict: "empty", signal: (row: WriteRow) => ({ event: "patched" as const,   row }) },
+  upsert: { conflict: "empty", signal: (row: WriteRow) => ({ event: "upserted" as const,  row }) },
+  occ:    { conflict: "stale", signal: (row: WriteRow) => ({ event: "versioned" as const, row }) },
+} as const satisfies Record<string, { conflict: WriteConflict["reason"]; signal: (r: WriteRow) => { event: string; row: WriteRow } }>
 
 const write = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
@@ -117,7 +119,7 @@ const write = Effect.gen(function* () {
         WHERE id = ${id} AND updated_at = ${payload.occ ?? ""} RETURNING *, 'UPDATE' AS _action`),
       Match.exhaustive),
     Effect.flatMap((rows) => Option.match(A.head(rows), {
-      onNone: () => Effect.fail(new WriteConflict({ entity, id, reason: kind === "occ" ? "stale" : "empty" })),
+      onNone: () => Effect.fail(new WriteConflict({ entity, id, reason: Strategy[kind].conflict })),
       onSome: (row) => Effect.succeed(Strategy[kind].signal(row)),
     })))
 })
@@ -125,7 +127,7 @@ const write = Effect.gen(function* () {
 
 **Write contracts:**
 - One vocabulary per behavioral domain — `Strategy` maps kind to signal emission; no parallel dispatch tables for the same discriminant.
-- `merge_action()` (PG 18.2+) returns `'INSERT' | 'UPDATE'` — the vocabulary's `signal` field projects the raw row into a typed event shape; downstream consumers never receive the raw row.
+- `merge_action()` returns `'INSERT' | 'UPDATE' | 'DELETE'` — the vocabulary's `signal` field projects the raw row into a typed event shape; downstream consumers never receive the raw row.
 - OCC is `WHERE updated_at = $occ` returning zero rows → typed `WriteConflict` with `reason: "stale"` — no version integer columns, no optimistic lock tables.
 
 
